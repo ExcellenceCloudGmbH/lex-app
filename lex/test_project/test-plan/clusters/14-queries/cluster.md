@@ -110,69 +110,69 @@ The 14b baseline hits the main text / number / date / set / compound-OR paths. T
   budgets.
 - ❌ **Export-specific layout / FK display names**. Cluster 13.
 
-### 14f. Value-list filters
+### 14k. Value-list filters
 
 | # | Scenario | What We Assert | Status |
 |---|----------|----------------|--------|
-| 14.36 | Set keys arrive as strings | Integer, `"false"`, ISO date and related-pk keys each match their rows | ✅ |
-| 14.37 | Blank in a value list | `null` matches empty cells, alone or beside a value | ✅ |
-| 14.38 | Nothing ticked | An empty `values` list matches no rows | ✅ |
-| 14.39 | Multi filter | Condition and list on one column are ANDed; a null half is skipped | ✅ |
-| 14.40 | Unconvertible key | 400 naming the field | ✅ |
-| 14.41 | Unknown filterType | Ignored as before, and logged with field and type | ✅ |
+| 14.45 | Set keys arrive as strings | Integer, `"false"`, ISO date and related-pk keys each match their rows | ✅ |
+| 14.46 | Blank in a value list | `null` matches empty cells, alone or beside a value | ✅ |
+| 14.47 | Nothing ticked | An empty `values` list matches no rows | ✅ |
+| 14.48 | Multi filter | Condition and list on one column are ANDed; a null half is skipped | ✅ |
+| 14.49 | Unconvertible key | 400 naming the field | ✅ |
+| 14.50 | Unknown filterType | Ignored as before, and logged with field and type | ✅ |
 
 ### 14g. filter_values
 
 | # | Scenario | What We Assert | Status |
 |---|----------|----------------|--------|
-| 14.42 | Narrowing | A column's own filter is ignored for its list; another column's filter narrows it | ✅ |
-| 14.43 | Keys and labels | Choice labels, `str(related)`, Yes/No, ISO dates, "(Blank)" | ✅ |
-| 14.44 | Ticked value removed by other filters | Listed with count 0 | ✅ |
-| 14.45 | Search | Text matches values in the database; foreign keys match labels | ✅ |
-| 14.46 | Limit | Cut to `limit` with `truncated`; ticked values kept past the cut | ✅ |
-| 14.47 | Order | Labels ascend case-insensitively; blank last | ✅ |
-| 14.48 | Not filterable | Unknown, JSON, related path, serializer-only and empty fields are 400 | ✅ |
-| 14.49 | as_of | Values of that instant, not of now | ✅ |
-| 14.50 | Bad key in another filter | 400 naming that field | ✅ |
-| 14.51 | Two counting paths | Database and per-row counts give identical answers | ✅ |
-| 14.52 | Credential-shaped column | Refused even behind a custom serializer's `fields = "__all__"`; no stored secret leaks | ✅ |
-| 14.53 | Ticked FK key visibility | A readable row's name is shown; a hidden-row-only, nonexistent or unconvertible key keeps its own key as a 0-count label, never a 400 | ✅ |
-| 14.54 | Serializer field source mismatch | A `SerializerMethodField`, and a real column re-sourced from another real column, are both refused | ✅ |
-| 14.55 | No permission methods at all | Database path; counts match the list endpoint's own tally; no warning logged | ✅ |
-| 14.56 | `can_read`-only override disqualifies the database path | Per-row path; a masked row's field is not counted; `uses_default_read_permission` needs BOTH identities, proven by a mutation | ✅ |
-| 14.57 | Continuous columns and long text | Decimal, float, date-time and `TextField` are refused — no value list | ✅ |
-| 14.58 | Method guard | GET and HEAD are 405 | ✅ |
-| 14.59 | Truncation and limit bounds | Both scan limits truncate; `limit` clamps to 1-1000, non-integer defaults to 200 | ✅ |
-| 14.60 | Default-permission LexModel end to end | A real LexModel keeping both identities default lists values/counts/labels matching the list endpoint, under a facet filter | ✅ |
-| 14.61 | Blank folding | `""` and `NULL` are one "(Blank)" bucket; the list's own set filter matches both | ✅ |
-| 14.62 | Integer ordering | Numeric order (2 before 10), not lexicographic; an equal label falls back to key order | ✅ |
-| 14.63 | `selected` handling | JSON `true` normalises to `"true"` (never `"True"`); capped at 1,000; search gates re-adding a missing ticked value | ✅ |
-| 14.64 | Meta-history / as-of-history masking | A meta-history or `?as_of=` historical container resolves back to the tracked model's `can_read`, matching its own list endpoint | ✅ |
-| 14.65 | Groups-query bound | The per-row scan issues the same `auth_group` query count at 5 and at 20 rows, proven by a mutation | ✅ |
-| 14.66 | API-key fast-path parity | An API-key caller's own scopes reach the per-row fast path; `filter_values` matches the list endpoint | ✅ |
-| 14.67 | `to_field` foreign-key labels | Labelled from the row whose target field holds the key, not a primary-key look-alike; a raising `__str__` leaves the key as label | ✅ |
-| 14.68 | Shipped boolean shape | A Set with JSON `true` / `false` filters the list POST | ✅ |
-| 14.69 | Group level | Set (with blank, and empty) and Multi filters narrow the groups and their counts | ✅ |
-| 14.70 | Model opt-out | `AuditLog` (`lex_value_lists = False`) refuses its columns with the standard 400 | ✅ |
+| 14.51 | Narrowing | A column's own filter is ignored for its list; another column's filter narrows it | ✅ |
+| 14.52 | Keys and labels | Choice labels, `str(related)`, Yes/No, ISO dates, "(Blank)" | ✅ |
+| 14.53 | Ticked value removed by other filters | Listed with count 0 | ✅ |
+| 14.54 | Search | Text matches values in the database; foreign keys match labels | ✅ |
+| 14.55 | Limit | Cut to `limit` with `truncated`; ticked values kept past the cut | ✅ |
+| 14.56 | Order | Labels ascend case-insensitively; blank last | ✅ |
+| 14.57 | Not filterable | Unknown, JSON, related path, serializer-only and empty fields are 400 | ✅ |
+| 14.58 | as_of | Values of that instant, not of now | ✅ |
+| 14.59 | Bad key in another filter | 400 naming that field | ✅ |
+| 14.60 | Two counting paths | Database and per-row counts give identical answers | ✅ |
+| 14.61 | Credential-shaped column | Refused even behind a custom serializer's `fields = "__all__"`; no stored secret leaks | ✅ |
+| 14.62 | Ticked FK key visibility | A readable row's name is shown; a hidden-row-only, nonexistent or unconvertible key keeps its own key as a 0-count label, never a 400 | ✅ |
+| 14.63 | Serializer field source mismatch | A `SerializerMethodField`, and a real column re-sourced from another real column, are both refused | ✅ |
+| 14.64 | No permission methods at all | Database path; counts match the list endpoint's own tally; no warning logged | ✅ |
+| 14.65 | `can_read`-only override disqualifies the database path | Per-row path; a masked row's field is not counted; `uses_default_read_permission` needs BOTH identities, proven by a mutation | ✅ |
+| 14.66 | Continuous columns and long text | Decimal, float, date-time and `TextField` are refused — no value list | ✅ |
+| 14.67 | Method guard | GET and HEAD are 405 | ✅ |
+| 14.68 | Truncation and limit bounds | Both scan limits truncate; `limit` clamps to 1-1000, non-integer defaults to 200 | ✅ |
+| 14.69 | Default-permission LexModel end to end | A real LexModel keeping both identities default lists values/counts/labels matching the list endpoint, under a facet filter | ✅ |
+| 14.70 | Blank folding | `""` and `NULL` are one "(Blank)" bucket; the list's own set filter matches both | ✅ |
+| 14.71 | Integer ordering | Numeric order (2 before 10), not lexicographic; an equal label falls back to key order | ✅ |
+| 14.72 | `selected` handling | JSON `true` normalises to `"true"` (never `"True"`); capped at 1,000; search gates re-adding a missing ticked value | ✅ |
+| 14.73 | Meta-history / as-of-history masking | A meta-history or `?as_of=` historical container resolves back to the tracked model's `can_read`, matching its own list endpoint | ✅ |
+| 14.74 | Groups-query bound | The per-row scan issues the same `auth_group` query count at 5 and at 20 rows, proven by a mutation | ✅ |
+| 14.75 | API-key fast-path parity | An API-key caller's own scopes reach the per-row fast path; `filter_values` matches the list endpoint | ✅ |
+| 14.76 | `to_field` foreign-key labels | Labelled from the row whose target field holds the key, not a primary-key look-alike; a raising `__str__` leaves the key as label | ✅ |
+| 14.77 | Shipped boolean shape | A Set with JSON `true` / `false` filters the list POST | ✅ |
+| 14.78 | Group level | Set (with blank, and empty) and Multi filters narrow the groups and their counts | ✅ |
+| 14.79 | Model opt-out | `AuditLog` (`lex_value_lists = False`) refuses its columns with the standard 400 | ✅ |
 
 ### 14j. GET list — the `__blank` query-param lookup suffix
 
 "Select All Records" fetches ids through the list GET endpoint's query-param filters, not the
-POST AG Grid endpoint. Its "blank" must match what `_build_filter_q`'s Set branch (14.37/14.61)
+POST AG Grid endpoint. Its "blank" must match what `_build_filter_q`'s Set branch (14.46/14.70)
 already calls blank: NULL **or** `""` on a plain text column (`is_plain_text_field`), NULL only on
 every other column. The GET grammar could previously only ask `field__isnull=true`, so a
 GET-driven select-all undercounted the `""` rows the POST path already treats as blank.
 
 | # | Scenario | What We Assert |
 |---|----------|----------------|
-| 14.71 | `?field__blank=true` | Matches the NULL and `""` rows on a plain text column; only the NULL row on a non-text column |
-| 14.72 | `?field__blank=false`, and `?field__blank!=true` | Both return the non-blank rows, on both column shapes; (fix round 1) a related path's `__blank` (e.g. `category__name__blank`) is ignored like a JSON sub-path -- only a direct column, including a FK's own `category__blank`, is supported |
-| 14.73 | `?col__exact=`, `?col__in=` (fix round 2, C1) | Convert each value by the column's own type -- a literal `"none"`/`"true"` string on a char/choice column stays that string (never `IS NULL` / a bool); a boolean and a foreign-key column still convert correctly; an unconvertible value matches no rows, never every row (fail-closed); a bare `?col=null` (no suffix) keeps meaning `IS NULL` via the untouched legacy path |
-| 14.74 | `?metadata__key__in=`, `?metadata__in=`, `?metadata__key__exact=` (fix round 3) | A `JSONField` keeps the legacy `_coerce_value` on `__exact`/`__in`, for a sub-path and the whole column alike -- a numeric/boolean-spelled key matches only the row whose stored JSON value is actually that type, not the differently-typed row the column-type-aware converter would otherwise match |
+| 14.80 | `?field__blank=true` | Matches the NULL and `""` rows on a plain text column; only the NULL row on a non-text column |
+| 14.81 | `?field__blank=false`, and `?field__blank!=true` | Both return the non-blank rows, on both column shapes; (fix round 1) a related path's `__blank` (e.g. `category__name__blank`) is ignored like a JSON sub-path -- only a direct column, including a FK's own `category__blank`, is supported |
+| 14.82 | `?col__exact=`, `?col__in=` (fix round 2, C1) | Convert each value by the column's own type -- a literal `"none"`/`"true"` string on a char/choice column stays that string (never `IS NULL` / a bool); a boolean and a foreign-key column still convert correctly; an unconvertible value matches no rows, never every row (fail-closed); a bare `?col=null` (no suffix) keeps meaning `IS NULL` via the untouched legacy path |
+| 14.83 | `?metadata__key__in=`, `?metadata__in=`, `?metadata__key__exact=` (fix round 3) | A `JSONField` keeps the legacy `_coerce_value` on `__exact`/`__in`, for a sub-path and the whole column alike -- a numeric/boolean-spelled key matches only the row whose stored JSON value is actually that type, not the differently-typed row the column-type-aware converter would otherwise match |
 
 **Fix round 1:** a review found the first pass wrongly supported a related path -- `field_path`
 containing another model's column (e.g. `category__name`, reached through the `category` FK) still
-built a real `Q`, when only a column directly on this model should. 14.72 gained two sub-cases:
+built a real `Q`, when only a column directly on this model should. 14.81 gained two sub-cases:
 `category__name__blank` must be ignored (200, every row), the same as the JSON sub-path case
 (`metadata__key__blank`, already correct and now a regression guard). The guard in
 `_build_query_from_values` now also checks that `field_path` carries no `"__"` of its own.
@@ -183,7 +183,7 @@ Python `None` and any `"true"`/`"false"` spelling to a bool, for EVERY column. A
 filter's "Select All" / group-selection fetch sends exactly this shape (`field__exact=<key>`, or
 repeated `field__in=<key>`), so a `CharField`/choice column whose stored key is literally `"none"`
 resolved to `IS NULL` and matched the blank rows instead of the `"none"` row the grid shows; inside
-`__in` the same key converted to `None` and dropped out. 14.73 pins that `__exact`/`__in` now convert
+`__in` the same key converted to `None` and dropped out. 14.82 pins that `__exact`/`__in` now convert
 by the column's type instead -- the same conversion the POST Set filter already applies
 (`_set_filter_values`), now shared via `_typed_value_converter`/`_coerce_typed_value` rather than
 duplicated: a foreign key's target field's `to_python`, a boolean's `_bool_from_key`, the field's own
@@ -191,10 +191,10 @@ duplicated: a foreign key's target field's `to_python`, a boolean's `_bool_from_
 the lookup matches no rows (`Q(pk__in=[])`, the same idiom `_build_filter_q` already uses for an
 explicit empty POST Set filter) rather than ever becoming a 400 or silently matching every row --
 returning "no filter" there would fail open (an unconvertible `?category__in=abc` would otherwise
-match the whole table, and a "Select All" bulk action would then run over everything; 14.73(g)/(h)
+match the whole table, and a "Select All" bulk action would then run over everything; 14.82(g)/(h)
 pin this). Bare keys and every other lookup suffix are untouched, so `?field=null` still means
 `IS NULL` for existing callers. The same change also gave `_resolve_filter_bar`'s "dropped" warning
-(cluster 10o, `lex/api/serializers/base_serializers.py`) a per-process per-(serializer class, name)
+(cluster 10p, `lex/api/serializers/base_serializers.py`) a per-process per-(serializer class, name)
 dedup, so a misconfigured `filter_bar` no longer re-logs on every fields-info request.
 
 **Fix round 3 (residual, same re-review):** a `JSONField` is the one exception to fix round 2's
@@ -204,7 +204,7 @@ already says its type (`5` is a number, `"5"` a string, `true` a bool, `null` is
 single column type to convert a raw query string by. Before this fix a JSON sub-path through `__in`
 (e.g. `?metadata__key__in=5`) fell back to `_typed_value_converter`'s generic `model_field.to_python`,
 which for `JSONField` is the inherited identity -- so the raw string `"5"` matched the row storing
-the JSON **string** `"5"` instead of the row storing the JSON **number** `5`. 14.74 pins the
+the JSON **string** `"5"` instead of the row storing the JSON **number** `5`. 14.83 pins the
 sub-path number and boolean cases and the whole-column case on `__in`, plus a sub-path `__exact`
 regression guard -- that one already fell through to the legacy path untouched, since the `__exact`
 branch's path-equality guard excludes a JSON sub-path on its own. The check lives in

@@ -194,7 +194,7 @@ class TestCluster10i_CreateListUIInfo(SimpleTestCase):
         when the attribute is missing — drift here would hide actions
         for every model that hasn't opted in explicitly.
 
-        `filter_bar` always comes back `[]` here (cluster 10o): this
+        `filter_bar` always comes back `[]` here (cluster 10p): this
         fallback branch is for serializers that are not `LexSerializer`s
         (no `Meta.model` to resolve columns against), so there is nothing
         for a filter bar to name.

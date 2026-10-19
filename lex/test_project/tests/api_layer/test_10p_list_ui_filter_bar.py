@@ -9,11 +9,11 @@ gives no bar and one warning, never a failed fields request. The fields endpoint
 also says, per column, whether a value list exists, decided by the same resolver
 as filter_values, so the frontend offers Set and Multi lists only where they
 work.
-Cluster 10o — scenarios 10.83–10.87. Type: U.
+Cluster 10p — scenarios 10.91–10.95. Type: U.
 Covers: lex/api/serializers/base_serializers.py (``get_list_ui_options``,
 ``_resolve_filter_bar``), lex/api/views/model_info/Fields.py (``create_list_ui_info``,
 ``Fields.get``'s ``value_list``), lex/api/utils/filterable_fields.py (``value_list_field``).
-Run: python -m lex pytest lex/test_project/tests/api_layer/test_10o_list_ui_filter_bar.py -v
+Run: python -m lex pytest lex/test_project/tests/api_layer/test_10p_list_ui_filter_bar.py -v
 """
 
 from __future__ import annotations
@@ -60,18 +60,18 @@ def _value_list_flags(model, serializer_name: str = "default") -> list:
     return [(info["name"], info["value_list"]) for info in response.data["fields"]]
 
 
-class TestCluster10o_ListUiFilterBar(SimpleTestCase):
-    """Cluster 10o: list_ui.filter_bar."""
+class TestCluster10p_ListUiFilterBar(SimpleTestCase):
+    """Cluster 10p: list_ui.filter_bar."""
 
     def tearDown(self):
         if "filter_bar" in SchemaItem.__dict__:
             del SchemaItem.filter_bar
         super().tearDown()
 
-    # -- 10.83 ---------------------------------------------------------
-    def test_10_83_the_serializer_meta_names_the_bar(self):
+    # -- 10.91 ---------------------------------------------------------
+    def test_10_91_the_serializer_meta_names_the_bar(self):
         """
-        Scenario 10.83: declared on the serializer
+        Scenario 10.91: declared on the serializer
         Given: a serializer whose Meta sets filter_bar
         When: its list options are built
         Then: list_ui.filter_bar carries those columns, in order
@@ -85,10 +85,10 @@ class TestCluster10o_ListUiFilterBar(SimpleTestCase):
 
         self.assertEqual(create_list_ui_info(WithBar)["filter_bar"], ["active", "name"])
 
-    # -- 10.84 ---------------------------------------------------------
-    def test_10_84_a_model_attribute_is_the_fallback(self):
+    # -- 10.92 ---------------------------------------------------------
+    def test_10_92_a_model_attribute_is_the_fallback(self):
         """
-        Scenario 10.84: declared on the model
+        Scenario 10.92: declared on the model
         Given: no filter_bar on the serializer, filter_bar on the model
         When: list options are built
         Then: the model's columns are used; with neither, the bar is empty
@@ -103,10 +103,10 @@ class TestCluster10o_ListUiFilterBar(SimpleTestCase):
         SchemaItem.filter_bar = ["day"]
         self.assertEqual(create_list_ui_info(Plain)["filter_bar"], ["day"])
 
-    # -- 10.85 ---------------------------------------------------------
-    def test_10_85_names_that_are_not_value_list_columns_are_dropped(self):
+    # -- 10.93 ---------------------------------------------------------
+    def test_10_93_names_that_are_not_value_list_columns_are_dropped(self):
         """
-        Scenario 10.85: only columns filter_values accepts
+        Scenario 10.93: only columns filter_values accepts
         Given: filter_bar naming an unknown field, a JSON field, a related path and a real column twice
         When: list options are built
         Then: only the real column is kept, once, and each drop is logged
@@ -123,10 +123,10 @@ class TestCluster10o_ListUiFilterBar(SimpleTestCase):
         self.assertEqual(bar, ["name"])
         self.assertEqual(len(logs.output), 3, f"one warning per dropped name: {logs.output!r}")
 
-    # -- 10.86 ---------------------------------------------------------
-    def test_10_86_the_fields_endpoint_says_which_columns_have_a_value_list(self):
+    # -- 10.94 ---------------------------------------------------------
+    def test_10_94_the_fields_endpoint_says_which_columns_have_a_value_list(self):
         """
-        Scenario 10.86: value_list on every field descriptor
+        Scenario 10.94: value_list on every field descriptor
         Given: a model with a char, integer, boolean, date, foreign-key and choice column, a
                TextField, a decimal, a JSON column and a credential-shaped name; a serializer that
                publishes the credential-shaped name, makes a column write-only and shows a column
@@ -187,10 +187,10 @@ class TestCluster10o_ListUiFilterBar(SimpleTestCase):
                     f"{name} is not a UserModelSerializer column and must not offer a value list",
                 )
 
-    # -- 10.87 ---------------------------------------------------------
-    def test_10_87_a_filter_bar_that_is_not_a_list_gives_no_bar(self):
+    # -- 10.95 ---------------------------------------------------------
+    def test_10_95_a_filter_bar_that_is_not_a_list_gives_no_bar(self):
         """
-        Scenario 10.87: filter_bar must be a list of names
+        Scenario 10.95: filter_bar must be a list of names
         Given: filter_bar = True on the model, and a model with a column named filter_bar (so the
                model attribute is that column)
         When: list options are built

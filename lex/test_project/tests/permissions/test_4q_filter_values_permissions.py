@@ -11,11 +11,11 @@ of a serializer that rewrites its rows. On the database path (a LexModel with th
 read filter alone decides which rows count, so a record-level grant must limit
 the list to that record. A regression leaks values of hidden fields or rows to
 anyone who opens a filter.
-Cluster 4o — scenarios 4.80–4.87. Type: E.
+Cluster 4q — scenarios 4.111–4.118. Type: E.
 Covers: lex/api/views/model_entries/FilterValues.py (``_filterable_field``, ``_count_per_row``),
 lex/api/utils/filterable_fields.py (``value_list_field``),
-lex/api/views/model_entries/filter_backends.py (the read filter 4.81 and 4.87 rely on).
-Run: python -m lex pytest lex/test_project/tests/permissions/test_4o_filter_values_permissions.py -v
+lex/api/views/model_entries/filter_backends.py (the read filter 4.112 and 4.118 rely on).
+Run: python -m lex pytest lex/test_project/tests/permissions/test_4q_filter_values_permissions.py -v
 """
 
 from __future__ import annotations
@@ -131,8 +131,8 @@ class _BlanksPrivateTitles(drf_serializers.ModelSerializer):
         return data
 
 
-class TestCluster04o_FilterValuesPermissions(E2ETestCase):
-    """Cluster 4o: filter_values honours row and field read permissions."""
+class TestCluster04q_FilterValuesPermissions(E2ETestCase):
+    """Cluster 4q: filter_values honours row and field read permissions."""
 
     e2e_models = [RowFieldItem, FieldLevelItem, KeycloakItem, OwnedItem]
 
@@ -214,20 +214,20 @@ class TestCluster04o_FilterValuesPermissions(E2ETestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    # -- 4.80 ----------------------------------------------------------
-    def test_04_80_a_field_hidden_on_some_rows_is_counted_only_where_readable(self):
+    # -- 4.111 ----------------------------------------------------------
+    def test_04_111_a_field_hidden_on_some_rows_is_counted_only_where_readable(self):
         """
-        Scenario 4.80: per-row field hiding
+        Scenario 4.111: per-row field hiding
         Given: two open rows in north, two private rows (north, south) that hide region
         When: region values are asked for
         Then: only the open rows count: north 2; south never appears
         """
         self.assertEqual(self._counts(ROWS, "region"), {"north": 2})
 
-    # -- 4.81 ----------------------------------------------------------
-    def test_04_81_rows_the_user_cannot_see_are_never_counted(self):
+    # -- 4.112 ----------------------------------------------------------
+    def test_04_112_rows_the_user_cannot_see_are_never_counted(self):
         """
-        Scenario 4.81: hidden rows stay hidden
+        Scenario 4.112: hidden rows stay hidden
         Given: a row whose permission_read denies it
         When: title and is_private values are asked for
         Then: the hidden row is in neither list
@@ -235,10 +235,10 @@ class TestCluster04o_FilterValuesPermissions(E2ETestCase):
         self.assertNotIn("hidden-1", self._counts(ROWS, "title"))
         self.assertEqual(self._counts(ROWS, "is_private"), {"false": 2, "true": 2})
 
-    # -- 4.82 ----------------------------------------------------------
-    def test_04_82_a_field_readable_on_no_row_gives_an_empty_list(self):
+    # -- 4.113 ----------------------------------------------------------
+    def test_04_113_a_field_readable_on_no_row_gives_an_empty_list(self):
         """
-        Scenario 4.82: nothing to show is not an error
+        Scenario 4.113: nothing to show is not an error
         Given: a regular user, who may read only id and public_name
         When: sensitive_salary values are asked for
         Then: 200 with no values
@@ -247,10 +247,10 @@ class TestCluster04o_FilterValuesPermissions(E2ETestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
         self.assertEqual(resp.data["values"], [], "no salary may leak")
 
-    # -- 4.83 ----------------------------------------------------------
-    def test_04_83_a_field_the_serializer_does_not_expose_is_refused(self):
+    # -- 4.114 ----------------------------------------------------------
+    def test_04_114_a_field_the_serializer_does_not_expose_is_refused(self):
         """
-        Scenario 4.83: the serializer decides which columns exist
+        Scenario 4.114: the serializer decides which columns exist
         Given: a named serializer exposing only title
         When: region values are asked for through it
         Then: 400 "is not filterable", although the model has region
@@ -277,10 +277,10 @@ class TestCluster04o_FilterValuesPermissions(E2ETestCase):
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, resp.data)
         self.assertIn("not filterable", str(resp.data))
 
-    # -- 4.84 ----------------------------------------------------------
-    def test_04_84_a_write_only_field_is_refused(self):
+    # -- 4.115 ----------------------------------------------------------
+    def test_04_115_a_write_only_field_is_refused(self):
         """
-        Scenario 4.84: a field the grid never renders has no value list
+        Scenario 4.115: a field the grid never renders has no value list
         Given: a serializer that makes region write-only (extra_kwargs), and one whose title is a
                HiddenField -- the list rows carry neither column
         When: their values are asked for through those serializers
@@ -305,10 +305,10 @@ class TestCluster04o_FilterValuesPermissions(E2ETestCase):
             "a readable field of the same serializer keeps its value list",
         )
 
-    # -- 4.85 ----------------------------------------------------------
-    def test_04_85_a_field_class_that_rewrites_its_value_is_refused(self):
+    # -- 4.116 ----------------------------------------------------------
+    def test_04_116_a_field_class_that_rewrites_its_value_is_refused(self):
         """
-        Scenario 4.85: the grid shows what the field class reads and renders, not the column
+        Scenario 4.116: the grid shows what the field class reads and renders, not the column
         Given: a serializer whose region field class renders every value as "(redacted)" (its own
                to_representation), one whose region field class reads "(masked)" instead of the
                stored value (its own get_attribute), and in both a title field class that only
@@ -355,7 +355,7 @@ class TestCluster04o_FilterValuesPermissions(E2ETestCase):
             created = OwnedItem.objects.create(name="owned-1", owner=owner)
             # OwnedItem keeps both default permission_read and can_read (cluster 4i's
             # helper is exercised directly, not through this path -- see its model
-            # docstring), so -- exactly like 4.87's KeycloakItem -- the database path
+            # docstring), so -- exactly like 4.118's KeycloakItem -- the database path
             # denies everything without an explicit per-record grant.
             self._grant_record_read(OwnedItem, created.pk)
 
@@ -368,10 +368,10 @@ class TestCluster04o_FilterValuesPermissions(E2ETestCase):
 
             self._assert_refused(OWNED, "owner", "?serializer=nested", (str(owner),))
 
-    # -- 4.86 ----------------------------------------------------------
-    def test_04_86_a_serializer_that_rewrites_its_rows_lists_no_column(self):
+    # -- 4.117 ----------------------------------------------------------
+    def test_04_117_a_serializer_that_rewrites_its_rows_lists_no_column(self):
         """
-        Scenario 4.86: a serializer's own to_representation can mask any column on any row
+        Scenario 4.117: a serializer's own to_representation can mask any column on any row
         Given: a serializer that blanks a private row's title in its to_representation
         When: title -- a normally filterable column -- and is_private are asked for through it,
               and title through the default serializer
@@ -390,10 +390,10 @@ class TestCluster04o_FilterValuesPermissions(E2ETestCase):
             "the default serializer renders title as stored, so it keeps its value list",
         )
 
-    # -- 4.87 ----------------------------------------------------------
-    def test_04_87_a_record_level_grant_limits_the_database_count(self):
+    # -- 4.118 ----------------------------------------------------------
+    def test_04_118_a_record_level_grant_limits_the_database_count(self):
         """
-        Scenario 4.87: on the database path the read filter alone decides which rows count
+        Scenario 4.118: on the database path the read filter alone decides which rows count
         Given: a LexModel keeping both default permission_read and can_read (the database path,
                unpatched), three rows, and a Keycloak read grant on ONE of them
         When: label values are asked for

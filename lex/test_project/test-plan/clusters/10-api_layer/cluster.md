@@ -65,16 +65,16 @@
 
 **Scenario range:** 10.83 – 10.90. **Test file:** `lex/test_project/tests/api_layer/test_10o_error_and_route_hardening.py`. **Type:** E (10.85, 10.88, 10.90 U). **Status:** ✅ Complete (2026-10-18). Batch: [10o](batches.md).
 
-### 10o. list_ui.filter_bar
+### 10p. list_ui.filter_bar
 
 | # | Scenario | What We Assert | Status |
 |---|----------|----------------|--------|
-| 10.83 | Declared on the serializer | `Meta.filter_bar` reaches `list_ui.filter_bar` in order | ✅ |
-| 10.84 | Declared on the model | Model attribute is the fallback; none means `[]` | ✅ |
-| 10.85 | Not a value-list column | Unknown, JSON and related-path names dropped with a warning each | ✅ |
-| 10.86 | `value_list` on the fields endpoint | True for char, integer, boolean, date, FK and choice columns; false for TextField, decimal, JSON, credential-shaped, write-only and renamed fields, and for every column of an opted-out model | ✅ |
-| 10.87 | `filter_bar` that is not a list | `True`, or a model column named `filter_bar`: no bar and one warning, not a failed request | ✅ |
+| 10.91 | Declared on the serializer | `Meta.filter_bar` reaches `list_ui.filter_bar` in order | ✅ |
+| 10.92 | Declared on the model | Model attribute is the fallback; none means `[]` | ✅ |
+| 10.93 | Not a value-list column | Unknown, JSON and related-path names dropped with a warning each | ✅ |
+| 10.94 | `value_list` on the fields endpoint | True for char, integer, boolean, date, FK and choice columns; false for TextField, decimal, JSON, credential-shaped, write-only and renamed fields, and for every column of an opted-out model | ✅ |
+| 10.95 | `filter_bar` that is not a list | `True`, or a model column named `filter_bar`: no bar and one warning, not a failed request | ✅ |
 
-**Scenario range:** 10.83-10.87. **Test file:** `lex/test_project/tests/api_layer/test_10o_list_ui_filter_bar.py`. **Type:** U. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/serializers/base_serializers.py` (`get_list_ui_options`, `_resolve_filter_bar`), `lex/api/views/model_info/Fields.py` (`create_list_ui_info`, `Fields.get`), `lex/api/utils/filterable_fields.py` (`value_list_field`). Batch: [10o](batches.md).
+**Scenario range:** 10.91-10.95. **Test file:** `lex/test_project/tests/api_layer/test_10p_list_ui_filter_bar.py`. **Type:** U. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/serializers/base_serializers.py` (`get_list_ui_options`, `_resolve_filter_bar`), `lex/api/views/model_info/Fields.py` (`create_list_ui_info`, `Fields.get`), `lex/api/utils/filterable_fields.py` (`value_list_field`). Batch: [10p](batches.md).
 
 ---

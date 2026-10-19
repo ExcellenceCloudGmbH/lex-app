@@ -77,17 +77,17 @@
 
 ---
 
-## Batch 10o — list_ui.filter_bar and the fields endpoint's value_list flag (10.83-10.87)
+## Batch 10p — list_ui.filter_bar and the fields endpoint's value_list flag (10.91-10.95)
 
 - **Type:** U
 - **Files covered:** `lex/api/serializers/base_serializers.py`, `lex/api/views/model_info/Fields.py`,
   `lex/api/utils/filterable_fields.py`
-- **Test file:** `lex/test_project/tests/api_layer/test_10o_list_ui_filter_bar.py`
-- **Test classes:** `TestCluster10o_ListUiFilterBar`
+- **Test file:** `lex/test_project/tests/api_layer/test_10p_list_ui_filter_bar.py`
+- **Test classes:** `TestCluster10p_ListUiFilterBar`
 - **Fixtures:** `SchemaItem`; `ValueListItem`, `ValueListOptOutItem`, `FilterBarColumnItem` and
   `AuditLog` (final review; no tables -- `Fields.get` is called directly)
 - **Status:** complete — 5 pass
-- **Final review (10.86-10.87):** every field descriptor carries `value_list`, decided by
+- **Final review (10.94-10.95):** every field descriptor carries `value_list`, decided by
   `value_list_field` for the requested serializer instance; a `filter_bar` that is not a list of names
   gives no bar and one warning instead of a `TypeError`.
 - **Note:** `_resolve_filter_bar(serializer_class, serializer)` decides each name with

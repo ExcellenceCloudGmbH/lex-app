@@ -15,16 +15,16 @@
 
 ---
 
-## Batch 14f — Value-list filters on the AG Grid list endpoint (14.36-14.41)
+## Batch 14k — Value-list filters on the AG Grid list endpoint (14.45-14.50)
 
 - **Type:** E
 - **Files covered:** `lex/api/views/model_entries/List.py`
-- **Test file:** `lex/test_project/tests/queries/test_14f_value_list_filters.py`
-- **Test classes:** `TestCluster14f_ValueListFilters`
+- **Test file:** `lex/test_project/tests/queries/test_14k_value_list_filters.py`
+- **Test classes:** `TestCluster14k_ValueListFilters`
 - **Fixtures:** `QueryItem`, `QueryCategory`
 - **Status:** complete — 6 pass
 
-## Batch 14g — filter_values: a column's values with counts (14.42-14.70)
+## Batch 14g — filter_values: a column's values with counts (14.51-14.79)
 
 - **Type:** E
 - **Files covered:** `lex/api/views/model_entries/FilterValues.py`, `lex/api/utils/filterable_fields.py`,
@@ -40,9 +40,9 @@
   (a `TextField`), `QueryLedger` / `QueryLedgerEntry` (a `to_field` foreign key) and `AuditLog`
   (final review)
 - **Status:** complete — 29 pass (10 original + 12 from fix round 1 + 3 from fix round 2 + 4 from the
-  final review, 14.67-14.70; 14.57 widened to a `TextField`)
+  final review, 14.76-14.79; 14.66 widened to a `TextField`)
 
-## Batch 14j — GET list: the `__blank` query-param lookup suffix (14.71-14.74)
+## Batch 14j — GET list: the `__blank` query-param lookup suffix (14.80-14.83)
 
 - **Type:** E
 - **Files covered:** `lex/api/views/model_entries/List.py`
@@ -58,7 +58,7 @@
 - **Fix round 1:** a review found `__blank` wrongly applied to a related path (`category__name__blank`
   built a real filter instead of being ignored, since `field_path` "category__name" has no gap
   against `lookup_path` the way a JSON sub-path does). `_build_query_from_values` now also requires
-  `field_path` to carry no `"__"` of its own; 14.72 gained two sub-cases pinning the related-path
+  `field_path` to carry no `"__"` of its own; 14.81 gained two sub-cases pinning the related-path
   and JSON-sub-path shapes both ignored (200, every row), the latter a regression guard since it
   already passed.
 - **Fix round 2 (C1, final review of `feat/multi-value-filters`):** the same GET grammar's `__exact`
@@ -66,7 +66,7 @@
   column -- so a value-list Set filter's own stored key `"none"` on a `CharField`/choice column
   (`field__exact=none`, or inside `field__in=...`) was silently lowered to Python `None` and
   resolved to `IS NULL` instead of matching the row that literally stores it, and the same key
-  inside `__in` converted to `None` and dropped out. 14.73 (`TestCluster14j_ExactAndInTypeConversion`)
+  inside `__in` converted to `None` and dropped out. 14.82 (`TestCluster14j_ExactAndInTypeConversion`)
   pins that `__exact`/`__in` now convert each value by the column's own type -- a foreign key's
   target field's `to_python`, a boolean's `_bool_from_key`, the field's own `to_python` otherwise --
   via `_typed_value_converter`/`_coerce_typed_value`, a conversion helper factored out of and shared
@@ -75,10 +75,10 @@
   (`Q(pk__in=[])`, the same idiom `_build_filter_q` already uses for an explicit empty POST Set
   filter) rather than ever becoming a 400 or silently matching every row -- returning "no filter"
   there would fail open (an unconvertible `?category__in=abc` would otherwise match the whole
-  table, and a "Select All" bulk action would then run over everything). 14.73(g)/(h) pin this.
+  table, and a "Select All" bulk action would then run over everything). 14.82(g)/(h) pin this.
   Bare keys (no lookup suffix) and every other lookup keep the legacy, type-blind `_coerce_value`
   unchanged, so `?field=null` still means `IS NULL` for existing callers.
-  `_resolve_filter_bar` (`lex/api/serializers/base_serializers.py`, cluster 10o) also gained a
+  `_resolve_filter_bar` (`lex/api/serializers/base_serializers.py`, cluster 10p) also gained a
   per-process per-(serializer class, name) dedup on its "dropped" warning in the same change, so a
   misconfigured `filter_bar` no longer re-logs on every fields-info request.
 - **Fix round 3 (residual, same re-review):** a `JSONField` is the one exception to "every other
@@ -89,7 +89,7 @@
   `__in` (e.g. `?metadata__key__in=5`) fell back to `_typed_value_converter`'s generic
   `model_field.to_python`, which for `JSONField` is the inherited identity -- so the raw string
   `"5"` matched the row storing the JSON **string** `"5"` instead of the row storing the JSON
-  **number** `5`. 14.74 pins the sub-path (a) number, (b) boolean and (c) whole-column shapes on
+  **number** `5`. 14.83 pins the sub-path (a) number, (b) boolean and (c) whole-column shapes on
   `__in`, plus (d) a sub-path `__exact` regression guard -- that one already fell through to the
   legacy path untouched, since the `__exact` branch's path-equality guard excludes a JSON sub-path
   on its own (`"metadata__key__exact" != "metadata__exact"`). The check lives in

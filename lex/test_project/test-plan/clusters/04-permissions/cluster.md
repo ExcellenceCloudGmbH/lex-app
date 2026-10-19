@@ -107,19 +107,19 @@
 
 **Scenario range:** 4.101 – 4.110. **Test file:** `lex/test_project/tests/permissions/test_4p_internal_tools_and_history.py`. **Type:** E. **Status:** ✅ Complete (2026-10-18). Batch: [4p](batches.md).
 
-### 4o. filter_values and read permissions
+### 4q. filter_values and read permissions
 
 | # | Scenario | What We Assert | Status |
 |---|----------|----------------|--------|
-| 4.80 | Field hidden on some rows | Counted only on rows that allow it | ✅ |
-| 4.81 | Rows hidden by permission_read | Never counted, in any column | ✅ |
-| 4.82 | Field readable on no row | 200 with an empty list | ✅ |
-| 4.83 | Field the serializer does not expose | 400 "is not filterable" | ✅ |
-| 4.84 | Write-only field (`extra_kwargs`, `HiddenField`) | 400 "is not filterable"; no stored value in the response | ✅ |
-| 4.85 | Field class with its own `to_representation` or `get_attribute`; a nested serializer on an FK column | 400 for each; a class that only inherits DRF's methods is still listed | ✅ |
-| 4.86 | Serializer class that rewrites its rows | No column listed through it; the default serializer still lists them | ✅ |
-| 4.87 | Record-level read grant, database path | Only the granted row is counted; other rows' values never appear | ✅ |
+| 4.111 | Field hidden on some rows | Counted only on rows that allow it | ✅ |
+| 4.112 | Rows hidden by permission_read | Never counted, in any column | ✅ |
+| 4.113 | Field readable on no row | 200 with an empty list | ✅ |
+| 4.114 | Field the serializer does not expose | 400 "is not filterable" | ✅ |
+| 4.115 | Write-only field (`extra_kwargs`, `HiddenField`) | 400 "is not filterable"; no stored value in the response | ✅ |
+| 4.116 | Field class with its own `to_representation` or `get_attribute`; a nested serializer on an FK column | 400 for each; a class that only inherits DRF's methods is still listed | ✅ |
+| 4.117 | Serializer class that rewrites its rows | No column listed through it; the default serializer still lists them | ✅ |
+| 4.118 | Record-level read grant, database path | Only the granted row is counted; other rows' values never appear | ✅ |
 
-**Scenario range:** 4.80 – 4.87. **Test file:** `lex/test_project/tests/permissions/test_4o_filter_values_permissions.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/views/model_entries/FilterValues.py`, `lex/api/utils/filterable_fields.py`, `lex/api/views/model_entries/filter_backends.py`. Batch: [4o](batches.md).
+**Scenario range:** 4.111 – 4.118. **Test file:** `lex/test_project/tests/permissions/test_4q_filter_values_permissions.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/views/model_entries/FilterValues.py`, `lex/api/utils/filterable_fields.py`, `lex/api/views/model_entries/filter_backends.py`. Batch: [4q](batches.md).
 
 ---

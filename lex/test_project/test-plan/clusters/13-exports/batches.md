@@ -77,6 +77,6 @@ writing-plan batch blocks were recorded for this cluster.
 | Test classes | `TestCluster13i_ValueListFilters` (13.46 a Set with one category and blank, and an empty selection, listed and exported on the pandas path and the universal streaming path) |
 | Fixtures | `ExportCategory`, `ExportItem`, `FastExportItem` (13b / 13e setup); the Keycloak `export` scope granted by patching `UserContext._resolve_keycloak_scopes`, as 13e does |
 | Tests landed | **1 pass / 0 fail** (2 subtests) |
-| Status | ✅ Complete — the design's §8 promise that a blank filters as blank and an empty selection as "no rows" consistently in the grid and the export. Mutations: the pre-14f Set translation fails it, and so does an export that drops the filter model while the list keeps it. |
+| Status | ✅ Complete — the design's §8 promise that a blank filters as blank and an empty selection as "no rows" consistently in the grid and the export. Mutations: the pre-14k Set translation fails it, and so does an export that drops the filter model while the list keeps it. |
 
 ---

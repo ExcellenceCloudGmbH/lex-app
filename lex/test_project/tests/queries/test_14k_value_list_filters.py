@@ -7,9 +7,9 @@ endpoint must turn exactly those into SQL: keys converted to the column's type,
 no rows, and both halves of a Multi filter applied. A regression silently widens or
 empties the grid: the user sees rows they did not ask for, or none, and export and
 "Select All Records" inherit the same answer.
-Cluster 14f — scenarios 14.36–14.41. Type: E.
+Cluster 14k — scenarios 14.45–14.50. Type: E.
 Covers: lex/api/views/model_entries/List.py (``_build_filter_q``, ``_set_filter_values``).
-Run: python -m lex pytest lex/test_project/tests/queries/test_14f_value_list_filters.py -v
+Run: python -m lex pytest lex/test_project/tests/queries/test_14k_value_list_filters.py -v
 """
 
 from __future__ import annotations
@@ -50,8 +50,8 @@ def _request(filter_model: dict) -> dict:
     }
 
 
-class TestCluster14f_ValueListFilters(E2ETestCase):
-    """Cluster 14f: Set and Multi filter models on the AG Grid list endpoint."""
+class TestCluster14k_ValueListFilters(E2ETestCase):
+    """Cluster 14k: Set and Multi filter models on the AG Grid list endpoint."""
 
     e2e_models = ALL_MODELS
 
@@ -86,10 +86,10 @@ class TestCluster14f_ValueListFilters(E2ETestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
         return {row["name"] for row in resp.data["rowData"]}
 
-    # -- 14.36 ---------------------------------------------------------
-    def test_14_36_keys_are_converted_to_the_column_type(self):
+    # -- 14.45 ---------------------------------------------------------
+    def test_14_45_keys_are_converted_to_the_column_type(self):
         """
-        Scenario 14.36: a ticked value arrives as a string and still matches
+        Scenario 14.45: a ticked value arrives as a string and still matches
         Given: rows with integer, boolean, date and foreign-key columns
         When: Set filters send their keys as strings
         Then: each key matches the rows holding that value
@@ -111,10 +111,10 @@ class TestCluster14f_ValueListFilters(E2ETestCase):
             {"beta-mid"}, "a foreign key's key is the related primary key",
         )
 
-    # -- 14.37 ---------------------------------------------------------
-    def test_14_37_null_matches_blank_cells(self):
+    # -- 14.46 ---------------------------------------------------------
+    def test_14_46_null_matches_blank_cells(self):
         """
-        Scenario 14.37: "(Blank)" in a value list finds the empty cells
+        Scenario 14.46: "(Blank)" in a value list finds the empty cells
         Given: a row with no date and no category
         When: a Set filter carries null, alone or beside a value
         Then: the blank row matches — SQL IN alone never matches NULL
@@ -128,10 +128,10 @@ class TestCluster14f_ValueListFilters(E2ETestCase):
             {"alpha-small", "alpha-mid", "loose"}, "a value and null together OR their matches",
         )
 
-    # -- 14.38 ---------------------------------------------------------
-    def test_14_38_nothing_ticked_means_no_rows(self):
+    # -- 14.47 ---------------------------------------------------------
+    def test_14_47_nothing_ticked_means_no_rows(self):
         """
-        Scenario 14.38: an empty selection is "match nothing", as AG Grid means it
+        Scenario 14.47: an empty selection is "match nothing", as AG Grid means it
         Given: four rows
         When: a Set filter arrives with an empty values list
         Then: no row matches, rather than every row
@@ -141,10 +141,10 @@ class TestCluster14f_ValueListFilters(E2ETestCase):
             "an empty selection used to be dropped, which returned every row",
         )
 
-    # -- 14.39 ---------------------------------------------------------
-    def test_14_39_both_halves_of_a_multi_filter_apply(self):
+    # -- 14.48 ---------------------------------------------------------
+    def test_14_48_both_halves_of_a_multi_filter_apply(self):
         """
-        Scenario 14.39: a condition and a value list on one column are ANDed
+        Scenario 14.48: a condition and a value list on one column are ANDed
         Given: a text column with a Multi filter
         When: the condition says "contains mid" and the list ticks two names
         Then: only rows passing both match; an empty half is ignored
@@ -159,10 +159,10 @@ class TestCluster14f_ValueListFilters(E2ETestCase):
         ]}}
         self.assertEqual(self._names(list_only), {"loose"}, "a null half is skipped")
 
-    # -- 14.40 ---------------------------------------------------------
-    def test_14_40_an_unconvertible_key_is_a_400_naming_the_field(self):
+    # -- 14.49 ---------------------------------------------------------
+    def test_14_49_an_unconvertible_key_is_a_400_naming_the_field(self):
         """
-        Scenario 14.40: a bad key is refused, not silently widened
+        Scenario 14.49: a bad key is refused, not silently widened
         Given: an integer column
         When: a Set filter sends a key that is not an integer
         Then: 400, and the error names the column
@@ -171,10 +171,10 @@ class TestCluster14f_ValueListFilters(E2ETestCase):
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, resp.data)
         self.assertIn("count", str(resp.data), "the error must name the field")
 
-    # -- 14.41 ---------------------------------------------------------
-    def test_14_41_an_unknown_filter_type_is_ignored_and_logged(self):
+    # -- 14.50 ---------------------------------------------------------
+    def test_14_50_an_unknown_filter_type_is_ignored_and_logged(self):
         """
-        Scenario 14.41: compatibility for shapes the server does not know
+        Scenario 14.50: compatibility for shapes the server does not know
         Given: a filter model with an unknown filterType
         When: the list is requested
         Then: the filter is ignored as before, and the server logs the field and type

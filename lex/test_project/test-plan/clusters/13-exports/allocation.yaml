@@ -105,11 +105,11 @@ letters:
       xfail: 0
     note: >-
       The grid, its export and Select All read one filter model; the export paths filter through
-      ListModelEntries._apply_filter_model, the list's own Set and Multi translation (14f). 13.46
+      ListModelEntries._apply_filter_model, the list's own Set and Multi translation (14k). 13.46
       lists and exports under a Set ticking one category and blank, and under an empty selection,
       on the pandas path (ExportItem, its own permission_export) and the universal streaming path
       (FastExportItem with the export scope, as in 13e): the sheet holds exactly the list's rows
       (alpha and the blank row), and nothing ticked exports nothing -- the export's "No data" 404.
-      A pin of behaviour the 14f translation already gives the export. Mutations: the pre-14f Set
+      A pin of behaviour the 14k translation already gives the export. Mutations: the pre-14k Set
       translation (blanks dropped, empty selection ignored) fails it, and so does an export that
       drops the grid's filter model while the list keeps it (both subtests).

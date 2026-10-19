@@ -22,7 +22,7 @@ the ``config.js`` string literal it is spliced into).
 ``EmbedXFrameOptionsMiddleware`` is not registered in this repo's ``MIDDLEWARE``
 today (see batches.md), so it is not what actually makes lex-app frameable --
 ``serve_react`` is: it is decorated ``@xframe_options_exempt``, so Django's own
-``XFrameOptionsMiddleware`` never protects its HTML documents. The 1.406 scenario
+``XFrameOptionsMiddleware`` never protects its HTML documents. The 1.410 scenario
 pins the ``frame-ancestors`` restriction where it actually takes effect: on
 ``serve_react``'s own document responses (the SPA fallback and any other real
 ``.html`` file it serves), never on the assets or ``config.js`` beside them.
@@ -50,10 +50,10 @@ containing any of them outright, before encoding, rather than accepting
 whichever side's answer Python happens to produce. The same review also found
 the hostname grammar's ``.match()`` + ``$`` would tolerate a trailing newline
 (``$`` matches just before one); it now uses ``.fullmatch()``. The scenario IDs
-(1.402-1.406) are unchanged across every round -- each one only adds cases to
+(1.406-1.410) are unchanged across every round -- each one only adds cases to
 the existing numbers.
 
-Cluster 1ax -- scenarios 1.402-1.406. Type: U.
+Cluster 1ax -- scenarios 1.406-1.410. Type: U.
 Covers: lex/runtime_config.py (parse_embed_allowed_origins, merge_frame_ancestors),
 lex/lex_app/settings.py (LEX_EMBED_ALLOWED_ORIGINS), lex/core/middleware/embed_xframe.py
 (EmbedXFrameOptionsMiddleware.process_response), lex/react/views.py (serve_react's
@@ -106,16 +106,16 @@ def _serve(path: str, root) -> HttpResponse:
 
 
 # ---------------------------------------------------------------------------
-# 1.402 -- CSP frame-ancestors added on every exempt response, left off others
+# 1.406 -- CSP frame-ancestors added on every exempt response, left off others
 # ---------------------------------------------------------------------------
 @override_settings(LEX_EMBED_ALLOWED_ORIGINS=_ALLOWED_ORIGINS)
 class TestCluster01ax_MiddlewareAddsFrameAncestors(SimpleTestCase):
     """Cluster 1ax: with origins configured, every exempt response is restricted
     to those origins via a CSP ``frame-ancestors`` directive."""
 
-    def test_1_402_embed_true_response_gets_frame_ancestors(self):
+    def test_1_406_embed_true_response_gets_frame_ancestors(self):
         """
-        Scenario 1.402: an ``embed=true`` response carries the configured directive.
+        Scenario 1.406: an ``embed=true`` response carries the configured directive.
         Given: LEX_EMBED_ALLOWED_ORIGINS names two origins, and a request carrying
                ``?embed=true`` (the query-param exemption path)
         When: the middleware processes the response
@@ -126,9 +126,9 @@ class TestCluster01ax_MiddlewareAddsFrameAncestors(SimpleTestCase):
 
         self.assertEqual(response["Content-Security-Policy"], _EXPECTED_FRAME_ANCESTORS)
 
-    def test_1_402_oidc_path_response_gets_frame_ancestors(self):
+    def test_1_406_oidc_path_response_gets_frame_ancestors(self):
         """
-        Scenario 1.402: an OIDC-path response carries the configured directive.
+        Scenario 1.406: an OIDC-path response carries the configured directive.
         Given: LEX_EMBED_ALLOWED_ORIGINS names two origins, and a request whose path
                starts with /oidc/ (the Keycloak round-trip exemption path)
         When: the middleware processes the response
@@ -139,9 +139,9 @@ class TestCluster01ax_MiddlewareAddsFrameAncestors(SimpleTestCase):
 
         self.assertEqual(response["Content-Security-Policy"], _EXPECTED_FRAME_ANCESTORS)
 
-    def test_1_402_cookie_marked_response_gets_frame_ancestors(self):
+    def test_1_406_cookie_marked_response_gets_frame_ancestors(self):
         """
-        Scenario 1.402: a response exempted by the ``_lex_embed`` cookie gets the directive.
+        Scenario 1.406: a response exempted by the ``_lex_embed`` cookie gets the directive.
         Given: LEX_EMBED_ALLOWED_ORIGINS names two origins, and a request carrying the
                ``_lex_embed=1`` marker cookie from an earlier embed=true visit
         When: the middleware processes the response
@@ -152,9 +152,9 @@ class TestCluster01ax_MiddlewareAddsFrameAncestors(SimpleTestCase):
 
         self.assertEqual(response["Content-Security-Policy"], _EXPECTED_FRAME_ANCESTORS)
 
-    def test_1_402_non_embed_response_has_no_added_csp(self):
+    def test_1_406_non_embed_response_has_no_added_csp(self):
         """
-        Scenario 1.402: an ordinary, non-exempt response is never given a CSP header.
+        Scenario 1.406: an ordinary, non-exempt response is never given a CSP header.
         Given: LEX_EMBED_ALLOWED_ORIGINS configured, and a plain top-level request with
                no embed=true, no /oidc/ path, and no embed cookie
         When: the middleware processes the response
@@ -166,9 +166,9 @@ class TestCluster01ax_MiddlewareAddsFrameAncestors(SimpleTestCase):
 
         self.assertNotIn("Content-Security-Policy", response)
 
-    def test_1_402_existing_csp_header_keeps_other_directives(self):
+    def test_1_406_existing_csp_header_keeps_other_directives(self):
         """
-        Scenario 1.402: merging the directive never drops what was already there.
+        Scenario 1.406: merging the directive never drops what was already there.
         Given: an embed=true response that already carries a CSP header with
                unrelated directives (e.g. default-src, script-src)
         When: the middleware adds frame-ancestors
@@ -186,9 +186,9 @@ class TestCluster01ax_MiddlewareAddsFrameAncestors(SimpleTestCase):
         self.assertIn("script-src 'self' 'unsafe-inline'", csp, csp)
         self.assertIn(_EXPECTED_FRAME_ANCESTORS, csp, csp)
 
-    def test_1_402_existing_frame_ancestors_directive_is_replaced_not_duplicated(self):
+    def test_1_406_existing_frame_ancestors_directive_is_replaced_not_duplicated(self):
         """
-        Scenario 1.402: a stale frame-ancestors directive is replaced, not appended twice.
+        Scenario 1.406: a stale frame-ancestors directive is replaced, not appended twice.
         Given: an embed=true response whose CSP already names a frame-ancestors
                directive (e.g. set upstream, pointing at a now-wrong origin)
         When: the middleware processes the response
@@ -210,9 +210,9 @@ class TestCluster01ax_MiddlewareAddsFrameAncestors(SimpleTestCase):
         self.assertIn(_EXPECTED_FRAME_ANCESTORS, csp, csp)
 
     @override_settings(LEX_EMBED_ALLOWED_ORIGINS=[], LEX_EMBED_ORIGINS_CONFIGURED=True)
-    def test_1_402_configured_but_all_invalid_still_gets_self_only_directive(self):
+    def test_1_406_configured_but_all_invalid_still_gets_self_only_directive(self):
         """
-        Scenario 1.402 (fail closed): set-but-nothing-valid restricts to 'self', not open.
+        Scenario 1.406 (fail closed): set-but-nothing-valid restricts to 'self', not open.
         Given: an operator set LEX_EMBED_ALLOWED_ORIGINS to something (e.g. a wildcard
                that normalised to nothing), so LEX_EMBED_ORIGINS_CONFIGURED is True even
                though the parsed list is empty
@@ -229,7 +229,7 @@ class TestCluster01ax_MiddlewareAddsFrameAncestors(SimpleTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 1.403 -- unset/empty setting: no CSP, pre-existing embed behaviour untouched
+# 1.407 -- unset/empty setting: no CSP, pre-existing embed behaviour untouched
 # ---------------------------------------------------------------------------
 @override_settings(LEX_EMBED_ALLOWED_ORIGINS=[], LEX_EMBED_ORIGINS_CONFIGURED=False)
 class TestCluster01ax_EmptyAllowListIsANoOp(SimpleTestCase):
@@ -242,9 +242,9 @@ class TestCluster01ax_EmptyAllowListIsANoOp(SimpleTestCase):
     covers set-but-empty, which must NOT behave like this one.
     """
 
-    def test_1_403_empty_allowed_origins_adds_no_csp_header(self):
+    def test_1_407_empty_allowed_origins_adds_no_csp_header(self):
         """
-        Scenario 1.403: an empty allow-list never produces a CSP header.
+        Scenario 1.407: an empty allow-list never produces a CSP header.
         Given: LEX_EMBED_ALLOWED_ORIGINS == [] and LEX_EMBED_ORIGINS_CONFIGURED == False
                (what an unset or a blank env var resolve to -- see
                TestCluster01ax_ParseEmbedAllowedOrigins for the env-parsing boundary
@@ -258,9 +258,9 @@ class TestCluster01ax_EmptyAllowListIsANoOp(SimpleTestCase):
 
         self.assertNotIn("Content-Security-Policy", response)
 
-    def test_1_403_xframe_options_still_stripped_and_cookies_still_patched(self):
+    def test_1_407_xframe_options_still_stripped_and_cookies_still_patched(self):
         """
-        Scenario 1.403: the pre-existing embed behaviour is untouched.
+        Scenario 1.407: the pre-existing embed behaviour is untouched.
         Given: LEX_EMBED_ALLOWED_ORIGINS == [], and an embed=true response carrying
                X-Frame-Options plus session/CSRF cookies, as SessionMiddleware and
                CsrfViewMiddleware would have left them
@@ -284,7 +284,7 @@ class TestCluster01ax_EmptyAllowListIsANoOp(SimpleTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 1.404 -- config.js exposes the validated list to the frontend
+# 1.408 -- config.js exposes the validated list to the frontend
 # ---------------------------------------------------------------------------
 @pytest.fixture
 def config_js_build(tmp_path):
@@ -308,9 +308,9 @@ class TestCluster01ax_ConfigJsEmbedOrigins:
     """Cluster 1ax: config.js exposes LEX_EMBED_ALLOWED_ORIGINS to the frontend
     as window.REACT_APP_EMBED_ALLOWED_ORIGINS."""
 
-    def test_1_404_config_js_serves_comma_joined_origins(self, config_js_build):
+    def test_1_408_config_js_serves_comma_joined_origins(self, config_js_build):
         """
-        Scenario 1.404: configured origins reach the frontend as a comma list.
+        Scenario 1.408: configured origins reach the frontend as a comma list.
         Given: the LEX_EMBED_ALLOWED_ORIGINS setting resolved to two origins
         When: config.js is served
         Then: window.REACT_APP_EMBED_ALLOWED_ORIGINS is the comma-joined list,
@@ -326,9 +326,9 @@ class TestCluster01ax_ConfigJsEmbedOrigins:
         )
         assert expected in body, body
 
-    def test_1_404_config_js_serves_empty_string_when_unset(self, config_js_build):
+    def test_1_408_config_js_serves_empty_string_when_unset(self, config_js_build):
         """
-        Scenario 1.404: an empty setting serves an empty string, not "undefined".
+        Scenario 1.408: an empty setting serves an empty string, not "undefined".
         Given: the LEX_EMBED_ALLOWED_ORIGINS setting resolved to []
         When: config.js is served
         Then: window.REACT_APP_EMBED_ALLOWED_ORIGINS = "" -- the frontend sees the
@@ -341,9 +341,9 @@ class TestCluster01ax_ConfigJsEmbedOrigins:
         assert 'window.REACT_APP_EMBED_ALLOWED_ORIGINS = ""' in body, body
         assert "= undefined" not in body, body
 
-    def test_1_404_placeholder_absent_is_left_untouched(self, config_js_build_without_placeholder):
+    def test_1_408_placeholder_absent_is_left_untouched(self, config_js_build_without_placeholder):
         """
-        Scenario 1.404: a config.js that predates this feature is served unchanged.
+        Scenario 1.408: a config.js that predates this feature is served unchanged.
         Given: a config.js with no REACT_APP_EMBED_ALLOWED_ORIGINS placeholder line
                (an older frontend build)
         When: config.js is served, with origins configured
@@ -358,9 +358,9 @@ class TestCluster01ax_ConfigJsEmbedOrigins:
         assert "REACT_APP_EMBED_ALLOWED_ORIGINS" not in body, body
         assert "window.REACT_APP_KEYCLOAK_REALM = undefined" not in body, body
 
-    def test_1_404_value_cannot_break_out_of_the_js_string_literal(self, tmp_path):
+    def test_1_408_value_cannot_break_out_of_the_js_string_literal(self, tmp_path):
         """
-        Scenario 1.404 (defence in depth): a hostile-looking value stays one JS string.
+        Scenario 1.408 (defence in depth): a hostile-looking value stays one JS string.
         Given: an origin list containing a value crafted to close a naively-quoted
                string literal early (validated origins can never actually contain
                a quote, but the splice must not assume that)
@@ -381,14 +381,14 @@ class TestCluster01ax_ConfigJsEmbedOrigins:
 
 
 # ---------------------------------------------------------------------------
-# 1.405 -- parsing/validation: normalisation, and invalid entries dropped+logged
+# 1.409 -- parsing/validation: normalisation, and invalid entries dropped+logged
 # ---------------------------------------------------------------------------
 class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
     """Cluster 1ax: parse_embed_allowed_origins -- the pure validator settings.py calls."""
 
-    def test_1_405_unset_or_blank_gives_empty_list(self):
+    def test_1_409_unset_or_blank_gives_empty_list(self):
         """
-        Scenario 1.405: no configured origins is the documented "off" state, not an error.
+        Scenario 1.409: no configured origins is the documented "off" state, not an error.
         Given: raw is None, "", or whitespace-only
         When: parse_embed_allowed_origins parses it
         Then: it returns [] every time, with nothing logged
@@ -398,9 +398,9 @@ class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
                 with self.assertNoLogs("lex.runtime_config", level="WARNING"):
                     self.assertEqual(parse_embed_allowed_origins(raw), [])
 
-    def test_1_405_valid_origins_are_parsed_and_normalised(self):
+    def test_1_409_valid_origins_are_parsed_and_normalised(self):
         """
-        Scenario 1.405: well-formed origins pass through, case-normalised.
+        Scenario 1.409: well-formed origins pass through, case-normalised.
         Given: two valid origins -- one with a port, one with a mixed-case scheme and host
         When: parse_embed_allowed_origins parses the comma-separated raw value
         Then: both come back lower-cased as scheme://host[:port], in their original
@@ -412,9 +412,9 @@ class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
 
         self.assertEqual(result, _ALLOWED_ORIGINS)
 
-    def test_1_405_duplicate_origins_collapse_to_one(self):
+    def test_1_409_duplicate_origins_collapse_to_one(self):
         """
-        Scenario 1.405 (normalisation): the same origin twice is listed once.
+        Scenario 1.409 (normalisation): the same origin twice is listed once.
         Given: the same origin repeated, differing only by scheme case
         When: parse_embed_allowed_origins parses it
         Then: it appears once, at its first position
@@ -423,9 +423,9 @@ class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
 
         self.assertEqual(result, ["https://reports.example.com"])
 
-    def test_1_405_blank_segments_from_stray_commas_are_skipped_quietly(self):
+    def test_1_409_blank_segments_from_stray_commas_are_skipped_quietly(self):
         """
-        Scenario 1.405: a stray/trailing comma is a formatting artifact, not a bad origin.
+        Scenario 1.409: a stray/trailing comma is a formatting artifact, not a bad origin.
         Given: "https://a.example.com,,https://b.example.com," (double and trailing comma)
         When: parse_embed_allowed_origins parses it
         Then: both real origins come back and nothing is logged for the empty segments
@@ -435,9 +435,9 @@ class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
 
         self.assertEqual(result, ["https://a.example.com", "https://b.example.com"])
 
-    def test_1_405_invalid_entries_are_dropped_with_one_warning_naming_them(self):
+    def test_1_409_invalid_entries_are_dropped_with_one_warning_naming_them(self):
         """
-        Scenario 1.405: a path, a wildcard, a non-http scheme and garbage are all dropped.
+        Scenario 1.409: a path, a wildcard, a non-http scheme and garbage are all dropped.
         Given: one valid origin alongside a path, a wildcard, an ftp scheme, and garbage
         When: parse_embed_allowed_origins parses the mixed raw value
         Then: only the valid origin survives, and exactly one WARNING log names all
@@ -463,9 +463,9 @@ class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
         self.assertIn("ftp://files.example.com", message)
         self.assertIn("not a valid origin", message)
 
-    def test_1_405_credentials_query_and_fragment_are_also_invalid(self):
+    def test_1_409_credentials_query_and_fragment_are_also_invalid(self):
         """
-        Scenario 1.405 (boundary): userinfo, a query string and a fragment are all rejected.
+        Scenario 1.409 (boundary): userinfo, a query string and a fragment are all rejected.
         Given: an origin carrying embedded credentials, one carrying a query string,
                and one carrying a fragment -- none of them bare scheme://host[:port]
         When: parse_embed_allowed_origins parses each alongside one valid origin
@@ -483,9 +483,9 @@ class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
 
         self.assertEqual(result, ["https://reports.example.com"])
 
-    def test_1_405_idn_hosts_are_accepted_as_punycode(self):
+    def test_1_409_idn_hosts_are_accepted_as_punycode(self):
         """
-        Scenario 1.405 (security fix): a non-ASCII host is IDNA-encoded, not rejected
+        Scenario 1.409 (security fix): a non-ASCII host is IDNA-encoded, not rejected
         or passed through raw.
         Given: an internationalised domain, mixed with an ASCII one
         When: parse_embed_allowed_origins parses them
@@ -502,9 +502,9 @@ class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
             result, ["https://xn--mller-kva.de", "https://reports.example.com"]
         )
 
-    def test_1_405_idna_divergent_hosts_are_rejected(self):
+    def test_1_409_idna_divergent_hosts_are_rejected(self):
         """
-        Scenario 1.405 (security fix, re-review): a host where Python's stdlib
+        Scenario 1.409 (security fix, re-review): a host where Python's stdlib
         IDNA2003 and a browser's WHATWG/UTS46 (non-transitional) domain-to-ASCII
         disagree is dropped, not silently encoded to the wrong domain.
         Given: "fußball.de" -- IDNA2003 case-folds ß (U+00DF) to "ss", giving the
@@ -531,9 +531,9 @@ class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
         self.assertIn("https://fußball.de", message, message)
         self.assertIn("https://ελλάς.gr", message, message)
 
-    def test_1_405_bracketed_and_syntax_breaking_hosts_are_rejected(self):
+    def test_1_409_bracketed_and_syntax_breaking_hosts_are_rejected(self):
         """
-        Scenario 1.405 (security fix): a host is not just "whatever urlsplit accepted".
+        Scenario 1.409 (security fix): a host is not just "whatever urlsplit accepted".
         Given: an IPv6-literal-shaped bracketed host, and a bracketed host crafted to
                inject a bare `https:` CSP source token through the space inside it,
                alongside hosts carrying `;`, a space, a quote, a backslash and `%`
@@ -569,24 +569,24 @@ class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
         ):
             self.assertIn(bad, message, message)
 
-    def test_1_405_default_ports_are_dropped(self):
+    def test_1_409_default_ports_are_dropped(self):
         """
-        Scenario 1.405 (browser-origin form): :443 on https and :80 on http vanish.
+        Scenario 1.409 (browser-origin form): :443 on https and :80 on http vanish.
         Given: an https origin on :443 and an http origin on :80 -- each one's own
                scheme's default port
         When: parse_embed_allowed_origins parses them
         Then: both come back without a port, matching the form a browser's own
               MessageEvent.origin would take -- a non-default port (already covered
-              by test_1_405_valid_origins_are_parsed_and_normalised's :8443 case) is
+              by test_1_409_valid_origins_are_parsed_and_normalised's :8443 case) is
               kept
         """
         result = parse_embed_allowed_origins("https://x.example.com:443,http://y.example.com:80")
 
         self.assertEqual(result, ["https://x.example.com", "http://y.example.com"])
 
-    def test_1_405_a_lone_trailing_slash_is_accepted(self):
+    def test_1_409_a_lone_trailing_slash_is_accepted(self):
         """
-        Scenario 1.405 (browser-origin form): a bare trailing slash is not a path.
+        Scenario 1.409 (browser-origin form): a bare trailing slash is not a path.
         Given: "https://x.example.com/" -- a trailing slash and nothing else
         When: parse_embed_allowed_origins parses it
         Then: it is accepted as "https://x.example.com" -- the origin of a URL with
@@ -598,9 +598,9 @@ class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
 
         self.assertEqual(result, ["https://x.example.com"])
 
-    def test_1_405_duplicates_after_port_normalisation_collapse_to_one(self):
+    def test_1_409_duplicates_after_port_normalisation_collapse_to_one(self):
         """
-        Scenario 1.405 (normalisation): dropping the default port can create a
+        Scenario 1.409 (normalisation): dropping the default port can create a
         duplicate that didn't look like one in the raw value.
         Given: the same host once with an explicit default port and once without
         When: parse_embed_allowed_origins parses them
@@ -611,9 +611,9 @@ class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
 
         self.assertEqual(result, ["https://x.example.com"])
 
-    def test_1_405_configured_but_all_invalid_fails_closed_with_a_warning(self):
+    def test_1_409_configured_but_all_invalid_fails_closed_with_a_warning(self):
         """
-        Scenario 1.405 (fail closed): the parser itself flags "configured but empty".
+        Scenario 1.409 (fail closed): the parser itself flags "configured but empty".
         Given: LEX_EMBED_ALLOWED_ORIGINS set to only a wildcard -- syntactically
                "something", but nothing that survives validation
         When: parse_embed_allowed_origins parses it
@@ -632,9 +632,9 @@ class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
             any("limited to the app itself" in m for m in messages), messages
         )
 
-    def test_1_405_embed_origins_configured_distinguishes_blank_from_set(self):
+    def test_1_409_embed_origins_configured_distinguishes_blank_from_set(self):
         """
-        Scenario 1.405: embed_origins_configured answers "was anything written?",
+        Scenario 1.409: embed_origins_configured answers "was anything written?",
         not "did anything validate?".
         Given: None, "", whitespace-only, a valid origin, and a value that is
                syntactically present but will fail every validation rule
@@ -653,7 +653,7 @@ class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
 
 
 class TestCluster01ax_SettingReadsEnvVar(SimpleTestCase):
-    """Cluster 1ax (scenario 1.405): lex.lex_app.settings wires
+    """Cluster 1ax (scenario 1.409): lex.lex_app.settings wires
     os.getenv("LEX_EMBED_ALLOWED_ORIGINS") through parse_embed_allowed_origins --
     this is the glue, not just the helper function in isolation.
 
@@ -683,9 +683,9 @@ class TestCluster01ax_SettingReadsEnvVar(SimpleTestCase):
             importlib.reload(lex_settings)
         return lex_settings
 
-    def test_1_405_setting_is_the_parsed_env_var(self):
+    def test_1_409_setting_is_the_parsed_env_var(self):
         """
-        Scenario 1.405: the Django setting is parse_embed_allowed_origins(os.getenv(...)),
+        Scenario 1.409: the Django setting is parse_embed_allowed_origins(os.getenv(...)),
         not a hand-rolled re-implementation.
         Given: LEX_EMBED_ALLOWED_ORIGINS set in the environment to one valid and
                one invalid origin
@@ -697,9 +697,9 @@ class TestCluster01ax_SettingReadsEnvVar(SimpleTestCase):
 
         self.assertEqual(settings_mod.LEX_EMBED_ALLOWED_ORIGINS, ["https://reports.example.com"])
 
-    def test_1_405_setting_is_empty_list_when_env_var_unset(self):
+    def test_1_409_setting_is_empty_list_when_env_var_unset(self):
         """
-        Scenario 1.405: the documented "off" state holds at the settings layer too.
+        Scenario 1.409: the documented "off" state holds at the settings layer too.
         Given: LEX_EMBED_ALLOWED_ORIGINS is not present in the environment
         When: lex.lex_app.settings is (re)imported
         Then: the setting is [] -- never None, never a string
@@ -708,9 +708,9 @@ class TestCluster01ax_SettingReadsEnvVar(SimpleTestCase):
 
         self.assertEqual(settings_mod.LEX_EMBED_ALLOWED_ORIGINS, [])
 
-    def test_1_405_origins_configured_setting_reflects_env_var(self):
+    def test_1_409_origins_configured_setting_reflects_env_var(self):
         """
-        Scenario 1.405 (fail closed): LEX_EMBED_ORIGINS_CONFIGURED is wired the
+        Scenario 1.409 (fail closed): LEX_EMBED_ORIGINS_CONFIGURED is wired the
         same way LEX_EMBED_ALLOWED_ORIGINS is -- from the real env var, not
         hand-maintained separately.
         Given: the env var set to a wildcard-only value (parses to [], but was
@@ -729,7 +729,7 @@ class TestCluster01ax_SettingReadsEnvVar(SimpleTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 1.406 -- the SPA document itself carries frame-ancestors
+# 1.410 -- the SPA document itself carries frame-ancestors
 #
 # serve_react is @xframe_options_exempt, so Django's own XFrameOptionsMiddleware
 # never protects it -- the SPA's HTML documents (index.html, the SPA fallback for
@@ -755,9 +755,9 @@ class TestCluster01ax_SpaDocumentCsp:
     """Cluster 1ax: the SPA document responses `serve_react` itself produces
     carry frame-ancestors -- not just the (unregistered) middleware's responses."""
 
-    def test_1_406_spa_fallback_gets_frame_ancestors_when_origins_set(self, spa_build):
+    def test_1_410_spa_fallback_gets_frame_ancestors_when_origins_set(self, spa_build):
         """
-        Scenario 1.406: a client-routed path (no matching file) falls back to
+        Scenario 1.410: a client-routed path (no matching file) falls back to
         index.html, which must carry the configured directive.
         Given: LEX_EMBED_ALLOWED_ORIGINS set to two origins
         When: a path with no matching file is served (the SPA fallback)
@@ -768,9 +768,9 @@ class TestCluster01ax_SpaDocumentCsp:
 
         assert response["Content-Security-Policy"] == _EXPECTED_FRAME_ANCESTORS
 
-    def test_1_406_literal_html_file_also_gets_frame_ancestors(self, spa_build):
+    def test_1_410_literal_html_file_also_gets_frame_ancestors(self, spa_build):
         """
-        Scenario 1.406: a real, non-fallback .html file is a document too.
+        Scenario 1.410: a real, non-fallback .html file is a document too.
         Given: LEX_EMBED_ALLOWED_ORIGINS set, and embed.html -- a second real Vite
                entry point served as a literal file, not through the SPA fallback
         When: embed.html is served
@@ -782,9 +782,9 @@ class TestCluster01ax_SpaDocumentCsp:
 
         assert response["Content-Security-Policy"] == _EXPECTED_FRAME_ANCESTORS
 
-    def test_1_406_literal_htm_file_matched_case_insensitively(self, spa_build):
+    def test_1_410_literal_htm_file_matched_case_insensitively(self, spa_build):
         """
-        Scenario 1.406 (minor fix): the document check is case-insensitive and
+        Scenario 1.410 (minor fix): the document check is case-insensitive and
         also recognises the .htm extension.
         Given: LEX_EMBED_ALLOWED_ORIGINS set, and a file named INDEX.HTM -- an
                unusual case/extension a build could still legitimately emit
@@ -798,9 +798,9 @@ class TestCluster01ax_SpaDocumentCsp:
 
         assert response["Content-Security-Policy"] == _EXPECTED_FRAME_ANCESTORS
 
-    def test_1_406_existing_csp_on_spa_fallback_keeps_other_directives(self, spa_build):
+    def test_1_410_existing_csp_on_spa_fallback_keeps_other_directives(self, spa_build):
         """
-        Scenario 1.406: merging the directive never drops what was already there.
+        Scenario 1.410: merging the directive never drops what was already there.
         Given: LEX_EMBED_ALLOWED_ORIGINS set, and a response carrying a CSP header
                already. This exact state -- a CSP already present on the response
                `_apply_embed_csp` receives -- cannot happen through serve_react's
@@ -811,7 +811,7 @@ class TestCluster01ax_SpaDocumentCsp:
                native `SECURE_CSP` instead). `static_serve` is mocked here purely
                to exercise `merge_frame_ancestors`'s general-purpose "preserve
                other directives" behaviour through this call site, the same
-               behaviour the middleware's own 1.402 test proves it needs for real.
+               behaviour the middleware's own 1.406 test proves it needs for real.
         When: the SPA fallback response is built
         Then: the original directive survives, and frame-ancestors is merged in
               alongside it
@@ -827,9 +827,9 @@ class TestCluster01ax_SpaDocumentCsp:
         assert "default-src 'self'" in csp, csp
         assert _EXPECTED_FRAME_ANCESTORS in csp, csp
 
-    def test_1_406_hashed_asset_gets_no_frame_ancestors(self, spa_build):
+    def test_1_410_hashed_asset_gets_no_frame_ancestors(self, spa_build):
         """
-        Scenario 1.406: a hashed asset is not a document and never gets the directive.
+        Scenario 1.410: a hashed asset is not a document and never gets the directive.
         Given: LEX_EMBED_ALLOWED_ORIGINS set, and a content-hashed JS asset
         When: the asset is served
         Then: no Content-Security-Policy header is added -- framing restrictions
@@ -840,9 +840,9 @@ class TestCluster01ax_SpaDocumentCsp:
 
         assert "Content-Security-Policy" not in response
 
-    def test_1_406_config_js_gets_no_frame_ancestors(self, spa_build):
+    def test_1_410_config_js_gets_no_frame_ancestors(self, spa_build):
         """
-        Scenario 1.406: config.js is a script, not a document, and never gets the directive.
+        Scenario 1.410: config.js is a script, not a document, and never gets the directive.
         Given: LEX_EMBED_ALLOWED_ORIGINS set
         When: config.js is served
         Then: no Content-Security-Policy header is added to it
@@ -852,9 +852,9 @@ class TestCluster01ax_SpaDocumentCsp:
 
         assert "Content-Security-Policy" not in response
 
-    def test_1_406_spa_fallback_has_no_added_csp_when_unset(self, spa_build):
+    def test_1_410_spa_fallback_has_no_added_csp_when_unset(self, spa_build):
         """
-        Scenario 1.406: unset/empty behaves exactly as before this change.
+        Scenario 1.410: unset/empty behaves exactly as before this change.
         Given: LEX_EMBED_ALLOWED_ORIGINS == [] and LEX_EMBED_ORIGINS_CONFIGURED == False
         When: a client-routed path falls back to index.html
         Then: no Content-Security-Policy header is added
@@ -864,9 +864,9 @@ class TestCluster01ax_SpaDocumentCsp:
 
         assert "Content-Security-Policy" not in response
 
-    def test_1_406_configured_but_all_invalid_still_gets_self_only_directive(self, spa_build):
+    def test_1_410_configured_but_all_invalid_still_gets_self_only_directive(self, spa_build):
         """
-        Scenario 1.406 (fail closed): set-but-nothing-valid restricts to 'self' here too.
+        Scenario 1.410 (fail closed): set-but-nothing-valid restricts to 'self' here too.
         Given: LEX_EMBED_ALLOWED_ORIGINS == [] but LEX_EMBED_ORIGINS_CONFIGURED == True
                (an operator configured something; none of it validated)
         When: a client-routed path falls back to index.html

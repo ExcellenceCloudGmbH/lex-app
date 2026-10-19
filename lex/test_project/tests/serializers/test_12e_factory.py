@@ -317,7 +317,7 @@ class TestCluster12e_FactoryContract(SimpleTestCase):
     def test_12_35_wrap_custom_serializer_preserves_hide_actions_column(self) -> None:
         """Scenario 12.35: ``Meta.hide_actions_column`` survives wrapping.
 
-        ``filter_bar`` comes back ``[]`` (cluster 10o): neither this Meta nor
+        ``filter_bar`` comes back ``[]`` (cluster 10p): neither this Meta nor
         ``WideItem`` declares one, so ``_resolve_filter_bar`` has nothing to
         resolve.
         """

@@ -7,7 +7,7 @@ ticked value can be unticked and more added; a ticked value the other filters
 removed stays listed at 0. A regression offers values that lead to empty grids,
 hides values the user needs, or shows ids where names belong.
 
-Fix round 1 (14.52–14.63): the first pass could show a value the grid itself
+Fix round 1 (14.61–14.72): the first pass could show a value the grid itself
 withholds -- a foreign key's name resolved from a row the user cannot read, a
 credential-shaped column exposed behind a custom serializer, a column type the
 design never meant to get a value list, or a per-row ``can_read`` override
@@ -15,27 +15,27 @@ silently skipped because the database path was taken anyway. These scenarios
 pin the design spec's §1 (which column types get a value list), §3.7 / §8 (a
 value list never shows what the grid hides) and the blank-folding rule.
 
-Fix round 2 (14.64–14.66): a re-review found three gaps left by round 1 --
+Fix round 2 (14.73–14.75): a re-review found three gaps left by round 1 --
 a meta-history container still took the database path (walking only one
 ``instance_type`` level instead of the whole chain), the per-row scan had no
 bound on how many ``auth_group`` queries it issues, and the per-row fast path
 dropped an API-key caller's own scopes (it resolves them through
 ``with_instance``, which an API-key ``UserContext`` does not carry
 ``user_permissions`` for) where ``can_read`` itself would not have. Several
-existing scenarios were also tightened: 14.56 now pins that BOTH
+existing scenarios were also tightened: 14.65 now pins that BOTH
 ``permission_read`` and ``can_read`` must be the literal default (not just
-one), 14.54's renamed-field case now names a real column, 14.55/14.60 derive
+one), 14.63's renamed-field case now names a real column, 14.64/14.69 derive
 their expected counts from the list endpoint instead of hard-coding them, and
 an unconvertible ticked foreign-key key is now a silent 0 rather than a 400.
 
-Final review (14.67–14.70, and 14.57 widened): long text gets no value list
+Final review (14.76–14.79, and 14.66 widened): long text gets no value list
 (a ``TextField``'s values are near-unique bodies), a model can opt out with
 ``lex_value_lists = False`` -- ``AuditLog`` does, because its read permission
 is decided per entry -- and a foreign key declared with ``to_field`` is
 labelled from the row its stored value names, not from the row whose primary
 key happens to equal it. The list's own translation is pinned for the boolean
 shape the frontend ships and for grouped rows.
-Cluster 14g — scenarios 14.42–14.70. Type: E.
+Cluster 14g — scenarios 14.51–14.79. Type: E.
 Covers: lex/api/views/model_entries/FilterValues.py, lex/api/utils/filterable_fields.py,
 lex/api/serializers/base_serializers.py (readable_field_names), lex/api/views/model_entries/List.py
 (blank folding on plain text columns, Set and Multi on the group level),
@@ -113,11 +113,11 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
                 created_on=created_on, category=category,
             )
 
-        # 14.53 / 14.56 — per-row can_read masking of the "category" field.
+        # 14.62 / 14.65 — per-row can_read masking of the "category" field.
         QueryMaskedItem.objects.create(name="visible-beta", visible=True, category=self.beta)
         QueryMaskedItem.objects.create(name="hidden-gamma", visible=False, category=self.gamma)
 
-        # 14.55 / 14.59 / 14.60 — no permission_read / can_read override at all.
+        # 14.64 / 14.68 / 14.69 — no permission_read / can_read override at all.
         QueryOpenItem.objects.create(name="open-a", status=QUERY_STATUS_ACTIVE)
         QueryOpenItem.objects.create(name="open-b", status=QUERY_STATUS_ACTIVE)
         QueryOpenItem.objects.create(name="open-c", status=QUERY_STATUS_ARCHIVED)
@@ -137,7 +137,7 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
     def _list_field_tally(self, model: str, field: str, filter_model=None, query: str = "") -> dict:
         """POST the AG Grid list endpoint for ``model`` and tally ``field``
         across the returned rows: the "what the grid actually shows" oracle
-        14.55, 14.60 and 14.64 compare ``filter_values`` against, instead of
+        14.64, 14.69 and 14.73 compare ``filter_values`` against, instead of
         hard-coding the expected counts.
 
         The list endpoint serialises a field as its native JSON type (e.g. a
@@ -182,10 +182,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    # -- 14.42 ---------------------------------------------------------
-    def test_14_42_counts_follow_the_other_filters_not_the_columns_own(self):
+    # -- 14.51 ---------------------------------------------------------
+    def test_14_51_counts_follow_the_other_filters_not_the_columns_own(self):
         """
-        Scenario 14.42: narrowing
+        Scenario 14.51: narrowing
         Given: five rows across three statuses and two categories
         When: status values are asked for under a status filter, then under a category filter
         Then: the status filter is ignored for its own list; the category filter narrows it
@@ -203,10 +203,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
             "another column's filter must narrow the list",
         )
 
-    # -- 14.43 ---------------------------------------------------------
-    def test_14_43_keys_and_labels_per_type(self):
+    # -- 14.52 ---------------------------------------------------------
+    def test_14_52_keys_and_labels_per_type(self):
         """
-        Scenario 14.43: what a value list shows
+        Scenario 14.52: what a value list shows
         Given: choice, foreign-key, boolean, date and integer columns, one blank row
         When: each column's values are asked for
         Then: keys are the wire form and labels are readable
@@ -224,10 +224,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         self.assertEqual(self._counts("created_on")["2026-02-20"], 2, "a date key is ISO")
         self.assertEqual(self._counts("count")["5"], 1, "an integer key is its string form")
 
-    # -- 14.44 ---------------------------------------------------------
-    def test_14_44_a_ticked_value_the_other_filters_removed_stays_at_zero(self):
+    # -- 14.53 ---------------------------------------------------------
+    def test_14_53_a_ticked_value_the_other_filters_removed_stays_at_zero(self):
         """
-        Scenario 14.44: a ticked value can still be unticked
+        Scenario 14.53: a ticked value can still be unticked
         Given: a category filter that leaves no archived row
         When: status values are asked for with "archived" ticked
         Then: archived is listed with count 0
@@ -236,10 +236,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         counts = self._counts("status", other, selected=[QUERY_STATUS_ARCHIVED])
         self.assertEqual(counts.get(QUERY_STATUS_ARCHIVED), 0, "a ticked value must stay listed")
 
-    # -- 14.45 ---------------------------------------------------------
-    def test_14_45_search_matches_labels(self):
+    # -- 14.54 ---------------------------------------------------------
+    def test_14_54_search_matches_labels(self):
         """
-        Scenario 14.45: searching a long list
+        Scenario 14.54: searching a long list
         Given: text and foreign-key columns
         When: values are searched
         Then: text matches its values; a foreign key matches its labels
@@ -247,10 +247,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         self.assertEqual(set(self._counts("name", search="MID")), {"alpha-mid", "beta-mid"}, "case-insensitive")
         self.assertEqual(set(self._counts("category", search="bet")), {str(self.beta.pk)}, "matched on str(related)")
 
-    # -- 14.46 ---------------------------------------------------------
-    def test_14_46_limit_cuts_the_list_and_says_so(self):
+    # -- 14.55 ---------------------------------------------------------
+    def test_14_55_limit_cuts_the_list_and_says_so(self):
         """
-        Scenario 14.46: a long list is cut, and a ticked value survives the cut
+        Scenario 14.55: a long list is cut, and a ticked value survives the cut
         Given: five distinct names
         When: two are asked for, then two with "loose" ticked
         Then: two come back with truncated=true; the ticked one is added after the cut
@@ -261,10 +261,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         ticked = {i["key"] for i in self._values("name", limit=2, selected=["loose"])["values"]}
         self.assertIn("loose", ticked, "a ticked value is never cut away")
 
-    # -- 14.47 ---------------------------------------------------------
-    def test_14_47_values_are_sorted_by_label_with_blank_last(self):
+    # -- 14.56 ---------------------------------------------------------
+    def test_14_56_values_are_sorted_by_label_with_blank_last(self):
         """
-        Scenario 14.47: a predictable order
+        Scenario 14.56: a predictable order
         Given: two categories and one blank
         When: category values are asked for
         Then: labels ascend, case-insensitively, and blank comes last
@@ -272,10 +272,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         labels = [i["label"] for i in self._values("category")["values"]]
         self.assertEqual(labels, ["QCat<alpha>", "QCat<beta>", "(Blank)"])
 
-    # -- 14.48 ---------------------------------------------------------
-    def test_14_48_only_the_lists_own_columns_can_be_listed(self):
+    # -- 14.57 ---------------------------------------------------------
+    def test_14_57_only_the_lists_own_columns_can_be_listed(self):
         """
-        Scenario 14.48: what is not filterable
+        Scenario 14.57: what is not filterable
         Given: the item model
         When: an unknown field, a JSON field, a related path or a serializer-only field is asked for
         Then: each is a 400 "is not filterable"
@@ -285,10 +285,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
             self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, f"{field!r}: {resp.data}")
             self.assertIn("not filterable", str(resp.data), field)
 
-    # -- 14.49 ---------------------------------------------------------
-    def test_14_49_as_of_lists_the_values_of_that_moment(self):
+    # -- 14.58 ---------------------------------------------------------
+    def test_14_58_as_of_lists_the_values_of_that_moment(self):
         """
-        Scenario 14.49: time travel
+        Scenario 14.58: time travel
         Given: a row whose status changed after a recorded instant
         When: status values are asked for as of that instant
         Then: the earlier status is counted, not the current one
@@ -312,10 +312,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
             "as of the instant: still a draft",
         )
 
-    # -- 14.50 ---------------------------------------------------------
-    def test_14_50_a_bad_key_in_another_filter_is_a_400(self):
+    # -- 14.59 ---------------------------------------------------------
+    def test_14_59_a_bad_key_in_another_filter_is_a_400(self):
         """
-        Scenario 14.50: the other filters are translated like the list's
+        Scenario 14.59: the other filters are translated like the list's
         Given: an integer filter with a key that is not an integer
         When: another column's values are asked for under it
         Then: 400 naming the integer field
@@ -324,10 +324,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, resp.data)
         self.assertIn("count", str(resp.data))
 
-    # -- 14.51 ---------------------------------------------------------
-    def test_14_51_the_database_count_and_the_per_row_count_agree(self):
+    # -- 14.60 ---------------------------------------------------------
+    def test_14_60_the_database_count_and_the_per_row_count_agree(self):
         """
-        Scenario 14.51: two ways to count, one answer
+        Scenario 14.60: two ways to count, one answer
         Given: a model whose read permission allows every field
         When: values are counted per row (overridden permission) and in the database
         Then: the answers are identical
@@ -341,10 +341,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
             in_database = self._values("category", other)
         self.assertEqual(per_row, in_database)
 
-    # -- 14.53 ---------------------------------------------------------
-    def test_14_53_a_ticked_foreign_key_never_borrows_a_hidden_rows_name(self):
+    # -- 14.62 ---------------------------------------------------------
+    def test_14_62_a_ticked_foreign_key_never_borrows_a_hidden_rows_name(self):
         """
-        Scenario 14.53: labels respect visibility, not just existence
+        Scenario 14.62: labels respect visibility, not just existence
         Given: one category a readable row carries, one only a masked row carries, one no row
                carries, and one ticked key that cannot even convert to a primary key
         When: category values are asked for with all four ticked, under a filter matching no rows
@@ -382,14 +382,14 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
             "entry with its own key as label, never a 400",
         )
 
-    # -- 14.54 ---------------------------------------------------------
+    # -- 14.63 ---------------------------------------------------------
     # (see TestCluster14g_SerializerDependentRefusals below -- needs a custom
-    # serializer, so it shares that class's fixture with 14.52.)
+    # serializer, so it shares that class's fixture with 14.61.)
 
-    # -- 14.55 ---------------------------------------------------------
-    def test_14_55_no_permission_methods_at_all_uses_the_database_path(self):
+    # -- 14.64 ---------------------------------------------------------
+    def test_14_64_no_permission_methods_at_all_uses_the_database_path(self):
         """
-        Scenario 14.55: nothing to check means nothing to scan
+        Scenario 14.64: nothing to check means nothing to scan
         Given: a model that overrides neither permission_read nor can_read
         When: its status values are asked for
         Then: the counts match what the list endpoint itself shows, and no warning is logged
@@ -405,10 +405,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         mock_warning.assert_not_called()
         self.assertEqual(counts, expected, "counts must match what the list endpoint shows")
 
-    # -- 14.56 ---------------------------------------------------------
-    def test_14_56_can_read_masking_is_honoured_even_with_permission_read_open(self):
+    # -- 14.65 ---------------------------------------------------------
+    def test_14_65_can_read_masking_is_honoured_even_with_permission_read_open(self):
         """
-        Scenario 14.56: BOTH methods must be the default, not just permission_read
+        Scenario 14.65: BOTH methods must be the default, not just permission_read
         Given: (a) a model that keeps the literal default permission_read and overrides ONLY
                can_read, and (b) a model whose permission_read is permissive but can_read hides
                category on some rows
@@ -451,10 +451,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
             "a masked row's category must not be counted at all",
         )
 
-    # -- 14.57 ---------------------------------------------------------
-    def test_14_57_continuous_columns_and_long_text_have_no_value_list(self):
+    # -- 14.66 ---------------------------------------------------------
+    def test_14_66_continuous_columns_and_long_text_have_no_value_list(self):
         """
-        Scenario 14.57: no value list for continuous values or long text
+        Scenario 14.66: no value list for continuous values or long text
         Given: decimal, float and date-time columns, and a TextField column
         When: each is asked for
         Then: each is a 400 "is not filterable" -- "text" in the design's table means CharField;
@@ -465,10 +465,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
             self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, f"{field!r}: {resp.data}")
             self.assertIn("not filterable", str(resp.data), field)
 
-    # -- 14.58 ---------------------------------------------------------
-    def test_14_58_get_and_head_are_not_allowed(self):
+    # -- 14.67 ---------------------------------------------------------
+    def test_14_67_get_and_head_are_not_allowed(self):
         """
-        Scenario 14.58: the endpoint is POST-only
+        Scenario 14.67: the endpoint is POST-only
         Given: the filter_values URL
         When: GET and HEAD are sent
         Then: both are 405
@@ -477,10 +477,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         self.assertEqual(self.client.get(url).status_code, status.HTTP_405_METHOD_NOT_ALLOWED, "GET must be 405")
         self.assertEqual(self.client.head(url).status_code, status.HTTP_405_METHOD_NOT_ALLOWED, "HEAD must be 405")
 
-    # -- 14.59 ---------------------------------------------------------
-    def test_14_59_truncation_and_limit_normalisation(self):
+    # -- 14.68 ---------------------------------------------------------
+    def test_14_68_truncation_and_limit_normalisation(self):
         """
-        Scenario 14.59: truncation on both counting paths, and limit normalisation
+        Scenario 14.68: truncation on both counting paths, and limit normalisation
         Given: a scan limit smaller than the distinct values, a row-scan limit smaller than the rows,
                and out-of-range limit values
         Then: truncated is true in both cases; a limit above 1000 is clamped, a non-integer is 200
@@ -502,10 +502,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
             resp = self._post({"field": "name", "filterModel": {}, "limit": bad_limit}, model=OPEN_ITEM)
             self.assertEqual(resp.status_code, status.HTTP_200_OK, f"limit={bad_limit!r}: {resp.data}")
 
-    # -- 14.60 ---------------------------------------------------------
-    def test_14_60_default_permission_identity_and_database_path_faceting(self):
+    # -- 14.69 ---------------------------------------------------------
+    def test_14_69_default_permission_identity_and_database_path_faceting(self):
         """
-        Scenario 14.60: the default-permission identity, and a real default-permission LexModel
+        Scenario 14.69: the default-permission identity, and a real default-permission LexModel
         end to end
         Given: (a) a LexModel subclass that overrides neither method, and (b) a real LexModel
                (``QueryDefaultPermissionItem``) that ALSO keeps both at their literal default, with
@@ -562,10 +562,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
             "labels must be the choice labels, not the raw keys",
         )
 
-    # -- 14.61 ---------------------------------------------------------
-    def test_14_61_blank_folds_empty_string_and_null_together(self):
+    # -- 14.70 ---------------------------------------------------------
+    def test_14_70_blank_folds_empty_string_and_null_together(self):
         """
-        Scenario 14.61: one blank bucket, not two
+        Scenario 14.70: one blank bucket, not two
         Given: a plain text column with both a NULL row and an empty-string row
         When: its values are asked for, and the list is asked to filter on blank
         Then: filter_values reports one "(Blank)" entry with the summed count; the list's own set
@@ -597,10 +597,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
                 f"ticking {ticked!r} must match both blank rows (NULL and empty string)",
             )
 
-    # -- 14.62 ---------------------------------------------------------
-    def test_14_62_integer_columns_sort_numerically_not_lexicographically(self):
+    # -- 14.71 ---------------------------------------------------------
+    def test_14_71_integer_columns_sort_numerically_not_lexicographically(self):
         """
-        Scenario 14.62: 2 before 10, and an equal label falls back to key order
+        Scenario 14.71: 2 before 10, and an equal label falls back to key order
         Given: counts of 2 and 10 on an integer column, and two categories with the same str()
         When: each column's values are asked for
         Then: the integer column comes back in numeric order, not lexicographic ("10" before "2")
@@ -630,10 +630,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
             f"an equal label must be ordered by key, got {ordered_dup_keys!r}",
         )
 
-    # -- 14.63 ---------------------------------------------------------
-    def test_14_63_selected_keys_are_normalised_capped_and_search_filtered(self):
+    # -- 14.72 ---------------------------------------------------------
+    def test_14_72_selected_keys_are_normalised_capped_and_search_filtered(self):
         """
-        Scenario 14.63: selected keys are treated like stored keys
+        Scenario 14.72: selected keys are treated like stored keys
         Given: a boolean column, a request selecting more than 1000 keys, and an active search
         When: values are asked for
         Then: a JSON true selects the "true" bucket; only the first 1000 selected keys are honoured;
@@ -669,10 +669,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         )
         self.assertEqual(statuses[QUERY_STATUS_ARCHIVED], "Archived")
 
-    # -- 14.64 ---------------------------------------------------------
-    def test_14_64_meta_history_and_as_of_history_honour_per_row_masking(self):
+    # -- 14.73 ---------------------------------------------------------
+    def test_14_73_meta_history_and_as_of_history_honour_per_row_masking(self):
         """
-        Scenario 14.64: a meta-history or as-of-historical container is not a shortcut
+        Scenario 14.73: a meta-history or as-of-historical container is not a shortcut
         Given: QueryMaskedItem's existing visible/masked rows
         When: category values are asked for on its metahistorical container, and on its
               historical container with ?as_of=
@@ -726,10 +726,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
             "the masked row's category must not be counted as_of either",
         )
 
-    # -- 14.65 ---------------------------------------------------------
-    def test_14_65_per_row_scan_issues_a_bounded_number_of_groups_queries(self):
+    # -- 14.74 ---------------------------------------------------------
+    def test_14_74_per_row_scan_issues_a_bounded_number_of_groups_queries(self):
         """
-        Scenario 14.65: one base context per request, not one per row
+        Scenario 14.74: one base context per request, not one per row
         Given: QueryItem's 5 setUp rows, then 20 rows (4x)
         When: filter_values asks for "status" values each time
         Then: the number of auth_group / auth_user_groups queries does not grow with the row count
@@ -754,10 +754,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
             f"groups queries must not scale with row count: {small} at 5 rows, {large} at 20 rows",
         )
 
-    # -- 14.66 ---------------------------------------------------------
-    def test_14_66_api_key_callers_own_scopes_reach_the_fast_path(self):
+    # -- 14.75 ---------------------------------------------------------
+    def test_14_75_api_key_callers_own_scopes_reach_the_fast_path(self):
         """
-        Scenario 14.66: an API-key caller's own scopes must not be dropped
+        Scenario 14.75: an API-key caller's own scopes must not be dropped
         Given: a model whose field-level masking depends on keycloak_scopes, under API-key auth
         When: secret_field values are asked for
         Then: the counts match what the list POST shows for the same field and caller
@@ -772,10 +772,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         actual = {item["key"]: item["count"] for item in data["values"]}
         self.assertEqual(actual, expected, "filter_values must match the grid for an API-key caller")
 
-    # -- 14.67 ---------------------------------------------------------
-    def test_14_67_a_to_field_foreign_key_is_labelled_from_the_row_it_names(self):
+    # -- 14.76 ---------------------------------------------------------
+    def test_14_76_a_to_field_foreign_key_is_labelled_from_the_row_it_names(self):
         """
-        Scenario 14.67: a foreign key that stores another column than the primary key
+        Scenario 14.76: a foreign key that stores another column than the primary key
         Given: entries pointing at ledgers through to_field="number"; one ledger's number equals a
                DIFFERENT ledger's primary key, one number equals no primary key, and one ledger's
                __str__ raises
@@ -811,10 +811,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         )
         self.assertNotIn("Ledger<decoy>", str(data), "no entry points at the decoy")
 
-    # -- 14.68 ---------------------------------------------------------
-    def test_14_68_the_shipped_boolean_filter_shape_filters_the_list(self):
+    # -- 14.77 ---------------------------------------------------------
+    def test_14_77_the_shipped_boolean_filter_shape_filters_the_list(self):
         """
-        Scenario 14.68: the boolean filter the frontend ships today
+        Scenario 14.77: the boolean filter the frontend ships today
         Given: four active rows and one inactive row
         When: the list is asked for under a Set filter carrying JSON booleans, [true] then [false]
         Then: each returns exactly the rows holding that value
@@ -835,10 +835,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         )
         self.assertEqual(_names([False]), {"alpha-mid"}, "a JSON false ticks the inactive row")
 
-    # -- 14.69 ---------------------------------------------------------
-    def test_14_69_a_group_level_request_honours_set_and_multi_filters(self):
+    # -- 14.78 ---------------------------------------------------------
+    def test_14_78_a_group_level_request_honours_set_and_multi_filters(self):
         """
-        Scenario 14.69: grouped rows are filtered like flat ones
+        Scenario 14.78: grouped rows are filtered like flat ones
         Given: rows grouped by status (the list's group level)
         When: the groups are asked for under a Set filter with a value and blank, a Multi filter,
               a blank-only Set and an empty selection
@@ -879,10 +879,10 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
             "nothing ticked means no groups, not every group",
         )
 
-    # -- 14.70 ---------------------------------------------------------
-    def test_14_70_a_model_that_opts_out_lists_no_column(self):
+    # -- 14.79 ---------------------------------------------------------
+    def test_14_79_a_model_that_opts_out_lists_no_column(self):
         """
-        Scenario 14.70: AuditLog opts out of value lists
+        Scenario 14.79: AuditLog opts out of value lists
         Given: AuditLog (lex_value_lists = False) with a stored entry
         When: the columns its serializer exposes that would otherwise get a value list -- id,
               author, resource and action (choices) -- are asked for
@@ -951,10 +951,10 @@ class TestCluster14g_SerializerDependentRefusals(E2ETestCase):
     def _post(self, body: dict, query: str = "?serializer=all_fields"):
         return self.client.post(self.url_filter_values(ITEM) + query, data=body, format="json")
 
-    # -- 14.52 ---------------------------------------------------------
-    def test_14_52_a_credential_shaped_column_is_refused_even_behind_fields_all(self):
+    # -- 14.61 ---------------------------------------------------------
+    def test_14_61_a_credential_shaped_column_is_refused_even_behind_fields_all(self):
         """
-        Scenario 14.52: the sensitive-name floor applies here too
+        Scenario 14.61: the sensitive-name floor applies here too
         Given: a custom serializer that publishes every column, including api_key, via fields = "__all__"
         When: api_key values are asked for
         Then: 400 "is not filterable", and the stored secret never appears in the response
@@ -964,10 +964,10 @@ class TestCluster14g_SerializerDependentRefusals(E2ETestCase):
         self.assertIn("not filterable", str(resp.data))
         self.assertNotIn("super-secret-value-123", str(resp.content), "a stored secret must never appear")
 
-    # -- 14.54 ---------------------------------------------------------
-    def test_14_54_a_serializer_field_whose_source_is_another_column_is_refused(self):
+    # -- 14.63 ---------------------------------------------------------
+    def test_14_63_a_serializer_field_whose_source_is_another_column_is_refused(self):
         """
-        Scenario 14.54: the grid shows the serializer's field, not the raw column
+        Scenario 14.63: the grid shows the serializer's field, not the raw column
         Given: a SerializerMethodField named "status", and "note" -- a plain text column the type
                allowlist would otherwise accept -- re-sourced from "name", a DIFFERENT real,
                otherwise-filterable column

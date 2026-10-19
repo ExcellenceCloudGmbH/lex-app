@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 406
+max_scenario: 419
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1285,32 +1285,9 @@ letters:
       warnings.catch_warnings(), which drops the warning policy the settings install there,
       so the plugin reinstalls those filters in pytest_configure (1.393, third half). 1av
       (1.386-1.392) is reserved by an open PR, hence aw.
-  aw:
-    title: lex_view filters, filter_bar and on_filter
-    scenarios: 1.393-1.401
-    status: complete
-    tests:
-      pass: 14
-      skip: 0
-      xfail: 0
-    note: >-
-      lex_view(filters=, filter_bar=, on_filter=). Filters ride the component's arguments, never its
-      URL or key, because the URL is the component's identity and a changed URL remounts the frame.
-      1.393-1.398 pin that, the component choice, the filter_bar and emit_filter parameters, and
-      refusals at the call. 1.399 runs the shim's decision function under node (skipped without
-      node): post only to a loaded frame, only named filters, only when they differ.
-      Final review: the shim no longer treats "last posted" as what the frame holds. After every
-      load -- a reload, a sign-in round trip -- filter_sync.afterLoad takes the frame to hold only
-      the filters its URL carried and re-posts the host's when they differ; index.html runs it from
-      one persistent load handler (it was a once-only listener). A token over
-      MAX_URL_FILTERS_TOKEN = 2,000 characters is left out of the URL (url_filters_token is None)
-      and arrives by message only. 1.400 pins the boundary (a 2,000-character token rides the URL,
-      2,002 does not) and the post after a URL-less load; 1.401 that a new load re-posts filters
-      that differ from the URL's and not ones equal to them.
-
   ax:
     title: 'LEX_EMBED_ALLOWED_ORIGINS -- named sites only may embed lex-app and use its filter bridge'
-    scenarios: 1.402-1.406
+    scenarios: 1.406-1.410
     status: complete
     tests:
       pass: 38
@@ -1329,9 +1306,9 @@ letters:
       empty/unset list changes nothing. serve_react's config.js rewrite exposes the validated list
       to the frontend as window.REACT_APP_EMBED_ALLOWED_ORIGINS, comma-joined and escaped with
       json.dumps so a value can never break out of the JS string literal, a no-op when the
-      placeholder line is absent (older builds). 1.402-1.403 cover the middleware across all three
-      exempt paths plus the CSP-merge boundary; 1.404 covers config.js including the escaping;
-      1.405 covers the parser's validation rules end to end through a real settings-module reload,
+      placeholder line is absent (older builds). 1.406-1.407 cover the middleware across all three
+      exempt paths plus the CSP-merge boundary; 1.408 covers config.js including the escaping;
+      1.409 covers the parser's validation rules end to end through a real settings-module reload,
       not just the helper in isolation. The frontend half (gating the `filter` channel on the
       parent origin) is a separate task.
 
@@ -1339,7 +1316,7 @@ letters:
       MIDDLEWARE, so (as found during review) it is not what makes lex-app frameable --
       serve_react is, via its own @xframe_options_exempt decorator, which bypasses
       XFrameOptionsMiddleware for every response it returns regardless of the (unregistered)
-      embed middleware. 1.406 moves the restriction to where it actually takes effect:
+      embed middleware. 1.410 moves the restriction to where it actually takes effect:
       serve_react now applies the same frame-ancestors directive, through a shared
       merge_frame_ancestors (moved from the middleware module to lex/runtime_config.py so both
       call sites share one implementation), to its own HTML document responses -- the SPA
@@ -1369,7 +1346,7 @@ letters:
       not support a comma-joined multi-policy CSP value. serve_react's two LEX_EMBED_* lookups now
       read django.conf.settings (not the lex.lex_app.settings module) so override_settings reaches
       them in tests; its document check is now case-insensitive and also matches .htm. No new
-      scenario IDs -- 1.402 and 1.406 each gained a configured-but-all-invalid case, and 1.405
+      scenario IDs -- 1.406 and 1.410 each gained a configured-but-all-invalid case, and 1.409
       gained cases for every invalid host shape plus the fail-closed warning and
       embed_origins_configured itself.
 
@@ -1382,7 +1359,29 @@ letters:
       the existing WARNING (fail closed, no round-trip check added -- that would reject valid
       punycode input). Also: _HOSTNAME_RE now uses .fullmatch() with no anchors instead of
       .match() + a trailing $, which tolerates a newline just before it. Test fix: the `;` case
-      in 1.405's bracketed-host test used a host that also contained a wildcard, so the existing
+      in 1.409's bracketed-host test used a host that also contained a wildcard, so the existing
       wildcard pre-check was rejecting it before the grammar check ever ran; changed to a host with
       only the semicolon, so the grammar is what is actually exercised. Also fixed a doc typo
       (muller.de -> müller.de) in this note's prior paragraph. No new scenario IDs.
+  ay:
+    title: lex_view filters, filter_bar and on_filter
+    scenarios: 1.411-1.419
+    status: complete
+    tests:
+      pass: 14
+      skip: 0
+      xfail: 0
+    note: >-
+      lex_view(filters=, filter_bar=, on_filter=). Filters ride the component's arguments, never its
+      URL or key, because the URL is the component's identity and a changed URL remounts the frame.
+      1.411-1.416 pin that, the component choice, the filter_bar and emit_filter parameters, and
+      refusals at the call. 1.417 runs the shim's decision function under node (skipped without
+      node): post only to a loaded frame, only named filters, only when they differ.
+      Final review: the shim no longer treats "last posted" as what the frame holds. After every
+      load -- a reload, a sign-in round trip -- filter_sync.afterLoad takes the frame to hold only
+      the filters its URL carried and re-posts the host's when they differ; index.html runs it from
+      one persistent load handler (it was a once-only listener). A token over
+      MAX_URL_FILTERS_TOKEN = 2,000 characters is left out of the URL (url_filters_token is None)
+      and arrives by message only. 1.418 pins the boundary (a 2,000-character token rides the URL,
+      2,002 does not) and the post after a URL-less load; 1.419 that a new load re-posts filters
+      that differ from the URL's and not ones equal to them.

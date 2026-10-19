@@ -27,16 +27,16 @@ single model covers the full AG Grid filter contract:
                                                     only, no value list
 
 ``QueryMaskedItem`` overrides ``can_read`` to hide ``category`` per row
-(cluster 14g's per-row field-masking fixture: 14.53, 14.56).
+(cluster 14g's per-row field-masking fixture: 14.62, 14.65).
 
 ``QueryOpenItem`` overrides neither ``permission_read`` nor ``can_read`` at
-all -- cluster 14g's "default permissions" fixture (14.55, 14.59, 14.60):
+all -- cluster 14g's "default permissions" fixture (14.64, 14.68, 14.69):
 the read filter and the serializer both fall through to allow-everything, so
 a database count is exact without any row-by-row check.
 
 ``QueryLedgerEntry`` points at ``QueryLedger`` through ``to_field="number"``,
 so its foreign-key column stores a ledger's number, not its primary key
-(14.67).
+(14.76).
 
 Rule #3: no cross-cluster imports — stood up fresh here.
 """
@@ -180,7 +180,7 @@ class QueryOpenItem(models.Model):
     """A plain Django model -- no ``LexModel``, so no ``permission_read`` /
     ``can_read`` at all, inherited or otherwise.
 
-    Cluster 14g's "declares neither" fixture (14.55, 14.59, 14.60). This has
+    Cluster 14g's "declares neither" fixture (14.64, 14.68, 14.69). This has
     to NOT be a ``LexModel`` subclass: a LexModel that simply skips
     overriding ``permission_read`` still has it, inherited and unchanged --
     which is the OTHER case ``uses_default_read_permission`` covers (the
@@ -212,7 +212,7 @@ class QueryDefaultPermissionItem(LexModel):
     ``can_read`` -- both stay the literal inherited default.
 
     Cluster 14g's "default permissions, through the real endpoint" fixture
-    (14.60), distinct from ``QueryOpenItem``: that one has no such methods
+    (14.69), distinct from ``QueryOpenItem``: that one has no such methods
     AT ALL (a plain Django model), which is ``uses_default_read_permission``'s
     OTHER True branch. This one exercises the identity branch -- the row
     filter's ``_get_default_permission_target`` fast path, keyed on Keycloak
@@ -244,7 +244,7 @@ class QueryScopedFieldItem(LexModel):
     ``secret_field`` unless the caller's Keycloak scopes include ``"read"``;
     ``can_read`` is left at the LexModel default (unoverridden).
 
-    Cluster 14g's API-key fast-path parity fixture (14.66). ``permission_read``
+    Cluster 14g's API-key fast-path parity fixture (14.75). ``permission_read``
     being an override (not the literal default) keeps the row filter off its
     restrictive UMA fast path regardless of auth method -- ``allow_fields``
     always sets ``allowed=True``, so the row is never excluded either way --
