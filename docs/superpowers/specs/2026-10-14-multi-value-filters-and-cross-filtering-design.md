@@ -81,6 +81,17 @@ Found while the implementation plans were written against the source:
       whose `permission_list` refuses the caller has no value list: 404 (`LEX_SEC_NOT_FOUND`).
     - `LEX_LEGACY_SECURITY=true`, or the matching `LEX_SEC_<FLAG>=false`, restores the previous
       behaviour, as it does for the list.
+18. **The grid's own filters are the only filter UI.** The filter bar is withdrawn. That includes
+    `list_ui.filter_bar` (§4: `Meta.filter_bar` and a model's `filter_bar`) and
+    `lex_view(filter_bar=)`.
+    - AG Grid's column filters and its Filters side panel do the filtering, in the app and in embeds
+      alike. The column filter is the value list with counts, its search box and narrowing.
+    - §6, Amendment 5, and Amendment 17's `list_ui.filter_bar` clause no longer apply.
+    - A value list applies as values are ticked, with no Apply button; a typed condition keeps
+      Apply / Enter.
+    - Value lists show up to 1,000 values (Amendment 4), and their search box searches those.
+      `filter_values` keeps its `search` parameter for direct callers.
+    - The embed's `filters` and its `filter` events (§7) are unchanged.
 
 ## The problem
 
