@@ -123,7 +123,8 @@ letters:
       skip: 0
       xfail: 0
     note: >-
-      New endpoint for the grid's value-list filters and filter bar. Subclasses ListModelEntries, so
+      New endpoint for the grid's value-list filters and filter bar (the bar was later withdrawn,
+      Amendment 18). Subclasses ListModelEntries, so
       as_of, the read filter and the 14k translation are the list's own. 14.51 pins that a column's
       own filter is left out and the others narrow; 14.52 keys and labels per type; 14.53 a ticked
       value at 0; 14.54 search (database for text, labels for foreign keys); 14.55 limit and

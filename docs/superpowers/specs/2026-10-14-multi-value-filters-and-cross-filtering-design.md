@@ -105,10 +105,12 @@ The goal is a native lex-app feature first, which every embed then gets for free
 1. **Value lists.** A column filter lists the column's values with a row count each; the user ticks
    any number of them.
 2. **Narrowing.** Each value list reflects the other active filters.
-3. **A filter bar** above the grid shows chosen columns' value lists as dropdowns.
-4. **Streamlit.** `lex_view` can set an embed's filters and its bar, hears when its filters change,
-   and can change them again without reloading the frame. Linking two embedded tables is then plain
-   Python: read one embed's selection or filters and pass them to the other.
+3. **A filter bar** above the grid shows chosen columns' value lists as dropdowns. (withdrawn,
+   Amendment 18)
+4. **Streamlit.** `lex_view` can set an embed's filters and its bar (withdrawn, Amendment 18), hears
+   when its filters change, and can change them again without reloading the frame. Linking two
+   embedded tables is then plain Python: read one embed's selection or filters and pass them to the
+   other.
 
 ## What already exists
 
@@ -159,9 +161,9 @@ The goal is a native lex-app feature first, which every embed then gets for free
 
 ### 1. One filter state
 
-All filtering stays in AG Grid's filter model. The column menus, the filter bar, saved views,
-export, "Select All Records" and the embed bridge all read and write that one model, so they cannot
-disagree.
+All filtering stays in AG Grid's filter model. The column menus, the filter bar (withdrawn,
+Amendment 18), saved views, export, "Select All Records" and the embed bridge all read and write
+that one model, so they cannot disagree.
 
 The filter each column gets:
 
@@ -251,6 +253,8 @@ Behaviour:
      `LEX_FILTER_VALUES_SCAN_LIMIT` distinct keys (default 5,000, most frequent first).
    - Results are sorted by label and cut at `limit` (default 200, maximum 1,000).
    - `truncated` says the list is not complete, and the UI then asks the user to search.
+     (Withdrawn, Amendment 18 — the grid's own lists do not read `truncated`; nothing tells the
+     user a list was cut. `filter_values` still reports it for direct callers.)
 7. **Field-level read permission.**
    - The field must be a filterable field of the requested serializer. A field the serializer does
      not expose can never be listed, however the model is built.
@@ -264,7 +268,7 @@ Behaviour:
    - A field that is not a filterable field of the serializer is a 400 "field is not filterable".
    - A bad `filterModel` key is a 400 naming the field.
 
-### 4. Backend: `filter_bar` in `list_ui`
+### 4. Backend: `filter_bar` in `list_ui` (withdrawn, Amendment 18)
 
 `get_list_ui_options` adds `filter_bar`: the field names a list shows in its bar by default. It reads
 `Meta.filter_bar` from the serializer, falling back to a model attribute `filter_bar`, so projects
@@ -287,7 +291,7 @@ warning. The default is `[]`, which means no bar.
   it to the server translator, §2 covers it. Otherwise `translateFilterModel` learns both shapes in
   this change.
 
-### 6. Frontend: the filter bar
+### 6. Frontend: the filter bar (withdrawn, Amendment 18)
 
 - **Where it sits:** a row between the toolbar and the grid. Each bar column is a dropdown: multiple
   choice, chips, a search box and counts, fed by `filter_values` exactly like the column menu.
@@ -314,7 +318,7 @@ New `lex_view` parameters:
 lex_view(
     "invoice",
     filters={"status": ["open", "closed"], "region": "north", "customer": None},
-    filter_bar=["status", "region", "customer"],
+    filter_bar=["status", "region", "customer"],  # withdrawn, Amendment 18 — no longer a lex_view parameter
     on_filter=True,
 )
 ```
@@ -328,15 +332,17 @@ lex_view(
   - Fields that are not columns of the embedded list are ignored, with a console warning.
   - The host's filters replace the filters on the fields they name; filters on other fields, set by
     the user, stay.
-- **`filter_bar`:** the bar's columns. `[]` hides the bar.
+- **`filter_bar`:** the bar's columns. `[]` hides the bar. (withdrawn, Amendment 18 — `lex_view` has
+  no `filter_bar` parameter)
 - **`on_filter`:** report filter changes as `filter` events.
 
 **On the wire**
 
-1. The first load carries the filters in the URL, as `filters=<base64url JSON>` and `filter_bar=a,b`.
-   Both are added to `SNAPSHOT_EXACT`, so they survive in-app navigation. Only the list of the
-   resource the embed opened with applies them: when it first mounts, after the saved view, and they
-   win for the fields they name. Another table reached inside the same embed ignores them.
+1. The first load carries the filters in the URL, as `filters=<base64url JSON>` and `filter_bar=a,b`
+   (withdrawn, Amendment 18). Both are added to `SNAPSHOT_EXACT`, so they survive in-app navigation.
+   Only the list of the resource the embed opened with applies them: when it first mounts, after the
+   saved view, and they win for the fields they name. Another table reached inside the same embed
+   ignores them.
 2. Passing `filters` selects the component path, as the `on_*` flags already do. Python hands the
    component the URL without `filters` plus the filters as their own argument.
    - On first render the component adds them to the iframe URL.
@@ -375,11 +381,11 @@ lex_view("order_line", filters={"order": ids}, key="lines")
 | Case | Behaviour |
 |---|---|
 | `filter_values` returns 400 | The list shows the server's message; the column keeps working with its condition filter |
-| `filter_values` 404 / 405 (older backend) | Value lists marked unavailable; bar hidden; condition filters unchanged |
+| `filter_values` 404 / 405 (older backend) | Value lists marked unavailable; bar hidden (withdrawn, Amendment 18 — there is no bar); condition filters unchanged |
 | A filter key that cannot be converted | 400 naming the field, from both the list and `filter_values` |
 | `filters` names an unknown field | Ignored with a console warning; other fields applied |
-| `filter_bar` names an unknown or non-filterable field | Dropped with a warning |
-| Values truncated | The list says so and offers search |
+| `filter_bar` names an unknown or non-filterable field (withdrawn, Amendment 18) | Dropped with a warning |
+| Values truncated | The list says so and offers search (withdrawn, Amendment 18 — lists show up to 1,000 values, and the search box searches only those; nothing marks a list as cut) |
 
 ## Testing
 
@@ -398,7 +404,8 @@ written).
     and a field readable on no row gives an empty list.
   - A field the serializer does not expose gets a 400, even when the model has it.
 - **The cluster that owns `lex_view`:**
-  - The URL and component arguments for `filters` and `filter_bar`.
+  - The URL and component arguments for `filters` and `filter_bar` (withdrawn, Amendment 18 — only
+    `filters` remains).
   - The component posts a changed filter instead of reloading the frame, and does not post an
     unchanged one.
 
@@ -406,28 +413,32 @@ written).
 - **Grid-read cluster:**
   - Each field type gets its filter from the table in §1.
   - The values callback sends the right request; labels and counts render.
-  - The bar and the column menu stay in sync, both ways.
+  - The bar and the column menu stay in sync, both ways. (withdrawn, Amendment 18)
   - The migration of old saved-view models.
-- **Grid-views cluster:** saved views keep `filterBar` and Set / Multi models.
+- **Grid-views cluster:** saved views keep `filterBar` (withdrawn, Amendment 18) and Set / Multi
+  models.
 - **Embed cluster:**
-  - The `filters` and `filter_bar` parameters, and the host `filter` message applied without a
-    reload.
+  - The `filters` and `filter_bar` (withdrawn, Amendment 18) parameters, and the host `filter`
+    message applied without a reload.
   - The `filter` event is gated by `emit_filter` and carries the documented payload.
 - **End to end:**
-  - Narrowing across two bar filters, with counts updating.
+  - Narrowing across two bar filters, with counts updating. (withdrawn, Amendment 18 — narrowing is
+    now exercised across two column filters, not the bar)
   - An embed-host page pushing a filter into the frame and receiving the event back.
 
 ## Delivery order
 
-1. `lex-app`: filter translation (§2), `filter_values` (§3), `list_ui.filter_bar` (§4).
-2. `process-admin-general-client`: column filters and value lists (§5), the filter bar (§6), the
-   bridge's `filter` event and host message (§7).
+1. `lex-app`: filter translation (§2), `filter_values` (§3), `list_ui.filter_bar` (§4) (withdrawn,
+   Amendment 18).
+2. `process-admin-general-client`: column filters and value lists (§5), the filter bar (§6)
+   (withdrawn, Amendment 18), the bridge's `filter` event and host message (§7).
 3. `lex-app`: `lex_view` parameters and the component (§7); then the frontend version pin.
 4. `lex-app-docs`, three pages:
    - *Filtering and sorting:* value lists, narrowing and the bar. Also corrects two current claims:
      the foreign-key filter is single-value today, and filters wait for **Apply**.
-   - *Embedding app pages:* `filters`, `filter_bar`, `on_filter` and the linking pattern.
-   - *Serializers:* the `filter_bar` option.
+   - *Embedding app pages:* `filters`, `filter_bar` (withdrawn, Amendment 18), `on_filter` and the
+     linking pattern.
+   - *Serializers:* the `filter_bar` option. (withdrawn, Amendment 18)
 
 The frontend reaches projects through the pinned `lex-app-frontend` package, so steps 1 and 2 ship in
 the same `lex-app` release; §5's fallback covers a frontend paired with an older backend.

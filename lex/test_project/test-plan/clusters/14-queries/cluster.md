@@ -196,6 +196,7 @@ pin this). Bare keys and every other lookup suffix are untouched, so `?field=nul
 `IS NULL` for existing callers. The same change also gave `_resolve_filter_bar`'s "dropped" warning
 (cluster 10p, `lex/api/serializers/base_serializers.py`) a per-process per-(serializer class, name)
 dedup, so a misconfigured `filter_bar` no longer re-logs on every fields-info request.
+`_resolve_filter_bar` was later withdrawn with the bar it served (Amendment 18; see cluster 10p).
 
 **Fix round 3 (residual, same re-review):** a `JSONField` is the one exception to fix round 2's
 "every other field type stays typed" -- it keeps the legacy `_coerce_value` on `__exact`/`__in`

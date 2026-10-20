@@ -637,7 +637,12 @@ def lex_view(
     on_filter : bool
         Report filter changes as ``"filter"`` events. Payload: ``resource``,
         ``filters`` (field → ticked keys), ``filter_model`` (the grid's whole
-        model) and ``row_count``.
+        model) and ``row_count``. A value list applies on each tick, with no
+        Apply button, so each change the user makes sends its own
+        ``"filter"`` event and reruns the script. Pass a table's filters on
+        to *another* table; never echo them back into the same table's
+        ``filters=`` — an echo that arrives one rerun late can undo the
+        user's latest tick (spec Amendment 15).
     filters : dict, optional
         Field name to stored values to tick: a list, one value, or ``None``
         to untick them all. An empty list also unticks them all, as ticking
