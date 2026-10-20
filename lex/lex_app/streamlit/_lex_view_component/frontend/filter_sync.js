@@ -5,9 +5,10 @@
  * load carries the filters in the iframe URL (unless the token is too long for
  * it); after that a change is POSTED, so the frame keeps its state instead of
  * reloading. A post happens only once the frame has loaded, only when the host
- * named filters, and only when they differ from the ones the frame already has:
- * feeding an embed's own filter event back into lex_view(filters=...) must
- * settle, not loop.
+ * named filters, and only when they differ from the ones the frame already has,
+ * so re-passing the same filters on a rerun sends nothing. A page should still
+ * pass a table's filters on to another table, not echo them back into the same
+ * one: an echo that arrives one rerun late can undo the user's latest tick.
  */
 (function (root) {
   function shouldPost(state) {
