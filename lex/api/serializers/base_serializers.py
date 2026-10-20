@@ -19,6 +19,7 @@ from lex.api.serializers.sensitive_fields import (
     filter_sensitive_field_names,
     strip_sensitive_fields,
 )
+from lex.api.utils.filterable_fields import _KEEPS_FIELD_VALUES
 
 ID_FIELD_NAME = "id_field"
 SHORT_DESCR_NAME = "short_description"
@@ -105,6 +106,15 @@ def _lex_model_can_read():
     from lex.core.models.LexModel import LexModel
 
     return LexModel.can_read
+
+
+def _keeps_lex_model_can_read(instance) -> bool:
+    """Whether ``instance`` reads through LexModel's own ``can_read``.
+
+    False for an override, and for a model that declares no ``can_read`` at all
+    (a plain Django model), which the read-once check must not assume has one.
+    """
+    return getattr(type(instance), "can_read", None) is _lex_model_can_read()
 
 
 def _get_capabilities(model_class: type) -> dict:
@@ -788,31 +798,60 @@ class LexSerializer(serializers.ModelSerializer):
         CALCULATION_ID_NAME, HAS_CALCULATION_LOG_NAME,
     })
 
-    def to_representation(self, instance):
-        request = self.context.get('request')
+    def _resolve_permission_target(self, instance):
+        """The instance permission checks should run against, and its capability flags.
 
-        # Resolve the target instance for permission checks
+        Unwraps a History / MetaHistory wrapper when the wrapper class itself
+        declares neither ``can_read`` nor ``permission_read`` (i.e. it isn't a
+        LexModel), so permission checks always run against a real LexModel.
+        """
         caps = _get_capabilities(type(instance))
-
         if not caps['has_can_read'] and not caps['has_permission_read']:
             target_instance = self._unwrap_instance(instance)
             target_caps = _get_capabilities(type(target_instance))
         else:
             target_instance = instance
             target_caps = caps
+        return target_instance, target_caps
 
-        # Normal visible fields for concrete models
+    def _resolve_target_and_visible_fields(self, instance, request):
+        """Resolve the instance to check permissions against, and which
+        model field names ``request`` may read on it.
+
+        The one copy of the per-record read decision: ``to_representation``
+        (every serialized row) and ``readable_field_names`` (``FilterValues``'
+        per-row count) both call it, so a value list counts exactly the field
+        values the grid shows. An empty set means the record is withheld.
+
+        0. A ``permission_read`` result the read filter already computed for
+           this request and record is reused when ``can_read`` is LexModel's
+           own (BUG-011).
+        1. Else ``can_read``. LexModel's own is ``permission_read`` +
+           ``get_fields``, computed from this serializer's cached base context
+           (``_get_can_read_context``, which keeps an API key's own scopes),
+           so a scan over many rows queries the user's groups once. An
+           override is called as is: ``False`` -> withheld, ``True`` -> all
+           fields, else the names it returns.
+        2. Else ``permission_read``: not ``allowed`` -> withheld; else
+           ``get_fields`` (a bare truthy / falsy result -> all / none).
+        3. Else all fields.
+
+        A hook that raises withholds the record when ``LEX_SEC_FAIL_CLOSED``
+        is on (the default) and propagates when it is off.
+        """
+        target_instance, target_caps = self._resolve_permission_target(instance)
+
         visible_fields = None
 
         # 0. Already decided for this request (the list filter asked first; BUG-011)
         remembered = None
-        if request is not None and type(target_instance).can_read is _lex_model_can_read():
+        if request is not None and _keeps_lex_model_can_read(target_instance):
             from lex.api.security import recalled
 
             remembered = recalled(request, "read", target_instance)
         if remembered is not None:
             if not remembered.allowed:
-                return {}
+                return target_instance, set()
             visible_fields = self._normalize_field_names(
                 remembered.get_fields(self._get_cached_field_names(type(target_instance)))
             )
@@ -820,7 +859,7 @@ class LexSerializer(serializers.ModelSerializer):
         # 1. Try Legacy 'can_read'
         elif target_caps['has_can_read']:
             try:
-                if request is not None and type(target_instance).can_read is _lex_model_can_read():
+                if request is not None and _keeps_lex_model_can_read(target_instance):
                     # LexModel.can_read is permission_read with a context built from
                     # the request; build it from this serializer's cached base
                     # instead of querying the user's groups once per row (BUG-011).
@@ -831,10 +870,10 @@ class LexSerializer(serializers.ModelSerializer):
             except Exception:
                 if _fail_closed():
                     logger.exception("can_read raised for %s; record withheld", type(target_instance).__name__)
-                    return {}
+                    return target_instance, set()
                 raise
             if raw_visible_fields is False:
-                return {}
+                return target_instance, set()
             if raw_visible_fields is True:
                 visible_fields = self._get_cached_field_names(type(target_instance))
             else:
@@ -848,10 +887,10 @@ class LexSerializer(serializers.ModelSerializer):
             except Exception:
                 if _fail_closed():
                     logger.exception("permission_read raised for %s; record withheld", type(target_instance).__name__)
-                    return {}
+                    return target_instance, set()
                 raise
             if hasattr(result, "allowed") and not result.allowed:
-                return {}  # Hide entirely
+                return target_instance, set()  # Hide entirely
 
             all_fields = self._get_cached_field_names(type(target_instance))
             if hasattr(result, "get_fields"):
@@ -866,6 +905,24 @@ class LexSerializer(serializers.ModelSerializer):
             visible_fields = self._get_cached_field_names(type(instance))
         else:
             visible_fields = self._normalize_field_names(visible_fields)
+
+        return target_instance, visible_fields
+
+    def readable_field_names(self, instance, request) -> set:
+        """Which model field names ``request`` may read on ``instance``.
+
+        See ``_resolve_target_and_visible_fields`` for the full decision;
+        this is the half of it most callers (``FilterValues``) need. Call it
+        on one serializer instance for a whole scan: the base user context is
+        cached on the instance, not rebuilt per row.
+        """
+        _, visible_fields = self._resolve_target_and_visible_fields(instance, request)
+        return visible_fields
+
+    def to_representation(self, instance):
+        request = self.context.get('request')
+
+        target_instance, visible_fields = self._resolve_target_and_visible_fields(instance, request)
 
         if not visible_fields:
             return {}
@@ -1120,6 +1177,10 @@ def _wrap_custom_serializer(custom_cls, model_class):
                     representation["id"] = pk_value
             return representation
 
+        # Only `id` is touched, so every other field keeps the value its
+        # field class rendered (see filterable_fields.renders_rows_as_stored).
+        # Framework-private mark -- see filterable_fields._KEEPS_FIELD_VALUES.
+        setattr(_to_representation_with_id, _KEEPS_FIELD_VALUES, True)
         wrapped_cls.to_representation = _to_representation_with_id
     return wrapped_cls
 

@@ -93,6 +93,14 @@ columns downstream apps declare and write from `calculate()`.
 | 13.44 | 122-char nested report path | Round-trips byte-for-byte; over the column width Django's storage silently truncates and suffixes rather than raising |
 | 13.45 | Bare `PDFField()` width | Same 300 default — PDF reports build the same nested paths |
 
+### 13i. Value-list filters in the export
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 13.46 | Set filter with blank, and an empty selection | On the pandas and the streaming export path the sheet holds exactly the rows the list POST returns for the same filter; nothing ticked exports no rows (404 "No data available for export") |
+
+**Scenario range:** 13.46. **Test file:** `lex/test_project/tests/exports/test_13i_value_list_filters.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Batch: [13i](batches.md).
+
 **What is explicitly NOT tested here:**
 
 - ❌ **Excel formatting cosmetics** (column widths, cell colours,

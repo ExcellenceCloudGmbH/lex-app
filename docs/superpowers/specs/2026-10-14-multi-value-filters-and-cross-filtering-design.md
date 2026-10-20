@@ -1,0 +1,451 @@
+# Multi-value filters and cross-filtering
+
+**Date:** 2026-10-14
+**Status:** draft, for review
+**Touches:** `lex-app` (filter translation, a filter-values endpoint, a list option, `lex_view` and its
+Streamlit component), `process-admin-general-client` (grid filters, a filter bar, the embed bridge),
+`lex-app-docs` (three pages)
+
+## Amendments
+
+Found while the implementation plans were written against the source:
+
+1. **`as_of` and `serializer` are query parameters** of `filter_values`, as they are for the list
+   POST: the shared mixin reads both from the URL. The request body carries `field`, `filterModel`,
+   `selected`, `search` and `limit`.
+2. **The per-row permission count is capped by rows read**: `LEX_FILTER_VALUES_ROW_SCAN_LIMIT`
+   (default 50,000). Past it the answer is `truncated`. `LEX_FILTER_VALUES_SCAN_LIMIT` still caps
+   distinct values.
+3. **Only the list's own columns** can be listed: a field with `__` (a related path) is not
+   filterable by `filter_values`.
+4. **Column-menu lists ask for up to 1,000 values**, and AG's search box filters only those. Searching
+   the server is the filter bar's job.
+5. **Removing a column from the bar keeps its filter**; the column header still shows it. Unticking
+   values is how a filter is cleared.
+6. **First-load embed filters** apply to the first list mounted in the embed whose resource appears in
+   the path the embed opened with. Host `filter` messages apply to the list mounted when they arrive.
+   (See 11 for messages that arrive before a list.)
+7. **Long text has no value list.** `TextField` columns without `choices` keep their text condition
+   only; "text" in §1's table means `CharField`.
+8. **A model can opt out of value lists** with `lex_value_lists = False`: `filter_values` refuses
+   its columns and the fields endpoint marks them `value_list: false`. `AuditLog` opts out — its
+   read permission is decided per entry against the entry's target record, so a count would have to
+   evaluate every audit row.
+9. **Only what the grid renders can be listed.** A write-only field, a field whose class overrides
+   `get_attribute` or `to_representation` outside DRF, and every field of a serializer class that
+   overrides `to_representation` are not filterable.
+10. **The fields endpoint says which columns have a value list**: every field of
+    `GET api/model_info/<model>/fields` carries `value_list: true|false`, decided by the same
+    resolver as `filter_values` for the requested serializer. The frontend offers Set and Multi
+    value lists only where it is true.
+11. **Embed filter delivery.** After every frame load the component treats the frame as holding
+    only the filters its URL carried, and re-posts the current host filters when they differ.
+    Filters whose token would exceed 2,000 characters are not put in the URL and arrive by message
+    only. A host `filter` message that arrives before any list is mounted is kept and applied to the
+    first list that mounts. Re-passing the same filters on a rerun does not override what the user
+    changed inside the frame.
+12. **Amendment 2 caps the count.** The read filter's own per-row pass is the list's and is not
+    capped by `LEX_FILTER_VALUES_ROW_SCAN_LIMIT`.
+13. **Value lists are positive selections.** A value list starts with nothing ticked and has no
+    "select all": ticked values are included, and nothing ticked means no filter, in the column
+    menu and the filter bar alike. AG applies an empty Set as no filter, so the UI never produces
+    an empty selection, and a host's empty list clears that field like `None`. The server still
+    reads an explicit empty Set (`values: []`) as "no rows", for direct API callers.
+14. **Allowed embedding sites.** `LEX_EMBED_ALLOWED_ORIGINS` (a comma-separated list of origins such as
+    `https://reports.example.com`) names the sites allowed to embed lex-app.
+    - When it is set, embed responses carry `Content-Security-Policy: frame-ancestors 'self' <origins>`,
+      so the browser refuses every other framing site.
+    - `config.js` passes the list to the frontend as `window.REACT_APP_EMBED_ALLOWED_ORIGINS`.
+    - The embed sends `filter` events, and accepts host `filter` messages, only when the parent frame's
+      origin is on the list. With the setting unset, framing and the other bridge events and messages
+      behave as before, and the `filter` channel stays off. A `filter` event reports a row count with
+      no user action, so a page that may frame lex-app must be named before it can read one.
+15. **Echoes and group counts.** A host that feeds an embed's `filter` event back into it changes
+    nothing: fields whose ticked keys already match are skipped, and a Multi filter's condition half
+    is kept. Echoing an older event after the user's next change can still undo that change; hosts
+    should pass filters on, not echo them. On a grouped table, `row_count` is the number of top-level
+    groups.
+16. **Host filters set value lists only.** A host's `filters`, on the first load or later, replace a
+    column's ticked keys and nothing else. On a column whose filter also has a condition, the
+    condition stays, and `None` or `[]` clears only the ticked keys.
+17. **lex-app-v2's secure defaults apply to value lists.** `filter_values` answers as the list it
+    mirrors does under lex-app-v2's security switches.
+    - A column the list refuses to filter by (`LEX_SEC_FILTERS`), such as one `permission_read`
+      withholds from the caller on every record, is treated like a field that does not exist:
+      `filter_values` answers 400 "is not filterable", the fields endpoint marks it
+      `value_list: false` for that caller, and `list_ui.filter_bar` leaves it out. This replaces
+      §3.7's empty list for such a field; a field hidden per row on every row the other filters
+      leave still gives an empty list. A `filterModel` entry on such a field is ignored, as the
+      list ignores it.
+    - A row whose permission check raises is not counted (`LEX_SEC_FAIL_CLOSED`), and a model
+      whose `permission_list` refuses the caller has no value list: 404 (`LEX_SEC_NOT_FOUND`).
+    - `LEX_LEGACY_SECURITY=true`, or the matching `LEX_SEC_<FLAG>=false`, restores the previous
+      behaviour, as it does for the list.
+18. **The grid's own filters are the only filter UI.** The filter bar is withdrawn. That includes
+    `list_ui.filter_bar` (§4: `Meta.filter_bar` and a model's `filter_bar`) and
+    `lex_view(filter_bar=)`.
+    - AG Grid's column filters and its Filters side panel do the filtering, in the app and in embeds
+      alike. The column filter is the value list with counts, its search box and narrowing.
+    - §6, Amendment 5, and Amendment 17's `list_ui.filter_bar` clause no longer apply.
+    - A value list applies as values are ticked, with no Apply button; a typed condition keeps
+      Apply / Enter.
+    - Value lists show up to 1,000 values (Amendment 4), and their search box searches those.
+      `filter_values` keeps its `search` parameter for direct callers.
+    - The embed's `filters` and its `filter` events (§7) are unchanged.
+
+## The problem
+
+A review page needs to narrow one table with several values per column at once (for example two or
+three statuses), with filters that narrow each other: once a region is picked, the customer filter
+only offers that region's customers. Projects build such pages by hand in Streamlit today, because
+the lex-app grid cannot do either, and an embedded lex-app table cannot be told what to filter.
+
+The goal is a native lex-app feature first, which every embed then gets for free:
+
+1. **Value lists.** A column filter lists the column's values with a row count each; the user ticks
+   any number of them.
+2. **Narrowing.** Each value list reflects the other active filters.
+3. **A filter bar** above the grid shows chosen columns' value lists as dropdowns. (withdrawn,
+   Amendment 18)
+4. **Streamlit.** `lex_view` can set an embed's filters and its bar (withdrawn, Amendment 18), hears
+   when its filters change, and can change them again without reloading the frame. Linking two
+   embedded tables is then plain Python: read one embed's selection or filters and pass them to the
+   other.
+
+## What already exists
+
+**Frontend** (`process-admin-general-client`, default branch `lex-app-v2-pac-latest`)
+
+- The grid is AG Grid Enterprise 33.2.1 with a licence (`src/index.tsx`). The enterprise Set Filter
+  and Multi Filter are installed but not registered (`CustomDatagrid.tsx`, `gridModules`).
+- Every list page uses the server-side row model. Rows come from `POST api/model_entries/<model>/list`
+  with the whole AG request in the body (`ServerSideDatasource.ts`).
+- `getFilterForField` picks a column's filter by field type: number filter for numbers, date filter
+  for dates, `AGDateTimeFilter` for date-times, `AGForeignKeyFilter` for foreign keys (single value,
+  sent as `{filterType: 'text', type: 'equals'}`), `AGBooleanFilter` for booleans (sent as
+  `{filterType: 'set', values: [bool]}`), and AG's text filter for everything else.
+- Saved views keep the filter model in local storage (`<resource>_gridViews`) and `restoreView`
+  applies it when the grid starts.
+- The list ignores filters in the URL (`<List disableSyncWithLocation>` in `CustomList.tsx`).
+- The embed bridge (`src/utils/lexAppBridge.ts`) sends `create`, `update`, `delete`, `select` and
+  `navigate`, each gated by an `emit_*` flag in `FLAG_MAP`. An event type missing from that map is
+  sent without any opt-in check. The only messages the app accepts from the host are the widget
+  host's `manifest`.
+- "Select All Records" fetches ids with its own GET filter translator (`translateFilterModel`),
+  which drops several filter shapes. The bulk-update work is moving it to the server translator.
+
+**Backend** (`lex-app`, `lex-app-v2`)
+
+- `ListModelEntries._build_filter_q` (`lex/api/views/model_entries/List.py`) translates the AG
+  filter model for the list, the export and the AG requests. A `set` model becomes `field__in`
+  with the values unconverted. An empty list is ignored, so it matches every row; AG means "no
+  rows". A blank value never matches, because SQL `IN` skips NULL. An unknown `filterType`,
+  including `multi`, is dropped, which widens the result.
+- `_execute_group_level` already returns a column's distinct values with a `__childCount`, over the
+  filtered queryset: `qs.values(field).annotate(Count("pk"))`. It checks that the field is a real
+  column, but not that the user may read that field.
+- Row visibility comes from `UserReadRestrictionFilterBackend`. The default `permission_read`
+  (Keycloak `read` scope) is all fields or none and is applied in the database. A model that
+  overrides `permission_read` is evaluated per row in Python, and its `PermissionResult` can hide
+  single fields per row; the serializer then drops those fields from the row.
+- A foreign key's display name is `str(related)`, sent as the companion key
+  `<field>__short_description` (`base_serializers.py`).
+- List options travel to the frontend as `list_ui`, read from the serializer's `Meta` by
+  `get_list_ui_options` (today only `hide_actions_column`).
+- `lex_view` (`lex/lex_app/streamlit/embed.py`) builds the embed URL. It renders the
+  `_lex_view_component` when any `on_*` flag is set, and a plain iframe otherwise. The component
+  re-points the iframe only when the URL really changes, and already posts the host's theme into
+  the frame with `{source: 'lex-app-host', type: 'theme'}`.
+
+## The design
+
+### 1. One filter state
+
+All filtering stays in AG Grid's filter model. The column menus, the filter bar (withdrawn,
+Amendment 18), saved views, export, "Select All Records" and the embed bridge all read and write
+that one model, so they cannot disagree.
+
+The filter each column gets:
+
+| Field | Column filter | Value list |
+|---|---|---|
+| has `choices` | Set | yes, labelled with the choice labels |
+| foreign key | Set (replaces the single-value `AGForeignKeyFilter`) | yes, labelled with `str(related)` |
+| boolean | Set (replaces `AGBooleanFilter`) | Yes, No, (Blank) |
+| text | Multi: text condition + Set | yes |
+| integer | Multi: number condition + Set | yes |
+| date | Multi: date condition + Set | yes |
+| decimal, float | number condition, as today | no — continuous values |
+| date-time | `AGDateTimeFilter`, as today | no — every value is an instant |
+| file, JSON, many-to-many | none, as today | no |
+
+Model shapes:
+
+- Set: `{filterType: 'set', values: [key, …]}`. A key is the stored value as a string: a foreign key's
+  primary key, `"true"` / `"false"`, an ISO date, a number. `null` stands for blank.
+- Multi: `{filterType: 'multi', filterModels: [conditionModel | null, setModel | null]}`.
+
+**Old saved views keep working.** `restoreView` migrates a stored model whose shape no longer fits its
+column:
+- a text, number or date model on a column that is now Multi becomes `{filterType: 'multi',
+  filterModels: [old, null]}`;
+- a foreign key's `text equals` becomes a Set with that one key;
+- a boolean Set's `true` / `false` become `"true"` / `"false"`.
+
+The backend keeps accepting the old shapes.
+
+### 2. Backend: filter translation
+
+`_build_filter_q` changes in three places, so the list, the export and the AG requests all honour
+the new shapes. It stays the one server-side translator.
+
+- **Set.** Each key is converted with the field's `to_python` (with the target primary key's
+  `to_python` for a foreign key). `null` adds `Q(field__isnull=True)` to the `__in`. An empty list
+  matches no rows (`Q(pk__in=[])`). A key that fails conversion is a 400 naming the field, not a
+  silent widening.
+- **Multi.** The child models are applied with AND. An empty child is skipped.
+- **Unknown filter types** stay ignored for compatibility, but are logged with the field name.
+
+### 3. Backend: the filter-values endpoint
+
+`POST api/model_entries/<model>/filter_values?as_of=<instant>&serializer=<name>` (both optional,
+read exactly as the list POST reads them)
+
+Request body:
+
+```json
+{
+  "field": "region",
+  "filterModel": { "status": { "filterType": "set", "values": ["open", "closed"] } },
+  "selected": ["north"],
+  "search": "no",
+  "limit": 200
+}
+```
+
+Response:
+
+```json
+{
+  "values": [
+    { "key": "north", "label": "North", "count": 41 },
+    { "key": null, "label": "(Blank)", "count": 3 }
+  ],
+  "truncated": false
+}
+```
+
+Behaviour:
+
+1. **Same rows as the grid.** It starts from the queryset the list POST uses: the provider queryset
+   (including `as_of`), then the read filter. It is a read, with the same permission class settings
+   as the list POST.
+2. **Faceting.** It applies `filterModel` without the entry for `field`, so the list shows what the
+   *other* filters leave. A column cannot narrow its own value list.
+3. **Counts.** It groups by `field` with `Count("pk")`, as `_execute_group_level` does.
+4. **Labels.** Choices use their labels; a foreign key uses `str(related)`, resolved in one query
+   per page of keys; booleans become Yes / No; `null` becomes "(Blank)".
+5. **Selected values stay visible.** Every key in `selected` appears in the result, with count 0 if
+   the other filters removed it, so a ticked value can still be unticked.
+6. **Search and size.**
+   - `search` matches labels case-insensitively. On text fields without choices it runs in the
+     database (`__icontains`). On every other type it runs in Python on the labels, over at most
+     `LEX_FILTER_VALUES_SCAN_LIMIT` distinct keys (default 5,000, most frequent first).
+   - Results are sorted by label and cut at `limit` (default 200, maximum 1,000).
+   - `truncated` says the list is not complete, and the UI then asks the user to search.
+     (Withdrawn, Amendment 18 — the grid's own lists do not read `truncated`; nothing tells the
+     user a list was cut. `filter_values` still reports it for direct callers.)
+7. **Field-level read permission.**
+   - The field must be a filterable field of the requested serializer. A field the serializer does
+     not expose can never be listed, however the model is built.
+   - With the default `permission_read`, the database aggregate is enough: rows are all-or-nothing.
+   - When the model overrides `permission_read`, only rows whose `PermissionResult` allows the field
+     are counted. These rows are evaluated per row in chunks, as the read filter already does, and
+     capped by the scan limit. A field the user can read on no row gives an empty list, not an
+     error.
+   - The value list never shows a value the user could not see in the grid.
+8. **Errors.**
+   - A field that is not a filterable field of the serializer is a 400 "field is not filterable".
+   - A bad `filterModel` key is a 400 naming the field.
+
+### 4. Backend: `filter_bar` in `list_ui` (withdrawn, Amendment 18)
+
+`get_list_ui_options` adds `filter_bar`: the field names a list shows in its bar by default. It reads
+`Meta.filter_bar` from the serializer, falling back to a model attribute `filter_bar`, so projects
+without a custom serializer can set it. Field names that are not filterable are dropped with a
+warning. The default is `[]`, which means no bar.
+
+### 5. Frontend: column filters and value lists
+
+- Register `SetFilterModule` and `MultiFilterModule`, and give each column the filter from the table
+  in §1.
+- **Value lists** come from `filter_values`. AG's Set Filter `values` callback posts the grid's
+  current filter model and the column's ticked keys, with `refreshValuesOnOpen: true`. Narrowing
+  therefore holds every time a list opens.
+  - Each item shows its label and count.
+  - `valueFormatter` and `keyCreator` map keys to labels.
+  - The list keeps the server's order.
+- **Older backends.** If the endpoint answers 404 or 405, value lists are reported as unavailable,
+  and the column keeps its condition filter.
+- **"Select All Records"** must honour Set and Multi models. If the bulk-update work has already moved
+  it to the server translator, §2 covers it. Otherwise `translateFilterModel` learns both shapes in
+  this change.
+
+### 6. Frontend: the filter bar (withdrawn, Amendment 18)
+
+- **Where it sits:** a row between the toolbar and the grid. Each bar column is a dropdown: multiple
+  choice, chips, a search box and counts, fed by `filter_values` exactly like the column menu.
+- **One state:** picking or removing a value writes the column's Set model through the grid API and
+  calls `onFilterChanged`. The bar re-reads the model on every `filterChanged`, so the bar and the
+  column menu always show the same selection.
+- **Condition filters:** on a Multi column the bar edits only the Set part. If a condition is also
+  active there, the bar item shows a small "+ condition" mark.
+- **Which columns:**
+  1. The embed's `filter_bar` parameter, if given.
+  2. Otherwise the active saved view's `filterBar`.
+  3. Otherwise `list_ui.filter_bar`.
+
+  Users add a column with **Show in filter bar** in its column menu and remove one with the chip's ×.
+  Saved views store the choice as `filterBar`.
+- **When it shows:** only when it has at least one column. `hide_toolbar` does not hide it, because
+  on embed pages the bar is the main control.
+
+### 7. Embedding in Streamlit
+
+New `lex_view` parameters:
+
+```python
+lex_view(
+    "invoice",
+    filters={"status": ["open", "closed"], "region": "north", "customer": None},
+    filter_bar=["status", "region", "customer"],  # withdrawn, Amendment 18 — no longer a lex_view parameter
+    on_filter=True,
+)
+```
+
+**What the parameters mean**
+
+- **`filters`:** field name to stored values.
+  - A list gives a value list, and an empty list means "match nothing".
+  - A single value means just that value.
+  - `None` clears the field.
+  - Fields that are not columns of the embedded list are ignored, with a console warning.
+  - The host's filters replace the filters on the fields they name; filters on other fields, set by
+    the user, stay.
+- **`filter_bar`:** the bar's columns. `[]` hides the bar. (withdrawn, Amendment 18 — `lex_view` has
+  no `filter_bar` parameter)
+- **`on_filter`:** report filter changes as `filter` events.
+
+**On the wire**
+
+1. The first load carries the filters in the URL, as `filters=<base64url JSON>` and `filter_bar=a,b`
+   (withdrawn, Amendment 18). Both are added to `SNAPSHOT_EXACT`, so they survive in-app navigation.
+   Only the list of the resource the embed opened with applies them: when it first mounts, after the
+   saved view, and they win for the fields they name. Another table reached inside the same embed
+   ignores them.
+2. Passing `filters` selects the component path, as the `on_*` flags already do. Python hands the
+   component the URL without `filters` plus the filters as their own argument.
+   - On first render the component adds them to the iframe URL.
+   - On later renders, if only the filters changed, it posts `{source: 'lex-app-host', type:
+     'filter', payload: {filters}}` to the frame's origin instead of reloading it.
+3. The app accepts a host `filter` message only from `window.parent`, with that source tag, and
+   applies it like the first-load filters.
+4. `filter` joins `LexBridgeEventType` and `FLAG_MAP` (`emit_filter`), so it is gated like every
+   other event. Payload: `{resource, filters: {field: [keys]}, filter_model, row_count}`.
+   - `filters` lists only value-list selections; `filter_model` is the whole AG model.
+   - The event is sent once the grid has the new row count, debounced by 300 ms.
+5. Feeding an embed's own `filter` event back into its `filters` settles after one rerun. The
+   component does not post a filter that equals the one the frame already has.
+
+**Linking two tables** needs no new API:
+
+```python
+picked = lex_view("order", on_select=True, key="orders")
+ids = picked["payload"]["ids"] if picked and picked["type"] == "select" else None
+lex_view("order_line", filters={"order": ids}, key="lines")
+```
+
+### 8. Security and correctness
+
+- A value list never contains a row or a field value the user cannot read in the grid (§3.7).
+- Host filters are ordinary grid filters: the server applies the same read permissions to every
+  request, so a page cannot widen what a user sees.
+- Host messages are accepted only from the parent frame with the `lex-app-host` tag, and their
+  fields are checked against the list's filterable columns.
+- A blank value filters as blank, consistently in the grid, export and "Select All Records". An
+  explicit empty Set filters as "no rows" on the server; the UI and hosts clear a field instead
+  (Amendment 13).
+
+## Error handling
+
+| Case | Behaviour |
+|---|---|
+| `filter_values` returns 400 | The list shows the server's message; the column keeps working with its condition filter |
+| `filter_values` 404 / 405 (older backend) | Value lists marked unavailable; bar hidden (withdrawn, Amendment 18 — there is no bar); condition filters unchanged |
+| A filter key that cannot be converted | 400 naming the field, from both the list and `filter_values` |
+| `filters` names an unknown field | Ignored with a console warning; other fields applied |
+| `filter_bar` names an unknown or non-filterable field (withdrawn, Amendment 18) | Dropped with a warning |
+| Values truncated | The list says so and offers search (withdrawn, Amendment 18 — lists show up to 1,000 values, and the search box searches only those; nothing marks a list as cut) |
+
+## Testing
+
+Tests follow the test plans of both repositories (cluster tests, scenarios allocated when the plan is
+written).
+
+**`lex-app`**
+- **Queries cluster:**
+  - Set conversion per field type, blank, empty list and Multi, in the list, export and AG requests.
+  - `filter_values` faceting: a field's own filter is excluded.
+  - Counts, and labels for choices, foreign keys and booleans.
+  - Selected values kept at 0, search on text and foreign keys, `limit` and `truncated`, and `as_of`.
+- **Permissions cluster:**
+  - Rows hidden by the read filter are never counted.
+  - A field hidden per row by an overridden `permission_read` is counted only on rows that allow it,
+    and a field readable on no row gives an empty list.
+  - A field the serializer does not expose gets a 400, even when the model has it.
+- **The cluster that owns `lex_view`:**
+  - The URL and component arguments for `filters` and `filter_bar` (withdrawn, Amendment 18 — only
+    `filters` remains).
+  - The component posts a changed filter instead of reloading the frame, and does not post an
+    unchanged one.
+
+**`process-admin-general-client`**
+- **Grid-read cluster:**
+  - Each field type gets its filter from the table in §1.
+  - The values callback sends the right request; labels and counts render.
+  - The bar and the column menu stay in sync, both ways. (withdrawn, Amendment 18)
+  - The migration of old saved-view models.
+- **Grid-views cluster:** saved views keep `filterBar` (withdrawn, Amendment 18) and Set / Multi
+  models.
+- **Embed cluster:**
+  - The `filters` and `filter_bar` (withdrawn, Amendment 18) parameters, and the host `filter`
+    message applied without a reload.
+  - The `filter` event is gated by `emit_filter` and carries the documented payload.
+- **End to end:**
+  - Narrowing across two bar filters, with counts updating. (withdrawn, Amendment 18 — narrowing is
+    now exercised across two column filters, not the bar)
+  - An embed-host page pushing a filter into the frame and receiving the event back.
+
+## Delivery order
+
+1. `lex-app`: filter translation (§2), `filter_values` (§3), `list_ui.filter_bar` (§4) (withdrawn,
+   Amendment 18).
+2. `process-admin-general-client`: column filters and value lists (§5), the filter bar (§6)
+   (withdrawn, Amendment 18), the bridge's `filter` event and host message (§7).
+3. `lex-app`: `lex_view` parameters and the component (§7); then the frontend version pin.
+4. `lex-app-docs`, three pages:
+   - *Filtering and sorting:* value lists, narrowing and the bar. Also corrects two current claims:
+     the foreign-key filter is single-value today, and filters wait for **Apply**.
+   - *Embedding app pages:* `filters`, `filter_bar` (withdrawn, Amendment 18), `on_filter` and the
+     linking pattern.
+   - *Serializers:* the `filter_bar` option. (withdrawn, Amendment 18)
+
+The frontend reaches projects through the pinned `lex-app-frontend` package, so steps 1 and 2 ship in
+the same `lex-app` release; §5's fallback covers a frontend paired with an older backend.
+
+## Out of scope
+
+- Linking tables inside lex-app itself (a page with several grids).
+- Locked filters an embed's user cannot remove.
+- Value lists for decimals, floats and date-times.
+- Bulk update, handled separately.

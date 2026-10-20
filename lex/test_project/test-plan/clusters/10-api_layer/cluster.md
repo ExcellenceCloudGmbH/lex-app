@@ -64,3 +64,14 @@
 | 10.90 | one KeycloakManager | three token requests build one manager and get permissions and roles; no token builds none |
 
 **Scenario range:** 10.83 – 10.90. **Test file:** `lex/test_project/tests/api_layer/test_10o_error_and_route_hardening.py`. **Type:** E (10.85, 10.88, 10.90 U). **Status:** ✅ Complete (2026-10-18). Batch: [10o](batches.md).
+
+### 10p. The fields endpoint's value_list flag, and no filter bar
+
+| # | Scenario | What We Assert | Status |
+|---|----------|----------------|--------|
+| 10.91 | `value_list` on the fields endpoint | True for char, integer, boolean, date, FK and choice columns; false for TextField, decimal, JSON, credential-shaped, write-only and renamed fields, and for every column of an opted-out model | ✅ |
+| 10.92 | No filter bar (spec Amendment 18) | `list_ui` has no `filter_bar` key, though the model and the serializer declare one; every field still carries `value_list` | ✅ |
+
+**Scenario range:** 10.91-10.92. **Test file:** `lex/test_project/tests/api_layer/test_10p_fields_value_list_flag.py`. **Type:** U. **Status:** ✅ Complete (2026-10-16; the filter bar withdrawn 2026-10-20). Covers `lex/api/views/model_info/Fields.py` (`Fields.get`'s `value_list` and `list_ui`, `create_list_ui_info`), `lex/api/serializers/base_serializers.py` (`get_list_ui_options`), `lex/api/utils/filterable_fields.py` (`value_list_field`). Batch: [10p](batches.md).
+
+---

@@ -1,14 +1,17 @@
+import json
 import os
 import posixpath
 import re
 from pathlib import Path
 
+from django.conf import settings as django_settings
 from django.http import HttpResponse, JsonResponse
 from django.utils._os import safe_join
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.clickjacking import xframe_options_exempt
 from django.views.static import serve as static_serve
 from lex.lex_app import settings
+from lex.runtime_config import frame_ancestors_directive, merge_frame_ancestors
 
 #: A build asset whose filename contains its own content hash, as the bundler
 #: emits them: ``assets/index-BfLMwcsL.js``. The hash is the whole point -- the
@@ -47,6 +50,50 @@ def _no_store(response):
     return response
 
 
+def _apply_embed_csp(response):
+    """Restrict who may frame an HTML document response to
+    ``settings.LEX_EMBED_ALLOWED_ORIGINS``.
+
+    ``serve_react`` is ``@xframe_options_exempt`` -- it must allow being framed
+    at all when ``embed=true`` -- so Django's own ``XFrameOptionsMiddleware``
+    never protects its documents, and nor does ``EmbedXFrameOptionsMiddleware``
+    unless a deployment has registered it. This view's own HTML documents (the
+    SPA fallback, and any other real ``.html``/``.htm`` file it serves, e.g.
+    ``embed.html``) are therefore the one place that actually needs the
+    restriction applied directly. Call only for documents -- never for assets
+    or ``config.js``, where a framing restriction has no meaning.
+
+    Reads ``django.conf.settings`` (not the ``lex.lex_app.settings`` module
+    ``settings.repo_name`` above uses) specifically so ``override_settings``
+    reaches it in tests -- the two are independently-imported objects in this
+    codebase, confirmed empirically; see ``test_1ax_embed_allowed_origins.py``.
+
+    Unset *and* not configured leaves the response untouched, exactly as
+    before this setting existed. Configured but with nothing valid in it
+    still restricts to ``frame-ancestors 'self'`` (fail closed) rather than
+    behaving as if unset -- see ``LEX_EMBED_ORIGINS_CONFIGURED``.
+
+    Gotcha this creates: this sets ``Content-Security-Policy`` from inside the
+    view, before any middleware's response phase runs. Django's own
+    ``django.middleware.csp.ContentSecurityPolicyMiddleware`` (``SECURE_CSP``)
+    skips adding its header when one is already present -- so a deployment
+    that both enables ``SECURE_CSP`` *and* configures
+    ``LEX_EMBED_ALLOWED_ORIGINS`` would silently lose its site-wide policy on
+    every SPA document, left with only the narrow ``frame-ancestors`` directive
+    set here. Not handled by this function; flagged for whoever wires the two
+    together.
+    """
+    allowed_origins = getattr(django_settings, "LEX_EMBED_ALLOWED_ORIGINS", None) or []
+    origins_configured = getattr(django_settings, "LEX_EMBED_ORIGINS_CONFIGURED", False)
+    if not allowed_origins and not origins_configured:
+        return response
+    directive = frame_ancestors_directive(allowed_origins)
+    response["Content-Security-Policy"] = merge_frame_ancestors(
+        response.get("Content-Security-Policy", ""), directive
+    )
+    return response
+
+
 @ensure_csrf_cookie
 @xframe_options_exempt
 def serve_react(request, path, document_root=None):
@@ -79,6 +126,20 @@ def serve_react(request, path, document_root=None):
         for key, value in replacements['undefined'].items():
             content = content.replace(f"window.{key} = undefined", f"window.{key} = \"{value}\"")
 
+        # Comma-joined allowed embed origins, from the validated LEX_EMBED_ALLOWED_ORIGINS
+        # setting -- not a raw env var. Read from django.conf.settings (not the
+        # lex.lex_app.settings module `settings.repo_name` above uses) so
+        # override_settings reaches it in tests -- see _apply_embed_csp's docstring.
+        # Escaped with json.dumps (not the naive f'"{value}"' used above) so a value
+        # can never break out of the JS string literal; origins are already validated,
+        # but this is cheap defence in depth. A no-op when the frontend build predates
+        # this placeholder.
+        embed_origins = ",".join(getattr(django_settings, "LEX_EMBED_ALLOWED_ORIGINS", None) or [])
+        content = content.replace(
+            "window.REACT_APP_EMBED_ALLOWED_ORIGINS = undefined",
+            f"window.REACT_APP_EMBED_ALLOWED_ORIGINS = {json.dumps(embed_origins)}",
+        )
+
         response = HttpResponse(content, content_type='application/javascript')
         # Rewritten from the environment on every request, so never cached.
         return _no_store(response)
@@ -97,8 +158,16 @@ def serve_react(request, path, document_root=None):
             response["Cache-Control"] = _IMMUTABLE
             return response
         # An unhashed file cannot be told apart from a future version of itself.
-        return _no_store(response)
+        response = _no_store(response)
+        if path.lower().endswith((".html", ".htm")):
+            # A real, non-fallback HTML entry point (e.g. embed.html) is a
+            # document too -- restrict who may frame it the same as index.html.
+            # Case-insensitive: a build is free to emit either case/extension.
+            response = _apply_embed_csp(response)
+        return response
 
     # SPA fallback: index.html names the hashed assets, so it must never be a
-    # stale copy pointing at a build that no longer exists.
-    return _no_store(static_serve(request, "index.html", document_root))
+    # stale copy pointing at a build that no longer exists. It is also the
+    # document every client-routed path ultimately renders, so it is the one
+    # that needs the frame-ancestors restriction applied.
+    return _apply_embed_csp(_no_store(static_serve(request, "index.html", document_root)))
