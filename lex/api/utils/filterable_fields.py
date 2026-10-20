@@ -1,7 +1,8 @@
 """Which model fields a value-list filter can list.
 
-One answer for the endpoint that lists values and for the ``filter_bar`` list
-option, so the bar can never name a column the endpoint would refuse.
+One answer for the endpoint that lists values (``filter_values``) and for the
+fields endpoint's ``value_list`` flag, so the grid never offers a value list
+the endpoint would refuse.
 
 The serializer layer is imported inside the functions that use it, never at
 module level: ``base_serializers`` imports this module while it loads, so an
@@ -158,9 +159,8 @@ def value_list_field(serializer, model_class, name: str, request=None) -> Option
 
     ``serializer`` is the requested serializer instance, and only a column
     the grid renders exactly as stored can be listed. Shared by the
-    ``filter_values`` endpoint, ``Meta.filter_bar`` validation and the fields
-    endpoint's ``value_list`` flag, so none of them can name a column the
-    others would refuse. ``None`` when:
+    ``filter_values`` endpoint and the fields endpoint's ``value_list`` flag,
+    so neither can offer a column the other would refuse. ``None`` when:
 
     * the model opts out of value lists (:func:`model_offers_value_lists`);
     * the serializer class rewrites its rows (:func:`renders_rows_as_stored`);
@@ -178,8 +178,7 @@ def value_list_field(serializer, model_class, name: str, request=None) -> Option
       (``LEX_SEC_FILTERS``, :func:`lex.api.filter_policy.path_allowed`): the
       list treats such a field as one that does not exist and ignores a
       filter on it, so it has no value list either. ``filter_values`` and the
-      fields endpoint pass their request; ``Meta.filter_bar`` validation has
-      none, and the fields endpoint narrows the bar per request instead.
+      fields endpoint both pass their request.
     """
     name = (name or "").strip()
     if not name or "__" in name:

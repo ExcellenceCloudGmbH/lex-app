@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 95
+max_scenario: 92
 letters:
   a:
     title: ''
@@ -159,30 +159,28 @@ letters:
       a JSON 404, SPA routes keep index.html (10.87-10.88). api/global-search/?q= routed (10.89). One
       KeycloakManager per process (10.90). Ported from #815, #821 (manager only), #830.
   p:
-    title: list_ui.filter_bar and the fields endpoint's value_list flag
-    scenarios: 10.91-10.95
+    title: The fields endpoint's value_list flag, and no filter bar
+    scenarios: 10.91-10.92
     status: complete
     tests:
-      pass: 5
+      pass: 2
       skip: 0
       xfail: 0
     note: >-
-      The filter bar's default columns travel in list_ui. 10.91 reads Meta.filter_bar, 10.92 falls
-      back to a model attribute and defaults to an empty bar, 10.93 drops names that are not
-      value-list columns (unknown, JSON, related paths) with one warning each and de-duplicates.
-      _resolve_filter_bar resolves each name with value_list_field(serializer, model, name) -- the
-      same resolver filter_values uses (lex/api/utils/filterable_fields.py), given the cls()
-      instance get_list_ui_options builds -- so the bar can never name a column the endpoint would
-      refuse. A serializer that cannot build its fields without a request is logged at DEBUG and
-      checked without them: value_lists_offered (the model opt-out and the serializer-class check)
-      and the column type. Fallout: test_10i's 10.25 exact list_ui dicts gained filter_bar: [].
-      Final review: every descriptor of GET api/model_info/<model>/fields carries value_list,
-      computed by value_list_field with the serializer instance Fields.get already builds; a field
-      with no column behind it is false (10.94: char, integer, boolean, date, FK and choice true;
+      Every descriptor of GET api/model_info/<model>/fields carries value_list, computed by
+      value_list_field -- the resolver filter_values uses (lex/api/utils/filterable_fields.py) --
+      for the serializer the list renders through (UserModelSerializer for auth.User); a field with
+      no column behind it is false (10.91: char, integer, boolean, date, FK and choice true;
       TextField, decimal, JSON, credential-shaped, write-only and renamed fields false; every column
-      of ValueListOptOutItem and AuditLog false). A filter_bar that is not a list, a tuple or a
-      single name -- True, or a model column named filter_bar -- gives no bar and one warning where
-      it raised a TypeError and failed the fields request (10.95).
-      Merged with lex-app-v2: value_list also asks the filter allow-list (LEX_SEC_FILTERS) whether
-      the caller may filter by the column, and the bar drops such a column per caller (4.123); 10.94
-      builds its own container, so its helper points the allow-list at that container.
+      of ValueListOptOutItem and AuditLog false; auth.User's flags agree with what filter_values
+      accepts). Merged with lex-app-v2: value_list also asks the filter allow-list (LEX_SEC_FILTERS)
+      whether the caller may filter by the column (4.123); 10.91 builds its own container, so its
+      helper points the allow-list at that container.
+      Native column filters (spec Amendment 18): the grid's own column filters are the only filter
+      UI, so list_ui.filter_bar is withdrawn -- Meta.filter_bar, a model's filter_bar,
+      _resolve_filter_bar and the fields endpoint's per-caller narrowing. 10.92 pins that list_ui
+      has no filter_bar key for a model and a serializer that still declare one, while every field
+      keeps value_list. The bar's scenarios (Meta.filter_bar, the model fallback, dropped names, a
+      filter_bar that is not a list) and their fixture FilterBarColumnItem are gone, 10.94 became
+      10.91, the file is test_10p_fields_value_list_flag.py, and test_10i's 10.25 and test_12e's
+      12.35 pin lex-app-v2's list_ui dicts again.

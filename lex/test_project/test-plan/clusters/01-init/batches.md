@@ -1906,7 +1906,7 @@ Test fix: 1.409's `;`-carrying host case also carried a `*`, so the existing wil
 rejecting it before the grammar check ever ran; changed to a host with only the semicolon. One new
 test (`test_1_409_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenario IDs.
 
-## Batch 1ay — lex_view filters, filter_bar and on_filter (1.411-1.419)
+## Batch 1ay — lex_view filters and on_filter (1.411-1.419)
 
 - **Type:** U
 - **Files covered:** `lex/lex_app/streamlit/embed.py`, `lex/lex_app/streamlit/_lex_view_component/__init__.py`,
@@ -1914,8 +1914,13 @@ test (`test_1_409_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 - **Test file:** `lex/test_project/tests/init/test_1ay_lex_view_filters.py`
 - **Test classes:** `TestCluster1ay_LexViewFilters`
 - **Fixtures:** none
-- **Status:** complete — 14 pass (node-dependent tests skip without node)
+- **Status:** complete — 12 pass (node-dependent tests skip without node)
 - **Final review (1.418-1.419):** every frame load resets what the frame is taken to hold to the
   filters its URL carried (`filter_sync.afterLoad`, run from one persistent load handler), so the
   host's filters are re-posted when they differ; a filters token over 2,000 characters stays out of
   the URL (`url_filters_token`) and is delivered by message only.
+- **Native column filters (2026-10-20, spec Amendment 18):** the filter bar is withdrawn, so
+  `lex_view` has no `filter_bar` parameter and sends no `filter_bar` URL parameter. 1.413 now pins
+  that passing `filter_bar` is a `TypeError`, as for any unknown keyword, before anything renders (it
+  pinned `filter_bar=a,b` in the URL); 1.415 lost its two `filter_bar` cases. 14 → 12 tests. See the
+  [session note](../../progress/sessions/2026-10-20-native-column-filters.md).

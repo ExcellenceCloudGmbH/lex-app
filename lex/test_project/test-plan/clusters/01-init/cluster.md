@@ -515,7 +515,7 @@ does not remove user launch configurations.
 |---|----------|----------------|--------|
 | 1.411 | Filters reach the component | Not in the URL; normalised dict and matching token as arguments | ✅ |
 | 1.412 | Filters select the component | No plain iframe when `filters` is given | ✅ |
-| 1.413 | filter_bar | `a,b`; empty means hide; absent sends nothing | ✅ |
+| 1.413 | No filter_bar (spec Amendment 18) | Passing `filter_bar` is a TypeError, as for any unknown keyword; nothing renders | ✅ |
 | 1.414 | on_filter | `emit_filter=true` | ✅ |
 | 1.415 | Malformed arguments | TypeError at the call | ✅ |
 | 1.416 | A filter change is not a new frame | Same URL, different token | ✅ |

@@ -1,4 +1,4 @@
-"""lex_view sets an embed's filters, names its filter bar and hears its filter changes.
+"""lex_view sets an embed's filters and hears its filter changes.
 
 Intent: a Streamlit page passes filters to an embedded table and can change them
 on a later rerun without reloading the frame, and two embeds can be linked by
@@ -10,7 +10,10 @@ the frame has loaded, only when they differ from what the frame has. Every load
 -- a reload, a sign-in round trip -- starts an app holding only the filters its
 URL carried, so the shim re-posts the host's filters when they differ. A token
 longer than 2,000 characters (a long id list) stays out of the URL, where it
-could hit a 414 and land in access logs, and arrives by message only.
+could hit a 414 and land in access logs, and arrives by message only. The
+grid's own column filters are the only filter UI (spec Amendment 18), so
+lex_view has no filter_bar: passing one is a TypeError, as for any unknown
+keyword.
 Cluster 01-init, batch 1ay — scenarios 1.411–1.419. Type: U.
 Covers: lex/lex_app/streamlit/embed.py (``lex_view``, ``normalise_filters``,
 ``encode_filters_token``), lex/lex_app/streamlit/_lex_view_component/__init__.py,
@@ -66,7 +69,7 @@ def _run_shim(program: str) -> list:
 
 
 class TestCluster1ay_LexViewFilters:
-    """Cluster 1ay: lex_view filters, filter_bar and on_filter."""
+    """Cluster 1ay: lex_view filters and on_filter."""
 
     def test_01_411_filters_go_to_the_component_not_the_url(self, monkeypatch):
         """
@@ -98,22 +101,22 @@ class TestCluster1ay_LexViewFilters:
         embed_mod.lex_view("invoice", filters={"status": "open"})
         assert captured["filters"] == {"status": "open"}
 
-    def test_01_413_filter_bar_rides_the_url(self, monkeypatch):
+    def test_01_413_lex_view_has_no_filter_bar(self, monkeypatch):
         """
-        Scenario 1.413: the bar's columns
-        Given: filter_bar as a list, as an empty list, and absent
-        When: lex_view renders
-        Then: filter_bar=a,b; filter_bar= (hide); no parameter at all
+        Scenario 1.413: the grid's own column filters are the only filter UI (Amendment 18)
+        Given: lex_view called with filter_bar=["a"]
+        When: the call is made
+        Then: TypeError, as for any unknown keyword, before anything renders
         """
         from lex.lex_app.streamlit import embed as embed_mod
+        from lex.lex_app.streamlit.embed import lex_view
 
         captured = _capture_component(monkeypatch)
-        embed_mod.lex_view("invoice", filter_bar=["status", "region"], on_select=True)
-        assert _query(captured["url"])["filter_bar"] == ["status,region"]
-        embed_mod.lex_view("invoice", filter_bar=[], on_select=True)
-        assert _query(captured["url"])["filter_bar"] == [""], "an empty bar is sent, and means hide"
-        embed_mod.lex_view("invoice", on_select=True)
-        assert "filter_bar" not in _query(captured["url"])
+        iframes: list = []
+        monkeypatch.setattr(embed_mod.components, "iframe", lambda *a, **k: iframes.append((a, k)))
+        with pytest.raises(TypeError, match="unexpected keyword argument 'filter_bar'"):
+            lex_view("x", filter_bar=["a"])
+        assert captured == {} and iframes == [], "nothing renders"
 
     def test_01_414_on_filter_opts_in_to_filter_events(self, monkeypatch):
         """
@@ -134,14 +137,12 @@ class TestCluster1ay_LexViewFilters:
             {"filters": ["status"]},
             {"filters": {1: ["open"]}},
             {"filters": {"status": [object()]}},
-            {"filter_bar": "status"},
-            {"filter_bar": ["status", 3]},
         ],
     )
     def test_01_415_a_malformed_argument_is_refused_at_the_call(self, monkeypatch, kwargs):
         """
         Scenario 1.415: mistakes surface in the line that made them
-        Given: filters that are not a dict of names to values, or a filter_bar that is not a list of names
+        Given: filters that are not a dict of names to values
         When: lex_view is called
         Then: TypeError, before anything renders
         """

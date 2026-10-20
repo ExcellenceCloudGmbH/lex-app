@@ -85,7 +85,7 @@ class SchemaItem(LexModel):
 
 @_permissive
 class ValueListItem(LexModel):
-    """One column per value-list decision the fields endpoint reports (10.94)."""
+    """One column per value-list decision the fields endpoint reports (10.91, 10.92)."""
 
     name = models.CharField(max_length=200)                     # char
     count = models.IntegerField(default=0)                      # integer
@@ -117,27 +117,12 @@ class ValueListItem(LexModel):
 
 @_permissive
 class ValueListOptOutItem(LexModel):
-    """Opts out of value lists: no column of it gets one (10.94)."""
+    """Opts out of value lists: no column of it gets one (10.91)."""
 
     lex_value_lists = False
 
     name = models.CharField(max_length=200)
     count = models.IntegerField(default=0)
-
-    class Meta:
-        app_label = "lex_app"
-
-    def __str__(self) -> str:  # pragma: no cover
-        return self.name
-
-
-@_permissive
-class FilterBarColumnItem(LexModel):
-    """Has a column named ``filter_bar``, so the model attribute is that
-    column, not a list of names (10.95)."""
-
-    name = models.CharField(max_length=200)
-    filter_bar = models.CharField(max_length=200, blank=True, default="")
 
     class Meta:
         app_label = "lex_app"

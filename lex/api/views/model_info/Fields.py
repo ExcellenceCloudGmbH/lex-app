@@ -11,7 +11,6 @@ from django.db.models import (
     AutoField,
     JSONField
 )
-from lex.api.filter_policy import path_allowed
 from lex.api.serializers import ID_FIELD_NAME, SHORT_DESCR_NAME
 from lex.api.utils.filterable_fields import value_list_field
 from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import resolve_serializer_class
@@ -158,7 +157,6 @@ def create_list_ui_info(serializer):
     meta = getattr(serializer_class, "Meta", None)
     return {
         "hide_actions_column": bool(getattr(meta, "hide_actions_column", False)),
-        "filter_bar": [],
     }
 
 
@@ -287,19 +285,10 @@ class Fields(APIView):
 
             fields_info.append(info)
 
-        list_ui = dict(create_list_ui_info(serializer))
-        # The bar's names were checked without a request. A column this caller
-        # may not filter by (LEX_SEC_FILTERS) is one filter_values refuses for
-        # them, so it leaves their bar too.
-        if list_ui.get("filter_bar"):
-            list_ui["filter_bar"] = [
-                name for name in list_ui["filter_bar"] if path_allowed(model, name, request)
-            ]
-
         return Response(
             {
                 "fields": fields_info,
                 "id_field": model._meta.pk.name,
-                "list_ui": list_ui,
+                "list_ui": create_list_ui_info(serializer),
             }
         )

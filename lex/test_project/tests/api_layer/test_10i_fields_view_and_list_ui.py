@@ -193,11 +193,6 @@ class TestCluster10i_CreateListUIInfo(SimpleTestCase):
         serializer's `Meta`. Default-False keeps the column visible
         when the attribute is missing — drift here would hide actions
         for every model that hasn't opted in explicitly.
-
-        `filter_bar` always comes back `[]` here (cluster 10p): this
-        fallback branch is for serializers that are not `LexSerializer`s
-        (no `Meta.model` to resolve columns against), so there is nothing
-        for a filter bar to name.
         """
         class STrue:
             class Meta:
@@ -210,10 +205,10 @@ class TestCluster10i_CreateListUIInfo(SimpleTestCase):
         class SNoMeta:
             pass
 
-        self.assertEqual(create_list_ui_info(STrue), {"hide_actions_column": True, "filter_bar": []})
-        self.assertEqual(create_list_ui_info(SFalse), {"hide_actions_column": False, "filter_bar": []})
+        self.assertEqual(create_list_ui_info(STrue), {"hide_actions_column": True})
+        self.assertEqual(create_list_ui_info(SFalse), {"hide_actions_column": False})
         # Missing Meta entirely → False (default).
-        self.assertEqual(create_list_ui_info(SNoMeta), {"hide_actions_column": False, "filter_bar": []})
+        self.assertEqual(create_list_ui_info(SNoMeta), {"hide_actions_column": False})
 
 
 # --------------------------------------------------------------------- #

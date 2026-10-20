@@ -141,12 +141,13 @@ must not open a check on the whole model.
 | --- | --- |
 | Scenario range | 4.119 – 4.124 |
 | Type | E |
-| Files covered | `lex/api/views/model_entries/FilterValues.py` (`_filterable_field`, `_count_per_row`, `_count_in_database`), `lex/api/utils/filterable_fields.py` (`value_list_field`'s `request`), `lex/api/views/model_info/Fields.py` (`value_list`, `list_ui.filter_bar` per caller), `lex/api/serializers/base_serializers.py` (`readable_field_names`), `lex/api/views/model_entries/filter_backends.py`, `lex/api/filter_policy.py` |
+| Files covered | `lex/api/views/model_entries/FilterValues.py` (`_filterable_field`, `_count_per_row`, `_count_in_database`), `lex/api/utils/filterable_fields.py` (`value_list_field`'s `request`), `lex/api/views/model_info/Fields.py` (`value_list` per caller), `lex/api/serializers/base_serializers.py` (`readable_field_names`), `lex/api/views/model_entries/filter_backends.py`, `lex/api/filter_policy.py` |
 | Test file | `lex/test_project/tests/permissions/test_4r_filter_values_secure_defaults.py` |
 | Test classes | `TestCluster04r_FilterValuesSecureDefaults` |
 | Fixtures | new `ReadCheckRaisesItem` (`can_read` raises for "boom"); `RaisingReadItem` (4o), `FieldLevelItem`, `RowFieldItem`; a serializer that is not a LexSerializer resolved for `RaisingReadItem` (4.121); `LEX_SEC_*`/`LEX_LEGACY_SECURITY` cleared per test |
 | Tests landed | **6 pass / 0 fail** |
-| Also changed | 4.113 (per-row empty list), 10.94's helper (the allow-list reads the container the test builds), spec Amendment 17 |
+| Also changed | 4.113 (per-row empty list), 10.91's helper (then 10.94; the allow-list reads the container the test builds), spec Amendment 17 |
+| Native column filters | 4.123 no longer checks `list_ui.filter_bar`: the filter bar is withdrawn (spec Amendment 18) — see [session note](../../progress/sessions/2026-10-20-native-column-filters.md) |
 | Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-19-merge-lex-app-v2-secure-defaults.md) |
 
 ---

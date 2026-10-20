@@ -77,27 +77,29 @@
 
 ---
 
-## Batch 10p — list_ui.filter_bar and the fields endpoint's value_list flag (10.91-10.95)
+## Batch 10p — the fields endpoint's value_list flag, and no filter bar (10.91-10.92)
 
 - **Type:** U
-- **Files covered:** `lex/api/serializers/base_serializers.py`, `lex/api/views/model_info/Fields.py`,
+- **Files covered:** `lex/api/views/model_info/Fields.py`, `lex/api/serializers/base_serializers.py`,
   `lex/api/utils/filterable_fields.py`
-- **Test file:** `lex/test_project/tests/api_layer/test_10p_list_ui_filter_bar.py`
-- **Test classes:** `TestCluster10p_ListUiFilterBar`
-- **Fixtures:** `SchemaItem`; `ValueListItem`, `ValueListOptOutItem`, `FilterBarColumnItem` and
-  `AuditLog` (final review; no tables -- `Fields.get` is called directly)
-- **Status:** complete — 5 pass
-- **Merged with lex-app-v2:** `value_list` and `list_ui.filter_bar` also follow the filter
-  allow-list for the caller (4.123); 10.94's helper points the allow-list at the container it builds.
-- **Final review (10.94-10.95):** every field descriptor carries `value_list`, decided by
-  `value_list_field` for the requested serializer instance; a `filter_bar` that is not a list of names
-  gives no bar and one warning instead of a `TypeError`.
-- **Note:** `_resolve_filter_bar(serializer_class, serializer)` decides each name with
-  `value_list_field(serializer, model, name)`, the resolver the `filter_values` endpoint uses, given
-  the `cls()` instance `get_list_ui_options` builds, so the bar can never name a column the endpoint
-  would refuse. A serializer that cannot build its fields without a request is logged at DEBUG and
-  checked without them (`value_lists_offered` and the column type). Fallout:
-  `test_10i_fields_view_and_list_ui.py`'s 10.25 and `test_12e_factory.py`'s 12.35 pinned exact
-  `list_ui` / `get_list_ui_options()` dicts and both were updated to include `filter_bar: []`.
+- **Test file:** `lex/test_project/tests/api_layer/test_10p_fields_value_list_flag.py`
+- **Test classes:** `TestCluster10p_FieldsValueListFlag`
+- **Fixtures:** `ValueListItem`, `ValueListOptOutItem`, `AuditLog` and `auth.User` (no tables --
+  `Fields.get` is called directly)
+- **Status:** complete — 2 pass
+- **Merged with lex-app-v2:** `value_list` also follows the filter allow-list for the caller (4.123);
+  10.91's helper points the allow-list at the container it builds.
+- **Note:** every field descriptor carries `value_list`, decided by `value_list_field` -- the
+  resolver the `filter_values` endpoint uses -- for the serializer the list renders through.
+- **Native column filters (2026-10-20, spec Amendment 18):** the grid's own column filters are the
+  only filter UI, so `list_ui.filter_bar` is withdrawn: `Meta.filter_bar`, a model's `filter_bar`,
+  `_resolve_filter_bar` and the fields endpoint's per-caller narrowing are gone. 10.92 pins that
+  `list_ui` has no `filter_bar` key for a model and a serializer that still declare one, and that
+  every field keeps `value_list`. The bar's four scenarios (`Meta.filter_bar`, the model fallback,
+  dropped names, a `filter_bar` that is not a list) went with their fixture `FilterBarColumnItem`;
+  10.94 became 10.91 and the file was renamed from `test_10p_list_ui_filter_bar.py`.
+  `test_10i_fields_view_and_list_ui.py`'s 10.25 and `test_12e_factory.py`'s 12.35 pin lex-app-v2's
+  exact `list_ui` / `get_list_ui_options()` dicts again. See the
+  [session note](../../progress/sessions/2026-10-20-native-column-filters.md).
 
 ---

@@ -7,16 +7,16 @@ permission check that raises withholds its record from the list
 it counts: row by row, or in the database when no per-row check applies. A field
 the caller may not filter by (LEX_SEC_FILTERS) is treated like a field that does
 not exist: the list ignores a filter on it, so the value list for it is refused
-like any unknown field, the fields endpoint says the column has no value list,
-and the filter bar leaves it out -- otherwise a user could tick a value the grid
-then silently ignores. A model whose own permission_list refuses the caller has
-no list, so it has no value list either (LEX_SEC_NOT_FOUND). Every switch that
-restores the list's old behaviour restores the value list's too. A regression
-counts a row the grid withholds, or offers a filter the grid refuses.
+like any unknown field and the fields endpoint says the column has no value
+list -- otherwise a user could tick a value the grid then silently ignores. A
+model whose own permission_list refuses the caller has no list, so it has no
+value list either (LEX_SEC_NOT_FOUND). Every switch that restores the list's old
+behaviour restores the value list's too. A regression counts a row the grid
+withholds, or offers a filter the grid refuses.
 Cluster 4r — scenarios 4.119–4.124. Type: E.
 Covers: lex/api/views/model_entries/FilterValues.py (``_filterable_field``, ``_count_per_row``,
 ``_count_in_database``), lex/api/utils/filterable_fields.py (``value_list_field``),
-lex/api/views/model_info/Fields.py (``value_list``, ``list_ui.filter_bar``),
+lex/api/views/model_info/Fields.py (``value_list``),
 lex/api/serializers/base_serializers.py (``readable_field_names``),
 lex/api/views/model_entries/filter_backends.py (the read filter), lex/api/filter_policy.py.
 Run: python -m lex pytest lex/test_project/tests/permissions/test_4r_filter_values_secure_defaults.py -v
@@ -209,37 +209,31 @@ class TestCluster04r_FilterValuesSecureDefaults(E2ETestCase):
         )
 
     # -- 4.123 ---------------------------------------------------------
-    def test_04_123_the_fields_endpoint_and_the_bar_agree_with_filter_values(self):
+    def test_04_123_the_fields_endpoint_agrees_with_filter_values(self):
         """
         Scenario 4.123: the frontend is told the same thing filter_values answers
-        Given: FieldLevelItem with filter_bar = ["public_name", "sensitive_salary"], and a regular
-               user whose permission_read withholds sensitive_salary on every record
+        Given: FieldLevelItem, and a regular user whose permission_read withholds sensitive_salary on
+               every record
         When: GET .../fields is asked by default, with LEX_SEC_FILTERS=false, and as an "hr" member
-        Then: by default sensitive_salary has value_list false and the bar holds public_name only;
-              with LEX_SEC_FILTERS=false, and for the hr member, the column has a value list and
-              the bar holds both
+        Then: by default sensitive_salary has value_list false; with LEX_SEC_FILTERS=false, and for
+              the hr member, the column has a value list
         """
 
-        def _flags_and_bar():
+        def _flags():
             body = self._fields(FIELD_LEVEL)
-            flags = {info["name"]: info["value_list"] for info in body["fields"]}
-            return flags, body["list_ui"]["filter_bar"]
+            return {info["name"]: info["value_list"] for info in body["fields"]}
 
-        with mock.patch.object(FieldLevelItem, "filter_bar", ["public_name", "sensitive_salary"], create=True):
-            flags, bar = _flags_and_bar()
-            self.assertIs(flags["public_name"], True, "a visible column keeps its value list")
-            self.assertIs(flags["sensitive_salary"], False, "a column the caller may not filter by has none")
-            self.assertEqual(bar, ["public_name"], "the bar never names a column filter_values refuses")
+        flags = _flags()
+        self.assertIs(flags["public_name"], True, "a visible column keeps its value list")
+        self.assertIs(flags["sensitive_salary"], False, "a column the caller may not filter by has none")
 
-            with _env(LEX_SEC_FILTERS="false"):
-                flags, bar = _flags_and_bar()
-            self.assertIs(flags["sensitive_salary"], True, "legacy: the column is listed again")
-            self.assertEqual(bar, ["public_name", "sensitive_salary"], "legacy: the bar holds both")
+        with _env(LEX_SEC_FILTERS="false"):
+            flags = _flags()
+        self.assertIs(flags["sensitive_salary"], True, "legacy: the column is listed again")
 
-            self._join_hr()
-            flags, bar = _flags_and_bar()
-            self.assertIs(flags["sensitive_salary"], True, "a caller who may read the field gets a value list")
-            self.assertEqual(bar, ["public_name", "sensitive_salary"])
+        self._join_hr()
+        flags = _flags()
+        self.assertIs(flags["sensitive_salary"], True, "a caller who may read the field gets a value list")
 
     # -- 4.124 ---------------------------------------------------------
     def test_04_124_no_list_means_no_value_list(self):

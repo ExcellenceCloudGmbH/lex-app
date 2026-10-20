@@ -528,14 +528,6 @@ def encode_filters_token(filters: Dict[str, Any]) -> str:
     return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ascii").rstrip("=")
 
 
-def _filter_bar_param(filter_bar: Any) -> str:
-    if isinstance(filter_bar, str) or not isinstance(filter_bar, (list, tuple)):
-        raise TypeError("lex_view(filter_bar=...) must be a list of field names")
-    if not all(isinstance(name, str) and name for name in filter_bar):
-        raise TypeError("lex_view(filter_bar=...) must be a list of field names")
-    return ",".join(filter_bar)
-
-
 def lex_view(
     path: str = "",
     *,
@@ -558,7 +550,6 @@ def lex_view(
     on_flow_step: bool = False,
     on_filter: bool = False,
     filters: Optional[Dict[str, Any]] = None,
-    filter_bar: Optional[List[str]] = None,
     extra_params: Optional[Dict[str, str]] = None,
     base_url: Optional[str] = None,
     key: Optional[str] = None,
@@ -656,8 +647,6 @@ def lex_view(
         it. Filters on fields not named here, set by the user, stay. Filters
         whose token is longer than 2,000 characters (a long id list) are not
         put in the frame's URL; they are posted once the frame has loaded.
-    filter_bar : list of str, optional
-        The columns shown in the embed's filter bar; ``[]`` hides the bar.
     theme : str
         Host colour scheme forwarded to the embedded app — ``"light"``
         (default) or ``"dark"``.  Sent as the ``?theme=`` query parameter
@@ -716,7 +705,6 @@ def lex_view(
     raw_url = f"{resolved_base}{path}"
 
     filters_payload = normalise_filters(filters) if filters is not None else None
-    filter_bar_value = _filter_bar_param(filter_bar) if filter_bar is not None else None
 
     # ── Parse & build query params ──
     parsed = urllib.parse.urlparse(raw_url)
@@ -758,9 +746,6 @@ def lex_view(
     # Serializer override (per docs/features/access-and-ui/lex_view callbacks.md)
     if serializer:
         params["serializer"] = [serializer]
-
-    if filter_bar_value is not None:
-        params["filter_bar"] = [filter_bar_value]
 
     # Theme handshake (host → iframe): boot fallback via query param; the
     # custom-component shim additionally posts a `theme` message on load.

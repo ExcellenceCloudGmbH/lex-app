@@ -1364,19 +1364,20 @@ letters:
       only the semicolon, so the grammar is what is actually exercised. Also fixed a doc typo
       (muller.de -> müller.de) in this note's prior paragraph. No new scenario IDs.
   ay:
-    title: lex_view filters, filter_bar and on_filter
+    title: lex_view filters and on_filter
     scenarios: 1.411-1.419
     status: complete
     tests:
-      pass: 14
+      pass: 12
       skip: 0
       xfail: 0
     note: >-
-      lex_view(filters=, filter_bar=, on_filter=). Filters ride the component's arguments, never its
+      lex_view(filters=, on_filter=). Filters ride the component's arguments, never its
       URL or key, because the URL is the component's identity and a changed URL remounts the frame.
-      1.411-1.416 pin that, the component choice, the filter_bar and emit_filter parameters, and
-      refusals at the call. 1.417 runs the shim's decision function under node (skipped without
-      node): post only to a loaded frame, only named filters, only when they differ.
+      1.411-1.416 pin that, the component choice, that there is no filter_bar parameter, the
+      emit_filter parameter, and refusals at the call. 1.417 runs the shim's decision function under
+      node (skipped without node): post only to a loaded frame, only named filters, only when they
+      differ.
       Final review: the shim no longer treats "last posted" as what the frame holds. After every
       load -- a reload, a sign-in round trip -- filter_sync.afterLoad takes the frame to hold only
       the filters its URL carried and re-posts the host's when they differ; index.html runs it from
@@ -1385,3 +1386,7 @@ letters:
       and arrives by message only. 1.418 pins the boundary (a 2,000-character token rides the URL,
       2,002 does not) and the post after a URL-less load; 1.419 that a new load re-posts filters
       that differ from the URL's and not ones equal to them.
+      Native column filters (spec Amendment 18): the filter bar is withdrawn, so lex_view lost its
+      filter_bar parameter and the filter_bar URL parameter. 1.413 now pins that passing filter_bar
+      is a TypeError, as for any unknown keyword, before anything renders (it pinned filter_bar=a,b
+      in the URL), and 1.415 lost its two filter_bar cases: 14 tests became 12.

@@ -270,8 +270,8 @@ class FilterValues(ListModelEntries):
         """The model field behind ``field``, or a 400.
 
         Delegates to :func:`value_list_field` -- the one place that decides
-        which columns a value list can cover, shared with ``Meta.filter_bar``
-        and the fields endpoint -- and raises the single generic refusal when
+        which columns a value list can cover, shared with the fields endpoint's
+        ``value_list`` flag -- and raises the single generic refusal when
         it returns ``None``, so the response never says which fields exist. A
         field the caller may not filter by (``LEX_SEC_FILTERS``) gets the same
         refusal: the list treats it as a field that does not exist.
