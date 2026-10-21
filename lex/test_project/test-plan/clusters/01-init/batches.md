@@ -1787,3 +1787,40 @@ fails 1.400; no pytest-django check fails 1.401; removing `tryfirst` and removin
 fails 1.393's third half; the old `pytest_cmd` / `collect_groups` fail both halves of 1.403;
 dropping `-m <group>`, leaving VS Code without the test entries, or writing them without a test
 config each fail 1.404.
+
+---
+
+### Batch 1az — `lex incident_tz scan`: the read-only scan for the TIME_ZONE incident ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.420 – 1.435 |
+| Type | U / E |
+| Files covered | `lex/lex_app/incident_tz/scan.py` (new; one file, standard library plus a DB-API cursor, so it also runs on its own against an instance that has not been upgraded); `lex/lex_app/management/commands/incident_tz.py` (new; `lex incident_tz scan`) |
+| Test file | `lex/test_project/tests/init/test_1az_incident_tz_scan.py` |
+| Test model | `lex/test_project/tests/init/models.py` → `IncidentScanItem` (`due_on` a date, `meets_at` a time of day, `synced_at` a clock) |
+| Test classes | `TestCluster01az_ScanDecisions` (1.420–1.424), `TestCluster01az_ScanDatabase` (1.425–1.435) |
+| Fixtures | none — audit rows and history versions are created through the ORM, then their times stamped with `.update()`; a raw table without a model for 1.427 and 1.434 |
+| Tests landed | **16 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Q1 of the TZ remediation plan (LEX-747, step 3/8 LEX-1325): per database, the periods in which
+rc212 – v2.1.3 wrote, and a verdict per value. The audit log's `update` payloads carry
+`edited_at` as each version rendered it — Berlin digits before the incident, UTC digits during
+it (`…Z` in v2.1.1 – v2.1.3), an explicit offset after the fix — next to the row's own correct
+`date`; runs of affected rows give the periods, bracketed by their neighbours. Values with
+microseconds are clock-written (A). For the rest, lex history dates each value: the start of
+its final run of equal values, recorded at the meta-history's `sys_from` (lex names that table
+after the main table, `<table>_meta_history`). Without history, `created_at`/`edited_at`
+bracket the write. Nothing written before rc212's release (2026-06-26 10:06:08 UTC) can be
+affected.
+
+**Mutation check.** Dating a value by its version instead of its run fails 1.430; swapping the
+pre-incident and affected eras fails 1.420, 1.426 and 1.433; dropping the rc212-release floor
+fails 1.423; calling a midnight-UTC value written after the fix correct fails 1.431 and 1.435;
+skipping the read-only check fails 1.425.
+
+**Run outside the suite.** Against the local Northwind demo database: 69 columns in 26 tables,
+0.3 s, no exposure claimed (its 5 audit rows with `edited_at` are deletions carrying the string
+`"None"`, so the report asks for a stated period). Against a 106-table project schema with
+history and meta-history: 323 columns, 0.7 s.
