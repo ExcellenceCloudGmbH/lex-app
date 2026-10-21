@@ -39,6 +39,10 @@ RUN set -eux; \
     fi; \
     \
     apt-get update; \
+    # The python slim base ships Debian packages (perl, libgnutls30, openssl,
+    # ...) that apt-get install never touches. Upgrade them so every lex_app
+    # image carries the current Debian security fixes (Trivy, LEX-1130).
+    apt-get -y upgrade; \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
