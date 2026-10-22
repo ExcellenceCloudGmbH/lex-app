@@ -118,3 +118,33 @@
 **Why a regression matters:** `run_step` was a second write path into every model, carrying its own copy of the permission checks the generic CRUD endpoints apply. A route that comes back by accident is a write surface nobody audits any more. And the removal had to be surgical — it ran through the one url list the whole frontend is served from, so 10.99 is the half that proves nothing else went with it.
 
 **Allocation note:** first written as 10p/10.91–10.94. [10p](#batch-10p--file-download-endpoints-write-an-audit-entry-) (#840) landed that letter and range on `lex-app-v2` while this branch was open, so the batch re-took the next free pair when the base was merged in. Letters are never renumbered; this one moved before it ever landed.
+
+### Batch 10s — The usage payload: api/user/'s "usage" key, the per-instance hash, the switch ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.102 – 10.114 |
+| Type | U (10.113 I/E — drives the real `api/user/` view) |
+| Files covered | `lex/core/services/usage_config.py` (new), `lex/authentication/views/user_api.py` (`CurrentUser.get`) |
+| Test file | `lex/test_project/tests/api_layer/test_10s_usage_payload.py` |
+| Test classes | `TestCluster10s_UsageMetricsSwitch` (10.102–10.105), `TestCluster10s_UserHash` (10.106–10.107, 10.114), `TestCluster10s_UsagePayload` (10.108–10.112), `TestCluster10s_CurrentUserEndpoint` (10.113) |
+| Fixtures | a minimal `_User` stand-in carrying only `username`, for the pure-logic tests; a real `auth.User` (`get_user_model().objects.create_user`) for the endpoint test, driven with `APIRequestFactory` + `force_authenticate` as `test_10m_calculation_log_tree.py` does |
+| Tests landed | **13 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Fleet-metrics push build, Task 11 (PR F part 1). `usage_metrics_enabled()` is ported verbatim (contract, not literal source) from the closed, unmerged `usage-recorder` branch's `lex/core/services/usage_metrics.py:86-112`. `user_hash()`'s formula is pinned by a known-answer case (10.114) against a hash computed independently in the test, settling the salt's encoding: its literal UTF-8 bytes are the HMAC key, since `LEX_USAGE_SALT` is delivered "like `LEX_API_KEY`" (an opaque string, never hex-decoded), not `bytes.fromhex(salt)`. The endpoint test (10.113) mocks only the external OIDC userinfo call (`lex.authentication.views.user_api.requests.get`) and asserts the view's real code path merges `usage_payload(request.user)` into the unchanged userinfo body. |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.102 | unset defaults to enabled | `usage_metrics_enabled()` True with `LEX_USAGE_METRICS` unset |
+| 10.103 | recognised true-like values | true/1/yes/on, case- and whitespace-insensitive |
+| 10.104 | recognised false-like values | false/0/no/off, case- and whitespace-insensitive |
+| 10.105 | unrecognised value fails closed, warns once | an invalid value is off, with exactly one `logger.warning` across two calls |
+| 10.106 | user_hash deterministic | the same user + salt hash the same way, 32 hex characters |
+| 10.107 | different salt, different hash | the per-instance salt is load-bearing for cross-instance privacy |
+| 10.108 | full payload when fully configured | `enabled`, `posthog_key`, default `posthog_host`, `instance_rid`, `user_hash` |
+| 10.109 | explicit POSTHOG_HOST honoured | an override replaces the EU default |
+| 10.110 | switch off collapses to {"enabled": false} | no other keys present |
+| 10.111 | missing salt collapses to {"enabled": false} | no other keys present |
+| 10.112 | empty POSTHOG_PROJECT_KEY collapses to {"enabled": false} | no other keys present |
+| 10.113 | api/user/ carries "usage" | the real `CurrentUser` view's response includes `usage` matching `usage_payload(request.user)`, userinfo fields unchanged |
+| 10.114 | hash matches the formula, known-answer | `user_hash()` equals `hmac.new(salt utf-8, username utf-8, sha256).hexdigest()[:32]` computed independently |

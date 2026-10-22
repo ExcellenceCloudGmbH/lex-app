@@ -1,4 +1,5 @@
 import requests
+from lex.core.services.usage_config import usage_payload
 from lex.lex_app import settings
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -33,5 +34,7 @@ class CurrentUser(APIView):
                 data = {"detail": user_response.text}
             return Response(data, status=user_response.status_code)
 
-        # otherwise, return the successful payload
-        return Response(user_response.json(), status=status.HTTP_200_OK)
+        # otherwise, return the successful payload, plus the fleet-metrics usage key
+        data = user_response.json()
+        data["usage"] = usage_payload(request.user)
+        return Response(data, status=status.HTTP_200_OK)

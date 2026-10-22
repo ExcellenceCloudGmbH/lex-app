@@ -97,3 +97,29 @@ branches again per ``STORAGE_TYPE``. Each is recorded as an ``AuditLog`` row wit
 | 10.99 | the neighbours are untouched | `model-structure`, `project-info`, `calculationlog-tree`, `init-calculation-logs`, `clean-calculations`, `widget-structure`, `global-search-query`, `user-permissions`, `log` and `htmlreports` all still reverse |
 
 **Scenario range:** 10.97 – 10.99. **Test file:** `lex/test_project/tests/api_layer/test_10q_process_routes_removed.py`. **Type:** U. **Status:** ✅ Complete (2026-10-23). Batch: [10q](batches.md).
+
+---
+
+### 10s. The usage payload -- api/user/'s "usage" key, the per-instance hash, the switch ✅
+
+**What it tests:** `lex/core/services/usage_config.py` and `lex/authentication/views/user_api.py` (fleet-metrics push build, Task 11) -- `usage_metrics_enabled()` (the fail-closed `LEX_USAGE_METRICS` switch, ported from the closed, unmerged usage-recorder branch), `user_hash(user)` (a per-instance-salted HMAC pseudonym), and `usage_payload(user)` (the dict `api/user/` hands the interface under its new `"usage"` key).
+
+**Why a regression matters:** PostHog usage events must stay anonymous -- the interface only ever receives a pseudonym, never a user id or email. Each of the three privacy gates (the switch, the per-instance salt, the PostHog key) must independently collapse the payload to exactly `{"enabled": false}`; a partial payload leaking through with an unused key would be an information-exposure bug for an opted-out customer, and two instances producing the same hash for the same person would defeat the very reason the salt exists.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.102 | unset defaults to enabled | `usage_metrics_enabled()` True with the variable unset |
+| 10.103 | recognised true-like values | true/1/yes/on, case/whitespace-insensitive |
+| 10.104 | recognised false-like values | false/0/no/off, case/whitespace-insensitive |
+| 10.105 | unrecognised value fails closed, warns once | off, with one throttled warning per process |
+| 10.106 | user_hash deterministic | same user + salt hash the same way |
+| 10.107 | different salt, different hash | the per-instance salt is load-bearing |
+| 10.108 | full payload when fully configured | enabled, posthog_key, default posthog_host, instance_rid, user_hash |
+| 10.109 | explicit POSTHOG_HOST honoured | an override replaces the EU default |
+| 10.110 | switch off collapses the payload | exactly `{"enabled": false}` |
+| 10.111 | missing salt collapses the payload | exactly `{"enabled": false}` |
+| 10.112 | empty POSTHOG_PROJECT_KEY collapses the payload | exactly `{"enabled": false}` |
+| 10.113 | api/user/ carries "usage" | the real `CurrentUser` view's response includes `usage` matching `usage_payload(request.user)` |
+| 10.114 | hash matches the formula, known-answer | matches a hash computed independently from the same salt and username |
+
+**Scenario range:** 10.102 – 10.114. **Test file:** `lex/test_project/tests/api_layer/test_10s_usage_payload.py`. **Type:** U (10.113 I/E). **Status:** ✅ Complete (2026-10-22). Batch: [10s](batches.md).
