@@ -203,3 +203,20 @@ nested calculation recalculated what the button refused. The save now asks with 
 record had before it (7.237).
 
 ---
+
+### Batch 7v — The `calculation_finished` fleet-metrics event ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.238 – 7.258 |
+| Type | U/I |
+| Files covered | `lex/lex_app/fleet_metrics/calculations.py` (`emit_calculation_finished`), `lex/audit_logging/utils/calculation_audit.py` (the emit hook inside `ensure_terminal_calculation_audit`), `lex/lex_app/celery_tasks.py` (`_update_model_status`'s `emitter.flush(5)`) |
+| Test file | `lex/test_project/tests/calculations/test_7v_calculation_finished_events.py` |
+| Test classes | `TestCluster07v_EventLogic` (U, 12 scenarios, `SimpleNamespace` stand-ins) — 7.238 outcome mapping (success/failure/cancelled/aborted → SUCCESS/ERROR/CANCELLED/ABORTED); 7.239 an unmapped `audit_status` emits nothing; 7.240 `usage_metrics_enabled()` off suppresses every outcome; 7.241 a pk-less `audit_log` is a no-op; 7.242 real `duration_seconds` from the status row's span; 7.243 null duration when the finaliser created the row itself; 7.244 placeholder `calculation_id` / `resource` pass through unchanged; 7.245 `process` follows `running_in_uvicorn()`; 7.246/7.247 the `(audit_log.pk, outcome)` LRU de-dupe, including that a different outcome for the same pk is NOT de-duped; 7.248 the 10,000-entry bound evicts the oldest; 7.249 event shape + aware-UTC `occurred_at`. `TestCluster07v_EndToEnd` (I, 9 scenarios, real hook + mocked `emitter.emit`) — 7.250 sync success (`AuditColumnsCalc`); 7.251 sync error (`AuditColumnsFailingCalc`); 7.252 sync cancel (`AuditColumnsCancelCalc`); 7.253/7.254 `CallbackTask.on_success`/`on_failure` invoked directly, no broker (mirrors cluster 8g); 7.255 the startup-abort sweep — **`expectedFailure`, BUG-034**; 7.256 a direct `ensure_terminal_calculation_audit` call with no prior status row → null duration; 7.257 the same with a pre-seeded 'pending' row → a real measured duration; 7.258 `_update_model_status` calls `emitter.flush(5)` exactly once |
+| Fixtures | none new — reuses `AuditColumnsCalc` / `AuditColumnsFailingCalc` / `AuditColumnsCancelCalc` from batch 7s |
+| Tests landed | **20 pass / 1 expectedFailure (BUG-034)** |
+| Coverage gain | the only test coverage anywhere on `lex/lex_app/fleet_metrics/calculations.py` and the emit hook in `calculation_audit.py` |
+| Status | ✅ Complete — task 12 (fleet-metrics push build). `TestCluster07v_EndToEnd.setUp` resets `operation_context` and `ActiveCalculationStateStore` every test; both are process-globals that a direct `ensure_terminal_calculation_audit` call (pre-existing `_update_operation_context_audit_log` behaviour, unrelated to this batch) can leak across tests on the same thread, and without the reset 7.255 passed for the wrong reason depending on run order. Confirmed deterministic across repeated full-file runs and every test run alone. |
+| Note | **BUG-034 (open):** the startup-abort call site (`model_registration.py`) passes no `context_data`, and `ActiveCalculationStateStore` is empty at startup by design, so `ensure_terminal_calculation_audit`'s calculation_id resolution always misses for that path and no audit row (or fleet-metrics event) is ever produced for a startup-aborted calculation. Pre-existing, independent of this change, and out of task 12's scope (fixing resolution for that call site is a separate change) — see `known-bugs.md`. |
+
+---

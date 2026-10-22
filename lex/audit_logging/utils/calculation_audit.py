@@ -252,11 +252,31 @@ def ensure_terminal_calculation_audit(
             updated_at=timezone.now(),
         )
         if updated_rows == 0:
-            AuditLogStatus.objects.create(
+            status_row = AuditLogStatus.objects.create(
                 audit_log=audit_log,
                 status=audit_status,
                 error_traceback=stack_trace if audit_status == "failure" else None,
             )
+            # No earlier 'pending' row existed to time this run from -- the
+            # finaliser created the whole audit trail for it just now, so its
+            # start time is unknown (fleet_metrics.calculations.py, task 12).
+            status_row._freshly_created = True
+        else:
+            status_row = (
+                AuditLogStatus.objects.filter(audit_log=audit_log).order_by("-id").first()
+            )
+            if status_row is not None:
+                status_row._freshly_created = False
+
+    # Local imports: lex.lex_app's package __init__ pulls in Celery app setup
+    # (lex/lex_app/celery.py) and worker-recovery wiring, which this function
+    # must not force onto every caller's import graph just to send one event
+    # (task 12; the same defensive pattern heartbeat.py uses for apps.py).
+    from lex.lex_app.fleet_metrics.calculations import emit_calculation_finished
+    from lex.lex_app.fleet_metrics.emitter import guard
+
+    with guard("calculation_audit.emit"):
+        emit_calculation_finished(audit_log, status_row, audit_status)
 
     _update_operation_context_audit_log(audit_log)
     return audit_log

@@ -1,7 +1,7 @@
 cluster: 6
 slug: audit_logging
 title: Audit Logging
-max_scenario: 167
+max_scenario: 168
 letters:
   a:
     title: ''
@@ -207,3 +207,17 @@ letters:
       (6.163); auditlogstatus rows follow their entry (6.164); tracebacks are superuser-only (6.165);
       the opt-out restores the payload check (6.166); the detail endpoint applies the list's rule
       (6.167). 6.160-6.165 and 6.167 fail on the #840 head.
+  u:
+    title: Fleet-metrics audit contract — the backfill's columns
+    scenarios: '6.168'
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      Pins AuditLog.id/date/author/resource/payload/calculation_id and
+      AuditLogStatus.audit_log_id/status/created_at/updated_at (name, type,
+      db_table, auto_now_add/auto_now) at the Model._meta level — the exact
+      columns the out-of-repo fleet-metrics backfill reads by name and type
+      (task 12). Model-metadata only, no DB access needed.

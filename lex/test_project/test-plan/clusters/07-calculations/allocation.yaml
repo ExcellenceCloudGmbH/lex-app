@@ -3,7 +3,7 @@ slug: calculations
 title: Calculation State Machine
 test_dirs:
 - calculations
-max_scenario: 237
+max_scenario: 258
 letters:
   a:
     title: ''
@@ -227,3 +227,25 @@ letters:
       record created closed (its calculation_closed_reason() answers a reason) does not calculate on
       create, and nothing of a run happens for it: no registration, broadcast, cache entry, run audit entry or history row; 7.237 the method sees the status from
       before the run, so a record that closes itself once SUCCESS runs exactly once, nested or not.
+  v:
+    title: The calculation_finished fleet-metrics event
+    scenarios: 7.238-7.258
+    status: complete
+    tests:
+      pass: 20
+      skip: 0
+      xfail: 1
+    note: >-
+      emit_calculation_finished (lex/lex_app/fleet_metrics/calculations.py) maps the finaliser's
+      success/failure/cancelled/aborted to SUCCESS/ERROR/CANCELLED/ABORTED, derives duration_seconds
+      from the status row's span (null when the finaliser created the row itself), tags process via
+      running_in_uvicorn(), and de-dupes in-process on (audit_log.pk, outcome) with a 10,000-entry
+      LRU. Hooked into ensure_terminal_calculation_audit (calculation_audit.py) under
+      emitter.guard("calculation_audit.emit"), so every terminal call site converges on the event
+      with no new root-run logic; celery_tasks.py's _update_model_status flushes the emitter at the
+      end. 7.238-7.249 (U) pin emit_calculation_finished's own rules against SimpleNamespace
+      stand-ins; 7.250-7.258 (I) drive the real hook through sync success/error/cancel, a Celery
+      on_success/on_failure callback with no broker, the startup-abort sweep, a direct call with and
+      without a prior pending status row, and the flush(5) call. 20 pass, 1 expectedFailure (7.255 —
+      BUG-034, pre-existing: the startup-abort call site cannot resolve a calculation_id, so no
+      audit row and no event is ever produced for that path; independent of this change).

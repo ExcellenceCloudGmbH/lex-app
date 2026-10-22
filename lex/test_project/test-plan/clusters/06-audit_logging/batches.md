@@ -127,3 +127,18 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Tests landed | **8 pass / 0 fail** |
 | Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-22-audit-log-read-side.md). 4.53 (dispatch) and 6.145 (traceback read as superuser) updated |
 
+
+### Batch 6u — Fleet-metrics audit contract — the backfill's columns ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 6.168 |
+| Type | U |
+| Files covered | `lex/audit_logging/models/AuditLog.py`, `lex/audit_logging/models/AuditLogStatus.py` |
+| Test file | `lex/test_project/tests/audit_logging/test_6u_fleet_metrics_audit_contract.py` |
+| Test classes | `TestCluster06u_FleetMetricsAuditContract` — pins `AuditLog.id/date/author/resource/payload/calculation_id` and `AuditLogStatus.audit_log_id/status/created_at/updated_at` (field type, DB column name, `db_table`, and the `auto_now_add`/`auto_now` flags `emit_calculation_finished`'s `duration_seconds` depends on) |
+| Fixtures | none — `Model._meta` introspection only, no DB access |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete — task 12 (fleet-metrics push build). The out-of-repo backfill job on the Instance Controller reads these two tables directly by column name and type; this batch is the local tripwire for a framework refactor that would otherwise silently break it elsewhere, much later. |
+
+---
