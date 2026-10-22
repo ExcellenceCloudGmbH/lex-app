@@ -102,9 +102,9 @@ branches again per ``STORAGE_TYPE``. Each is recorded as an ``AuditLog`` row wit
 
 ### 10s. The usage payload -- api/user/'s "usage" key, the per-instance hash, the switch ✅
 
-**What it tests:** `lex/core/services/usage_config.py` and `lex/authentication/views/user_api.py` (fleet-metrics push build, Task 11) -- `usage_metrics_enabled()` (the fail-closed `LEX_USAGE_METRICS` switch, ported from the closed, unmerged usage-recorder branch), `user_hash(user)` (a per-instance-salted HMAC pseudonym), and `usage_payload(user)` (the dict `api/user/` hands the interface under its new `"usage"` key).
+**What it tests:** `lex/core/services/usage_config.py` and `lex/authentication/views/user_api.py` -- `usage_metrics_enabled()` (the fail-closed `LEX_USAGE_METRICS` switch), `user_hash(user)` (a per-instance-salted HMAC pseudonym), and `usage_payload(user)` (the dict `api/user/` hands the interface under its new `"usage"` key).
 
-**Why a regression matters:** PostHog usage events must stay anonymous -- the interface only ever receives a pseudonym, never a user id or email. Each of the three privacy gates (the switch, the per-instance salt, the PostHog key) must independently collapse the payload to exactly `{"enabled": false}`; a partial payload leaking through with an unused key would be an information-exposure bug for an opted-out customer, and two instances producing the same hash for the same person would defeat the very reason the salt exists.
+**Why a regression matters:** PostHog usage events must stay anonymous -- the interface only ever receives a pseudonym, never a user id or email. Each of the four conditions (the switch, the per-instance salt, the PostHog key, the instance identifier) must independently collapse the payload to exactly `{"enabled": false}`; a partial payload leaking through with an unused key would be an information-exposure bug for an opted-out customer, and two instances producing the same hash for the same person would defeat the very reason the salt exists. And `api/user/` must answer even when building the payload fails, because the interface cannot load without it.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
@@ -121,5 +121,7 @@ branches again per ``STORAGE_TYPE``. Each is recorded as an ``AuditLog`` row wit
 | 10.112 | empty POSTHOG_PROJECT_KEY collapses the payload | exactly `{"enabled": false}` |
 | 10.113 | api/user/ carries "usage" | the real `CurrentUser` view's response includes `usage` matching `usage_payload(request.user)` |
 | 10.114 | hash matches the formula, known-answer | matches a hash computed independently from the same salt and username |
+| 10.115 | unset instance identifier collapses the payload | exactly `{"enabled": false}` |
+| 10.116 | a failing usage payload never blocks sign-in | 200, userinfo unchanged, `usage` exactly `{"enabled": false}` |
 
-**Scenario range:** 10.102 – 10.114. **Test file:** `lex/test_project/tests/api_layer/test_10s_usage_payload.py`. **Type:** U (10.113 I/E). **Status:** ✅ Complete (2026-10-22). Batch: [10s](batches.md).
+**Scenario range:** 10.102 – 10.116. **Test file:** `lex/test_project/tests/api_layer/test_10s_usage_payload.py`. **Type:** U (10.113, 10.116 I/E). **Status:** ✅ Complete (2026-10-22). Batch: [10s](batches.md).

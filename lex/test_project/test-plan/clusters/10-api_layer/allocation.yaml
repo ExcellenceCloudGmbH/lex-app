@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 114
+max_scenario: 116
 letters:
   a:
     title: ''
@@ -196,31 +196,29 @@ letters:
       the next free pair on merge.
   s:
     title: The usage payload -- api/user/'s "usage" key, the per-instance hash, the switch
-    scenarios: 10.102-10.114
+    scenarios: 10.102-10.116
     status: complete
     tests:
-      pass: 13
+      pass: 15
       skip: 0
       xfail: 0
     note: >-
-      Fleet-metrics push build, Task 11 (PR F part 1). usage_metrics_enabled()
-      (ported from the closed, unmerged usage-recorder branch,
-      lex/core/services/usage_metrics.py:86-112): unset/empty and the
-      true-like spellings are on, the false-like spellings are off, anything
-      else fails closed with one throttled warning per process
-      (10.102-10.105). user_hash() is a deterministic, per-instance-salted
-      32-hex-char HMAC of the username -- same user and salt always match,
-      a different salt never does (10.106-10.107), and a known-answer case
-      pins the formula itself against a hash computed independently in the
-      test, with the salt's literal UTF-8 bytes as the HMAC key (10.114;
-      LEX_USAGE_SALT is delivered "like LEX_API_KEY" -- an opaque string,
+      usage_metrics_enabled(): unset/empty and the true-like spellings are
+      on, the false-like spellings are off, anything else fails closed with
+      one warning per process (10.102-10.105). user_hash() is a deterministic,
+      per-instance-salted 32-hex-char HMAC of the username -- same user and
+      salt always match, a different salt never does (10.106-10.107), and a
+      known-answer case pins the formula against a hash computed
+      independently in the test, with the salt's literal UTF-8 bytes as the
+      HMAC key (10.114; LEX_USAGE_SALT is an opaque string like LEX_API_KEY,
       never hex-decoded). usage_payload() returns the full enabled dict
       (posthog_key, posthog_host with its EU default or an explicit
-      override, instance_rid, user_hash) only when the switch is on AND
-      LEX_USAGE_SALT AND POSTHOG_PROJECT_KEY are both set; any one of the
-      three missing collapses it to exactly {"enabled": false}
-      (10.108-10.112). 10.113 drives the real api/user/ view (CurrentUser)
-      directly with APIRequestFactory + force_authenticate, mocking only the
-      external OIDC userinfo call, and asserts the "usage" key matches
-      usage_payload() for the same user -- the interface needs no new
-      endpoint.
+      override, instance_rid, user_hash) only when the switch is on and
+      LEX_USAGE_SALT, POSTHOG_PROJECT_KEY and INSTANCE_RESOURCE_IDENTIFIER
+      are all set; any one of them missing collapses it to exactly
+      {"enabled": false} (10.108-10.112, 10.115). 10.113 drives the real
+      api/user/ view (CurrentUser) with APIRequestFactory +
+      force_authenticate, mocking only the external OIDC userinfo call, and
+      asserts the "usage" key matches usage_payload() for the same user;
+      10.116 shows that a failure building it still answers 200 with
+      {"enabled": false} and a WARNING, so sign-in never depends on it.

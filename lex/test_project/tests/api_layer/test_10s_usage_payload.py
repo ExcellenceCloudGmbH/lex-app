@@ -3,19 +3,20 @@
 Intent
 ------
 PostHog usage events must stay anonymous: the interface only ever gets a
-per-instance pseudonym (``user_hash``), never a user id or email
-(source-plan.md 3.2, 3.4). lex-app computes that hash and the rest of the
-usage payload server-side and hands it to the interface through the existing
-``api/user/`` response, under one new ``"usage"`` key -- no new endpoint, no
-config.js key. Three independent privacy gates must each be able to turn the
-whole thing off: the ``LEX_USAGE_METRICS`` switch, a missing per-instance
-``LEX_USAGE_SALT``, and an empty ``POSTHOG_PROJECT_KEY``. In every one of
-those cases the payload must be exactly ``{"enabled": false}`` -- not a
-partial dict with some fields present -- because the interface decides
-whether to call ``posthog.init()`` purely from ``enabled``, and any key that
-leaked through unused (a key, a host) would be dead weight at best and a
-quiet privacy mismatch at worst if the interface's contract ever changed to
-trust it.
+per-instance pseudonym (``user_hash``), never a user id or email. lex-app
+computes that hash and the rest of the usage payload server-side and hands it
+to the interface through the existing ``api/user/`` response, under one new
+``"usage"`` key -- no new endpoint, no config.js key. Four conditions must
+each be able to turn the whole thing off: the ``LEX_USAGE_METRICS`` switch, a
+missing per-instance ``LEX_USAGE_SALT``, an empty ``POSTHOG_PROJECT_KEY``, and
+an unset ``INSTANCE_RESOURCE_IDENTIFIER`` (events no instance could be
+credited with). In every one of those cases the payload must be exactly
+``{"enabled": false}`` -- not a partial dict with some fields present --
+because the interface decides whether to call ``posthog.init()`` purely from
+``enabled``, and any key that leaked through unused (a key, a host) would be
+dead weight at best and a quiet privacy mismatch at worst if the interface's
+contract ever changed to trust it. And whatever happens while building it,
+``api/user/`` itself must still answer: the interface cannot load without it.
 
 A regression here reads as "an opted-out customer's PostHog project key is
 still visible in their browser's network tab" (an information-exposure bug,
@@ -23,7 +24,7 @@ not a functional one) or "two instances' hashes for the same actual person
 collide" (which would let fleet metrics join one person across instances --
 exactly what the per-instance salt exists to prevent).
 
-Cluster 10s -- scenarios 10.102-10.114. Type: U (10.113 I/E -- drives the real
+Cluster 10s -- scenarios 10.102-10.116. Type: U (10.113, 10.116 I/E -- drive the real
 ``api/user/`` view).
 Covers: lex/core/services/usage_config.py, lex/authentication/views/user_api.py.
 Run: python -m lex pytest lex/test_project/tests/api_layer/test_10s_usage_payload.py -v
@@ -79,8 +80,7 @@ class TestCluster10s_UsageMetricsSwitch(SimpleTestCase):
         Scenario 10.102: unset or empty means on.
         Given: LEX_USAGE_METRICS is not set at all
         When: usage_metrics_enabled() is asked
-        Then: it is True -- usage metrics are on by default (source-plan.md
-              3.1: "Unset, empty, true, 1, yes, on mean on").
+        Then: it is True -- usage metrics are on by default.
         """
         env = os.environ.copy()
         env.pop("LEX_USAGE_METRICS", None)
@@ -141,7 +141,7 @@ class TestCluster10s_UsageMetricsSwitch(SimpleTestCase):
 
 
 class TestCluster10s_UserHash(SimpleTestCase):
-    """Cluster 10s: user_hash() -- the per-instance pseudonym (source-plan.md 3.2)."""
+    """Cluster 10s: user_hash() -- the per-instance pseudonym."""
 
     # -- 10.106 ----------------------------------------------------
     def test_10_106_deterministic_for_the_same_user_and_salt(self) -> None:
@@ -169,8 +169,7 @@ class TestCluster10s_UserHash(SimpleTestCase):
         Given: the same username, two different LEX_USAGE_SALT values
         When: user_hash() is computed under each
         Then: the two hashes differ -- this is exactly the property that
-              stops two instances from being joined on the same real person
-              (source-plan.md 3.2).
+              stops two instances from being joined on the same real person.
         """
         user = _User("abcd1234hash@users.lex")
         with patch.dict("os.environ", {"LEX_USAGE_SALT": "salt-one"}, clear=False):
@@ -187,7 +186,7 @@ class TestCluster10s_UserHash(SimpleTestCase):
     # -- 10.114 ----------------------------------------------------
     def test_10_114_hash_matches_the_formula_computed_independently(self) -> None:
         """
-        Scenario 10.114: user_hash() matches section 3.2's formula exactly,
+        Scenario 10.114: user_hash() matches its formula exactly,
         not merely "is deterministic" or "changes with the salt" -- an
         implementation that swaps key and message, concatenates
         salt+username before hashing, or decodes the salt as hex
@@ -240,7 +239,7 @@ class TestCluster10s_UsagePayload(SimpleTestCase):
         Given: the switch on, a salt, a PostHog key, and no explicit POSTHOG_HOST
         When: usage_payload(user) is called
         Then: it returns enabled=True plus posthog_key, the default EU
-              posthog_host, instance_rid and user_hash (source-plan.md 3.4).
+              posthog_host, instance_rid and user_hash.
         """
         with patch.dict("os.environ", _ENABLED_ENV, clear=False):
             payload = usage_config.usage_payload(self.user)
@@ -305,7 +304,7 @@ class TestCluster10s_UsagePayload(SimpleTestCase):
         """
         Scenario 10.112: an empty POSTHOG_PROJECT_KEY also collapses the payload.
         Given: the switch on and a salt, but POSTHOG_PROJECT_KEY empty
-               (source-plan.md 3.1: "empty means no PostHog")
+               (empty means no PostHog)
         When: usage_payload(user) is called
         Then: the result is exactly {"enabled": False}.
         """
@@ -314,6 +313,28 @@ class TestCluster10s_UsagePayload(SimpleTestCase):
             payload = usage_config.usage_payload(self.user)
 
         self.assertEqual(payload, {"enabled": False})
+
+    # -- 10.115 ----------------------------------------------------
+    def test_10_115_disabled_only_enabled_false_when_instance_rid_is_unset(self) -> None:
+        """
+        Scenario 10.115: an unset instance identifier also collapses the payload.
+        Given: the switch on, a salt and a PostHog key, but
+               INSTANCE_RESOURCE_IDENTIFIER empty or absent
+        When: usage_payload(user) is called
+        Then: the result is exactly {"enabled": False} -- events carrying a
+              blank instance_rid could never be credited to any instance.
+        """
+        empty = dict(_ENABLED_ENV, INSTANCE_RESOURCE_IDENTIFIER="")
+        absent = dict(os.environ, **_ENABLED_ENV)
+        del absent["INSTANCE_RESOURCE_IDENTIFIER"]
+        for label, env in (("empty", empty), ("absent", absent)):
+            with self.subTest(instance_rid=label):
+                with patch.dict("os.environ", env, clear=(label == "absent")):
+                    payload = usage_config.usage_payload(self.user)
+                self.assertEqual(
+                    payload, {"enabled": False},
+                    f"An {label} INSTANCE_RESOURCE_IDENTIFIER must turn usage off.",
+                )
 
 
 class TestCluster10s_CurrentUserEndpoint(TestCase):
@@ -361,3 +382,30 @@ class TestCluster10s_CurrentUserEndpoint(TestCase):
         self.assertIn("usage", response.data)
         self.assertEqual(response.data["usage"], expected_usage)
         self.assertTrue(expected_usage["enabled"])
+
+    # -- 10.116 ----------------------------------------------------
+    def test_10_116_a_failing_usage_payload_never_blocks_sign_in(self) -> None:
+        """
+        Scenario 10.116: api/user/ still answers when building "usage" fails.
+        Given: an authenticated request, a mocked OIDC userinfo call, and
+               usage_payload raising
+        When: CurrentUser's GET is driven
+        Then: the response is 200 with the userinfo fields unchanged, "usage"
+              is exactly {"enabled": False} (the interface starts without
+              usage metrics), and the failure is logged at WARNING.
+        """
+        with patch.dict("os.environ", _ENABLED_ENV, clear=False), \
+             patch(
+                 "lex.authentication.views.user_api.usage_payload",
+                 side_effect=RuntimeError("boom"),
+             ), \
+             self.assertLogs("lex.authentication.views.user_api", level="WARNING") as logs:
+            response, _ = self._get()
+
+        self.assertEqual(
+            response.status_code, 200,
+            "A failure building the usage payload must never fail api/user/.",
+        )
+        self.assertEqual(response.data["sub"], "abcd1234hash@users.lex")
+        self.assertEqual(response.data["usage"], {"enabled": False})
+        self.assertEqual(len(logs.records), 1, "The failure must be logged once.")
