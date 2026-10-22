@@ -896,7 +896,12 @@ class LexSerializer(serializers.ModelSerializer):
         try:
             if instance.__class__._meta.model_name.lower() == 'auditlog':
                 payload = representation.get('payload') or getattr(instance, 'payload', None)
-                if isinstance(payload, dict):
+                if self._is_readable_file_operation_payload(instance):
+                    # An export or download payload describes the request (file
+                    # name, size, rows, filter), not field values of the record:
+                    # whoever may read the entry reads it whole.
+                    pass
+                elif isinstance(payload, dict):
                     model_class = self._resolve_target_model(instance)
                     if model_class is not None:
                         base_user_context = self._get_base_user_context(request) if request else None
@@ -936,6 +941,14 @@ class LexSerializer(serializers.ModelSerializer):
             self._add_fk_display_names_single(representation)
 
         return representation
+
+    @staticmethod
+    def _is_readable_file_operation_payload(instance) -> bool:
+        """An export/download entry whose payload is not pruned (LEX_SEC_READ_SURFACES)."""
+        from lex.core.security_flags import strict
+
+        file_operation_actions = getattr(type(instance), "FILE_OPERATION_ACTIONS", ())
+        return getattr(instance, "action", None) in file_operation_actions and strict("READ_SURFACES")
 
     def _add_fk_display_names_single(self, representation: dict) -> None:
         """Per-instance twin of ``FilteredListSerializer._batch_add_fk_display_names``.

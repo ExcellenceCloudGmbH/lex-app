@@ -83,7 +83,15 @@ class AuditLogDefaultSerializer(AuditLogReadOnlySerializerMixin, serializers.Mod
 
     def get_error_traceback(self, obj):
         record = self._get_latest_status_record(obj)
-        return record.error_traceback if record else None
+        if record is None:
+            return None
+        # A traceback is server internals; only a superuser reads it (LEX_SEC_READ_SURFACES).
+        from lex.core.security_flags import is_superuser, strict
+
+        request = (getattr(self, "context", None) or {}).get("request")
+        if strict("READ_SURFACES") and not is_superuser(request):
+            return None
+        return record.error_traceback
 
     def get_status_created_at(self, obj):
         record = self._get_latest_status_record(obj)

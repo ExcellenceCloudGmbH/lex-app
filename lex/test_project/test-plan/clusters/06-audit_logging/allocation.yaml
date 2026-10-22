@@ -1,7 +1,7 @@
 cluster: 6
 slug: audit_logging
 title: Audit Logging
-max_scenario: 124
+max_scenario: 167
 letters:
   a:
     title: ''
@@ -192,3 +192,18 @@ letters:
       exists and reads `pending` from inside the view, before the file is served, and is finalised
       afterwards (6.123); a failure the API layer has no answer for still leaves a `failure` entry
       carrying its traceback (6.124). Per-endpoint coverage lives in 10p, 13i and 15l.
+  t:
+    title: Who reads export & download entries
+    scenarios: 6.160-6.167
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      The read side of 6s, behind LEX_SEC_READ_SURFACES. A download entry is visible to whoever may
+      read its record and hidden from others (6.160); a model-wide export entry to whoever may export
+      the model (6.161); a record's history is one filtered query (6.162); the payload comes back whole
+      (6.163); auditlogstatus rows follow their entry (6.164); tracebacks are superuser-only (6.165);
+      the opt-out restores the payload check (6.166); the detail endpoint applies the list's rule
+      (6.167). 6.160-6.165 and 6.167 fail on the #840 head.
