@@ -76,3 +76,19 @@
 | Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-18-v2-security-hardening-internal-config.md) |
 
 ---
+
+### Batch 10p — File-download endpoints write an audit entry ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.91 – 10.96 |
+| Type | E |
+| Files covered | `lex/api/views/file_operations/FileDownload.py`, `lex/api/views/sharepoint/SharePointFileDownload.py`, `SharePointShareLink.py`, `SharePointPreview.py` |
+| Test file | `lex/test_project/tests/api_layer/test_10p_file_download_audit.py` |
+| Test classes | `TestCluster10p_FileDownloadAudit` (10.91 local download → record, field, filename, size and `delivery: stream`, generic relation pointing at the record; 10.92 a refused download → `failure` with its status code and nothing attached; 10.93 GCS → `delivery: url`) · `TestCluster10p_SharePointDownloadAudit` (10.94 SharePoint stream; 10.95 share link; 10.96 preview link, each told apart by `delivery`) |
+| Fixtures | `DownloadableDocument` in `tests/api_layer/models.py` — the cluster's own `FileField` model; `AuditLog` + `AuditLogStatus` in `e2e_framework_models`; SharePoint's SDK mocked at the project boundary |
+| Tests landed | **6 pass / 0 fail** |
+| Coverage gain | audit coverage for all four file-serving endpoints and both storage branches of `file-download`; 10l's `FieldFile` stubs completed with `name` / `size` |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-22-export-download-audit.md) |
+
+---

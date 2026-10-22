@@ -87,9 +87,28 @@ class AuditNonAtomicCalc(CalculationModel):
             )
 
 
+@_permissive
+class AuditFileItem(LexModel):
+    """A record with a file — the download surface of the audit trail."""
+
+    name = models.CharField(max_length=200)
+    attachment = models.FileField(upload_to="cluster6s/", blank=True, null=True)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_export(self, uc):
+        return PermissionResult.allow_all("cluster 6")
+
+
 ALL_MODELS = [AuditSimpleItem, AuditAtomicCalc, AuditNonAtomicCalc]
+FILE_MODELS = [AuditFileItem]
 
 AUDIT_SIMPLE = "auditsimpleitem"
 AUDIT_ATOMIC = "auditatomiccalc"
 AUDIT_NONATOMIC = "auditnonatomiccalc"
+AUDIT_FILE = "auditfileitem"
 

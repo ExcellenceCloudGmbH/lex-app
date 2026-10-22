@@ -64,3 +64,20 @@
 | 10.90 | one KeycloakManager | three token requests build one manager and get permissions and roles; no token builds none |
 
 **Scenario range:** 10.83 – 10.90. **Test file:** `lex/test_project/tests/api_layer/test_10o_error_and_route_hardening.py`. **Type:** E (10.85, 10.88, 10.90 U). **Status:** ✅ Complete (2026-10-18). Batch: [10o](batches.md).
+
+### 10p. File-download endpoints write an audit entry
+
+Four endpoints serve a file, each through its own machine, and ``file-download``
+branches again per ``STORAGE_TYPE``. Each is recorded as an ``AuditLog`` row with
+``action='download'`` — see [[history-and-audit/audit logs]].
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 10.91 | Local download | One entry naming the field, filename, byte size and `delivery: stream`, its generic relation pointing at the record so the download shows on that record's audit tab |
+| 10.92 | Refused download | Status `failure` with the refusing 404 and nothing attached — an attempt to take data out is recorded whether or not it succeeded |
+| 10.93 | GCS download | `delivery: url` — the caller received access, not bytes, and the trail tells the two apart |
+| 10.94 | SharePoint download | Own entry with `storage: SHAREPOINT`, `delivery: stream`; shares no code with `file-download` |
+| 10.95 | SharePoint share link | `delivery: share_link` plus the SharePoint document id — no bytes crossed the wire, but the file left the system's control |
+| 10.96 | SharePoint preview link | `delivery: preview_link`, distinguishable from the share link |
+
+**Scenario range:** 10.91 – 10.96. **Test file:** `lex/test_project/tests/api_layer/test_10p_file_download_audit.py`. **Type:** E. **Status:** ✅ Complete (2026-10-22). Batch: [10p](batches.md).

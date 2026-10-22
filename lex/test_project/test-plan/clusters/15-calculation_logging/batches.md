@@ -96,3 +96,19 @@ purged. It does nothing when the run's rows survived, and it never raises. 15.47
 | Status | ✅ Complete — paired with 7t. Checked to fail when the run is filed under the create request's own id (`<model>_create_<uuid>`, which has no pk) |
 
 ---
+
+### Batch 15l — The calculation-log PDF download writes an audit entry ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 15.52 – 15.55 |
+| Type | E |
+| Files covered | `lex/api/views/calculations/DownloadMarkdownPdf.py` |
+| Test file | `lex/test_project/tests/calculation_logging/test_15l_pdf_download_audit.py` |
+| Test classes | `TestCluster15l_PdfDownloadAudit` (15.52 single-log PDF → entry against the log with filename and size, `include_descendants: false`; 15.53 subtree download → scope + section count + `_full.pdf` name; 15.54 a rendering failure → `failure` with the 500 and no delivered size; 15.55 a log the caller may not see → `failure` keeping the 404's traceback, nothing attached) |
+| Fixtures | `_CalcLogTestCase` (already carries `CalculationLog` + `AuditLog` + `AuditLogStatus`); `render_pdf_bytes` stubbed to fail for 15.54; the superuser flag dropped for 15.55 |
+| Tests landed | **4 pass / 0 fail** |
+| Coverage gain | audit coverage for the PDF endpoint's two scopes and both refusal paths |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-22-export-download-audit.md) |
+
+---

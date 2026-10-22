@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 90
+max_scenario: 96
 letters:
   a:
     title: ''
@@ -158,3 +158,19 @@ letters:
       or the CORS allow-list, else 400 REDIRECT_NOT_ALLOWED before the OIDC view. Unknown api/ path is
       a JSON 404, SPA routes keep index.html (10.87-10.88). api/global-search/?q= routed (10.89). One
       KeycloakManager per process (10.90). Ported from #815, #821 (manager only), #830.
+  p:
+    title: File-download endpoints write an audit entry
+    scenarios: 10.91-10.96
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      Four endpoints serve a file and each has its own machine. `file-download` on local storage
+      records the record, field, filename, byte size and `delivery: stream` (10.91); a refused
+      download is a `failure` entry with its status code and no record attached (10.92); on GCS the
+      caller gets a URL, recorded as `delivery: url` so "bytes streamed" and "access handed out"
+      stay distinguishable (10.93). The SharePoint download (10.94), share link (10.95) and preview
+      link (10.96) are audited as downloads too, told apart by `delivery`. SharePoint's SDK is mocked
+      at the project boundary; `DownloadableDocument` is the cluster's own FileField model.

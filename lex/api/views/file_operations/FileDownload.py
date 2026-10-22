@@ -11,15 +11,34 @@ from rest_framework.views import APIView
 from rest_framework_api_key.permissions import HasAPIKey
 
 from lex.api.security import is_readable, read_result
+from lex.audit_logging.mixins.FileOperationAuditMixin import FileOperationAuditMixin
+from lex.audit_logging.utils.file_operation_audit import ACTION_DOWNLOAD
 from lex.core.security_flags import strict
 
 
 # Assuming HasAPIKey is imported from your custom permissions
 
-class FileDownloadView(APIView):
+
+def _file_size(file_obj):
+    """Byte size of the served file, or ``None`` when the storage can't say."""
+    try:
+        return file_obj.size
+    except Exception:
+        return None
+
+
+class FileDownloadView(FileOperationAuditMixin, APIView):
     model_collection = None
     http_method_names = ['get']
     permission_classes = [HasAPIKey | IsAuthenticated]
+    audit_action = ACTION_DOWNLOAD
+
+    def audit_request_payload(self, request, *args, **kwargs):
+        return {
+            "pk": request.query_params.get("pk"),
+            "field": request.query_params.get("field"),
+            "storage": os.getenv("STORAGE_TYPE", "LOCAL"),
+        }
 
     def get(self, request, *args, **kwargs):
         # 1. Fetch the model and instance
@@ -46,6 +65,8 @@ class FileDownloadView(APIView):
         if not instance:
             return JsonResponse({"error": "File not found"}, status=404)
 
+        self.attach_audit(instance)
+
         # The caller must be allowed to read the record and this field (LEX_SEC_READ_SURFACES).
         if strict("READ_SURFACES") and not self._may_read_file(request, instance, field_name):
             return JsonResponse({"error": "File not found"}, status=404)
@@ -54,6 +75,8 @@ class FileDownloadView(APIView):
         file_obj = getattr(instance, field_name)
         if not file_obj:
             return JsonResponse({"error": "File not found"}, status=404)
+
+        self.record_audit(filename=file_obj.name, size_bytes=_file_size(file_obj))
 
         storage_type = os.getenv("STORAGE_TYPE", "LOCAL")
 
@@ -75,10 +98,12 @@ class FileDownloadView(APIView):
                 get_server_relative_path(rel_url)
             )
             bytesio_object = BytesIO(binary_file.content)
+            self.record_audit(delivery="stream")
             return FileResponse(bytesio_object)
 
         elif storage_type == "GCS":
             # Cloud storage usually just needs the public/signed URL
+            self.record_audit(delivery="url")
             return JsonResponse({"download_url": file_obj.url})
 
         else:
@@ -86,12 +111,14 @@ class FileDownloadView(APIView):
             # FIX: Use .path instead of .url for filesystem operations.
             # .path provides the absolute OS-specific path automatically.
             try:
-                return FileResponse(open(file_obj.path, 'rb'))
+                response = FileResponse(open(file_obj.path, 'rb'))
             except NotImplementedError:
                 # A field with its own (non-filesystem) storage has no .path.
-                return FileResponse(file_obj.open('rb'))
+                response = FileResponse(file_obj.open('rb'))
             except FileNotFoundError:
                 return JsonResponse({"error": "File not found on server"}, status=404)
+            self.record_audit(delivery="stream")
+            return response
 
     @staticmethod
     def _may_read_file(request, instance, field_name):
