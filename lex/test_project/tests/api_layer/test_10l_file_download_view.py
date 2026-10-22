@@ -46,6 +46,18 @@ pytestmark = pytest.mark.api_layer
 # ---------------------------------------------------------------------------
 
 
+def _file_stub(**attrs):
+    """Stand in for a ``FieldFile``.
+
+    The view reads ``name`` and ``size`` off the field's value to record
+    what it served, so the stub carries them alongside whichever of
+    ``path`` / ``url`` the scenario under test needs.
+    """
+    attrs.setdefault("name", "document.bin")
+    attrs.setdefault("size", 1234)
+    return SimpleNamespace(**attrs)
+
+
 def _build_request(pk="42", field="document"):
     """Build a stub DRF-ish request carrying just `query_params`."""
     return SimpleNamespace(query_params={"pk": pk, "field": field})
@@ -131,7 +143,7 @@ class TestCluster10l_LocalStorage(SimpleTestCase):
     """
 
     def test_10_48_local_happy_path_returns_file_response(self):
-        instance = SimpleNamespace(document=SimpleNamespace(path="/tmp/test-fixture.bin"))
+        instance = SimpleNamespace(document=_file_stub(path="/tmp/test-fixture.bin"))
         view = _build_view()
         request = _build_request()
         kwargs = _build_kwargs(instance=instance)
@@ -152,7 +164,7 @@ class TestCluster10l_LocalStorage(SimpleTestCase):
         )
 
     def test_10_49_local_file_not_found_returns_404_json(self):
-        instance = SimpleNamespace(document=SimpleNamespace(path="/tmp/missing.bin"))
+        instance = SimpleNamespace(document=_file_stub(path="/tmp/missing.bin"))
         view = _build_view()
         request = _build_request()
         kwargs = _build_kwargs(instance=instance)
@@ -177,7 +189,7 @@ class TestCluster10l_LocalStorage(SimpleTestCase):
         crash every dev / single-host deployment that never set the
         env var.
         """
-        instance = SimpleNamespace(document=SimpleNamespace(path="/tmp/x.bin"))
+        instance = SimpleNamespace(document=_file_stub(path="/tmp/x.bin"))
         view = _build_view()
         request = _build_request()
         kwargs = _build_kwargs(instance=instance)
@@ -203,7 +215,7 @@ class TestCluster10l_LocalStorage(SimpleTestCase):
         404 JsonResponse) instead of silently dispatching to GCS
         because the elif chain happened to fall through.
         """
-        instance = SimpleNamespace(document=SimpleNamespace(path="/tmp/y.bin"))
+        instance = SimpleNamespace(document=_file_stub(path="/tmp/y.bin"))
         view = _build_view()
         request = _build_request()
         kwargs = _build_kwargs(instance=instance)
@@ -258,7 +270,7 @@ class TestCluster10l_SharePointStorage(SimpleTestCase):
 
     def test_10_50_sharepoint_returns_file_response_with_binary_content(self):
         shrp_ctx, fake_target, fake_binary = self._patch_sp(b"hello-sp")
-        instance = SimpleNamespace(document=SimpleNamespace(url="/sites/x/file.pdf"))
+        instance = SimpleNamespace(document=_file_stub(url="/sites/x/file.pdf"))
         view = _build_view()
         request = _build_request()
         kwargs = _build_kwargs(instance=instance)
@@ -292,7 +304,7 @@ class TestCluster10l_SharePointStorage(SimpleTestCase):
         server-relative path and the SDK raises a confusing
         'site not found' error."""
         shrp_ctx, fake_target, _ = self._patch_sp()
-        instance = SimpleNamespace(document=SimpleNamespace(url="/sites/x/has-slash.pdf"))
+        instance = SimpleNamespace(document=_file_stub(url="/sites/x/has-slash.pdf"))
         view = _build_view()
         request = _build_request()
         kwargs = _build_kwargs(instance=instance)
@@ -343,7 +355,7 @@ class TestCluster10l_GCSStorage(SimpleTestCase):
     """
 
     def test_10_52_gcs_returns_download_url_json(self):
-        file_obj = SimpleNamespace(url="https://storage.googleapis.com/bucket/file.pdf?signed")
+        file_obj = _file_stub(url="https://storage.googleapis.com/bucket/file.pdf?signed")
         instance = SimpleNamespace(document=file_obj)
         view = _build_view()
         request = _build_request()

@@ -3,7 +3,9 @@ import logging
 
 import markdown2
 from django.http import Http404, HttpResponse
+from lex.audit_logging.mixins.FileOperationAuditMixin import FileOperationAuditMixin
 from lex.audit_logging.models.CalculationLog import CalculationLog
+from lex.audit_logging.utils.file_operation_audit import ACTION_DOWNLOAD
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
@@ -239,8 +241,22 @@ def build_subtree_markdown(ordered, truncated: bool) -> str:
     return "\n\n".join(parts)
 
 
-class DownloadMarkdownPdf(APIView):
+class DownloadMarkdownPdf(FileOperationAuditMixin, APIView):
     permission_classes = [IsAuthenticated]
+    audit_action = ACTION_DOWNLOAD
+
+    def audit_model(self, request, *args, **kwargs):
+        return CalculationLog
+
+    def audit_request_payload(self, request, *args, **kwargs):
+        return {
+            "pk": kwargs.get("pk"),
+            "format": "pdf",
+            "delivery": "stream",
+            "include_descendants": _wants_descendants(
+                request.query_params.get("include_descendants")
+            ),
+        }
 
     def get(self, request, pk, format=None):
         """One calculation log as PDF, or that log and everything under it.
@@ -263,10 +279,14 @@ class DownloadMarkdownPdf(APIView):
             request.query_params.get("include_descendants")
         )
 
+        if obj is not None:
+            self.attach_audit(obj)
+
         if obj is not None and include_descendants:
             ordered, truncated = collect_subtree(obj)
             md_text = build_subtree_markdown(ordered, truncated)
             filename = f"document_{pk}_full.pdf"
+            self.record_audit(section_count=len(ordered), truncated=truncated)
         else:
             md_text = (obj.calculation_log if obj else "") or ""
             filename = f"document_{pk}.pdf"
@@ -277,6 +297,8 @@ class DownloadMarkdownPdf(APIView):
         except Exception:
             logger.exception("Calculation-log PDF rendering failed for pk=%s", pk)
             return HttpResponse("Error generating PDF", status=500)
+
+        self.record_audit(filename=filename, size_bytes=len(pdf_bytes))
 
         resp = HttpResponse(pdf_bytes, content_type="application/pdf")
         resp["Content-Disposition"] = f'attachment; filename="{filename}"'
