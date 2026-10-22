@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 476
+max_scenario: 480
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1305,39 +1305,39 @@ letters:
       a clean removal. The routes that served the feature are pinned by 10q.
   ba:
     title: The fleet-metrics event emitter -- gating, bounded queue, batched delivery
-    scenarios: 1.455-1.466,1.475-1.476
+    scenarios: 1.455-1.466,1.475-1.480
     status: complete
     tests:
-      pass: 14
+      pass: 18
       skip: 0
       xfail: 0
     note: >-
-      Fleet-metrics push build, Task 11 (PR F part 1). enabled() gates on
-      DEPLOYMENT_ENVIRONMENT + DOMAIN_BASE + LEX_API_KEY, same as the removed
-      version reporter's _is_deployed_instance (commit 0db88ad9); disabled
-      means emit() queues nothing and starts no thread (1.455-1.458), and
-      each of the three variables is independently required -- missing any
-      one of them on its own still disables (1.456). emit() never raises
-      even when its own machinery throws (1.459). The bounded
-      queue.Queue(1000) drops the oldest event once full (1.460). Batches cap
-      at 100 (1.461). A failing endpoint (network error or non-2xx) is
-      retried once after 5s then dropped with a throttled WARNING, at most
-      once per hour per label (1.462-1.464). note_failure()'s throttle uses
-      None, never 0.0, as its "never warned" sentinel, because
-      time.monotonic()'s reference point is unspecified and can legitimately
-      be small early in a process's life, which would otherwise let the very
-      first warning for a label be mistaken for one that just fired. One
-      daemon drain thread is reused across calls (1.465). flush(timeout) is
-      bounded by its budget -- checked before dequeuing the next batch, not
-      after, so an unsent batch is never pulled off the queue and then
-      abandoned (1.466). A forked child process (task 12 emits from Celery
-      worker processes) gets a fresh queue, fresh locks and a cleared
-      drain-thread singleton via os.register_at_fork, so it never inherits a
-      lock some other, now-nonexistent thread was holding, a Thread object
-      that falsely reports is_alive(), or events the parent already queued
-      (1.475-1.476). lex-mcp-local's guard/note_failure pattern
-      (src/lex_mcp/analytics.py:165-247) is reimplemented directly against
-      its documented swallow-and-throttle contract, not copied line for line.
+      enabled() gates on DEPLOYMENT_ENVIRONMENT + DOMAIN_BASE + LEX_API_KEY,
+      same as the removed version reporter's _is_deployed_instance (commit
+      0db88ad9); disabled means emit() queues nothing and starts no thread
+      (1.455-1.458), and each of the three variables is independently
+      required -- missing any one of them on its own still disables (1.456).
+      emit() never raises even when its own machinery throws (1.459). The
+      bounded queue.Queue(1000) drops the oldest event once full (1.460).
+      Batches cap at 100 (1.461). A failing endpoint (network error or
+      non-2xx) is retried once after 5s then dropped with a throttled
+      WARNING, at most once per hour per label (1.462-1.464); only a 2xx
+      counts as delivered and redirects are never followed (1.479-1.480).
+      note_failure()'s throttle uses None, never 0.0, as its "never warned"
+      sentinel, because time.monotonic()'s reference point is unspecified
+      and can legitimately be small early in a process's life, which would
+      otherwise let the very first warning for a label be mistaken for one
+      that just fired. One daemon drain thread is reused across calls
+      (1.465); each 30s tick posts batches until the queue is empty, stopping
+      at the first dropped batch so the rest waits for the next tick
+      (1.477-1.478). flush(timeout) is bounded by its budget -- checked
+      before dequeuing the next batch, not after, so an unsent batch is never
+      pulled off the queue and then abandoned (1.466). A forked child process
+      (calculation events are emitted from Celery worker processes) gets a
+      fresh queue, fresh locks and a cleared drain-thread singleton via
+      os.register_at_fork, so it never inherits a lock some other,
+      now-nonexistent thread was holding, a Thread object that falsely
+      reports is_alive(), or events the parent already queued (1.475-1.476).
   bb:
     title: The hourly fleet-metrics heartbeat -- web-process-only, immediate first beat
     scenarios: 1.467-1.474
@@ -1347,14 +1347,14 @@ letters:
       skip: 0
       xfail: 0
     note: >-
-      Fleet-metrics push build, Task 11 (PR F part 1). start() is a no-op
-      outside the web process (running_in_uvicorn() False, 1.467) and when
-      the emitter itself is not enabled() (1.468); in the web process with
-      the emitter enabled it schedules one daemon thread targeting _run and
-      beats immediately before its first sleep (1.469); a second start() in
-      the same process is guarded, mirroring the once-per-process latch the
-      removed version reporter used (1.470). The payload carries
-      lex_app_version/commit_sha/process="web" (1.471), an aware UTC
-      occurred_at (1.472), and usage_enabled tracking the LEX_USAGE_METRICS
-      switch both ways (1.473-1.474) -- the one signal the Collection
-      dashboard uses to tell an opted-out instance from a silent one.
+      start() is a no-op outside the web process (running_in_uvicorn()
+      False, 1.467) and when the emitter itself is not enabled() (1.468); in
+      the web process with the emitter enabled it schedules one daemon
+      thread targeting _run and beats immediately before its first sleep
+      (1.469); a second start() in the same process is guarded, mirroring
+      the once-per-process latch the removed version reporter used (1.470).
+      The payload carries lex_app_version/commit_sha/process="web" (1.471),
+      an aware UTC occurred_at (1.472), and usage_enabled tracking the
+      LEX_USAGE_METRICS switch both ways (1.473-1.474) -- the one signal the
+      Collection dashboard uses to tell an opted-out instance from a silent
+      one.

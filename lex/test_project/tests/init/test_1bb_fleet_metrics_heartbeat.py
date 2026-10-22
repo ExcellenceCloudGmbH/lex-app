@@ -3,9 +3,9 @@
 Intent
 ------
 The controller tells a silent instance (nothing listening, maybe crashed)
-apart from one that simply opted out of usage metrics (source-plan.md 3.3:
-"the heartbeat's usage_enabled: false is how the Collection dashboard tells
-an opted-out instance from a silent one"). That only works if every web
+apart from one that simply opted out of usage metrics: an opted-out
+instance still sends heartbeats, with ``usage_enabled: false``, and a silent
+one sends none. That only works if every web
 process -- and *only* web processes -- reliably sends a heartbeat at startup
 and every hour after, carrying the switch's current value. A Celery worker
 sending heartbeats would make the dashboard's per-instance count wrong (one
@@ -62,8 +62,8 @@ class TestCluster01bb_HeartbeatScheduling(SimpleTestCase):
         Given: a deployed instance, but running_in_uvicorn() is False (a
                worker process, or any process not started as the ASGI app)
         When: start() is called
-        Then: it returns False and no Thread is constructed -- "Workers send
-              none" (source-plan.md 3.3).
+        Then: it returns False and no Thread is constructed -- workers send
+              no heartbeat.
         """
         with patch.dict("os.environ", _DEPLOYED_ENV, clear=False), \
              patch("lex.lex_app.apps.running_in_uvicorn", return_value=False), \
@@ -152,7 +152,7 @@ class TestCluster01bb_HeartbeatScheduling(SimpleTestCase):
 
 
 class TestCluster01bb_HeartbeatPayload(SimpleTestCase):
-    """Cluster 1bb: the heartbeat event body (source-plan.md 3.3)."""
+    """Cluster 1bb: the heartbeat event body."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -165,7 +165,7 @@ class TestCluster01bb_HeartbeatPayload(SimpleTestCase):
     # -- 1.471 -----------------------------------------------------
     def test_1_471_payload_carries_the_documented_fields(self) -> None:
         """
-        Scenario 1.471: the payload shape matches source-plan.md 3.3 exactly.
+        Scenario 1.471: the payload carries exactly the heartbeat's fields.
         Given: a known lex._version.__version__ and COMMIT_SHA
         When: build_payload() is called
         Then: type is "heartbeat", lex_app_version and commit_sha match, and
@@ -188,9 +188,8 @@ class TestCluster01bb_HeartbeatPayload(SimpleTestCase):
         Given: no special setup
         When: build_payload() is called
         Then: occurred_at parses back to an aware datetime whose UTC offset
-              is zero and whose ISO string ends in "+00:00" or "Z"
-              (source-plan.md 3.2 -- "lex-app stamps every event with an
-              aware UTC timestamp").
+              is zero and whose ISO string ends in "+00:00" or "Z" -- every
+              event carries an aware UTC timestamp.
         """
         payload = heartbeat.build_payload()
         occurred_at = payload["occurred_at"]
@@ -207,7 +206,7 @@ class TestCluster01bb_HeartbeatPayload(SimpleTestCase):
     def test_1_473_usage_enabled_true_when_the_switch_is_on(self) -> None:
         """
         Scenario 1.473: usage_enabled reflects LEX_USAGE_METRICS=on.
-        Given: LEX_USAGE_METRICS unset (default on, per source-plan.md 3.1)
+        Given: LEX_USAGE_METRICS unset (on by default)
         When: build_payload() is called
         Then: usage_enabled is True.
         """

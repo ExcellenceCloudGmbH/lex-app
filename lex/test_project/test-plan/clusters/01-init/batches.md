@@ -1818,15 +1818,15 @@ config each fail 1.404.
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.455 – 1.466, 1.475 – 1.476 |
+| Scenario range | 1.455 – 1.466, 1.475 – 1.480 |
 | Type | U |
 | Files covered | `lex/lex_app/fleet_metrics/emitter.py` (new) |
 | Test file | `lex/test_project/tests/init/test_1ba_fleet_metrics_emitter.py` |
-| Test classes | `TestCluster01ba_EmitterGating` (1.455–1.459), `TestCluster01ba_BoundedQueue` (1.460), `TestCluster01ba_BatchingAndDelivery` (1.461–1.465), `TestCluster01ba_Flush` (1.466), `TestCluster01ba_ForkSafety` (1.475–1.476) |
+| Test classes | `TestCluster01ba_EmitterGating` (1.455–1.459), `TestCluster01ba_BoundedQueue` (1.460), `TestCluster01ba_BatchingAndDelivery` (1.461–1.465, 1.479–1.480), `TestCluster01ba_DrainTick` (1.477–1.478), `TestCluster01ba_Flush` (1.466), `TestCluster01ba_ForkSafety` (1.475–1.476) |
 | Fixtures | none (module-level `_reset_for_tests()` clears the queue, the drain-thread singleton and the warning throttle between tests) |
-| Tests landed | **14 pass / 0 fail** |
+| Tests landed | **18 pass / 0 fail** |
 | Status | ✅ Complete |
-| Note | Fleet-metrics push build, Task 11 (PR F part 1). `note_failure()`'s throttle uses `None`, never `0.0`, as its "never warned" sentinel, because `time.monotonic()`'s reference point is unspecified and can legitimately be small early in a process's life, which would otherwise let the very first warning for any label be mistaken for one that just fired. `flush(timeout)` checks its deadline before dequeuing the next batch, not after, so an unsent batch is never pulled off the queue and then abandoned. A forked child process (task 12 emits from Celery worker processes) gets a fresh queue, fresh locks and a cleared drain-thread singleton via `os.register_at_fork`, so it never inherits a lock some other, now-nonexistent thread was holding, a `Thread` object that falsely reports `is_alive()`, or events the parent already queued. `lex-mcp-local`'s `src/lex_mcp/analytics.py:165-247` (the documented source for the `guard()`/`note_failure()` pattern) is reimplemented directly against its documented swallow-and-throttle contract, not copied line for line. |
+| Note | `note_failure()`'s throttle uses `None`, never `0.0`, as its "never warned" sentinel, because `time.monotonic()`'s reference point is unspecified and can legitimately be small early in a process's life, which would otherwise let the very first warning for any label be mistaken for one that just fired. Each 30 s tick posts batches until the queue is empty and stops at the first dropped batch, so a down controller costs one attempt and one retry per tick; only a 2xx answer is a delivery, and redirects are not followed. `flush(timeout)` checks its deadline before dequeuing the next batch, not after, so an unsent batch is never pulled off the queue and then abandoned. A forked child process (calculation events are emitted from Celery worker processes) gets a fresh queue, fresh locks and a cleared drain-thread singleton via `os.register_at_fork`, so it never inherits a lock some other, now-nonexistent thread was holding, a `Thread` object that falsely reports `is_alive()`, or events the parent already queued. |
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
@@ -1844,6 +1844,10 @@ config each fail 1.404.
 | 1.466 | flush() respects its timeout budget | `flush(timeout)` stops once the budget is spent rather than draining every queued batch, and never abandons a dequeued-but-unsent batch |
 | 1.475 | at-fork handler registered | the module registers `_after_fork_in_child` as `os.register_at_fork`'s `after_in_child` hook |
 | 1.476 | at-fork handler resets state | `_after_fork_in_child()` replaces the queue, clears the drain-thread singleton and replaces both locks |
+| 1.477 | one tick drains the whole queue | 250 queued and a 202 endpoint: one tick of the real `_drain_loop` posts 100, 100 and 50, leaving the queue empty |
+| 1.478 | a tick stops at the first dropped batch | 250 queued and a failing endpoint: one tick tries only the first batch (attempt + retry), 150 stay queued |
+| 1.479 | a redirect is not a delivery | a 302 (which `requests` reports as `ok`) gets the one retry and is dropped with a WARNING |
+| 1.480 | posts never follow a redirect | `requests.post` gets `allow_redirects=False` and the events URL; a 202 is delivered |
 
 ### Batch 1bb — The hourly fleet-metrics heartbeat: web-process-only, immediate first beat ✅
 
@@ -1857,7 +1861,7 @@ config each fail 1.404.
 | Fixtures | none (`_reset_for_tests()` on both `emitter` and `heartbeat`) |
 | Tests landed | **8 pass / 0 fail** |
 | Status | ✅ Complete |
-| Note | Fleet-metrics push build, Task 11 (PR F part 1). `start()`'s web-process gate reuses `lex.lex_app.apps.running_in_uvicorn()`; its once-per-process guard mirrors the latch the removed version reporter used (commit 0db88ad9). `_run()` emits once before its first `time.sleep`, which is what gives the "first beat immediate" guarantee — proved directly by letting `time.sleep` raise `StopIteration` after one iteration rather than waiting a real hour. |
+| Note | `start()`'s web-process gate reuses `lex.lex_app.apps.running_in_uvicorn()`; its once-per-process guard mirrors the latch the removed version reporter used (commit 0db88ad9). `_run()` emits once before its first `time.sleep`, which is what gives the "first beat immediate" guarantee — proved directly by letting `time.sleep` raise `StopIteration` after one iteration rather than waiting a real hour. |
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |

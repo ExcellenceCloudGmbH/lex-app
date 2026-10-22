@@ -1,12 +1,12 @@
-"""The hourly heartbeat lex-app sends from the web process (source-plan.md 3.3).
+"""The hourly heartbeat lex-app sends from the web process.
 
 ``start()`` fires one heartbeat immediately and then one every 3600 seconds
 from a daemon thread, but only in the web process: Celery workers never call
-this (``running_in_uvicorn()`` gates it) and never send a heartbeat, matching
-the data contract's "Workers send none". The payload's ``usage_enabled`` rides
-along either way, which is how the Collection dashboard on the controller side
-tells an opted-out instance (heartbeats, ``usage_enabled: false``) from a
-silent one (no heartbeats at all).
+this (``running_in_uvicorn()`` gates it) and never send a heartbeat. The
+payload's ``usage_enabled`` rides along either way, which is how the
+Collection dashboard on the controller side tells an opted-out instance
+(heartbeats, ``usage_enabled: false``) from a silent one (no heartbeats at
+all).
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from lex.lex_app.fleet_metrics import emitter
 
 logger = logging.getLogger(__name__)
 
-#: Seconds between heartbeats after the first one (source-plan.md 3.3).
+#: Seconds between heartbeats after the first one.
 HEARTBEAT_INTERVAL_SECONDS = 3600.0
 
 _started = False
@@ -32,7 +32,7 @@ _start_lock = threading.Lock()
 
 
 def build_payload() -> Dict[str, Any]:
-    """The heartbeat event body (source-plan.md 3.3). ``process`` is always "web"."""
+    """The heartbeat event body. ``process`` is always "web"."""
     return {
         "type": "heartbeat",
         "occurred_at": datetime.now(timezone.utc).isoformat(),

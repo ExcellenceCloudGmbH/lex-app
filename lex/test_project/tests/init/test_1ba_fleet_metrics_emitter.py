@@ -2,8 +2,8 @@
 
 Intent
 ------
-lex-app pushes a small stream of fleet-metrics events (a heartbeat, and from
-task 12 a ``calculation_finished`` per root run) to the Instance Controller's
+lex-app pushes a small stream of fleet-metrics events (a heartbeat, and a
+``calculation_finished`` per root run) to the Instance Controller's
 ingest endpoint. The emitter is the one piece every one of those events flows
 through, so its contract is the whole safety net: an event producer (a
 request handler, a calculation finaliser, Django startup) must never notice
@@ -20,7 +20,7 @@ reporter used (commit 0db88ad9) and ``LexAPI.send_email`` still uses, so
 local dev, CI and pytest runs never queue or send anything -- every test
 below has to opt in explicitly by setting all three variables.
 
-Cluster 1ba -- scenarios 1.455-1.466, 1.475-1.476. Type: U.
+Cluster 1ba -- scenarios 1.455-1.466, 1.475-1.480. Type: U.
 Covers: lex/lex_app/fleet_metrics/emitter.py.
 Run: python -m lex pytest lex/test_project/tests/init/test_1ba_fleet_metrics_emitter.py -v
 """
@@ -39,13 +39,20 @@ from lex.lex_app.fleet_metrics import emitter
 
 pytestmark = pytest.mark.init
 
-#: The three variables that gate a deployed instance (source-plan.md 3.1),
-#: mirroring ``LexAPI.send_email``'s own gate.
+#: The three variables that gate a deployed instance, mirroring
+#: ``LexAPI.send_email``'s own gate.
 _DEPLOYED_ENV = {
     "DEPLOYMENT_ENVIRONMENT": "prod",
     "DOMAIN_BASE": "example-instance.lit.example.com",
     "LEX_API_KEY": "test-api-key-deadbeef",
 }
+
+
+class _StopLoop(BaseException):
+    """Raised from a patched ``time.sleep`` to end an endless daemon loop.
+
+    A ``BaseException``, so ``guard()`` (which catches ``Exception``) cannot
+    swallow it."""
 
 
 class _NoOpThread:
@@ -342,6 +349,125 @@ class TestCluster01ba_BatchingAndDelivery(SimpleTestCase):
         self.assertIs(kwargs.get("target"), emitter._drain_loop)
         self.assertTrue(kwargs.get("daemon"), "The drain thread must be a daemon thread.")
 
+    # -- 1.479 -----------------------------------------------------
+    def test_1_479_a_redirect_is_not_a_delivery(self) -> None:
+        """
+        Scenario 1.479: only a 2xx answer counts as delivered.
+        Given: the endpoint answers 302 (a redirect, for example to a login
+               page), which requests reports as ``ok``
+        When: one drain cycle runs over a queued event
+        Then: the batch gets the same one retry as any failure, and both
+              attempts failing drops it with a WARNING -- a redirect never
+              reached the ingest endpoint.
+        """
+        self._fill_queue(1)
+        response = MagicMock(ok=True, status_code=302)
+
+        with patch.dict("os.environ", _DEPLOYED_ENV, clear=False), \
+             patch.object(emitter.time, "sleep"), \
+             patch.object(emitter.requests, "post", return_value=response) as post, \
+             patch.object(emitter.logger, "warning") as warning:
+            delivered = emitter._drain_once()
+
+        self.assertFalse(delivered, "A 302 answer must not count as delivered.")
+        self.assertEqual(post.call_count, 2, "A 302 answer must get the one retry.")
+        self.assertGreaterEqual(warning.call_count, 1, "The dropped batch must be logged.")
+
+    # -- 1.480 -----------------------------------------------------
+    def test_1_480_posts_never_follow_a_redirect(self) -> None:
+        """
+        Scenario 1.480: the POST is sent with redirects disabled.
+        Given: a deployed instance and an endpoint answering 202
+        When: one batch is sent
+        Then: requests.post is called with allow_redirects=False to
+              https://{DOMAIN_BASE}/api/fleet-metrics/events/, and the 202
+              counts as delivered.
+        """
+        response = MagicMock(status_code=202)
+
+        with patch.dict("os.environ", _DEPLOYED_ENV, clear=False), \
+             patch.object(emitter.requests, "post", return_value=response) as post:
+            delivered = emitter._send([{"type": "heartbeat"}], emitter.REQUEST_TIMEOUT_SECONDS)
+
+        self.assertTrue(delivered, "A 202 answer must count as delivered.")
+        self.assertEqual(
+            post.call_args.args[0],
+            "https://example-instance.lit.example.com/api/fleet-metrics/events/",
+        )
+        self.assertIs(
+            post.call_args.kwargs.get("allow_redirects"), False,
+            "The POST must never follow a redirect.",
+        )
+
+
+class TestCluster01ba_DrainTick(SimpleTestCase):
+    """Cluster 1ba: each 30 s tick posts everything that is queued."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        emitter._reset_for_tests()
+
+    def tearDown(self) -> None:
+        emitter._reset_for_tests()
+        super().tearDown()
+
+    def _one_tick(self, sleeps: int) -> None:
+        """Run the real drain loop for one tick: ``sleeps`` calls to
+        ``time.sleep`` return (the 30 s wait, then any 5 s retry waits), the
+        next one ends the loop."""
+        side_effect = [None] * sleeps + [_StopLoop()]
+        with patch.object(emitter.time, "sleep", side_effect=side_effect):
+            with self.assertRaises(_StopLoop):
+                emitter._drain_loop()
+
+    # -- 1.477 -----------------------------------------------------
+    def test_1_477_one_tick_drains_the_whole_queue(self) -> None:
+        """
+        Scenario 1.477: a tick keeps posting batches until the queue is empty.
+        Given: 250 events queued and an endpoint answering 202
+        When: the drain loop runs one tick
+        Then: three POSTs carry 100, 100 and 50 events and the queue is empty
+              -- delivery is not capped at one batch per tick, so a burst of
+              events is never left to be pushed out by newer ones.
+        """
+        for i in range(250):
+            emitter._queue.put_nowait({"type": "heartbeat", "seq": i})
+        response = MagicMock(status_code=202)
+
+        with patch.dict("os.environ", _DEPLOYED_ENV, clear=False), \
+             patch.object(emitter.requests, "post", return_value=response) as post:
+            self._one_tick(sleeps=1)
+
+        sizes = [len(call.kwargs["json"]["events"]) for call in post.call_args_list]
+        self.assertEqual(sizes, [100, 100, 50], f"One tick must post every batch; got {sizes}.")
+        self.assertEqual(emitter._queue.qsize(), 0, "The queue must be empty after the tick.")
+
+    # -- 1.478 -----------------------------------------------------
+    def test_1_478_a_tick_stops_at_the_first_dropped_batch(self) -> None:
+        """
+        Scenario 1.478: a down endpoint costs one attempt and one retry per tick.
+        Given: 250 events queued and an endpoint that always fails
+        When: the drain loop runs one tick
+        Then: only the first batch is tried (attempt + retry), it is dropped,
+              and the other 150 events stay queued for the next tick -- a
+              down controller does not make one tick retry every batch.
+        """
+        for i in range(250):
+            emitter._queue.put_nowait({"type": "heartbeat", "seq": i})
+
+        with patch.dict("os.environ", _DEPLOYED_ENV, clear=False), \
+             patch.object(
+                 emitter.requests, "post", side_effect=requests.ConnectionError("down"),
+             ) as post, \
+             patch.object(emitter.logger, "warning"):
+            self._one_tick(sleeps=2)
+
+        self.assertEqual(post.call_count, 2, "Only the first batch may be tried in this tick.")
+        self.assertEqual(
+            emitter._queue.qsize(), 150,
+            "The batches after the dropped one must stay queued for the next tick.",
+        )
+
 
 class TestCluster01ba_Flush(SimpleTestCase):
     """Cluster 1ba: flush(timeout) is synchronous and time-bounded."""
@@ -393,8 +519,8 @@ class TestCluster01ba_Flush(SimpleTestCase):
 class TestCluster01ba_ForkSafety(SimpleTestCase):
     """Cluster 1ba: a forked child process never inherits dead-thread/lock state.
 
-    Task 12 emits from Celery worker processes, which can be forked rather
-    than spawned. A forked child keeps only the thread that called fork() --
+    Calculation events are emitted from Celery worker processes, which can be
+    forked rather than spawned. A forked child keeps only the thread that called fork() --
     every other thread the parent had simply stops existing there, taking
     any lock it held with it (held forever in the child) and leaving behind
     Thread objects that can still report ``is_alive() == True`` even though

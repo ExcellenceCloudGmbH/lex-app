@@ -1,8 +1,7 @@
 """Posts fleet-metrics events to the Instance Controller's ingest endpoint.
 
-Intent (source-plan.md section 3.3): every lex-app instance pushes a small
-stream of events -- a heartbeat at startup and every hour, and (from the
-calculation emitter, task 12) one ``calculation_finished`` per root run -- to
+Every lex-app instance pushes a small stream of events -- a heartbeat at
+startup and every hour, and one ``calculation_finished`` per root run -- to
 ``https://{DOMAIN_BASE}/api/fleet-metrics/events/``, authenticated with the
 instance's existing ``LEX_API_KEY``. Delivery must never slow down or break
 whatever triggered the event: a request handler, a calculation, or Django
@@ -12,10 +11,12 @@ startup itself. That is this module's whole job --
   full, the drain thread cannot be started, or fleet metrics are disabled;
 * a bounded ``queue.Queue(1000)`` drops the oldest event once it is full, so
   the most recent fleet state is always what (eventually) ships;
-* one daemon thread drains the queue, posting batches of at most 100 events
-  every 30 seconds with a 10 second timeout, one retry after 5 seconds, then
-  drops the batch and logs a WARNING -- throttled to at most once per hour
-  per failure label so a down controller cannot flood the log;
+* one daemon thread wakes every 30 seconds and posts everything queued, in
+  batches of at most 100 events, each with a 10 second timeout and one retry
+  after 5 seconds; a batch that fails both is dropped with a WARNING --
+  throttled to at most once per hour per failure label so a down controller
+  cannot flood the log -- and the rest waits for the next tick;
+* only a 2xx answer counts as delivered, and redirects are never followed;
 * ``flush(timeout)`` is a synchronous, best-effort drain bounded by
   ``timeout`` seconds total, for a Celery worker that is about to receive
   SIGTERM and cannot wait for the next scheduled drain tick;
@@ -23,17 +24,14 @@ startup itself. That is this module's whole job --
   ``DEPLOYMENT_ENVIRONMENT`` + ``DOMAIN_BASE`` + ``LEX_API_KEY`` gate
   ``_is_deployed_instance`` used in the removed version reporter (commit
   0db88ad9) -- so local dev, CI and pytest runs never queue or send anything;
-* a forked child process (task 12 emits from Celery worker processes) gets a
-  fresh queue, fresh locks and a cleared drain-thread singleton via
-  ``os.register_at_fork``, so it never inherits a lock some other,
-  now-nonexistent thread was holding, a ``Thread`` object that falsely
+* a forked child process (calculation events are emitted from Celery worker
+  processes) gets a fresh queue, fresh locks and a cleared drain-thread
+  singleton via ``os.register_at_fork``, so it never inherits a lock some
+  other, now-nonexistent thread was holding, a ``Thread`` object that falsely
   reports ``is_alive()``, or events the parent is already about to send.
 
 ``guard()`` and ``note_failure()`` are the "never let fleet-metrics code break
-its caller" primitives source-plan.md describes as copied from
-lex-mcp-local's ``src/lex_mcp/analytics.py:165-247``. These implement that
-documented swallow-and-throttle contract directly, rather than copying that
-file line for line.
+its caller" primitives: swallow the exception, log it throttled.
 """
 
 from __future__ import annotations
@@ -54,7 +52,7 @@ logger = logging.getLogger(__name__)
 MAX_QUEUE_SIZE = 1000
 #: At most this many events per POST.
 BATCH_SIZE = 100
-#: How often the daemon drain thread wakes up to post a batch.
+#: How often the daemon drain thread wakes up to post what is queued.
 DRAIN_INTERVAL_SECONDS = 30.0
 #: Per-HTTP-attempt timeout.
 REQUEST_TIMEOUT_SECONDS = 10.0
@@ -153,8 +151,8 @@ def emit(event: Dict[str, Any]) -> None:
 def flush(timeout: float = 5.0) -> None:
     """Best-effort synchronous drain, bounded by ``timeout`` seconds total.
 
-    Used by the Celery worker (lex/lex_app/celery_tasks.py, task 12) right
-    before it shuts down, so a worker's event leaves before ``SIGTERM`` --
+    Used by the Celery worker (lex/lex_app/celery_tasks.py) right before it
+    shuts down, so a worker's event leaves before ``SIGTERM`` --
     the daemon thread's next scheduled 30 s drain tick would otherwise be too
     late. Never raises.
     """
@@ -190,23 +188,35 @@ def _drain_loop() -> None:
     while True:
         time.sleep(DRAIN_INTERVAL_SECONDS)
         with guard("emitter.drain"):
-            _drain_once()
+            _drain()
 
 
-def _drain_once() -> None:
-    """Post one batch (if any), with the documented one retry after 5 s."""
+def _drain() -> None:
+    """Post batches until the queue is empty or a batch is dropped.
+
+    Stopping at the first dropped batch leaves the rest queued for the next
+    tick, so a down controller costs one attempt and one retry per tick, not
+    one per queued batch.
+    """
+    while _drain_once():
+        pass
+
+
+def _drain_once() -> bool:
+    """Post one batch (if any), with one retry after 5 s. True if delivered."""
     batch = _collect_batch()
     if not batch:
-        return
+        return False
     if _send(batch, REQUEST_TIMEOUT_SECONDS):
-        return
+        return True
     time.sleep(RETRY_DELAY_SECONDS)
     if _send(batch, REQUEST_TIMEOUT_SECONDS):
-        return
+        return True
     note_failure(
         "emitter.post",
         RuntimeError(f"dropped {len(batch)} fleet-metrics event(s) after one retry"),
     )
+    return False
 
 
 def _collect_batch(max_items: int = BATCH_SIZE) -> List[Dict[str, Any]]:
@@ -221,18 +231,25 @@ def _collect_batch(max_items: int = BATCH_SIZE) -> List[Dict[str, Any]]:
 
 
 def _send(batch: List[Dict[str, Any]], timeout: float) -> bool:
-    """One POST attempt for ``batch``. Returns success; never raises."""
+    """One POST attempt for ``batch``. Returns success; never raises.
+
+    Only a 2xx answer is a delivery. Redirects are not followed: a redirect
+    (to a login page, say) means the ingest endpoint never saw the batch.
+    """
     url = f"https://{os.getenv('DOMAIN_BASE')}/api/fleet-metrics/events/"
     headers = {
         "Authorization": f"Api-Key {os.getenv('LEX_API_KEY')}",
         "Content-Type": "application/json",
     }
     try:
-        response = requests.post(url, json={"events": batch}, headers=headers, timeout=timeout)
+        response = requests.post(
+            url, json={"events": batch}, headers=headers, timeout=timeout,
+            allow_redirects=False,
+        )
     except requests.RequestException as exc:
         note_failure("emitter.post.network", exc)
         return False
-    if response.ok:
+    if 200 <= response.status_code < 300:
         return True
     note_failure("emitter.post.status", RuntimeError(f"status {response.status_code}"))
     return False
@@ -269,9 +286,9 @@ def _after_fork_in_child() -> None:
 
 
 if hasattr(os, "register_at_fork"):
-    # POSIX only; Windows has no fork(). A forked worker process (task 12's
-    # Celery child) must never inherit a dead drain thread or a lock some
-    # other, now-nonexistent thread was holding.
+    # POSIX only; Windows has no fork(). A forked worker process (a Celery
+    # child) must never inherit a dead drain thread or a lock some other,
+    # now-nonexistent thread was holding.
     os.register_at_fork(after_in_child=_after_fork_in_child)
 
 
