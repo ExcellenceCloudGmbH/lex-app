@@ -8,6 +8,7 @@ from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.audit_logging.serializers.AuditLogMixinSerializer import generic_instance_payload
 from lex.audit_logging.utils.content_types import safe_get_content_type
+from lex.core.services.usage_config import usage_metrics_enabled
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
 
 logger = logging.getLogger(__name__)
@@ -259,24 +260,33 @@ def ensure_terminal_calculation_audit(
             )
             # No earlier 'pending' row existed to time this run from -- the
             # finaliser created the whole audit trail for it just now, so its
-            # start time is unknown (fleet_metrics.calculations.py, task 12).
+            # start time is unknown, not zero.
             status_row._freshly_created = True
-        else:
+        elif usage_metrics_enabled():
+            # This re-fetch only exists to hand a status row to the emit hook
+            # below, so skip it entirely when there is no hook to feed.
             status_row = (
                 AuditLogStatus.objects.filter(audit_log=audit_log).order_by("-id").first()
             )
             if status_row is not None:
                 status_row._freshly_created = False
+        else:
+            status_row = None
 
-    # Local imports: lex.lex_app's package __init__ pulls in Celery app setup
-    # (lex/lex_app/celery.py) and worker-recovery wiring, which this function
-    # must not force onto every caller's import graph just to send one event
-    # (task 12; the same defensive pattern heartbeat.py uses for apps.py).
-    from lex.lex_app.fleet_metrics.calculations import emit_calculation_finished
-    from lex.lex_app.fleet_metrics.emitter import guard
+    # Local import: lex.lex_app's package __init__ pulls in Celery app setup
+    # and worker-recovery wiring, which this function must not force onto
+    # every caller's import graph just to send one event (the same defensive
+    # pattern heartbeat.py uses for apps.py). The import sits inside the
+    # try/except too, so a broken optional dependency there can't propagate
+    # out of the finaliser after the audit write above has already committed.
+    try:
+        from lex.lex_app.fleet_metrics.calculations import emit_calculation_finished
+        from lex.lex_app.fleet_metrics.emitter import guard
 
-    with guard("calculation_audit.emit"):
-        emit_calculation_finished(audit_log, status_row, audit_status)
+        with guard("calculation_audit.emit"):
+            emit_calculation_finished(audit_log, status_row, audit_status)
+    except Exception:
+        logger.debug("Fleet-metrics emit hook unavailable", exc_info=True)
 
     _update_operation_context_audit_log(audit_log)
     return audit_log

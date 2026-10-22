@@ -4,14 +4,13 @@ Intent: the fleet-metrics backfill (a one-off, out-of-repo job on the
 Instance Controller) reads ``audit_logging_auditlog`` and
 ``audit_logging_auditlogstatus`` directly by column name and type to
 reconstruct ``calculation_finished`` history for runs that completed before
-an instance started sending the live event (task 12; source-plan.md 3.3).
-That job has no way to notice a framework refactor that quietly renames,
-retypes, or drops one of the columns it reads -- the failure would surface
-only as silently wrong or missing fleet data, much later, somewhere else.
-This batch pins the column contract so a change here fails *this* suite
-instead.
+an instance started sending the live event. That job has no way to notice a
+framework refactor that quietly renames, retypes, or drops one of the
+columns it reads -- the failure would surface only as silently wrong or
+missing fleet data, much later, somewhere else. This batch pins the column
+contract so a change here fails *this* suite instead.
 
-Columns pinned (scenario 6.168 of the branch this plan draws from):
+Columns pinned:
   * ``audit_logging_auditlog``: id, date, author, resource, payload,
     calculation_id.
   * ``audit_logging_auditlogstatus``: audit_log_id, status, created_at,
@@ -92,7 +91,7 @@ class TestCluster06u_FleetMetricsAuditContract(SimpleTestCase):
         Then: audit_log_id/status/created_at/updated_at all exist, with the
               types and DB column names the backfill's SQL assumes — these
               are exactly the two timestamps emit_calculation_finished's
-              duration_seconds is computed from (task 12)
+              duration_seconds is computed from
         """
         audit_log_field = AuditLogStatus._meta.get_field("audit_log")
         self.assertIsInstance(
@@ -120,7 +119,7 @@ class TestCluster06u_FleetMetricsAuditContract(SimpleTestCase):
             created_field.auto_now_add,
             "AuditLogStatus.created_at must be auto_now_add — "
             "emit_calculation_finished's duration_seconds is "
-            "updated_at - created_at (task 12).",
+            "updated_at - created_at.",
         )
         self.assertTrue(
             updated_field.auto_now,

@@ -280,8 +280,7 @@ class CallbackTask(Task):
                 # right after this task -- the emitter's own 30 s drain tick
                 # would often lose the calculation_finished event just queued
                 # above (SIGTERM arrives first). A bounded, synchronous,
-                # never-raising drain here gets it out before that happens
-                # (task 12; source-plan.md 3.3).
+                # never-raising drain here gets it out before that happens.
                 from lex.lex_app.fleet_metrics import emitter
 
                 emitter.flush(5)

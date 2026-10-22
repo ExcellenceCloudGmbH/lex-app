@@ -412,9 +412,11 @@ class ModelRegistration:
 
         @sync_to_async
         def reset_instances_with_aborted_calculations():
+            from lex.audit_logging.models.AuditLog import AuditLog
             from lex.audit_logging.utils.calculation_audit import (
                 ensure_terminal_calculation_audit,
             )
+            from lex.audit_logging.utils.content_types import safe_get_content_type
 
             stuck = list(
                 model.objects.filter(is_calculated=CalculationModel.IN_PROGRESS)
@@ -433,10 +435,27 @@ class ModelRegistration:
                 instance.save(skip_hooks=True)
 
                 try:
+                    # The run's own 'pending' AuditLog, written when it started
+                    # and never finalised because the server died mid-run. This
+                    # instance has no calculation_id to resolve on its own at
+                    # startup, so without this lookup the terminal audit write
+                    # below is silently skipped. Handing the row through as a
+                    # template lets ensure_terminal_calculation_audit finalise
+                    # it directly instead of being unable to find it.
+                    pending_log = (
+                        AuditLog.objects.filter(
+                            content_type=safe_get_content_type(model),
+                            object_id=instance.pk,
+                            status_records__status="pending",
+                        )
+                        .order_by("-id")
+                        .first()
+                    )
                     ensure_terminal_calculation_audit(
                         instance,
                         audit_status="aborted",
                         error_message="Calculation aborted during startup reset",
+                        context_data={"audit_log_temp": pending_log} if pending_log else None,
                     )
                 except Exception:
                     logger.warning(

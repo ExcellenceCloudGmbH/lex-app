@@ -1,33 +1,29 @@
-"""Cluster 7v — the ``calculation_finished`` fleet-metrics event (task 12).
+"""Cluster 7v — the ``calculation_finished`` fleet-metrics event.
 
 Intent: every root calculation's terminal state (SUCCESS, ERROR, CANCELLED,
 ABORTED) must reach the Instance Controller as exactly one ``calculation_
 finished`` event, however it got there — a synchronous save, a Celery
 worker's success/failure callback, a user cancel, or the startup recovery
-sweep aborting a stuck row. Missing one of those paths would leave a gap in
-the controller's fleet-wide Collection dashboard that nobody would notice
-until someone asks "why does instance X show no failures ever" and the
-answer is "because aborted runs never sent anything" (source-plan.md 3.3).
+sweep aborting a stuck row. Missing one of those paths would hide that
+failure mode from fleet-wide monitoring.
 
 Two layers are tested:
 
 * **Logic** (``TestCluster07v_EventLogic``, Type U) — ``emit_calculation_
   finished``'s own rules in isolation: outcome mapping, the usage-metrics
-  gate, duration derivation (including the "finaliser created the row
-  itself" null case), pass-through fields, the web/worker process tag, and
-  the in-process LRU de-dupe. Driven with lightweight stand-ins
-  (``SimpleNamespace``) rather than real DB rows — this module only ever
-  reads attributes off what it is handed, so no ORM round-trip is needed to
-  pin its own rules.
+  gate, duration derivation, pass-through fields, the web/worker process
+  tag, and the in-process LRU de-dupe. Driven with lightweight stand-ins
+  (``SimpleNamespace``), no DB needed.
 * **Integration** (``TestCluster07v_EndToEnd``, Type I) — the real hook
-  inside ``ensure_terminal_calculation_audit`` fires for each of the six
-  terminal call sites, with ``emitter.emit`` mocked so no network call is
-  made and the captured events can be asserted on directly.
+  inside ``ensure_terminal_calculation_audit`` fires for each terminal call
+  site, with ``emitter.emit`` mocked so no network call is made and the
+  captured events can be asserted on directly.
 
-Cluster 7v — scenarios 7.238–7.258. Type: U/I.
+Cluster 7v — scenarios 7.238–7.261. Type: U/I.
 Covers: lex/lex_app/fleet_metrics/calculations.py,
         lex/audit_logging/utils/calculation_audit.py (the emit hook),
-        lex/lex_app/celery_tasks.py (the flush(5) call).
+        lex/lex_app/celery_tasks.py (the flush(5) call),
+        lex/process_admin/utils/model_registration.py (the startup-abort lookup).
 Run: python -m lex pytest lex/test_project/tests/calculations/test_7v_calculation_finished_events.py -v
 """
 
@@ -35,7 +31,6 @@ from __future__ import annotations
 
 import os
 import time
-import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest import mock
@@ -101,9 +96,9 @@ class TestCluster07v_EventLogic(SimpleTestCase):
         self.addCleanup(fleet_calculations._reset_for_tests)
 
     # -- 7.238 — outcome mapping -----------------------------------------
-    def test_7_238_audit_status_maps_to_controller_outcome(self):
+    def test_7_238_audit_status_maps_to_outcome(self):
         """
-        Scenario 7.238: each finaliser audit_status maps to its controller outcome.
+        Scenario 7.238: each finaliser audit_status maps to its event outcome.
         Given: the four audit_status strings ensure_terminal_calculation_audit writes
         When: emit_calculation_finished is called with each
         Then: the emitted event's "outcome" is SUCCESS/ERROR/CANCELLED/ABORTED respectively
@@ -146,13 +141,14 @@ class TestCluster07v_EventLogic(SimpleTestCase):
         Scenario 7.240: the usage-metrics switch gates calculation events too.
         Given: usage_metrics_enabled() is False
         When: emit_calculation_finished is called with a normally-mapped audit_status
-        Then: no event is emitted — "an instance sends heartbeats only" (3.3)
+        Then: no event is emitted — a disabled instance still sends heartbeats,
+              just no calculation events
         """
         self.usage_mock.return_value = False
         fleet_calculations.emit_calculation_finished(_audit_log(), _status_row(), "success")
         self.emit_mock.assert_not_called()
 
-    # -- 7.241 — defensive: no pk yet ----------------------------------------
+    # -- 7.241 -- defensive: no pk yet ----------------------------------------
     def test_7_241_audit_log_without_a_pk_is_a_no_op(self):
         """
         Scenario 7.241: an unsaved AuditLog (no pk) never reaches the emitter.
@@ -300,7 +296,7 @@ class TestCluster07v_EventLogic(SimpleTestCase):
     # -- 7.249 — event shape --------------------------------------------
     def test_7_249_event_shape_and_aware_utc_timestamp(self):
         """
-        Scenario 7.249: the event's static shape matches source-plan.md 3.3.
+        Scenario 7.249: the event's static shape.
         Given: any emitted calculation_finished event
         When: its fields are inspected
         Then: type == "calculation_finished" and occurred_at parses as an
@@ -313,7 +309,7 @@ class TestCluster07v_EventLogic(SimpleTestCase):
         self.assertIsNotNone(parsed.tzinfo, "occurred_at must be timezone-aware.")
         self.assertEqual(
             parsed.utcoffset(), timedelta(0),
-            "occurred_at must be UTC (source-plan.md: 'events carry aware UTC timestamps').",
+            "occurred_at must be an aware UTC timestamp.",
         )
 
 
@@ -331,6 +327,23 @@ class TestCluster07v_EndToEnd(E2ETestCase):
         self.emit_mock = self._emit_patch.start()
         self.addCleanup(self._emit_patch.stop)
         self.addCleanup(fleet_calculations._reset_for_tests)
+        # Pin the usage-metrics switch on for both call sites that read it
+        # (each imported the name directly, so the source module can't be
+        # patched from here) -- a developer's local .env with
+        # LEX_USAGE_METRICS=false must not turn these tests red.
+        self._usage_patches = [
+            mock.patch(
+                "lex.lex_app.fleet_metrics.calculations.usage_metrics_enabled",
+                return_value=True,
+            ),
+            mock.patch(
+                "lex.audit_logging.utils.calculation_audit.usage_metrics_enabled",
+                return_value=True,
+            ),
+        ]
+        for p in self._usage_patches:
+            p.start()
+            self.addCleanup(p.stop)
         AuditLog.objects.all().delete()
         # ActiveCalculationStateStore is a process-global, not reset by
         # TransactionTestCase's table flush+PK reset between tests. Left
@@ -454,20 +467,25 @@ class TestCluster07v_EndToEnd(E2ETestCase):
         self.assertEqual(len(events), 1, f"expected exactly one event, got {len(events)}.")
         self.assertEqual(events[0]["outcome"], "ERROR")
 
-    # -- 7.255 — startup abort ----------------------------------------------
-    @unittest.expectedFailure  # BUG-034 (open): the startup-abort call site passes
-    # no context_data and ActiveCalculationStateStore is always empty at startup
-    # by design, so ensure_terminal_calculation_audit's own early-return guard
-    # fires before any audit row (or fleet-metrics event) is ever written.
-    def test_7_255_startup_abort_sweep_emits_one_aborted_event(self):
+    # -- 7.255 — startup abort finalises the interrupted run's own row -----
+    def test_7_255_startup_abort_sweep_finalises_the_pending_audit_row(self):
         """
         Scenario 7.255: the startup recovery sweep emits one ABORTED event
-        for a stuck IN_PROGRESS row nobody is tracking.
-
-        Pins the *correct* behaviour per source-plan.md 3.3 ("outcome is one
-        of SUCCESS, ERROR, ABORTED, CANCELLED"). Currently fails: see BUG-034.
+        for a stuck IN_PROGRESS row, using the pending AuditLog the
+        interrupted run left behind when it started.
         """
+        from lex.audit_logging.utils.content_types import safe_get_content_type
+
         calc = AuditColumnsCalc.objects.create(name="v255")
+        pending_log = AuditLog.objects.create(
+            author="system", resource="auditcolumnscalc", action="update",
+            calculation_id=f"calc_{calc.pk}",
+            content_type=safe_get_content_type(AuditColumnsCalc), object_id=calc.pk,
+        )
+        pending_status = AuditLogStatus.objects.create(audit_log=pending_log, status="pending")
+        start = datetime.now(timezone.utc) - timedelta(seconds=5)
+        AuditLogStatus.objects.filter(pk=pending_status.pk).update(created_at=start)
+
         AuditColumnsCalc.objects.filter(pk=calc.pk).update(is_calculated=CalculationModel.IN_PROGRESS)
 
         with mock.patch.dict(os.environ, {"CALLED_FROM_START_COMMAND": "1"}):
@@ -478,6 +496,89 @@ class TestCluster07v_EndToEnd(E2ETestCase):
         events = self._captured_events()
         self.assertEqual(len(events), 1, f"expected exactly one event, got {len(events)}.")
         self.assertEqual(events[0]["outcome"], "ABORTED")
+        self.assertEqual(
+            events[0]["audit_log_id"], pending_log.pk,
+            "the event must carry the interrupted run's own pending AuditLog, "
+            "not a fresh, unrelated one.",
+        )
+        self.assertIsNotNone(
+            events[0]["duration_seconds"],
+            "the pending row's real created_at gives a measurable duration, not null.",
+        )
+        self.assertGreater(events[0]["duration_seconds"], 4.0)
+
+        final_status = AuditLogStatus.objects.get(pk=pending_status.pk)
+        self.assertEqual(
+            final_status.status, "aborted",
+            "the sweep must finalise the interrupted run's own status row to "
+            "'aborted', not leave it 'pending' forever.",
+        )
+
+    # -- 7.259 — startup abort, nothing to link to --------------------------
+    def test_7_259_startup_abort_without_a_pending_row_emits_nothing(self):
+        """
+        Scenario 7.259: a stuck row with no prior audit trail at all still
+        produces no event — there is nothing to key it on.
+        """
+        calc = AuditColumnsCalc.objects.create(name="v259")
+        AuditColumnsCalc.objects.filter(pk=calc.pk).update(is_calculated=CalculationModel.IN_PROGRESS)
+
+        with mock.patch.dict(os.environ, {"CALLED_FROM_START_COMMAND": "1"}):
+            ModelRegistration._handle_calculation_model_reset(
+                AuditColumnsCalc, tracked_record_ids=set()
+            )
+
+        self.assertEqual(
+            self._captured_events(), [],
+            "with no pending AuditLog to find and no calculation_id to "
+            "resolve, the sweep has nothing to key an event on.",
+        )
+
+    # -- 7.260 — a raising hook must not break the finaliser ----------------
+    def test_7_260_a_raising_emit_hook_leaves_the_finaliser_intact(self):
+        """
+        Scenario 7.260: if the emit hook itself raises, ensure_terminal_
+        calculation_audit still returns its AuditLog, row committed.
+        """
+        from lex.audit_logging.utils.calculation_audit import ensure_terminal_calculation_audit
+
+        calc = AuditColumnsCalc.objects.create(name="v260")
+        self.emit_mock.side_effect = RuntimeError("boom")
+
+        result = ensure_terminal_calculation_audit(
+            calc, audit_status="success", context_data={"calculation_id": f"calc_{calc.pk}"},
+        )
+
+        self.assertIsNotNone(
+            result,
+            "a raising emit hook must not stop the finaliser from returning its AuditLog.",
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(pk=result.pk).exists(),
+            "the AuditLog row must still be committed even though the emit hook raised.",
+        )
+
+    # -- 7.261 — a nested (non-root) run sends nothing -----------------------
+    def test_7_261_a_nested_child_run_sends_no_event(self):
+        """
+        Scenario 7.261: a child calculation nested under a root run is not
+        itself a root run, so it never reaches the emit hook.
+        """
+        from lex.audit_logging.utils.ModelContext import ModelContext
+        from lex.audit_logging.utils.calculation_audit import ensure_terminal_calculation_audit
+
+        root = AuditColumnsCalc(pk=101, name="root")
+        child = AuditColumnsCalc(pk=102, name="child")
+        nested_context = ModelContext([root, child])
+
+        result = ensure_terminal_calculation_audit(
+            child, audit_status="success", model_context=nested_context,
+        )
+
+        self.assertIsNone(
+            result, "a non-root instance must return None before any audit write or emit.",
+        )
+        self.emit_mock.assert_not_called()
 
     # -- 7.256 — real null duration --------------------------------------
     def test_7_256_duration_is_null_when_no_prior_audit_row_existed(self):

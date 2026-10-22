@@ -139,6 +139,6 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Test classes | `TestCluster06u_FleetMetricsAuditContract` — pins `AuditLog.id/date/author/resource/payload/calculation_id` and `AuditLogStatus.audit_log_id/status/created_at/updated_at` (field type, DB column name, `db_table`, and the `auto_now_add`/`auto_now` flags `emit_calculation_finished`'s `duration_seconds` depends on) |
 | Fixtures | none — `Model._meta` introspection only, no DB access |
 | Tests landed | **3 pass / 0 fail** |
-| Status | ✅ Complete — task 12 (fleet-metrics push build). The out-of-repo backfill job on the Instance Controller reads these two tables directly by column name and type; this batch is the local tripwire for a framework refactor that would otherwise silently break it elsewhere, much later. |
+| Status | ✅ Complete. The out-of-repo backfill job on the Instance Controller reads these two tables directly by column name and type; this batch is the local tripwire for a framework refactor that would otherwise silently break it elsewhere, much later. |
 
 ---

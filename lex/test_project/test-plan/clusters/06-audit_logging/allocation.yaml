@@ -220,4 +220,4 @@ letters:
       AuditLogStatus.audit_log_id/status/created_at/updated_at (name, type,
       db_table, auto_now_add/auto_now) at the Model._meta level — the exact
       columns the out-of-repo fleet-metrics backfill reads by name and type
-      (task 12). Model-metadata only, no DB access needed.
+      Model-metadata only, no DB access needed.
