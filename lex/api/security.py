@@ -123,12 +123,14 @@ def is_readable(request, instance) -> bool:
 
     Judged by ``permission_read`` for this record — the decision the
     serializer made before, when a refused record came back as ``{}``.
-    Models without ``permission_read`` (audit log, plain Django models) use
-    the list endpoint's rule.
+    Models without ``permission_read`` (plain Django models) and the audit
+    trail, whose own ``permission_read`` allows everyone while its list
+    judges each entry by the record it names, use the list endpoint's rule.
     """
     from lex.api.views.model_entries.filter_backends import apply_read_restriction
 
-    if not hasattr(instance, "permission_read"):
+    audit_trail = strict("READ_SURFACES") and type(instance).__name__ in ("AuditLog", "AuditLogStatus")
+    if audit_trail or not hasattr(instance, "permission_read"):
         queryset = type(instance)._default_manager.filter(pk=instance.pk)
         return apply_read_restriction(queryset, request).exists()
     return bool(read_result(request, instance).allowed)

@@ -95,6 +95,29 @@ caller may not read — are recorded too, with status `failure` and the refusing
 status code. Requests rejected before the view runs at all (no session, no API
 key) are not: nothing was served and no operation began.
 
+### Who sees an export or download entry
+
+An export or download payload describes the request — file name, size, rows,
+filter — not field values of a record. So these entries are not judged by a
+record rebuilt from the payload, as create, update and delete entries are:
+
+- **A download** is visible to whoever may read the record it names
+  (`permission_read` of that record). If the record no longer exists, the
+  payload check applies as before.
+- **A model-wide export** is visible to whoever may export the model: its
+  `permission_list` does not refuse the caller and its `permission_export`
+  allows a blank record.
+- **A superuser** sees every entry.
+- **The payload** comes back whole to whoever may see the entry. Create,
+  update and delete payloads keep their field-level pruning.
+- **Status rows** (`api/model_entries/auditlogstatus/list`) are as visible as
+  their entry, and an entry fetched by id follows the same rule as the list.
+- **Tracebacks** of failed operations (`error_traceback`) are shown only to
+  superusers, on both `auditlog` and `auditlogstatus`.
+
+This is part of the `READ_SURFACES` hardening (on by default);
+`LEX_SEC_READ_SURFACES=false` restores the earlier payload-based check.
+
 ## Bulk Operations
 
 Bulk updates and deletes are also tracked via `BulkAuditLogMixin`. Each individual record in a bulk operation gets its own audit log entry — so a bulk update of 100 records creates 100 audit log entries.

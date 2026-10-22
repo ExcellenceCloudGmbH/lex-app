@@ -50,10 +50,10 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
         """Return the rows of ``queryset`` the requesting user may read."""
         name = name or queryset.model.__name__
 
-        # AuditLogStatus and CalculationLog handlers always permit every row,
-        # so skip the per-row loop entirely for them.
+        # CalculationLog's handler always permits every row, so skip the
+        # per-row loop entirely for it.
         if name == "AuditLogStatus":
-            return queryset
+            return self._handle_auditlogstatus(request, queryset)
         if name == "CalculationLog":
             return queryset
         if name == "AuditLog":
@@ -198,13 +198,31 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
 
         return frozenset(handled_resources), allowed_q
 
+    def _handle_auditlogstatus(self, request, queryset):
+        """A status row is readable iff its audit-log entry is (LEX_SEC_READ_SURFACES)."""
+        if not strict("READ_SURFACES"):
+            return queryset
+        from lex.audit_logging.models.AuditLog import AuditLog
+
+        audit_logs = AuditLog.objects.filter(pk__in=queryset.values("audit_log_id"))
+        readable = self._handle_auditlog(request, audit_logs).values("pk")
+        return queryset.filter(audit_log_id__in=readable)
+
     def _handle_auditlog(self, request, queryset):
         handled_resources, allowed_q = self._build_auditlog_db_visibility_filters(request)
         residual_queryset = queryset
 
         if handled_resources:
-            residual_queryset = queryset.exclude(resource__in=handled_resources)
-            residual_q = ~Q(resource__in=handled_resources)
+            # Export and download entries are judged row by row, by the record
+            # or the model they name (can_read_from_payload); the scope filter
+            # below only knows payload ids.
+            from lex.audit_logging.models.AuditLog import AuditLog
+
+            scoped_rows = Q(resource__in=handled_resources)
+            if strict("READ_SURFACES"):
+                scoped_rows &= ~Q(action__in=AuditLog.FILE_OPERATION_ACTIONS)
+            residual_queryset = queryset.exclude(scoped_rows)
+            residual_q = ~scoped_rows
             if allowed_q is None:
                 queryset = residual_queryset
             else:

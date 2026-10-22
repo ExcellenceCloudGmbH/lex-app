@@ -15,7 +15,7 @@
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 16 | 110 | 54 | 2 | 0 |
 | 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
-| 6. Audit Logging | 19 | 124 | 27 | 3 | 0 |
+| 6. Audit Logging | 20 | 167 | 35 | 3 | 0 |
 | 7. Calculation State Machine | 21 | 237 | 94 | 0 | 0 |
 | 8. Celery & Async | 15 | 153 | 89 | 12 | 0 |
 | 9. Signals & WebSocket | 7 | 43 | 15 | 0 | 0 |
@@ -185,6 +185,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 6q | Root-calculation detection ignores heading frames | 6.117-6.118 | complete | 2 | 0 | 0 | heading frames (`model_logging_context("...")`) are presentation-only — `_is_root_calculation` must skip them via get_root_model()/get_current_model() |
 | 6r | A run started by a create has its own audit entry | 6.119-6.120 | complete | 2 | 0 | 0 | 6.119 create and run are two entries - the create's finalised to 'success', the run's an 'update' under its own <model>_<pk>_update_<uuid> calculation id, also 'success'; 6.120 a failed run's entry is 'failure' with a traceback while the create's entry stays 'success'. |
 | 6s | Export & download audit mechanism | 6.121-6.124 | complete | 4 | 0 | 0 | The export/download half of the trail's contract, pinned through the file-download endpoint: `export` and `download` are recordable actions that round-trip through the table and `to_dict` (6.121); an API-key caller is named `Technical User`, not `AnonymousUser` (6.122); the entry exists and reads `pending` from inside the view, before the file is served, and is finalised afterwards (6.123); a failure the API layer has no answer for still leaves a `failure` entry carrying its traceback (6.124). Per-endpoint coverage lives in 10p, 13i and 15l. |
+| 6t | Who reads export & download entries | 6.160-6.167 | complete | 8 | 0 | 0 | The read side of 6s, behind LEX_SEC_READ_SURFACES. A download entry is visible to whoever may read its record and hidden from others (6.160); a model-wide export entry to whoever may export the model (6.161); a record's history is one filtered query (6.162); the payload comes back whole (6.163); auditlogstatus rows follow their entry (6.164); tracebacks are superuser-only (6.165); the opt-out restores the payload check (6.166); the detail endpoint applies the list's rule (6.167). 6.160-6.165 and 6.167 fail on the #840 head. |
 
 ## 7. Calculation State Machine (`calculations`)
 
