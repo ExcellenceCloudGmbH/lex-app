@@ -1,8 +1,8 @@
 ---
 date: 2026-10-22
 clusters: [6, 7]
-tests_added: "25 new scenarios (6.168, 7.238-7.261)"
-suite_tally: "test_7v_calculation_finished_events.py + test_6u_fleet_metrics_audit_contract.py: 27 pass / 0 fail, 4 subtests pass — confirmed deterministic across repeated full-file runs and every test run alone"
+tests_added: "26 new scenarios (6.168, 7.238-7.262)"
+suite_tally: "test_7v_calculation_finished_events.py + test_6u_fleet_metrics_audit_contract.py: 28 pass / 0 fail, 4 subtests pass — confirmed deterministic across repeated full-file runs and every test run alone"
 ---
 
 # Batches 6u, 7v — the calculation_finished fleet-metrics event
@@ -62,3 +62,25 @@ deterministic: the full file three times in a row, and each scenario run alone.
 Two more scenarios pin properties the hook relies on but nothing had exercised directly: 7.260 (a
 raising emit hook leaves `ensure_terminal_calculation_audit`'s own result and committed row intact)
 and 7.261 (a nested, non-root child run never reaches the hook at all).
+
+**Second pass, same day:** 7.261 originally passed no `calculation_id`, so it was actually pinned by
+the earlier calculation_id guard, not the root-run guard it claimed to test — confirmed by temporarily
+removing the root-run check and watching the test still pass (it didn't tell the two apart). Fixed by
+supplying a resolvable `calculation_id`, the same way 7.260 does, so removing the root-run guard now
+fails the test for the right reason (verified: RED with the guard removed, GREEN restored).
+
+The startup-abort fix also had a gap: a stuck row's *own* run might have no pending `AuditLog` of its
+own while an *older*, already-superseded run's pending entry for the same object still sits around
+(never cleaned up). The original lookup would have picked that stale row up and overwritten it with
+today's abort — wrong payload, and a duration measured from the old row's own, much older, start time.
+Fixed by only accepting a pending row when it is also the single *most recent* `AuditLog` for that
+object, and by resolving every stuck row's pending-row lookup in two bounded queries per model instead
+of one query (or two) per stuck row. 7.262 pins the stale-row case: nothing emitted, the old row left
+completely untouched.
+
+The emit hook's outer `except` around the import (`calculation_audit.py`) logged at DEBUG, which means
+a persistent, otherwise-undiagnosed failure there would have silently stopped every future
+`calculation_finished` event with nothing in the logs an operator would notice. It now logs at
+WARNING, throttled to once per hour per process, matching the emitter's own `note_failure` pattern (a
+separate, self-contained throttle here, since this is exactly the path that runs when importing the
+emitter package itself has failed).

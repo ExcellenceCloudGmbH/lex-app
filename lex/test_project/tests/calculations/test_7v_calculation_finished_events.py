@@ -563,6 +563,11 @@ class TestCluster07v_EndToEnd(E2ETestCase):
         """
         Scenario 7.261: a child calculation nested under a root run is not
         itself a root run, so it never reaches the emit hook.
+
+        Supplies a resolvable calculation_id, exactly as 7.260 does, so the
+        *only* thing that can stop this call is the root-run guard itself —
+        without it, nothing here would exercise that guard at all, since an
+        unresolvable calculation_id alone already returns None earlier.
         """
         from lex.audit_logging.utils.ModelContext import ModelContext
         from lex.audit_logging.utils.calculation_audit import ensure_terminal_calculation_audit
@@ -573,12 +578,17 @@ class TestCluster07v_EndToEnd(E2ETestCase):
 
         result = ensure_terminal_calculation_audit(
             child, audit_status="success", model_context=nested_context,
+            context_data={"calculation_id": "calc_nested_7_261"},
         )
 
         self.assertIsNone(
             result, "a non-root instance must return None before any audit write or emit.",
         )
         self.emit_mock.assert_not_called()
+        self.assertFalse(
+            AuditLog.objects.filter(calculation_id="calc_nested_7_261").exists(),
+            "a non-root instance must never get its own AuditLog row either.",
+        )
 
     # -- 7.256 — real null duration --------------------------------------
     def test_7_256_duration_is_null_when_no_prior_audit_row_existed(self):
@@ -655,3 +665,84 @@ class TestCluster07v_EndToEnd(E2ETestCase):
             )
 
         flush_mock.assert_called_once_with(5)
+
+    # -- 7.262 — a stale older pending row must never be overwritten --------
+    def test_7_262_a_stale_older_pending_row_is_left_untouched(self):
+        """
+        Scenario 7.262: an older, unrelated interrupted run's pending row
+        must never be mistaken for the *current* stuck run's own row.
+
+        Given: an object_id with two AuditLogs — an old one still 'pending'
+               (itself a never-cleaned-up crash from further in the past),
+               and a newer one already terminal ('success') — and the
+               current row is now stuck IN_PROGRESS with no pending row of
+               its own (the latest AuditLog for it is that 'success' one)
+        When: the startup sweep runs
+        Then: no event is emitted (nothing resolvable for *this* run), and
+              the old pending row is left exactly as it was — not finalised,
+              not re-dated, not reattributed to today's abort
+        """
+        from lex.audit_logging.utils.content_types import safe_get_content_type
+
+        calc = AuditColumnsCalc.objects.create(name="v262")
+        content_type = safe_get_content_type(AuditColumnsCalc)
+
+        old_pending_log = AuditLog.objects.create(
+            author="system", resource="auditcolumnscalc", action="update",
+            calculation_id="calc_v262_ancient_crash",
+            content_type=content_type, object_id=calc.pk,
+        )
+        old_pending_status = AuditLogStatus.objects.create(
+            audit_log=old_pending_log, status="pending",
+        )
+        ancient = datetime.now(timezone.utc) - timedelta(days=30)
+        AuditLogStatus.objects.filter(pk=old_pending_status.pk).update(
+            created_at=ancient, updated_at=ancient,
+        )
+
+        newer_terminal_log = AuditLog.objects.create(
+            author="system", resource="auditcolumnscalc", action="update",
+            calculation_id="calc_v262_completed_later",
+            content_type=content_type, object_id=calc.pk,
+        )
+        AuditLogStatus.objects.create(audit_log=newer_terminal_log, status="success")
+        self.assertGreater(
+            newer_terminal_log.pk, old_pending_log.pk,
+            "precondition: the terminal AuditLog must be the newer one.",
+        )
+
+        AuditColumnsCalc.objects.filter(pk=calc.pk).update(is_calculated=CalculationModel.IN_PROGRESS)
+
+        with mock.patch.dict(os.environ, {"CALLED_FROM_START_COMMAND": "1"}):
+            ModelRegistration._handle_calculation_model_reset(
+                AuditColumnsCalc, tracked_record_ids=set()
+            )
+
+        self.assertEqual(
+            self._captured_events(), [],
+            "the only pending row for this object belongs to an older, "
+            "already-superseded run — it must not be mistaken for this "
+            "run's own and must not produce an event.",
+        )
+
+        untouched = AuditLogStatus.objects.get(pk=old_pending_status.pk)
+        self.assertEqual(
+            untouched.status, "pending",
+            "the old row's status must be unchanged — it must never be "
+            "finalised to 'aborted' on today's unrelated run's behalf.",
+        )
+        self.assertEqual(
+            untouched.created_at, ancient,
+            "the old row's created_at must be unchanged.",
+        )
+        self.assertEqual(
+            untouched.updated_at, ancient,
+            "the old row must not have been touched at all — its "
+            "updated_at must still be the ancient timestamp, not now.",
+        )
+        self.assertEqual(
+            AuditLog.objects.get(pk=old_pending_log.pk).calculation_id,
+            "calc_v262_ancient_crash",
+            "the old AuditLog's own fields (payload, calculation_id, ...) "
+            "must be untouched.",
+        )

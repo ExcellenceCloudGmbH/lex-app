@@ -413,6 +413,7 @@ class ModelRegistration:
         @sync_to_async
         def reset_instances_with_aborted_calculations():
             from lex.audit_logging.models.AuditLog import AuditLog
+            from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
             from lex.audit_logging.utils.calculation_audit import (
                 ensure_terminal_calculation_audit,
             )
@@ -421,6 +422,39 @@ class ModelRegistration:
             stuck = list(
                 model.objects.filter(is_calculated=CalculationModel.IN_PROGRESS)
             )
+
+            # Each stuck instance's own pending AuditLog -- the one written
+            # when its run started, never finalised because the server died
+            # mid-run -- resolved in two bounded queries up front (never one
+            # per stuck row). Only a row that is BOTH 'pending' AND the most
+            # recent AuditLog for that object counts: an older pending entry
+            # under a newer, already-terminal AuditLog belongs to an earlier
+            # run and must never be overwritten with today's payload and a
+            # duration measured from its own, much older, start time.
+            pending_log_by_pk = {}
+            stuck_pks = [instance.pk for instance in stuck]
+            if stuck_pks:
+                content_type = safe_get_content_type(model)
+                latest_log_by_object_id = {}
+                for log in AuditLog.objects.filter(
+                    content_type=content_type, object_id__in=stuck_pks,
+                ).order_by("object_id", "-id"):
+                    # First row seen per object_id, in this order, is the
+                    # highest id for that object -- i.e. its latest AuditLog.
+                    latest_log_by_object_id.setdefault(log.object_id, log)
+
+                pending_latest_ids = set(
+                    AuditLogStatus.objects.filter(
+                        audit_log_id__in=[log.pk for log in latest_log_by_object_id.values()],
+                        status="pending",
+                    ).values_list("audit_log_id", flat=True)
+                )
+                pending_log_by_pk = {
+                    object_id: log
+                    for object_id, log in latest_log_by_object_id.items()
+                    if log.pk in pending_latest_ids
+                }
+
             for instance in stuck:
                 if (model_label, instance.pk) in tracked_record_ids:
                     # Owned by the recovery machinery: a live worker will finish
@@ -435,22 +469,7 @@ class ModelRegistration:
                 instance.save(skip_hooks=True)
 
                 try:
-                    # The run's own 'pending' AuditLog, written when it started
-                    # and never finalised because the server died mid-run. This
-                    # instance has no calculation_id to resolve on its own at
-                    # startup, so without this lookup the terminal audit write
-                    # below is silently skipped. Handing the row through as a
-                    # template lets ensure_terminal_calculation_audit finalise
-                    # it directly instead of being unable to find it.
-                    pending_log = (
-                        AuditLog.objects.filter(
-                            content_type=safe_get_content_type(model),
-                            object_id=instance.pk,
-                            status_records__status="pending",
-                        )
-                        .order_by("-id")
-                        .first()
-                    )
+                    pending_log = pending_log_by_pk.get(instance.pk)
                     ensure_terminal_calculation_audit(
                         instance,
                         audit_status="aborted",

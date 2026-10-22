@@ -219,5 +219,5 @@ letters:
       Pins AuditLog.id/date/author/resource/payload/calculation_id and
       AuditLogStatus.audit_log_id/status/created_at/updated_at (name, type,
       db_table, auto_now_add/auto_now) at the Model._meta level — the exact
-      columns the out-of-repo fleet-metrics backfill reads by name and type
+      columns the out-of-repo fleet-metrics backfill reads by name and type.
       Model-metadata only, no DB access needed.
