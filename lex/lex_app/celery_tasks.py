@@ -281,9 +281,12 @@ class CallbackTask(Task):
                 # would often lose the calculation_finished event just queued
                 # above (SIGTERM arrives first). A bounded, synchronous,
                 # never-raising drain here gets it out before that happens.
-                from lex.lex_app.fleet_metrics import emitter
+                try:
+                    from lex.lex_app.fleet_metrics import emitter
 
-                emitter.flush(5)
+                    emitter.flush(5)
+                except Exception:
+                    logger.warning("Flushing fleet-metrics events failed.", exc_info=True)
 
     def _persist_status_fields(
             self,

@@ -19,7 +19,7 @@ Two layers are tested:
   site, with ``emitter.emit`` mocked so no network call is made and the
   captured events can be asserted on directly.
 
-Cluster 7v — scenarios 7.238–7.261. Type: U/I.
+Cluster 7v — scenarios 7.238–7.268. Type: U/I.
 Covers: lex/lex_app/fleet_metrics/calculations.py,
         lex/audit_logging/utils/calculation_audit.py (the emit hook),
         lex/lex_app/celery_tasks.py (the flush(5) call),
@@ -29,13 +29,16 @@ Run: python -m lex pytest lex/test_project/tests/calculations/test_7v_calculatio
 
 from __future__ import annotations
 
+import contextlib
 import os
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest import mock
 
 import pytest
+from django.db import OperationalError, connection, transaction
 from django.test import SimpleTestCase
 
 from lex.audit_logging.models.AuditLog import AuditLog
@@ -43,8 +46,10 @@ from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.core.models.CalculationModel import CalculationModel
 from lex.api.utils.Context import operation_context
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
+from lex.lex_app import celery_tasks
 from lex.lex_app.celery_tasks import CallbackTask
 from lex.lex_app.fleet_metrics import calculations as fleet_calculations
+from lex.process_admin.utils import model_registration
 from lex.process_admin.utils.model_registration import ModelRegistration
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
@@ -63,6 +68,32 @@ def _status_row(created_at=None, updated_at=None, freshly_created=False):
     row = SimpleNamespace(created_at=created_at, updated_at=updated_at)
     row._freshly_created = freshly_created
     return row
+
+
+@contextlib.contextmanager
+def _emitter_unimportable():
+    """Make ``from lex.lex_app.fleet_metrics import emitter`` raise ImportError."""
+    import lex.lex_app.fleet_metrics as package
+
+    name = "lex.lex_app.fleet_metrics.emitter"
+    saved = sys.modules[name]
+    del package.emitter
+    sys.modules[name] = None
+    try:
+        yield
+    finally:
+        sys.modules[name] = saved
+        package.emitter = saved
+
+
+def _when_lookup_runs(action):
+    """An execute wrapper calling ``action(execute, context)`` just before the
+    pending-row lookup's aggregate query runs."""
+    def wrapper(execute, sql, params, many, context):
+        if "MAX(" in sql.upper() and "audit_logging_auditlog" in sql:
+            action(execute, context)
+        return execute(sql, params, many, context)
+    return wrapper
 
 
 #: Mirrors lex.api.utils.Context._DEFAULT_CONTEXT -- not imported directly
@@ -811,6 +842,112 @@ class TestCluster07v_EndToEnd(E2ETestCase):
             "payload", result[calc.pk].get_deferred_fields(),
             "the prefetch must never load payload — only pk/action/author.",
         )
+
+    def _lookup_falls_back(self, name, wrapper):
+        """Seed a stuck row with its pending AuditLog, run the pending-row lookup
+        with ``wrapper`` on this thread's connection, and assert it fell back."""
+        from lex.audit_logging.utils.content_types import safe_get_content_type
+
+        calc = AuditColumnsCalc.objects.create(name=name)
+        log = AuditLog.objects.create(
+            author="system", resource="auditcolumnscalc", action="update",
+            calculation_id=f"calc_{calc.pk}",
+            content_type=safe_get_content_type(AuditColumnsCalc), object_id=calc.pk,
+        )
+        status_row = AuditLogStatus.objects.create(audit_log=log, status="pending")
+        AuditColumnsCalc.objects.filter(pk=calc.pk).update(is_calculated=CalculationModel.IN_PROGRESS)
+
+        with connection.execute_wrapper(wrapper), self.assertLogs(
+            model_registration.logger, level="WARNING",
+        ):
+            found = ModelRegistration._resolve_pending_audit_logs(AuditColumnsCalc, [calc.pk])
+
+        self.assertEqual(
+            found, {},
+            "a timed-out lookup must fall back to 'nothing found', which the "
+            "sweep treats as before the lookup existed: abort, no event (7.263).",
+        )
+        self.assertEqual(
+            AuditLogStatus.objects.get(pk=status_row.pk).status, "pending",
+            "the connection must still be usable and the pending row untouched.",
+        )
+
+    # -- 7.266 — a timed-out lookup falls back -----------------------------
+    def test_7_266_a_timed_out_lookup_falls_back(self):
+        """
+        Scenario 7.266: a lookup cancelled by its statement timeout falls back.
+        Given: a stuck row whose interrupted run left a pending AuditLog, and
+               the database cancelling the lookup's aggregate query with a
+               statement-timeout error
+        When: the startup sweep's pending-row lookup runs
+        Then: nothing escapes, a WARNING is logged and the lookup answers
+              "nothing found", so the sweep aborts the row without an event.
+        """
+        def cancel(execute, context):
+            raise OperationalError("canceling statement due to statement timeout")
+
+        self._lookup_falls_back("v266", _when_lookup_runs(cancel))
+
+    # -- 7.267 — the lookup's timeout is real and ends with it -------------
+    def test_7_267_the_lookup_runs_under_its_own_statement_timeout(self):
+        """
+        Scenario 7.267: PostgreSQL cancels a slow lookup, and the timeout ends with it.
+        Given: the lookup's timeout shortened to 100 ms, and the database
+               spending 1 s just before the lookup's aggregate query
+        When: the pending-row lookup runs
+        Then: PostgreSQL cancels the slow statement and the lookup falls back
+              as in 7.266 -- a large audit table delays a restart by at most
+              the timeout -- and a lookup inside a caller's open transaction
+              leaves that transaction's statement_timeout as it was.
+        """
+        if connection.vendor != "postgresql":
+            self.skipTest("statement_timeout is PostgreSQL-only.")
+
+        def show_timeout():
+            with connection.cursor() as cursor:
+                cursor.execute("SHOW statement_timeout")
+                return cursor.fetchone()[0]
+
+        def sleep(execute, context):
+            execute("SELECT pg_sleep(1)", None, False, context)
+
+        with mock.patch.object(model_registration, "PENDING_AUDIT_LOOKUP_TIMEOUT", "100ms"):
+            self._lookup_falls_back("v267", _when_lookup_runs(sleep))
+            with transaction.atomic():
+                before = show_timeout()
+                ModelRegistration._resolve_pending_audit_logs(AuditColumnsCalc, [1])
+                self.assertEqual(show_timeout(), before, "the lookup's timeout must not outlive it.")
+
+    # -- 7.268 — a broken emitter import never stops the Celery callback ----
+    def test_7_268_an_unimportable_emitter_never_stops_the_celery_callback(self):
+        """
+        Scenario 7.268: the worker's flush cannot break the success callback.
+        Given: one Celery task finishing two rows, and the emitter module
+               failing to import
+        When: CallbackTask.on_success runs
+        Then: both rows reach SUCCESS -- the failed flush after the first row
+              does not stop the callback before the second -- and it is
+              logged at WARNING.
+        """
+        calcs = [
+            AuditColumnsCalc.objects.create(name=f"v268{i}", is_calculated=CalculationModel.NOT_CALCULATED)
+            for i in range(2)
+        ]
+        AuditColumnsCalc.objects.update(is_calculated=CalculationModel.IN_PROGRESS)
+        task = CallbackTask()
+        task.name = "fleet_metrics_test_task"
+
+        with _emitter_unimportable(), self.assertLogs(celery_tasks.logger, level="WARNING"):
+            task.on_success(
+                retval=None, task_id="task-7-268", args=(calcs,),
+                kwargs={"context": {"calculation_id": "calc_v268"}, "model_context": None},
+            )
+
+        for calc in calcs:
+            self.assertEqual(
+                AuditColumnsCalc.objects.get(pk=calc.pk).is_calculated, CalculationModel.SUCCESS,
+                "every row of the task must be finalised even when flushing the emitter fails.",
+            )
 
 
 class TestCluster07v_EmitHookWarningThrottle(SimpleTestCase):

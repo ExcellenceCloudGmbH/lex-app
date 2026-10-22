@@ -6,10 +6,16 @@ from typing import List, Type, Optional
 import nest_asyncio
 from asgiref.sync import sync_to_async
 from django.contrib import admin
-from django.db import models
+from django.db import connections, models, transaction
 from lex.lex_app.simple_history_config import get_model_exclusion_reason
 
 logger = logging.getLogger(__name__)
+
+#: The longest any one query of the startup sweep's pending-audit-log lookup may
+#: run. ``audit_logging_auditlog.object_id`` has no index, so on a large audit
+#: table the lookup can be slow; past this it falls back instead of holding up
+#: startup.
+PENDING_AUDIT_LOOKUP_TIMEOUT = "5s"
 
 
 class ModelRegistration:
@@ -397,7 +403,9 @@ class ModelRegistration:
         for instance) is reported as a WARNING and treated the same as
         "nothing found" -- the caller still aborts every stuck row, just
         without a pending row to finalise against, exactly like before this
-        lookup existed at all.
+        lookup existed at all. On PostgreSQL each query runs under a
+        transaction-local ``PENDING_AUDIT_LOOKUP_TIMEOUT``, so a slow lookup
+        is such a failure too.
         """
         from django.db.models import Max
 
@@ -411,33 +419,40 @@ class ModelRegistration:
             from lex.audit_logging.utils.content_types import safe_get_content_type
 
             content_type = safe_get_content_type(model)
-            latest_id_by_object_id = dict(
-                AuditLog.objects.filter(
-                    content_type=content_type, object_id__in=integer_pks,
+            using = AuditLog.objects.db
+            with transaction.atomic(using=using):
+                if connections[using].vendor == "postgresql":
+                    with connections[using].cursor() as cursor:
+                        cursor.execute(
+                            "SET LOCAL statement_timeout = %s", [PENDING_AUDIT_LOOKUP_TIMEOUT]
+                        )
+                latest_id_by_object_id = dict(
+                    AuditLog.objects.filter(
+                        content_type=content_type, object_id__in=integer_pks,
+                    )
+                    .values("object_id")
+                    .annotate(latest_id=Max("id"))
+                    .values_list("object_id", "latest_id")
                 )
-                .values("object_id")
-                .annotate(latest_id=Max("id"))
-                .values_list("object_id", "latest_id")
-            )
-            if not latest_id_by_object_id:
-                return {}
-
-            pending_latest_ids = set(
-                AuditLogStatus.objects.filter(
-                    audit_log_id__in=latest_id_by_object_id.values(), status="pending",
-                ).values_list("audit_log_id", flat=True)
-            )
-            if not pending_latest_ids:
-                return {}
-
-            # Only the two fields ensure_terminal_calculation_audit reads
-            # off the template directly (action, author) before it re-fetches
-            # the full row by pk -- never the (potentially large) payload.
-            pending_log_by_id = {
-                log.pk: log
-                for log in AuditLog.objects.filter(pk__in=pending_latest_ids)
-                .only("pk", "action", "author")
-            }
+                # An empty __in list returns nothing without a query.
+                pending_latest_ids = set(
+                    AuditLogStatus.objects.filter(
+                        audit_log_id__in=latest_id_by_object_id.values(), status="pending",
+                    ).values_list("audit_log_id", flat=True)
+                )
+                # Only the two fields ensure_terminal_calculation_audit reads
+                # off the template directly (action, author) before it
+                # re-fetches the full row by pk -- never the (potentially
+                # large) payload.
+                pending_log_by_id = {
+                    log.pk: log
+                    for log in AuditLog.objects.filter(pk__in=pending_latest_ids)
+                    .only("pk", "action", "author")
+                }
+                # Read-only, so roll back rather than commit: the timeout then
+                # ends here even inside a caller's open transaction, where a
+                # released savepoint would keep it until that transaction ends.
+                transaction.set_rollback(True, using=using)
             return {
                 object_id: pending_log_by_id[latest_id]
                 for object_id, latest_id in latest_id_by_object_id.items()
