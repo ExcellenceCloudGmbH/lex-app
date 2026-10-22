@@ -32,10 +32,25 @@ jobs:
     permissions:
       contents: write
     steps:
+      # lex-app-v2 accepts changes only through a reviewed pull request
+      # (ruleset of 2026-10-20, LEX-1142). The documentation bot app is the
+      # ruleset's only bypass actor, so the mechanical CHANGELOG commit is
+      # pushed with its installation token. GITHUB_TOKEN cannot be a bypass
+      # actor: its push would be rejected after the release has shipped.
+      - name: Generate GitHub App token (push the CHANGELOG commit)
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.DOCS_APP_ID }}
+          private-key: ${{ secrets.DOCS_APP_PRIVATE_KEY }}
+          repositories: "lex-app"
+          owner: ExcellenceCloudGmbH
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ github.event.repository.default_branch }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - uses: actions/setup-python@v5
         with:
