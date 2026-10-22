@@ -488,3 +488,30 @@ does not remove user launch configurations.
 | 1.404 | test run configurations | `Tests` and one per group, for PyCharm and VS Code |
 
 **Scenario range:** 1.393 – 1.404. **Test file:** `lex/test_project/tests/init/test_1aw_pytest_plugin.py`. **Type:** U / I. **Status:** ✅ Complete (2026-10-15). Batch: [1aw](batches.md).
+
+### 1az. `lex incident_tz scan` — which datetime values the TIME_ZONE incident stored wrong, read-only ✅
+
+**What it tests:** that the scan dates each database's exposure to rc212 – v2.1.3 from the database's own audit log, and sorts every datetime value into A (written by a clock), B (a date stored at midnight UTC by affected code), C (a time of day written by affected code), D (correct) or E (not settled by the evidence) from that database's history, meta-history and row stamps — without writing anything.
+
+**Why a regression matters:** the scan decides what the correction will touch. A value wrongly called B gets shifted although it was right; a value wrongly called D keeps its damage. And it runs against production databases, so it must not be able to write.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.420 | audit eras | Berlin digits → pre-incident; UTC digits, with or without `Z` → affected; an explicit offset → fixed; anything else → unknown |
+| 1.421 | one period, two brackets | a run of affected rows is one period, bracketed by the neighbouring rows; unknown rows change nothing |
+| 1.422 | downgrades and open ends | each return to affected code is its own period; one still running has no end |
+| 1.423 | positions | before the rc212 release → out (even with no older audit row); between known affected writes → in; inside a bracket → edge; a span across a period → ambiguous |
+| 1.424 | run on its own | connects with the variables every instance pod carries; `--window` is parsed to UTC; bad input refused |
+| 1.425 | read-only only | refuses outside a READ ONLY transaction |
+| 1.426 | exposure from the audit log | the period and each row's era come from the database's own rows; an unreadable log yields no period and a report that asks for one |
+| 1.427 | census and reconciliation | every timestamptz column, by layer; a column no model declares is listed |
+| 1.428 | clock values are A | microseconds mean a clock wrote the value, even at midnight UTC |
+| 1.429 | B in every layer | a midnight-UTC date written inside the window is B in main, history and meta-history, corrected to Berlin midnight (summer −2 h, winter −1 h) |
+| 1.430 | the history walk | a value is dated by the start of its final run of equal values, not by its row's last edit; a date put right by hand is not listed |
+| 1.431 | midnight UTC after the fix | E, not B; a Berlin-midnight date is D |
+| 1.432 | times of day | inside the window C, corrected by the offset, DST hours flagged; after the fix D |
+| 1.433 | the start gap | a write between the last pre-incident row and the first affected one is E |
+| 1.434 | no history | `created_at`/`edited_at` bracket the write: both inside → B; straddling the start → E |
+| 1.435 | the command | writes `scan.json` and `scan.md`, changes no record or history; the JSON renders the same Markdown on its own (`--render`); `--window` replaces the audit log's period |
+
+**Scenario range:** 1.420 – 1.435. **Test file:** `lex/test_project/tests/init/test_1az_incident_tz_scan.py`. **Type:** U / E. **Status:** ✅ Complete (2026-10-21). Batch: [1az](batches.md).

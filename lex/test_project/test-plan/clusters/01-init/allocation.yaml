@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 405
+max_scenario: 435
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1285,3 +1285,18 @@ letters:
       warnings.catch_warnings(), which drops the warning policy the settings install there,
       so the plugin reinstalls those filters in pytest_configure (1.393, third half). 1av
       (1.386-1.392) is reserved by an open PR, hence aw.
+  az:
+    title: lex incident_tz scan — read-only scan for the TIME_ZONE incident (exposure, census, verdicts A–E)
+    scenarios: 1.420-1.435
+    status: complete
+    tests:
+      pass: 16
+      skip: 0
+      xfail: 0
+    note: >-
+      Q1 of the TZ remediation plan (LEX-747, step 3/8 LEX-1325). Exposure periods from the
+      database's own audit log (edited_at rendered as Berlin digits, UTC digits or an explicit
+      offset), every timestamptz column by layer, and a verdict per value from history,
+      meta-history or row stamps; never writes (refuses outside a READ ONLY transaction).
+      scan.py is one file that also runs on its own. 1ax/1ay and scenarios up to 1.419 are
+      reserved by open PRs #822 and the ext chain, hence az and 1.420.
