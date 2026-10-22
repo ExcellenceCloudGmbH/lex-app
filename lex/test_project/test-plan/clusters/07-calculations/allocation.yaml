@@ -3,7 +3,7 @@ slug: calculations
 title: Calculation State Machine
 test_dirs:
 - calculations
-max_scenario: 262
+max_scenario: 265
 letters:
   a:
     title: ''
@@ -229,10 +229,10 @@ letters:
       before the run, so a record that closes itself once SUCCESS runs exactly once, nested or not.
   v:
     title: The calculation_finished fleet-metrics event
-    scenarios: 7.238-7.262
+    scenarios: 7.238-7.265
     status: complete
     tests:
-      pass: 25
+      pass: 28
       skip: 0
       xfail: 0
     note: >-
@@ -244,14 +244,18 @@ letters:
       plus emitter.guard("calculation_audit.emit") (an import failure now logs at WARNING, throttled
       to once per hour), so every terminal call site converges on the event with no new root-run
       logic; celery_tasks.py's _update_model_status flushes the emitter at the end. The startup-abort
-      sweep (model_registration.py) resolves, in two bounded queries per model (never one per stuck
-      row), each stuck instance's own pending AuditLog -- only when it is also the MOST RECENT
-      AuditLog for that object, so an older interrupted run's entry already superseded by a later,
-      terminal one is never mistaken for the current run's own and overwritten (fixes BUG-034).
-      7.238-7.249 (U) pin emit_calculation_finished's own rules against SimpleNamespace stand-ins;
-      7.250-7.262 (I) drive the real hook through sync success/error/cancel, a Celery
-      on_success/on_failure callback with no broker, the startup-abort sweep (with a pending row, with
-      none, and with only a stale superseded one), a direct call with and without a prior pending
-      status row, the flush(5) call, a raising emit hook leaving the finaliser's result intact, and a
-      nested child run sending no event (with a resolvable calculation_id, so only the root-run guard
-      itself can be what stops it). 25 pass / 0 fail.
+      sweep (model_registration.py) resolves, in a handful of bounded aggregate queries per model
+      (never one per stuck row, and never loading payload), each stuck instance's own pending
+      AuditLog -- only when it is also the MOST RECENT AuditLog for that object, so an older
+      interrupted run's entry already superseded by a later, terminal one is never mistaken for the
+      current run's own and overwritten (fixes BUG-034) -- and the whole lookup is wrapped so its own
+      failure (a DB error, a non-integer pk) can never stop the sweep itself: every stuck row is still
+      aborted, just without a pending row to finalise against. 7.238-7.249 (U) pin
+      emit_calculation_finished's own rules against SimpleNamespace stand-ins; 7.250-7.264 (I) drive
+      the real hook through sync success/error/cancel, a Celery on_success/on_failure callback with no
+      broker, the startup-abort sweep (with a pending row, with none, with only a stale superseded
+      one, and with the lookup itself failing), a direct call with and without a prior pending status
+      row, the flush(5) call, a raising emit hook leaving the finaliser's result intact, a nested child
+      run sending no event (with a resolvable calculation_id, so only the root-run guard itself can be
+      what stops it), and non-integer pks being skipped rather than fatal; 7.265 (U) pins the emit
+      hook's own once-per-hour WARNING throttle. 28 pass / 0 fail.

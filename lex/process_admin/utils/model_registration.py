@@ -377,6 +377,82 @@ class ModelRegistration:
         return result
 
     @classmethod
+    def _resolve_pending_audit_logs(cls, model: Type[models.Model], stuck_pks) -> dict:
+        """
+        Resolve each stuck instance's own pending AuditLog -- the one written
+        when its run started, never finalised because the server died
+        mid-run -- in a small, fixed number of bounded queries regardless of
+        how many stuck rows there are, never once per row.
+
+        Returns ``{object_id: AuditLog}`` for exactly the stuck rows whose
+        MOST RECENT AuditLog for that object is still ``'pending'``. An
+        older pending entry under a newer, already-terminal AuditLog is
+        excluded -- it belongs to an earlier, unrelated run and must never
+        be mistaken for this one's and overwritten with today's payload and
+        a duration measured from its own, much older, start time.
+
+        Never raises. ``object_id`` is a ``PositiveIntegerField``, so a
+        non-integer pk (a model with a non-default primary key) is skipped
+        before it ever reaches a query; any other failure here (a DB error,
+        for instance) is reported as a WARNING and treated the same as
+        "nothing found" -- the caller still aborts every stuck row, just
+        without a pending row to finalise against, exactly like before this
+        lookup existed at all.
+        """
+        from django.db.models import Max
+
+        integer_pks = [pk for pk in stuck_pks if isinstance(pk, int)]
+        if not integer_pks:
+            return {}
+
+        try:
+            from lex.audit_logging.models.AuditLog import AuditLog
+            from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
+            from lex.audit_logging.utils.content_types import safe_get_content_type
+
+            content_type = safe_get_content_type(model)
+            latest_id_by_object_id = dict(
+                AuditLog.objects.filter(
+                    content_type=content_type, object_id__in=integer_pks,
+                )
+                .values("object_id")
+                .annotate(latest_id=Max("id"))
+                .values_list("object_id", "latest_id")
+            )
+            if not latest_id_by_object_id:
+                return {}
+
+            pending_latest_ids = set(
+                AuditLogStatus.objects.filter(
+                    audit_log_id__in=latest_id_by_object_id.values(), status="pending",
+                ).values_list("audit_log_id", flat=True)
+            )
+            if not pending_latest_ids:
+                return {}
+
+            # Only the two fields ensure_terminal_calculation_audit reads
+            # off the template directly (action, author) before it re-fetches
+            # the full row by pk -- never the (potentially large) payload.
+            pending_log_by_id = {
+                log.pk: log
+                for log in AuditLog.objects.filter(pk__in=pending_latest_ids)
+                .only("pk", "action", "author")
+            }
+            return {
+                object_id: pending_log_by_id[latest_id]
+                for object_id, latest_id in latest_id_by_object_id.items()
+                if latest_id in pending_log_by_id
+            }
+        except Exception:
+            logger.warning(
+                "Failed to resolve pending audit logs for stuck %s rows "
+                "during startup reset; continuing without them.",
+                model.__name__,
+                exc_info=True,
+            )
+            return {}
+
+    @classmethod
     def _handle_calculation_model_reset(
         cls,
         model: Type[models.Model],
@@ -412,48 +488,17 @@ class ModelRegistration:
 
         @sync_to_async
         def reset_instances_with_aborted_calculations():
-            from lex.audit_logging.models.AuditLog import AuditLog
-            from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
             from lex.audit_logging.utils.calculation_audit import (
                 ensure_terminal_calculation_audit,
             )
-            from lex.audit_logging.utils.content_types import safe_get_content_type
 
             stuck = list(
                 model.objects.filter(is_calculated=CalculationModel.IN_PROGRESS)
             )
 
-            # Each stuck instance's own pending AuditLog -- the one written
-            # when its run started, never finalised because the server died
-            # mid-run -- resolved in two bounded queries up front (never one
-            # per stuck row). Only a row that is BOTH 'pending' AND the most
-            # recent AuditLog for that object counts: an older pending entry
-            # under a newer, already-terminal AuditLog belongs to an earlier
-            # run and must never be overwritten with today's payload and a
-            # duration measured from its own, much older, start time.
-            pending_log_by_pk = {}
-            stuck_pks = [instance.pk for instance in stuck]
-            if stuck_pks:
-                content_type = safe_get_content_type(model)
-                latest_log_by_object_id = {}
-                for log in AuditLog.objects.filter(
-                    content_type=content_type, object_id__in=stuck_pks,
-                ).order_by("object_id", "-id"):
-                    # First row seen per object_id, in this order, is the
-                    # highest id for that object -- i.e. its latest AuditLog.
-                    latest_log_by_object_id.setdefault(log.object_id, log)
-
-                pending_latest_ids = set(
-                    AuditLogStatus.objects.filter(
-                        audit_log_id__in=[log.pk for log in latest_log_by_object_id.values()],
-                        status="pending",
-                    ).values_list("audit_log_id", flat=True)
-                )
-                pending_log_by_pk = {
-                    object_id: log
-                    for object_id, log in latest_log_by_object_id.items()
-                    if log.pk in pending_latest_ids
-                }
+            pending_log_by_pk = cls._resolve_pending_audit_logs(
+                model, [instance.pk for instance in stuck],
+            )
 
             for instance in stuck:
                 if (model_label, instance.pk) in tracked_record_ids:

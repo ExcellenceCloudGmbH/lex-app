@@ -746,3 +746,110 @@ class TestCluster07v_EndToEnd(E2ETestCase):
             "the old AuditLog's own fields (payload, calculation_id, ...) "
             "must be untouched.",
         )
+
+    # -- 7.263 — the prefetch itself failing must not stop the sweep -------
+    def test_7_263_prefetch_failure_does_not_stop_the_startup_sweep(self):
+        """
+        Scenario 7.263: if resolving pending audit logs itself fails (a DB
+        error, for instance), the startup sweep still completes — every
+        stuck row is still reset to ABORTED, and nothing escapes.
+        """
+        calc = AuditColumnsCalc.objects.create(name="v263")
+        AuditColumnsCalc.objects.filter(pk=calc.pk).update(is_calculated=CalculationModel.IN_PROGRESS)
+
+        with mock.patch(
+            "lex.audit_logging.utils.content_types.safe_get_content_type",
+            side_effect=RuntimeError("boom"),
+        ), mock.patch.dict(os.environ, {"CALLED_FROM_START_COMMAND": "1"}):
+            ModelRegistration._handle_calculation_model_reset(
+                AuditColumnsCalc, tracked_record_ids=set()
+            )  # must not raise
+
+        after = AuditColumnsCalc.objects.get(pk=calc.pk)
+        self.assertEqual(
+            after.is_calculated, CalculationModel.ABORTED,
+            "the sweep must still abort the stuck row even when resolving "
+            "its pending audit log failed.",
+        )
+        self.assertEqual(
+            self._captured_events(), [],
+            "with no pending row resolvable (the lookup itself failed), "
+            "there is nothing to key an event on — same as the "
+            "no-pending-row case.",
+        )
+
+    # -- 7.264 — non-integer pks are skipped, not fatal ---------------------
+    def test_7_264_non_integer_pks_are_skipped_before_filtering(self):
+        """
+        Scenario 7.264: a non-integer pk must never reach the object_id
+        filter (a PositiveIntegerField, which would reject it) — it is
+        skipped up front, and a valid integer pk alongside it still
+        resolves normally. The prefetch also never loads payload.
+        """
+        from lex.audit_logging.utils.content_types import safe_get_content_type
+
+        calc = AuditColumnsCalc.objects.create(name="v264")
+        pending_log = AuditLog.objects.create(
+            author="system", resource="auditcolumnscalc", action="update",
+            calculation_id=f"calc_{calc.pk}",
+            content_type=safe_get_content_type(AuditColumnsCalc), object_id=calc.pk,
+        )
+        AuditLogStatus.objects.create(audit_log=pending_log, status="pending")
+
+        result = ModelRegistration._resolve_pending_audit_logs(
+            AuditColumnsCalc, ["not-an-integer", calc.pk, None],
+        )
+
+        self.assertEqual(
+            set(result.keys()), {calc.pk},
+            "the non-integer/None entries must be silently skipped, not "
+            "raise, and must not prevent the valid integer pk from "
+            "resolving.",
+        )
+        self.assertEqual(result[calc.pk].pk, pending_log.pk)
+        self.assertIn(
+            "payload", result[calc.pk].get_deferred_fields(),
+            "the prefetch must never load payload — only pk/action/author.",
+        )
+
+
+class TestCluster07v_EmitHookWarningThrottle(SimpleTestCase):
+    """Cluster 7v: the emit-hook import-failure warning is throttled hourly."""
+
+    def setUp(self):
+        super().setUp()
+        from lex.audit_logging.utils import calculation_audit as _ca
+
+        self._ca = _ca
+        _ca._reset_emit_hook_warning_throttle_for_tests()
+        self.addCleanup(_ca._reset_emit_hook_warning_throttle_for_tests)
+
+    # -- 7.265 — the WARNING throttle itself --------------------------------
+    def test_7_265_emit_hook_warning_is_throttled_to_once_per_hour(self):
+        """
+        Scenario 7.265: a persistent emit-hook failure logs at WARNING once,
+        stays silent for repeats within the hour, then logs again after.
+        """
+        clock = {"t": 1_000.0}
+        with mock.patch(
+            "lex.audit_logging.utils.calculation_audit.time.monotonic",
+            side_effect=lambda: clock["t"],
+        ):
+            with self.assertLogs(
+                "lex.audit_logging.utils.calculation_audit", level="WARNING",
+            ) as first:
+                self._ca._warn_emit_hook_unavailable(RuntimeError("boom"))
+            self.assertEqual(len(first.records), 1)
+
+            clock["t"] += 10.0  # still well within the hour
+            with self.assertNoLogs(
+                "lex.audit_logging.utils.calculation_audit", level="WARNING",
+            ):
+                self._ca._warn_emit_hook_unavailable(RuntimeError("boom again"))
+
+            clock["t"] += 3600.0  # past the throttle window
+            with self.assertLogs(
+                "lex.audit_logging.utils.calculation_audit", level="WARNING",
+            ) as third:
+                self._ca._warn_emit_hook_unavailable(RuntimeError("boom a third time"))
+            self.assertEqual(len(third.records), 1)
