@@ -150,6 +150,9 @@ REASONS = {
     ("C", IN): "time of day written while affected code was writing; "
                "wrong only if the frontend then sent naive local time",
     ("D", OUT): "time of day written outside every exposure period",
+    ("E", "machine_time", IN): "a time with seconds but no microseconds, written while affected "
+                               "code ran: made by code, not typed; right if a clock was truncated, "
+                               "late if a local time was read from a file: check its source",
     ("E", "midnight_utc", OUT): "midnight UTC written outside every exposure "
                                 "period: not this incident, check the source",
     ("E", EDGE): "written in the gap around an exposure period's start or end",
@@ -507,6 +510,8 @@ def verdict(kind: str, position: str) -> tuple[str, str]:
             return "E", REASONS[("E", "midnight_utc", OUT)]
         return "E", REASONS[("E", position)]
     if position == IN:
+        if kind == "machine_time":
+            return "E", REASONS[("E", "machine_time", IN)]
         return "C", REASONS[("C", IN)]
     if position == OUT:
         return "D", REASONS[("D", OUT)]
@@ -658,8 +663,12 @@ def _classes(v: str) -> dict:
         "candidate": (
             f"{micro} = 0 AND ({utc_time} = time '00:00' OR {local_time} <> time '00:00')"
         ),
+        # The frontend's date-time input works to the minute: a time with seconds
+        # (and no microseconds) was made by code, not typed.
         "kind": (
-            f"CASE WHEN {utc_time} = time '00:00' THEN 'midnight_utc' ELSE 'time_of_day' END"
+            f"CASE WHEN {utc_time} = time '00:00' THEN 'midnight_utc' "
+            f"WHEN date_part('second', {v} AT TIME ZONE 'UTC') >= 1 THEN 'machine_time' "
+            "ELSE 'time_of_day' END"
         ),
         "digits": f"({v} AT TIME ZONE 'UTC')",
         # Corrected values, as naive UTC digits like every timestamp the scan reads.
@@ -1440,7 +1449,9 @@ def render_markdown(report: dict, max_rows: int = 50) -> str:
 
     r11 = [c for c in report["columns"] if c["layer"] != "framework"
            and (c.get("r11_mirror_after_switch") or c.get("typed_after_switch"))]
-    if meta.get("running_era") == ERA_PRE or r11:
+    # On fixed code a time typed through the new frontend is right: R11 is about
+    # instances still running (or of unknown) pre-incident code.
+    if meta.get("running_era") in (ERA_PRE, None) and (meta.get("running_era") == ERA_PRE or r11):
         out += ["## R11: a pre-incident backend with the new frontend", ""]
         out.append(
             f"From {_iso(FRONTEND_INSTANTS_SINCE)} a frontend pod could serve a build that sends "

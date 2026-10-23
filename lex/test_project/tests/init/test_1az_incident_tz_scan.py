@@ -9,7 +9,7 @@ place or, worse, sends a correct value to be "corrected" — so these scenarios
 pin how each verdict follows from the database's own evidence (audit log,
 history, meta-history) and that the scan never writes.
 
-Cluster 1az — scenarios 1.420–1.449. Type: U + E.
+Cluster 1az — scenarios 1.420–1.450. Type: U + E.
 Covers: lex/lex_app/incident_tz/scan.py, lex/lex_app/management/commands/incident_tz.py.
 Run: python -m lex pytest lex/test_project/tests/init/test_1az_incident_tz_scan.py -v
 """
@@ -1009,4 +1009,29 @@ class TestCluster01az_ScanDatabase(E2ETestCase):
         found = self.rows(report, raw, "due_on")
         self.assertEqual(len(found), 2, f"Both values are judged: {found}")
         self.assertFalse(any(r["mirror"] for r in found))
+
+    def test_1_450_a_time_with_seconds_was_written_by_code_not_typed(self) -> None:
+        """
+        Scenario 1.450: the frontend's date-time input works to the minute.
+        Given: inside the period, 09:30:00 (typed) and 07:48:18 without microseconds
+               (code that truncated a clock, or read a time from a file); after the
+               fix, 07:48:18 again
+        When: the scan runs
+        Then: 09:30:00 is C; 07:48:18 inside the period is E with a reason naming
+              both sources (a truncated clock is right, a file's local time is not),
+              and is never marked as sent by the frontend; after the fix it is D
+        """
+        self.seed_audit()
+        typed = self.seed([(IN_WINDOW, {"meets_at": TIME_WRONG})], name="typed")
+        machine = self.seed([(IN_WINDOW, {"meets_at": utc(2026, 7, 21, 7, 48, 18)})], name="machine")
+        later = self.seed([(AFTER_FIX, {"meets_at": utc(2026, 9, 2, 7, 48, 18)})], name="later")
+        report = self.run_scan()
+        typed_row = self.only(self.rows(report, self.main, "meets_at", row=typed.pk), "main row")
+        self.assertEqual((typed_row["verdict"], typed_row["kind"]), ("C", "time_of_day"))
+        machine_row = self.only(self.rows(report, self.main, "meets_at", row=machine.pk), "main row")
+        self.assertEqual((machine_row["verdict"], machine_row["kind"]), ("E", "machine_time"))
+        self.assertIn("clock", machine_row["reason"])
+        self.assertIsNone(machine_row["frontend"], "Code, not the frontend, wrote it.")
+        later_row = self.only(self.rows(report, self.main, "meets_at", row=later.pk), "main row")
+        self.assertEqual(later_row["verdict"], "D")
 

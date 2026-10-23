@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 449
+max_scenario: 450
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1287,10 +1287,10 @@ letters:
       (1.386-1.392) is reserved by an open PR, hence aw.
   az:
     title: lex incident_tz scan — read-only scan for the TIME_ZONE incident (exposure, census, verdicts A–E)
-    scenarios: 1.420-1.449
+    scenarios: 1.420-1.450
     status: complete
     tests:
-      pass: 30
+      pass: 31
       skip: 0
       xfail: 0
     note: >-
@@ -1312,3 +1312,5 @@ letters:
       1.448: every timestamp is read as UTC digits in SQL, so a 9999-12-31 sentinel neither overflows
       the driver (a Berlin session renders it as year 10000) nor the mirror check. 1.449: run on its own
       the JSON leaves out D rows other than R11 suspects and can travel gzipped (--gzip); --render reads both.
+      1.450: a time with seconds but no microseconds is machine_time (the frontend's input works to the
+      minute): E inside a period (a truncated clock is right, a file's local time is not), never C.
