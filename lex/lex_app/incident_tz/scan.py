@@ -468,7 +468,8 @@ def manual_period(start: dt.datetime, end: dt.datetime) -> Period:
 
 def position_of(when: Optional[dt.datetime], periods: Sequence[Period]) -> str:
     if when is None:
-        return UNKNOWN
+        # Without any exposure there is nothing a write time could fall inside.
+        return UNKNOWN if periods else OUT
     if when < RC212_RELEASED_AT:
         return OUT
     positions = {period.position(when) for period in periods}
@@ -484,7 +485,7 @@ def span_position(
 ) -> str:
     """Where a value written at some moment between ``start`` and ``end`` falls."""
     if start is None or end is None:
-        return UNKNOWN
+        return UNKNOWN if periods else OUT
     if start > end:
         start, end = end, start
     for period in periods:
@@ -979,7 +980,7 @@ def _classify_main(cursor, table, column, history, meta, periods, zone, layer) -
             position = span_position(written[0], written[1], periods)
         else:
             written = None
-            position = UNKNOWN
+            position = position_of(None, periods)
         rows.append(_row(layer, table.name, column, row_id, None, value, digits, kind,
                          fix_b, fix_c, written, position, zone))
     return rows, provenance
@@ -1032,7 +1033,7 @@ def _classify_meta(cursor, meta, history, column, record_key, periods, zone) -> 
     return rows
 
 
-def _signature_only(cursor, table, column, zone, layer) -> list:
+def _signature_only(cursor, table, column, zone, layer, periods=()) -> list:
     c = _classes("t." + quote(column))
     cursor.execute(
         f"""
@@ -1045,7 +1046,7 @@ def _signature_only(cursor, table, column, zone, layer) -> list:
     )
     return [
         _row(layer, table.name, column, row_id, None, value, digits, kind, fix_b, fix_c,
-             None, UNKNOWN, zone)
+             None, position_of(None, periods), zone)
         for row_id, value, digits, kind, fix_b, fix_c in cursor.fetchall()
     ]
 
@@ -1208,7 +1209,7 @@ def scan(
                         found = _classify_history(cursor, table, meta, column, key, periods, zone)
                         report.provenance = "history"
                     else:
-                        found = _signature_only(cursor, table, column, zone, layer)
+                        found = _signature_only(cursor, table, column, zone, layer, periods)
                 else:  # meta_history
                     main, history = owners_of_meta.get(table_name, (None, None))
                     key = main.primary_key if main is not None else "id"
@@ -1216,7 +1217,7 @@ def scan(
                         found = _classify_meta(cursor, table, history, column, key, periods, zone)
                         report.provenance = "history"
                     else:
-                        found = _signature_only(cursor, table, column, zone, layer)
+                        found = _signature_only(cursor, table, column, zone, layer, periods)
             for row in found:
                 report.verdicts[row["verdict"]] += 1
                 if row["after_switch"] and row["kind"] == "time_of_day":

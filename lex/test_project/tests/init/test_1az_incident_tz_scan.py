@@ -9,7 +9,7 @@ place or, worse, sends a correct value to be "corrected" — so these scenarios
 pin how each verdict follows from the database's own evidence (audit log,
 history, meta-history) and that the scan never writes.
 
-Cluster 1az — scenarios 1.420–1.450. Type: U + E.
+Cluster 1az — scenarios 1.420–1.451. Type: U + E.
 Covers: lex/lex_app/incident_tz/scan.py, lex/lex_app/management/commands/incident_tz.py.
 Run: python -m lex pytest lex/test_project/tests/init/test_1az_incident_tz_scan.py -v
 """
@@ -1034,4 +1034,39 @@ class TestCluster01az_ScanDatabase(E2ETestCase):
         self.assertIsNone(machine_row["frontend"], "Code, not the frontend, wrote it.")
         later_row = self.only(self.rows(report, self.main, "meets_at", row=later.pk), "main row")
         self.assertEqual(later_row["verdict"], "D")
+
+    def test_1_451_with_no_exposure_an_undatable_value_is_outside_it(self) -> None:
+        """
+        Scenario 1.451: a write time is only needed where there is an exposure to place it in.
+        Given: a raw table whose rows carry no write time, holding a typed 09:30 and a
+               midnight-UTC date; first an audit log from a pre-incident version only,
+               then the full audit log with its affected period
+        When: the scan runs on each
+        Then: with no exposure the time is D and the date is E for its source (not this
+              incident), neither for want of a write time; with the period both are E
+              because their write time is unknown
+        """
+        self.seed_audit([AUDIT_ROWS[0]])
+        raw = self.make_raw_table()
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f'INSERT INTO "{raw}" (due_on, created_at, edited_at) VALUES (%s, NULL, NULL), (%s, NULL, NULL) '
+                "RETURNING id",
+                [TIME_WRONG, SUMMER_DATE_WRONG],
+            )
+            time_id, date_id = (row[0] for row in cursor.fetchall())
+        quiet = self.run_scan(tables=[raw])
+        self.assertEqual(quiet["exposure"]["periods"], [])
+        time_row = self.only(self.rows(quiet, raw, "due_on", row=time_id), "row")
+        date_row = self.only(self.rows(quiet, raw, "due_on", row=date_id), "row")
+        self.assertEqual((time_row["verdict"], time_row["position"]), ("D", tzscan.OUT))
+        self.assertEqual((date_row["verdict"], date_row["position"]), ("E", tzscan.OUT))
+        self.assertIn("outside every exposure period", date_row["reason"])
+
+        AuditLog.objects.all().delete()
+        self.seed_audit()
+        exposed = self.run_scan(tables=[raw])
+        for row_id in (time_id, date_id):
+            row = self.only(self.rows(exposed, raw, "due_on", row=row_id), "row")
+            self.assertEqual((row["verdict"], row["position"]), ("E", tzscan.UNKNOWN))
 
