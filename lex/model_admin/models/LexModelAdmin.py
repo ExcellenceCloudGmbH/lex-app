@@ -29,7 +29,7 @@ def get_displayed_fields(model):
 # I made all the models that can be singleton to singleton
 # Beware there might be an expected behavior if the logic is reliant of creating a new object everytime
 @LexSingleton
-class ModelProcessAdmin:
+class LexModelAdmin:
     def __init__(
         self,
         to_display_string=None,

@@ -17,7 +17,7 @@
 9. [Serializers — API Data Layer](#9-serializers--api-data-layer)
 10. [Custom Fields (Bokeh, HTML, PDF, XLSX)](#10-custom-fields-bokeh-html-pdf-xlsx)
 11. [Filters](#11-filters)
-12. [Process Admin — Model Registration & Structure](#12-process-admin--model-registration--structure)
+12. [Model Admin — Model Registration & Structure](#12-model-admin--model-registration--structure)
 13. [Audit Logging](#13-audit-logging)
 14. [LexLogger — Fluent Markdown Logging](#14-lexlogger--fluent-markdown-logging)
 15. [Celery Integration — Async Task Dispatch](#15-celery-integration--async-task-dispatch)
@@ -27,14 +27,13 @@
 19. [Authentication & Keycloak](#19-authentication--keycloak)
 20. [Streamlit Integration](#20-streamlit-integration)
 21. [HTMLReport — Custom HTML Views](#21-htmlreport--custom-html-views)
-22. [Process — Abstract Workflow Definition](#22-process--abstract-workflow-definition)
-23. [CLI Commands](#23-cli-commands)
-24. [Settings & Environment Variables](#24-settings--environment-variables)
-25. [Import System — Module Aliasing](#25-import-system--module-aliasing)
-26. [Utilities & Decorators](#26-utilities--decorators)
-27. [Common Patterns & Conventions](#27-common-patterns--conventions)
-28. [Quick Reference — What to Import From Where](#28-quick-reference--what-to-import-from-where)
-29. [Complete Code Examples](#29-complete-code-examples)
+22. [CLI Commands](#22-cli-commands)
+23. [Settings & Environment Variables](#23-settings--environment-variables)
+24. [Import System — Module Aliasing](#24-import-system--module-aliasing)
+25. [Utilities & Decorators](#25-utilities--decorators)
+26. [Common Patterns & Conventions](#26-common-patterns--conventions)
+27. [Quick Reference — What to Import From Where](#27-quick-reference--what-to-import-from-where)
+28. [Complete Code Examples](#28-complete-code-examples)
 
 ---
 
@@ -71,7 +70,7 @@ Lex Framework (this repo)
     │
     ├── lex/core/           ← Base models, mixins, calculations, signals
     ├── lex/api/            ← REST API views, serializers, filters, WebSocket consumers
-    ├── lex/process_admin/  ← Model registry, structure, URL routing
+    ├── lex/model_admin/  ← Model registry, structure, URL routing
     ├── lex/audit_logging/  ← Audit trail, LexLogger, calculation logs
     ├── lex/authentication/ ← Keycloak, OIDC, JWT, user profiles
     ├── lex/utilities/      ← App config, singletons, import system, storage
@@ -751,14 +750,14 @@ FilterTree JSON → create_filter_queries_from_tree_paths() → Django ORM Q obj
 
 ---
 
-## 12. Process Admin — Model Registration & Structure
+## 12. Model Admin — Model Registration & Structure
 
-### ProcessAdminSite (Singleton)
+### LexAdminSite (Singleton)
 
-Central registry for all models, HTML reports, processes, and structures. Accessed via:
+Central registry for all models, HTML reports and structures. Accessed via:
 
 ```python
-from lex.process_admin import processAdminSite
+from lex.model_admin import lexAdminSite
 ```
 
 ### Model Registration
@@ -767,7 +766,7 @@ Models are auto-discovered and registered. You rarely need to register manually.
 
 1. Walks your project directory
 2. Finds all `models.Model` subclasses
-3. Calls `processAdminSite.register(model_class)` for each
+3. Calls `lexAdminSite.register(model_class)` for each
 4. Connects `post_save` signal → `do_post_save` for dependency cascading
 5. Registers with `django-simple-history` (unless excluded)
 
@@ -776,7 +775,7 @@ Models are auto-discovered and registered. You rarely need to register manually.
 Wraps a Django model with metadata:
 
 ```python
-container = processAdminSite.model_collection.get_container_by_id('product')
+container = lexAdminSite.model_collection.get_container_by_id('product')
 container.model_class      # → Product
 container.model_id         # → 'product'
 container.display_title    # → 'Product'
@@ -837,14 +836,14 @@ def get_widget_structure():
     return {}
 ```
 
-### ModelProcessAdmin
+### LexModelAdmin
 
 Controls how a model appears in the admin:
 
 ```python
-from lex.process_admin.models import ModelProcessAdmin
+from lex.model_admin.models import LexModelAdmin
 
-class ProductAdmin(ModelProcessAdmin):
+class ProductAdmin(LexModelAdmin):
     fields_not_in_table_view = ['description', 'internal_notes']
     main_field = 'name'
     allow_quick_instance_creation = True
@@ -1310,38 +1309,11 @@ class SalesDashboard(HTMLReport):
         """
 ```
 
-HTMLReports are registered via `processAdminSite.registerHTMLReport(name, report_instance)` during auto-discovery.
+HTMLReports are registered via `lexAdminSite.registerHTMLReport(name, report_instance)` during auto-discovery.
 
 ---
 
-## 22. Process — Abstract Workflow Definition
-
-### Import
-
-```python
-from lex.core.models import Process
-```
-
-### Usage
-
-```python
-from lex.core.models import Process
-
-class DataPipeline(Process):
-    def get_structure(self):
-        """Return the process structure for the frontend."""
-        return {
-            "steps": [
-                {"name": "Upload Data", "model": "raw_data"},
-                {"name": "Validate", "model": "validated_data"},
-                {"name": "Calculate", "model": "results"},
-            ]
-        }
-```
-
----
-
-## 23. CLI Commands
+## 22. CLI Commands
 
 ### `lex` CLI
 
@@ -1386,7 +1358,7 @@ lex shell
 
 ---
 
-## 24. Settings & Environment Variables
+## 23. Settings & Environment Variables
 
 ### Key Environment Variables
 
@@ -1434,7 +1406,7 @@ lex shell
 
 ---
 
-## 25. Import System — Module Aliasing
+## 24. Import System — Module Aliasing
 
 Lex provides a custom import system that allows short-form imports in user projects.
 
@@ -1461,7 +1433,7 @@ Both resolve to the same class. Lex core modules (`lex.*`) are excluded from ali
 
 ---
 
-## 26. Utilities & Decorators
+## 25. Utilities & Decorators
 
 ### LexSingleton
 
@@ -1521,7 +1493,7 @@ with model_logging_context(my_model_instance):
 
 ---
 
-## 27. Common Patterns & Conventions
+## 26. Common Patterns & Conventions
 
 ### Model Hierarchy
 
@@ -1531,7 +1503,6 @@ django.db.models.Model
 │   └── LexModel (lex.core.models.base)
 │       ├── CalculationModel (status-tracked calculations)
 │       └── CalculatedModelMixin (combinatorial + parallel)
-├── Process (abstract workflow)
 └── HTMLReport (custom HTML views)
 ```
 
@@ -1582,12 +1553,12 @@ The framework never crashes on infrastructure failures:
 
 ---
 
-## 28. Quick Reference — What to Import From Where
+## 27. Quick Reference — What to Import From Where
 
 ### Core Models
 
 ```python
-from lex.core.models import LexModel, CalculationModel, HTMLReport, Process
+from lex.core.models import LexModel, CalculationModel, HTMLReport
 from lex.core.models import UserContext, PermissionResult
 ```
 
@@ -1624,11 +1595,11 @@ from lex.audit_logging.handlers import LexLogger
 from lex.audit_logging.utils import model_logging_context
 ```
 
-### Process Admin
+### Model Admin
 
 ```python
-from lex.process_admin import processAdminSite, ModelRegistration
-from lex.process_admin.models import ModelProcessAdmin
+from lex.model_admin import lexAdminSite, ModelRegistration
+from lex.model_admin.models import LexModelAdmin
 ```
 
 ### Authentication
@@ -1661,7 +1632,7 @@ from lex.core.exceptions import (
 
 ---
 
-## 29. Complete Code Examples
+## 28. Complete Code Examples
 
 ### Example 1: Simple Data Model with Permissions
 

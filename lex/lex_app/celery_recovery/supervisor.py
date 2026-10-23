@@ -125,7 +125,7 @@ def tracked_calculation_record_ids() -> set[tuple[str, Any]]:
     """``(_meta.label_lower, pk)`` for every calculation row a tracked recovery
     task currently owns — whether its worker is alive or merely tracked.
 
-    The startup reset sweep (``process_admin.utils.model_registration``) consults
+    The startup reset sweep (``model_admin.utils.model_registration``) consults
     this to decide which stuck ``IN_PROGRESS`` rows it must NOT abort: a row owned
     by a tracked task will either be finished by its still-running worker or
     requeued/resumed by :func:`scan_and_recover`. Aborting it at startup would,

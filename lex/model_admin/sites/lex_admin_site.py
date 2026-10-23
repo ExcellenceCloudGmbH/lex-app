@@ -18,7 +18,6 @@ from lex.api.views.model_entries.One import OneModelEntry
 from lex.api.views.model_info.Fields import Fields
 from lex.api.views.model_info.Widgets import Widgets
 from lex.api.views.permissions.ModelPermissions import ModelPermissions
-from lex.api.views.process_flow.CreateOrUpdate import CreateOrUpdate
 from lex.api.views.project_info.ProjectInfo import ProjectInfo
 from lex.api.views.sharepoint.DeleteUnusedFiles import DeleteUnusedFiles
 from lex.api.views.sharepoint.SharePointFileDownload import SharePointFileDownload
@@ -28,33 +27,31 @@ from lex.authentication.views.permissions import UserPermissionsView
 from lex.authentication.views.token_views import StreamlitTokenView
 from lex.core.mixins.CalculatedModelMixin import CalculatedModelMixin
 from lex.core.signals import do_post_save
-from lex.process_admin.models.ModelCollection import ModelCollection
-from lex.process_admin.models.ModelProcessAdmin import ModelProcessAdmin
-from lex.process_admin.views.model_relation_views import (
+from lex.model_admin.models.ModelCollection import ModelCollection
+from lex.model_admin.models.LexModelAdmin import LexModelAdmin
+from lex.model_admin.views.model_relation_views import (
     ModelStructureObtainView,
     Overview,
-    ProcessStructure,
 )
 from lex.utilities.decorators.singleton import LexSingleton
 
 
 @LexSingleton
-class ProcessAdminSite:
+class LexAdminSite:
     """
     Used as instance, i.e. inheriting this class is not necessary in order to use it.
     """
 
-    name = "process_admin_rest_api"
+    name = "lex_rest_api"
 
     def __init__(self) -> None:
         super().__init__()
 
-        self.registered_models = {}  # Model-classes to ModelProcessAdmin-instances
+        self.registered_models = {}  # Model-classes to LexModelAdmin-instances
         self.model_structure = {}
         self.auto_include_missing_models_in_structure = True
         self.model_styling = {}
         self.html_reports = {}
-        self.processes = {}
         self.widget_structure = []
 
         self.initialized = False
@@ -74,9 +71,6 @@ class ProcessAdminSite:
 
     def registerHTMLReport(self, name, report):
         self.html_reports[name] = report
-
-    def registerProcess(self, name, process):
-        self.processes[name] = process
 
     def register_model_structure(
         self,
@@ -113,9 +107,9 @@ class ProcessAdminSite:
         self.model_structure = model_structure
         self.auto_include_missing_models_in_structure = auto_include_missing_models
 
-    def register(self, model_or_iterable, process_admin=None):
-        if process_admin is None:
-            process_admin = ModelProcessAdmin()
+    def register(self, model_or_iterable, model_admin=None):
+        if model_admin is None:
+            model_admin = LexModelAdmin()
 
         if isinstance(model_or_iterable, ModelBase):
             model_or_iterable = [model_or_iterable]
@@ -125,7 +119,7 @@ class ProcessAdminSite:
                 # raise Exception('Model %s already registered' % model._meta.model_name)
                 pass
             else:
-                self.registered_models[model] = process_admin
+                self.registered_models[model] = model_admin
                 # TODO why was this in here in the first place?
                 # if not issubclass(model, CalculatedModelMixin):
                 post_save.connect(do_post_save, sender=model)
@@ -151,9 +145,6 @@ class ProcessAdminSite:
     def get_html_report_func(self, report_name, user):
         # Define the function that returns the HTML report
         return self.html_reports[report_name].get_html(user)
-
-    def get_process_structure_func(self, process_name):
-        return self.processes[process_name]()
 
     # TODO: Put urls definitions in the correct place (e.g. in a urls.py file)
     def _get_urls(self):
@@ -186,11 +177,6 @@ class ProcessAdminSite:
                 Overview.as_view(HTML_reports=self.html_reports),
                 name="htmlreports",
             ),
-            path(
-                "api/process/<str:process_name>",
-                ProcessStructure.as_view(processes=self.processes),
-                name="process",
-            ),
             path('api/auth/streamlit-token/', StreamlitTokenView.as_view(), name='streamlit_token'),
 
         ]
@@ -215,11 +201,6 @@ class ProcessAdminSite:
                 "api/model_entries/<model:model_container>/<str:calculationId>/history/<int:pk>",
                 HistoryModelEntry.as_view(),
                 name="model-history-list",
-            ),
-            path(
-                "api/run_step/<model:model_container>/<str:pk>",
-                CreateOrUpdate.as_view(),
-                name="run_step",
             ),
             path(
                 "api/model_entries/<model:model_container>/many",
@@ -322,6 +303,6 @@ class ProcessAdminSite:
 
         return (
             self._get_urls(),
-            "process_admin",
+            "model_admin",
             self.name,
         )  # TODO: what is the name exactly for??

@@ -153,8 +153,8 @@ def _get_fk_display_fields(model) -> list:
     fields = []
     try:
         # Lazy import: avoids a settings-time circular import between the
-        # serializer layer and process_admin.models (which pulls in core models).
-        from lex.process_admin.models.utils import get_relation_fields
+        # serializer layer and model_admin.models (which pulls in core models).
+        from lex.model_admin.models.utils import get_relation_fields
         for field in get_relation_fields(model):
             if getattr(field, "many_to_many", False):
                 continue

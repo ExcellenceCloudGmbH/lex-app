@@ -4,7 +4,7 @@ Cluster 1i: Initial-data upload — full journey end-to-end.
 Targets the customer-facing seed-loading surface documented in
 ``docs/lex_topics/16-initial-data-upload.md``:
 
-* :class:`ProcessAdminTestCase` (``lex/lex_app/tests/ProcessAdminTestCase.py``)
+* :class:`LexAppTestCase` (``lex/lex_app/tests/LexAppTestCase.py``)
   — the JSON walker: ``replace_tagged_parameters`` (the ``tag:`` and
   ``datetime:`` prefix resolvers), ``get_test_data_from_path``
   (recursive subprocess flattening), ``check_if_all_models_are_empty``
@@ -53,7 +53,7 @@ from unittest import mock
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.audit_logging.utils.InitialDataAuditLogger import InitialDataAuditLogger
-from lex.lex_app.tests.ProcessAdminTestCase import ProcessAdminTestCase
+from lex.lex_app.tests.LexAppTestCase import LexAppTestCase
 from lex.test_project.tests.crud_api.models import SimpleItem
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
@@ -80,7 +80,7 @@ class TestCluster01i_ReplaceTaggedParameters(unittest.TestCase):
         object previously stored at ``tagged_objects['foo']`` — this
         is the FK-by-reference mechanism.
         """
-        harness = ProcessAdminTestCase()
+        harness = LexAppTestCase()
         sentinel = object()
         harness.tagged_objects = {"team_design": sentinel, "other": 42}
 
@@ -112,7 +112,7 @@ class TestCluster01i_ReplaceTaggedParameters(unittest.TestCase):
         ships dates as strings but the model needs ``datetime``
         instances.
         """
-        harness = ProcessAdminTestCase()
+        harness = LexAppTestCase()
         harness.tagged_objects = {}
 
         out = harness.replace_tagged_parameters(
@@ -147,7 +147,7 @@ class TestCluster01i_SubprocessFlattening(unittest.TestCase):
         flatten preserving each sub-file's internal order AND the
         declared order of the subprocesses in the parent.
         """
-        harness = ProcessAdminTestCase()
+        harness = LexAppTestCase()
 
         # ``get_test_data_from_path`` interprets subprocess paths
         # relative to ``$PROJECT_ROOT``. The lex-app editable install
@@ -412,7 +412,7 @@ class TestCluster01i_AuditLoggerFinalize(E2ETestCase):
 # =====================================================================
 # TestCluster01i_FullSeedJourney
 #
-# End-to-end: drives ``ProcessAdminTestCase.setUp`` with a seed file
+# End-to-end: drives ``LexAppTestCase.setUp`` with a seed file
 # that walks every action (create / update / delete) and asserts both
 # the database state AND the audit trail match the docs' promise.
 # =====================================================================
@@ -423,19 +423,19 @@ class TestCluster01i_FullSeedJourney(E2ETestCase):
     e2e_framework_models = [AuditLog, AuditLogStatus]
 
     def _make_harness(self, fixture_name: str):
-        """Create a ``ProcessAdminTestCase`` instance that reads
+        """Create a ``LexAppTestCase`` instance that reads
         ``test_data`` from our own fixture file instead of the
         per-test-class default.
         """
-        class _ConfigurableProcessAdmin(ProcessAdminTestCase):
-            # ProcessAdminTestCase is itself a ``unittest.TestCase`` —
+        class _ConfigurableHarness(LexAppTestCase):
+            # LexAppTestCase is itself a ``unittest.TestCase`` —
             # instantiate without a method name via the ``runTest``
             # placeholder; we only call ``setUp`` on it, never the
             # unittest lifecycle.
             pass
 
-        _ConfigurableProcessAdmin.runTest = lambda self: None
-        harness = _ConfigurableProcessAdmin()
+        _ConfigurableHarness.runTest = lambda self: None
+        harness = _ConfigurableHarness()
         fixture_path = FIXTURES / fixture_name
         # Pin the test path to our fixture. ``get_test_data`` reads from
         # ``$PROJECT_ROOT`` + test_path; emulate by stubbing get_test_data.
@@ -457,7 +457,7 @@ class TestCluster01i_FullSeedJourney(E2ETestCase):
         documented action set.
 
         Given: a seed file with 2x create, 1x update, 1x delete.
-        When: ``ProcessAdminTestCase.setUp(audit_logger)`` runs the file.
+        When: ``LexAppTestCase.setUp(audit_logger)`` runs the file.
         Then:
           * DB has 1 row (2 created - 1 deleted = 1) with the updated value.
           * AuditLog table has 4 rows with actions [create, create, update, delete].
@@ -467,7 +467,7 @@ class TestCluster01i_FullSeedJourney(E2ETestCase):
         audit_logger = InitialDataAuditLogger()
 
         with mock.patch(
-            "lex.lex_app.tests.ProcessAdminTestCase.apps.get_app_config",
+            "lex.lex_app.tests.LexAppTestCase.apps.get_app_config",
         ) as get_app_config:
             get_app_config.return_value.models.values.return_value = [SimpleItem]
             harness.setUp(audit_logger=audit_logger)
@@ -492,12 +492,12 @@ class TestCluster01i_FullSeedJourney(E2ETestCase):
         """
         harness = self._make_harness("test_seed_journey.json")
 
-        # ``ProcessAdminTestCase.setUp`` calls ``apps.get_app_config
+        # ``LexAppTestCase.setUp`` calls ``apps.get_app_config
         # (settings.repo_name)`` which fails in the unit-test sandbox
         # (the test project's app label isn't registered). Stub the
         # model-lookup seam so the harness sees our one e2e_model.
         with mock.patch(
-            "lex.lex_app.tests.ProcessAdminTestCase.apps.get_app_config",
+            "lex.lex_app.tests.LexAppTestCase.apps.get_app_config",
         ) as get_app_config:
             get_app_config.return_value.models.values.return_value = [SimpleItem]
             # No audit_logger → audit_enabled=False branch of setUp.

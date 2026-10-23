@@ -24,7 +24,7 @@ from lex.core.security_flags import strict
 from lex.api.utils.temporal import parse_as_of_datetime
 from lex.api.views.model_entries.List import ListModelEntries
 from lex.api.views.model_entries.filter_backends import PrimaryKeyListFilterBackend
-from lex.process_admin.models.utils import get_relation_fields
+from lex.model_admin.models.utils import get_relation_fields
 from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_api_key.permissions import HasAPIKey

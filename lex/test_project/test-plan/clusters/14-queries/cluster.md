@@ -372,13 +372,13 @@ No broker, Redis, or database required.
 
 ### 1i. Initial-data upload — full journey end-to-end 
 
-**Gap (April 24):** `InitialDataAuditLogger` (148 stmts, **12.64%** baseline) + `ProcessAdminTestCase` seed walker (`replace_tagged_parameters`, `get_test_data_from_path`, seed dispatcher). Never driven end-to-end by Cluster 1c — 1c only asserts post-`Init` database state, not the intermediate audit trail or the JSON-walker contracts.
+**Gap (April 24):** `InitialDataAuditLogger` (148 stmts, **12.64%** baseline) + `LexAppTestCase` seed walker (`replace_tagged_parameters`, `get_test_data_from_path`, seed dispatcher). Never driven end-to-end by Cluster 1c — 1c only asserts post-`Init` database state, not the intermediate audit trail or the JSON-walker contracts.
 
 **Intent** (per `docs/lex_topics/16-initial-data-upload.md`): seed files declare production-shaped data in JSON; on server start if every referenced model is empty, the framework walks the JSON top-down and applies `create` / `update` / `delete` actions in declaration order. `tag:` prefixes resolve to in-memory objects created earlier; `datetime:` strings parse through `dateutil`; `{"subprocess": path}` entries flatten recursively. Every operation emits an `AuditLog` + `AuditLogStatus(pending)` pair; `mark_operation_success/failure` advances the status; `finalize_batch` sweeps lingering pendings so the compliance view is always consistent.
 
 **Models:** reuses `SimpleItem` from `crud_api/models.py` — a minimal LexModel with `name` + `value`. **Fixtures** (all new in `tests/fixtures/`): `seed_parent.json` (2 subprocess refs), `seed_child_01.json` (1 create), `seed_child_02.json` (2 creates), `test_seed_journey.json` (2 creates + 1 update + 1 delete).
 
-**Shape:** five test classes — two `SimpleTestCase` (pure unit, no DB) + three `E2ETestCase` (real `AuditLog` / `AuditLogStatus` / `SimpleItem`). `ProcessAdminTestCase.setUp` is driven via a `runTest = lambda: None` sub-class and a monkey-patched `get_test_data`; `apps.get_app_config` is stubbed so the harness sees `SimpleItem` without registering the test project as an installed app.
+**Shape:** five test classes — two `SimpleTestCase` (pure unit, no DB) + three `E2ETestCase` (real `AuditLog` / `AuditLogStatus` / `SimpleItem`). `LexAppTestCase.setUp` is driven via a `runTest = lambda: None` sub-class and a monkey-patched `get_test_data`; `apps.get_app_config` is stubbed so the harness sees `SimpleItem` without registering the test project as an installed app.
 
 | # | Scenario | What We Assert |
 |---|----------|----------------|
@@ -397,7 +397,7 @@ No broker, Redis, or database required.
 | 1.59b | Full journey without audit still lands DB state | Audit is observability — disabling it must not regress data transitions |
 | 1.60 | Crash path — `finalize_batch(failure_error=…)` after 3 pending ops | All 3 swept to `failure` with error string; `pending_resolved == 3` |
 
-**Status:**  Complete — 13 pass / 0 fail / 1 env-gated skip (1.59). Targets ~140 lines in `InitialDataAuditLogger.py` + ~40 in `ProcessAdminTestCase`.
+**Status:**  Complete — 13 pass / 0 fail / 1 env-gated skip (1.59). Targets ~140 lines in `InitialDataAuditLogger.py` + ~40 in `LexAppTestCase`.
 
 ### 8j. Celery task bodies — `load_data` / `calc_and_save` / `activate_history_version` 
 

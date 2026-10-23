@@ -246,7 +246,7 @@ lex/core/tests/
 ├── test_calculation_model_helpers.py
 └── test_exceptions.py
 
-lex/process_admin/tests/
+lex/model_admin/tests/
 ├── test_constants.py
 └── test_model_utils.py
 ```

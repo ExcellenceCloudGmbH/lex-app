@@ -2,7 +2,7 @@ from django.contrib.postgres.search import SearchVector
 from lex.api.views.model_entries.filter_backends import apply_read_restriction
 from lex.api.views.permissions.UserPermission import UserPermission
 from lex.core.security_flags import strict
-from lex.process_admin.models.ModelCollection import ModelCollection
+from lex.model_admin.models.ModelCollection import ModelCollection
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView

@@ -54,7 +54,7 @@
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 10.83 | no traceback by default | create, run_step and a raising `permission_create` answer 500 with `error`, no `traceback` |
+| 10.83 | no traceback by default | create and a raising `permission_create` answer 500 with `error`, no `traceback` (the `run_step` probe went with the ProcessFlow endpoint — 10p) |
 | 10.84 | traceback when allowed | `LEX_API_TRACEBACKS=true`, legacy, DEBUG show it; `LEX_API_TRACEBACKS=false` wins over DEBUG |
 | 10.85 | redirect targets | relative, own host, `CSRF_TRUSTED_ORIGINS` (wildcard, :3000), CORS origins pass; foreign, `//`, `/\`, `javascript:`, look-alike, userinfo hosts 400 on authenticate, logout, total_logout; other paths not inspected; opt-out passes |
 | 10.86 | guard in the stack | installed before the session middleware; `/oidc/authenticate` and `/oidc/total_logout` with a foreign `next` answer 400 |
@@ -64,3 +64,20 @@
 | 10.90 | one KeycloakManager | three token requests build one manager and get permissions and roles; no token builds none |
 
 **Scenario range:** 10.83 – 10.90. **Test file:** `lex/test_project/tests/api_layer/test_10o_error_and_route_hardening.py`. **Type:** E (10.85, 10.88, 10.90 U). **Status:** ✅ Complete (2026-10-18). Batch: [10o](batches.md).
+
+---
+
+### 10p. The Process and ProcessFlow endpoints are gone from the route table ✅
+
+**What it tests:** the two public routes the Process feature owned — `api/run_step/<model>/<pk>` (the ProcessFlow `CreateOrUpdate` view) and `api/process/<process_name>` (the `ProcessStructure` view) — no longer reverse, no longer appear in the route table under their paths, and their view modules no longer import. The third scenario is the other half: the removal ran through the one url list the entire frontend is served from, so every neighbouring endpoint is checked to still resolve.
+
+**Why a regression matters:** `run_step` was a second write path into every model with its own copy of the permission checks; a route that comes back by accident is a write surface nobody audits. And a cascade that takes a neighbour out with it breaks every screen in a project.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.91 | `run_step` is not routed | `NoReverseMatch`, no `run_step` name or `api/run_step/` path, `lex.api.views.process_flow` raises `ModuleNotFoundError` |
+| 10.92 | process structure is not routed | `NoReverseMatch`, no `process` name or `api/process/` path, no `ProcessStructure` on either module |
+| 10.93 | the neighbours are untouched | `model-structure`, `project-info`, `calculationlog-tree`, `init-calculation-logs`, `clean-calculations`, `widget-structure`, `global-search-query`, `user-permissions`, `log` and `htmlreports` all still reverse |
+| 10.94 | the namespace moved, no route did | `lex_rest_api` reverses, `process_admin_rest_api` does not, no served path carries the app name, the dead `LOGIN_REDIRECT_URL` follows the new name |
+
+**Scenario range:** 10.91 – 10.94. **Test file:** `lex/test_project/tests/api_layer/test_10p_process_routes_removed.py`. **Type:** U. **Status:** ✅ Complete (2026-10-22). Batch: [10p](batches.md).

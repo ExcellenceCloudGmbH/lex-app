@@ -226,7 +226,7 @@ class FastExportItem(LexModel):
 
 ALL_MODELS = [ExportCategory, ExportItem, ExportMaskedItem, FastExportItem]
 
-# URL names expected by ``process_admin_rest_api`` — lowercased model name.
+# URL names expected by ``lex_rest_api`` — lowercased model name.
 CATEGORY = "exportcategory"
 ITEM = "exportitem"
 MASKED = "exportmaskeditem"

@@ -1,7 +1,6 @@
 from django.db.models import Model
 from lex.core.models.HTMLReport import HTMLReport
-from lex.core.models.Process import Process
-from lex.process_admin.models.constants import RELATION_FIELD_TYPES
+from lex.model_admin.models.constants import RELATION_FIELD_TYPES
 
 
 # TODO: 2
@@ -54,8 +53,6 @@ def enrich_model_structure_with_readable_names_and_types(node_name, model_tree, 
         if isinstance(model_class, type):
             if issubclass(model_class, HTMLReport):
                 node_type = "HTMLReport"
-            elif issubclass(model_class, Process):
-                node_type = "Process"
         return {'readable_name': readable_name, 'type': node_type}
 
     return {

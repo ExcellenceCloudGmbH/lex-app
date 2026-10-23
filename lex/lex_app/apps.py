@@ -167,7 +167,7 @@ class LexAppConfig(GenericAppConfig):
         """
         from django.contrib import admin
         from django.contrib.auth import get_user_model
-        from lex.process_admin.utils.model_registration import ModelRegistration
+        from lex.model_admin.utils.model_registration import ModelRegistration
         from lex.lex_app.reflex.Reflex import Reflex, reflex_enabled
         from lex.lex_app.streamlit.Streamlit import Streamlit
 
@@ -244,9 +244,9 @@ class LexAppConfig(GenericAppConfig):
         """
         Check conditions and decide whether to load data asynchronously.
         """
-        from lex.lex_app.tests.ProcessAdminTestCase import ProcessAdminTestCase
+        from lex.lex_app.tests.LexAppTestCase import LexAppTestCase
         from lex.core.config import LexProjectConfig
-        test = ProcessAdminTestCase()
+        test = LexAppTestCase()
 
 
         project_config = LexProjectConfig.load()
@@ -314,7 +314,7 @@ class LexAppConfig(GenericAppConfig):
     def validate_initial_data_path(self, initial_data_path):
         """
         Validates that the initial data file exists, is accessible, and contains valid JSON structure.
-        Mimics logic from ProcessAdminTestCase.get_test_data() and adds content validation.
+        Mimics logic from LexAppTestCase.get_test_data() and adds content validation.
         """
         import json
         
@@ -323,12 +323,12 @@ class LexAppConfig(GenericAppConfig):
             return False
 
         try:
-            # Construct the absolute path matches ProcessAdminTestCase logic
+            # Construct the absolute path matches LexAppTestCase logic
             clean_path = initial_data_path.replace('/', os.sep)
             project_root = os.getenv("PROJECT_ROOT")
             
             if not project_root:
-                # Fallback if PROJECT_ROOT is not set, though ProcessAdminTestCase relies on it
+                # Fallback if PROJECT_ROOT is not set, though LexAppTestCase relies on it
                 print("Warning: PROJECT_ROOT environment variable not set. Defaulting to os.getcwd().")
                 project_root = os.getcwd()
                 
@@ -366,7 +366,7 @@ class LexAppConfig(GenericAppConfig):
                          print(f"ERROR: Item at index {idx} is not a dictionary.")
                          return False
                     
-                    # Check for required attributes that ProcessAdminTestCase expects
+                    # Check for required attributes that LexAppTestCase expects
                     if 'subprocess' in item:
                         continue # Subprocesses are handled recursively in actual code, we skip shallow validation here
                         

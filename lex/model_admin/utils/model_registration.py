@@ -18,7 +18,6 @@ class ModelRegistration:
 
     This class manages the registration of different types of models including:
     - HTML Report models
-    - Process models
     - Standard models with bitemporal history tracking
     - CalculationModel instances with aborted calculation handling
     """
@@ -40,8 +39,7 @@ class ModelRegistration:
             history_tracking_enabled: Project-level switch for history tracking.
                             When False, history is skipped for every model.
         """
-        from lex.process_admin.settings import processAdminSite
-        from lex.core.models.Process import Process
+        from lex.model_admin.settings import lexAdminSite
         from lex.core.models.HTMLReport import HTMLReport
         from lex.core.models.CalculationModel import CalculationModel
         from django.contrib.auth.models import User
@@ -54,7 +52,7 @@ class ModelRegistration:
             return f"{self.first_name} {self.last_name}"
 
         User.add_to_class("__str__", get_username)
-        processAdminSite.register([User])
+        lexAdminSite.register([User])
 
         history_ok = []
         history_skipped = []
@@ -64,7 +62,7 @@ class ModelRegistration:
         for model in models:
             try:
                 # Validate before any registration work
-                if not (issubclass(model, HTMLReport) or issubclass(model, Process)):
+                if not issubclass(model, HTMLReport):
                     _model_name = model.__name__.lower()
                     _exclusion = get_model_exclusion_reason(model)
                     _is_already_tracked = _exclusion == "Already has history tracking"
@@ -79,8 +77,6 @@ class ModelRegistration:
 
                 if issubclass(model, HTMLReport):
                     cls._register_html_report(model)
-                elif issubclass(model, Process):
-                    cls._register_process_model(model)
                 elif not issubclass(model, type) and not model._meta.abstract:
                     result = cls._register_standard_model(
                         model,
@@ -127,26 +123,18 @@ class ModelRegistration:
 
     @classmethod
     def _register_html_report(cls, model: Type[models.Model]) -> None:
-        from lex.process_admin.settings import processAdminSite
+        from lex.model_admin.settings import lexAdminSite
 
         model_name = model.__name__.lower()
-        processAdminSite.registerHTMLReport(model_name, model)
-        processAdminSite.register([model])
-
-    @classmethod
-    def _register_process_model(cls, model: Type[models.Model]) -> None:
-        from lex.process_admin.settings import processAdminSite
-
-        model_name = model.__name__.lower()
-        processAdminSite.registerProcess(model_name, model)
-        processAdminSite.register([model])
+        lexAdminSite.registerHTMLReport(model_name, model)
+        lexAdminSite.register([model])
 
     # ── Reserved names managed by the framework ──
     # Class names that user models must not use.
     _RESERVED_CLASS_NAMES = frozenset({
         'LexModel', 'LexManager', 'CalculationModel',
         'History', 'MetaHistory', 'StandardHistory',
-        'Process', 'HTMLReport', 'PermissionResult', 'UserContext',
+        'HTMLReport', 'PermissionResult', 'UserContext',
     })
 
     # Prefixes that collide with auto-generated history model names.
@@ -292,7 +280,7 @@ class ModelRegistration:
         Returns:
             'ok' if history was enabled, 'skipped' if excluded, 'failed' on error.
         """
-        from lex.process_admin.settings import processAdminSite, adminSite
+        from lex.model_admin.settings import lexAdminSite, adminSite
         from simple_history import register
         from simple_history.exceptions import MultipleRegistrationsError
         from lex.core.services.StandardHistory import StandardHistory
@@ -301,7 +289,7 @@ class ModelRegistration:
 
         model_name = model.__name__.lower()
         result = "skipped"
-        processAdminSite.register([model])
+        lexAdminSite.register([model])
 
         exclusion_reason = get_model_exclusion_reason(model)
         is_already_tracked = exclusion_reason == "Already has history tracking"
@@ -327,7 +315,7 @@ class ModelRegistration:
                     return "failed"
 
                 historical_model = model.history.model
-                processAdminSite.register([historical_model])
+                lexAdminSite.register([historical_model])
 
                 # ── Level 2: Meta History ──
                 history = MetaLevelHistoricalRecords(
@@ -361,7 +349,7 @@ class ModelRegistration:
                     meta_historical_model=meta_historical_model,
                 )
 
-                processAdminSite.register([meta_historical_model])
+                lexAdminSite.register([meta_historical_model])
                 result = "ok"
 
             except Exception as e:
@@ -468,21 +456,21 @@ class ModelRegistration:
         structure: dict,
         auto_include_missing_models: bool = True,
     ):
-        from lex.process_admin.settings import processAdminSite
+        from lex.model_admin.settings import lexAdminSite
         if structure is not None:
-            processAdminSite.register_model_structure(
+            lexAdminSite.register_model_structure(
                 structure,
                 auto_include_missing_models=auto_include_missing_models,
             )
 
     @classmethod
     def register_model_styling(cls, styling: dict):
-        from lex.process_admin.settings import processAdminSite
+        from lex.model_admin.settings import lexAdminSite
         if styling:
-            processAdminSite.register_model_styling(styling)
+            lexAdminSite.register_model_styling(styling)
 
     @classmethod
     def register_widget_structure(cls, structure):
-        from lex.process_admin.settings import processAdminSite
+        from lex.model_admin.settings import lexAdminSite
         if structure:
-            processAdminSite.register_widget_structure(structure)
+            lexAdminSite.register_widget_structure(structure)

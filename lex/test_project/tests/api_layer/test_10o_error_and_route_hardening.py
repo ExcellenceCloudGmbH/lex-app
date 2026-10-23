@@ -20,11 +20,10 @@ Intent
 
 Cluster 10o — scenarios 10.83–10.90. Type: E (10.85, 10.88, 10.89 U).
 Covers: lex/core/security_flags.py (expose_tracebacks), lex/api/security.py
-(error_detail), lex/api/views/model_entries/One.py and
-lex/api/views/process_flow/CreateOrUpdate.py (error bodies),
+(error_detail), lex/api/views/model_entries/One.py (error bodies),
 lex/authentication/middleware.py (OidcRedirectGuardMiddleware),
 lex/lex_app/settings.py (MIDDLEWARE), lex/react/views.py (serve_react),
-lex/process_admin/sites/process_admin_site.py and
+lex/model_admin/sites/lex_admin_site.py and
 lex/api/views/global_search_for_models/Search.py (?q=),
 lex/api/middleware/keycloak_permissions.py (_shared_manager).
 Run: python -m lex pytest lex/test_project/tests/api_layer/test_10o_error_and_route_hardening.py -v
@@ -40,12 +39,12 @@ from unittest import mock
 import pytest
 from django.http import HttpResponse
 from django.test import RequestFactory, SimpleTestCase, override_settings
-from django.urls import resolve, reverse
+from django.urls import resolve
 
 from lex.api.middleware import keycloak_permissions
 from lex.api.middleware.keycloak_permissions import KeycloakPermissionsMiddleware
 from lex.authentication.middleware import OidcRedirectGuardMiddleware
-from lex.test_project.tests._e2e_test_case import E2ETestCase, _MockContainer
+from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from .models import EXPLODING, HARDENING_MODELS, ApiSimpleItem, ExplodingItem
 
@@ -68,22 +67,17 @@ class TestCluster10o_Tracebacks(E2ETestCase):
 
     def _failures(self):
         create = self.client.post(self.url_create(EXPLODING), {"name": "explode"}, format="json")
-        run_step = self.client.patch(
-            reverse("process_admin_rest_api:run_step",
-                    kwargs={"model_container": _MockContainer(EXPLODING), "pk": 999999}),
-            {"name": "explode"}, format="json",
-        )
         with mock.patch.object(ExplodingItem, "permission_create", side_effect=RuntimeError("hook down")):
             refused = self.client.post(self.url_create(EXPLODING), {"name": "fine"}, format="json")
-        return {"create": create, "run_step": run_step, "permission_create raised": refused}
+        return {"create": create, "permission_create raised": refused}
 
     # -- 10.83 ---------------------------------------------------------
     def test_10_83_error_bodies_carry_no_traceback_by_default(self) -> None:
         """
         Scenario 10.83: a failing request answers 500 without a server traceback.
         Given: DEBUG off, default flags, a model whose save() raises
-        When: a row is created through the CRUD endpoint and through run_step,
-              and a create is refused because permission_create raised
+        When: a row is created through the CRUD endpoint, and a create is
+              refused because permission_create raised
         Then: each answers 500 with a readable "error" and no "traceback";
               nothing is stored.
         """
@@ -152,7 +146,7 @@ class TestCluster10o_OidcRedirects(SimpleTestCase):
               {code: REDIRECT_NOT_ALLOWED, error}; paths outside /oidc/ are not inspected.
         """
         allowed = [
-            "/", "/process_admin/all?tab=1", "https://lex.example.com/funds",
+            "/", "/model_admin/all?tab=1", "https://lex.example.com/funds",
             "https://portal.example.org/", "http://localhost:3000/", "https://app.partner.test/x",
             "https://grid.partner.test",
         ]
@@ -278,12 +272,12 @@ class TestCluster10o_GlobalSearchQuery(E2ETestCase):
               query answers the "No match found" sentinel; the ?q= path resolves to
               the Search view.
         """
-        from lex.process_admin.settings import processAdminSite
+        from lex.model_admin.settings import lexAdminSite
 
         item = ApiSimpleItem.objects.create(name="needle in a haystack")
-        container = processAdminSite.model_collection.get_container("apisimpleitem")
+        container = lexAdminSite.model_collection.get_container("apisimpleitem")
         self.assertEqual(resolve("/api/global-search/").func.view_class.__name__, "Search")
-        collection_class = type(processAdminSite.model_collection)
+        collection_class = type(lexAdminSite.model_collection)
         with mock.patch.object(collection_class, "all_containers", new_callable=mock.PropertyMock, return_value=[container]):
             by_query = self.client.get("/api/global-search/", {"q": "needle"})
             by_path = self.client.get("/api/global-search/needle")

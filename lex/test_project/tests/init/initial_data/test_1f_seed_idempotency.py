@@ -33,7 +33,7 @@ from pathlib import Path
 from unittest import mock
 
 from lex.lex_app.celery_tasks import load_data
-from lex.lex_app.tests.ProcessAdminTestCase import ProcessAdminTestCase
+from lex.lex_app.tests.LexAppTestCase import LexAppTestCase
 from lex.test_project.tests.crud_api.models import SimpleItem
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
@@ -87,7 +87,7 @@ class TestCluster01f_SeedIdempotencyGate(E2ETestCase):
 
         SimpleItem.objects.create(name="pre-existing", value=1)
 
-        test = ProcessAdminTestCase()
+        test = LexAppTestCase()
         # Bypass get_test_data()'s JSON parse — the gate is model-agnostic
         # and only cares which classes to probe.
         test.get_classes = lambda models: {SimpleItem}
@@ -119,7 +119,7 @@ class TestCluster01f_SeedIdempotencyGate(E2ETestCase):
 
         self.assertEqual(SimpleItem.objects.count(), 0)
 
-        test = ProcessAdminTestCase()
+        test = LexAppTestCase()
         test.get_classes = lambda models: {SimpleItem}
 
         self.assertTrue(

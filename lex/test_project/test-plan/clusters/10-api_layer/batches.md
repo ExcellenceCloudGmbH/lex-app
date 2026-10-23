@@ -68,7 +68,7 @@
 | --- | --- |
 | Scenario range | 10.83 – 10.90 |
 | Type | E (10.85, 10.88, 10.90 U) |
-| Files covered | `lex/core/security_flags.py` (`expose_tracebacks`), `lex/api/security.py` (`error_detail`), `lex/api/views/model_entries/One.py`, `lex/api/views/process_flow/CreateOrUpdate.py`, `lex/authentication/middleware.py` (`OidcRedirectGuardMiddleware`), `lex/lex_app/settings.py` (`MIDDLEWARE`), `lex/react/views.py`, `lex/process_admin/sites/process_admin_site.py`, `lex/api/views/global_search_for_models/Search.py`, `lex/api/middleware/keycloak_permissions.py` |
+| Files covered | `lex/core/security_flags.py` (`expose_tracebacks`), `lex/api/security.py` (`error_detail`), `lex/api/views/model_entries/One.py`, `lex/authentication/middleware.py` (`OidcRedirectGuardMiddleware`), `lex/lex_app/settings.py` (`MIDDLEWARE`), `lex/react/views.py`, `lex/model_admin/sites/lex_admin_site.py`, `lex/api/views/global_search_for_models/Search.py`, `lex/api/middleware/keycloak_permissions.py` |
 | Test file | `lex/test_project/tests/api_layer/test_10o_error_and_route_hardening.py` |
 | Test classes | `TestCluster10o_Tracebacks`, `TestCluster10o_OidcRedirects`, `TestCluster10o_OidcRedirectInStack`, `TestCluster10o_UnknownApiPaths`, `TestCluster10o_ServeReact`, `TestCluster10o_GlobalSearchQuery`, `TestCluster10o_KeycloakManagerPerProcess` |
 | Fixtures | new `ExplodingItem` (save raises for "explode") and `ApiSimpleItem` in `api_layer/models.py` (`HARDENING_MODELS`); a fake `KeycloakManager`; a temporary SPA build |
@@ -76,3 +76,28 @@
 | Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-18-v2-security-hardening-internal-config.md) |
 
 ---
+
+---
+
+### Batch 10p — the Process and ProcessFlow endpoints are gone from the route table ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.91 – 10.94 |
+| Type | U |
+| Files covered | `lex/model_admin/sites/lex_admin_site.py` (the url list and the namespace), `lex/api/views/process_flow/` (deleted), `lex/model_admin/views/__init__.py` and `lex/api/views/ModelStructureObtainView.py` (`ProcessStructure` deleted), `lex/lex_app/urls.py` and `lex/lex_app/settings.py` (`LOGIN_REDIRECT_URL`) |
+| Test file | `lex/test_project/tests/api_layer/test_10p_process_routes_removed.py` |
+| Test classes | `TestCluster10p_ProcessRoutesRemoved` (10.91–10.94) |
+| Fixtures | none — the project's own URLconf, walked for every `(name, path)` it serves |
+| Tests landed | **4 pass / 0 fail** |
+| Also changed | 10.83 no longer drives `run_step`; 4.90 retired (it pinned `run_step` alone); 4.105 creates through the CRUD endpoint instead; 4.108 drops its `run_step` probe |
+| Status | ✅ Complete — resolves pending decision 4 in [clusters/README.md](../README.md) for `CreateOrUpdate` |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.91 | `run_step` is not routed | `reverse` raises `NoReverseMatch`, no route named `run_step` or served under `api/run_step/`, `lex.api.views.process_flow[.CreateOrUpdate]` raises `ModuleNotFoundError` |
+| 10.92 | process structure is not routed | `reverse` raises `NoReverseMatch`, no route named `process` or served under `api/process/`, neither module exposes `ProcessStructure` |
+| 10.93 | the neighbours are untouched | the ten endpoints the bundled frontend loads a project with all still reverse |
+| 10.94 | the namespace moved, no route did | `process_admin_rest_api` raises `NoReverseMatch`, `lex_rest_api:model-structure` reverses to `/api/model-structure`, no served path carries the app name, and the dead `LOGIN_REDIRECT_URL` follows the new name |
+
+**Why a regression matters:** `run_step` was a second write path into every model, carrying its own copy of the permission checks the generic CRUD endpoints apply. A route that comes back by accident is a write surface nobody audits any more. And the removal had to be surgical — it ran through the one url list the whole frontend is served from, so 10.93 is the half that proves nothing else went with it.

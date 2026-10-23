@@ -194,7 +194,7 @@ ALLOWED_HOSTS = [
     os.environ.get("POD_IP", default="envvar_not_existing"),
 ]
 
-LOGIN_REDIRECT_URL = "/process_admin/all"
+LOGIN_REDIRECT_URL = "/model_admin/all"
 
 CSRF_TRUSTED_ORIGINS = [
     "https://*." + os.getenv("DOMAIN_HOSTED", "localhost"),
@@ -300,7 +300,7 @@ INSTALLED_APPS = [
     "lex.authentication.apps.AuthenticationConfig",
     "lex.audit_logging.apps.LoggingConfig",
     "lex.api.apps.ApiConfig",
-    "lex.process_admin.apps.ProcessAdminConfig",
+    "lex.model_admin.apps.ModelAdminConfig",
     "lex.lex_app.apps.LexAppConfig",
     "simple_history",
     "celery",
@@ -867,9 +867,8 @@ if os.getenv("STORAGE_TYPE") == "LEGACY" or not os.getenv("STORAGE_TYPE"):
         MEDIA_URL = os.path.join(NEW_BASE_DIR, f"{repo_name}/")
         USER_REPORT_ROOT = os.path.join(NEW_BASE_DIR, f"{repo_name}/")
     else:
-        # this section is not in effect when a cloud storage option is used.
-        # Check DjangoProcessAdminGeneric/gcsUtils.py or
-        # DjangoProcessAdminGeneric/sharepoint/SharePointCloudStorageUtils.py for replacement.
+        # this section is not in effect when a cloud storage option is used;
+        # the cloud backends live in lex/utilities/storage/.
         MEDIA_ROOT = f"/app/storage/uploads"
         MEDIA_URL = f"/app/storage/uploads"
 

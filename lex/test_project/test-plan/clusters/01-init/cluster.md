@@ -488,3 +488,24 @@ does not remove user launch configurations.
 | 1.404 | test run configurations | `Tests` and one per group, for PyCharm and VS Code |
 
 **Scenario range:** 1.393 – 1.404. **Test file:** `lex/test_project/tests/init/test_1aw_pytest_plugin.py`. **Type:** U / I. **Status:** ✅ Complete (2026-10-15). Batch: [1aw](batches.md).
+
+---
+
+### 1ax. The Process name removed from the public surface ✅
+
+**What it tests:** `Process` — the abstract model a project subclassed to describe a workflow — is gone, and every door into it is shut: the import, the admin site's registry, the registration branch, the reserved class name, and the `Process` node type in the model-structure payload. `HTMLReport`, the sibling feature that shares the same machinery, was deliberately kept, so each scenario checks it still works. 1.410–1.412 cover the second half: the *name* also left the admin backbone (`lex.model_admin`, `LexAdminSite`, `LexModelAdmin`, `LexAppTestCase`), which is a rename of machinery that stayed, not a removal — and `ProcessAdminTestCase` going without an alias is a deliberate breaking change for downstream projects.
+
+**Why a regression matters:** a feature that is only half removed is worse than either state. A surviving `registerProcess` collects classes nothing reads; a stale `Process` in `_RESERVED_CLASS_NAMES` keeps rejecting a project's own model for a framework class that no longer exists; a `Process` node type sends the frontend to an endpoint that is gone.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.406 | not importable | `lex.core.models.Process` raises `ModuleNotFoundError`, `Process` left `__all__` |
+| 1.407 | no registry left | no `processes` / `registerProcess` / `get_process_structure_func` / `_register_process_model`; the HTMLReport equivalents survive |
+| 1.408 | the name is the project's again | `class Process(LexModel)` validates; `LexModel`, `CalculationModel`, `HTMLReport` and `Historical*` still raise |
+| 1.409 | no `Process` node type | the structure payload types nodes `Model` / `HTMLReport` / `Folder` only |
+| 1.410 | the package is `lex.model_admin` | the eight lazy names resolve; `lex.process_admin` and the two old site spellings are gone |
+| 1.411 | `LexModelAdmin` | replaces `ModelProcessAdmin`, including what `register()` attaches by default |
+| 1.412 | `LexAppTestCase` | replaces the public `ProcessAdminTestCase`, with no compatibility alias |
+| 1.413 | the sweep reached every importer | every rewritten module imports; no `.py` under `lex/` names a retired spelling, the feature's included — only this file and 10p are exempt |
+
+**Scenario range:** 1.406 – 1.413. **Test file:** `lex/test_project/tests/init/test_1ax_process_feature_removed.py`. **Type:** I. **Status:** ✅ Complete (2026-10-22). Batch: [1ax](batches.md).

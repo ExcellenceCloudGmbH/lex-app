@@ -9,6 +9,6 @@ class Widgets(APIView):
     permission_classes = [HasAPIKey | IsAuthenticated]
 
     def get(self, *args, **kwargs):
-        from lex.process_admin.settings import processAdminSite
+        from lex.model_admin.settings import lexAdminSite
 
-        return JsonResponse({"widget_structure": processAdminSite.widget_structure})
+        return JsonResponse({"widget_structure": lexAdminSite.widget_structure})

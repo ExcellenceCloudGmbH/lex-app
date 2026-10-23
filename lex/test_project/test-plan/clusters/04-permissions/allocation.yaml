@@ -152,17 +152,20 @@ letters:
     scenarios: 4.80-4.100
     status: complete
     tests:
-      pass: 21
+      pass: 20
       skip: 0
       xfail: 0
     note: >-
       lex/core/security_flags.py (nine flags, LEX_LEGACY_SECURITY umbrella, LEX_SEC_<FLAG> override,
       is_superuser_or_admin) and lex/api/security.py. FAIL_CLOSED (4.80-4.81), NOT_FOUND incl. bulk
-      GET dropping unreadable ids (4.82-4.84), EDIT on PATCH, bulk PATCH/DELETE and run_step with
-      400 {code, detail, error} bodies (4.85-4.90, BUG-010), READ_SURFACES on history, search,
+      GET dropping unreadable ids (4.82-4.84), EDIT on PATCH and bulk PATCH/DELETE with
+      400 {code, detail, error} bodies (4.85-4.89, BUG-010), READ_SURFACES on history, search,
       export, file download and the HTML report endpoint (4.91-4.95), BUG-011 once-per-row
       (4.96), API-key read context (4.97), flag resolution (4.98), admin helper (4.99), signed-out
       callers keep their sign-in answer (4.100). Ported from #816 without the 3.0 extension hooks.
+      2026-10-22: 4.90 is RETIRED -- it pinned run_step alone, and the ProcessFlow endpoint was
+      removed with the Process feature (10p pins its absence). The scenario id is not reused.
+      Pass 21 -> 20.
   p:
     title: Internal tools, Django users, permission_list and history writes (v2 security hardening)
     scenarios: 4.101-4.110
@@ -175,8 +178,10 @@ letters:
       LEX_SEC_INTERNAL: delete-unused-files for superusers and the Keycloak client role admin (4.101),
       POST api/logs for superusers (4.102), the calculation-log tree and its PDF only for logs of
       readable records (4.103-4.104), auth.User writes for superusers (4.105). permission_list false
-      answers 404 (4.106, LEX_SEC_NOT_FOUND). LEX_SEC_HISTORY_WRITE: PATCH/PUT/POST/DELETE, bulk and
-      run_step on Historical*/MetaHistorical* rows answer 400 EDIT_NOT_ALLOWED for non-superusers
+      answers 404 (4.106, LEX_SEC_NOT_FOUND). LEX_SEC_HISTORY_WRITE: PATCH/PUT/POST/DELETE and bulk writes
+      on Historical*/MetaHistorical* rows answer 400 EDIT_NOT_ALLOWED for non-superusers
       (4.107-4.110). Against the tree without these changes 8 of 10 fail (4.109 and 4.110 pin the
       opt-out and the unaffected main record). Ported from #826 (B2-B4, A9) with B1 widened to the
-      admin role; E1 is new.
+      admin role; E1 is new. 2026-10-22: 4.105 creates through the CRUD endpoint and 4.108 dropped
+      its run_step probe -- the ProcessFlow endpoint was removed with the Process feature (10p).
+      Both scenarios keep every other write path; pass stays 10.

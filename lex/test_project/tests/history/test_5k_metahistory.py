@@ -37,7 +37,7 @@ def _meta_model_for(model_class):
     """Resolve ``MetaHistorical<Model>``. The ``meta_history`` manager
     is attached to the *historical* model by
     ``ModelRegistration._register_standard_model`` (see
-    ``lex/process_admin/utils/model_registration.py`` line ~334:
+    ``lex/model_admin/utils/model_registration.py`` line ~334:
     ``history.contribute_to_class(historical_model, "meta_history")``)
     — NOT to the source model. The earlier shorthand
     ``model_class.meta_history.model`` always raised ``AttributeError``

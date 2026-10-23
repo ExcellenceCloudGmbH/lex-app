@@ -25,7 +25,7 @@ Cluster 7s — scenarios 7.205–7.221. Type: I/E.
 Covers: lex/core/models/LexModel.py (_should_skip_edited_fields_update,
         update_edited_at, update_edited_by),
         lex/core/models/CalculationModel.py (execute_calculation_sync),
-        lex/process_admin/utils/model_registration.py
+        lex/model_admin/utils/model_registration.py
         (_handle_calculation_model_reset).
 Run: python -m lex pytest lex/test_project/tests/calculations/test_7s_calculation_audit_columns.py -v
 """
@@ -40,7 +40,7 @@ import pytest
 from django.utils import timezone
 
 from lex.core.models.CalculationModel import CalculationModel
-from lex.process_admin.utils.model_registration import ModelRegistration
+from lex.model_admin.utils.model_registration import ModelRegistration
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from .models import (

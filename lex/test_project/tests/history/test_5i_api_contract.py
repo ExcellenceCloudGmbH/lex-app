@@ -183,7 +183,7 @@ class TestCluster05i_HistoryAPIContract(E2ETestCase):
     @unittest.skip(
         "Scenario 5.74: ?as_of system-time branch requires "
         "MetaHistorical* tables to be populated end-to-end. "
-        "test_project's HistSimpleItem skips process_admin's "
+        "test_project's HistSimpleItem skips model_admin's "
         "register_standard_model() bootstrap, so the L2 chain is not "
         "wired and the endpoint returns zero rows. Production-"
         "registered models exercise this path in integration tests; "

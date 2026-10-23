@@ -48,7 +48,7 @@ pytestmark = pytest.mark.history
 _SKIP_NOT_PG = "the in-database applier is PostgreSQL-only (design §8.13)"
 _SKIP_NO_L2 = "MetaHistorical* (L2) is not wired on HistSimpleItem in this environment"
 
-_SCHEDULE = "lex.process_admin.utils.local_scheduler.LocalSchedulerBackend.schedule"
+_SCHEDULE = "lex.model_admin.utils.local_scheduler.LocalSchedulerBackend.schedule"
 _NOW = "django.utils.timezone.now"
 
 
@@ -714,7 +714,7 @@ class TestCluster05o_ActivationApplier(E2ETestCase):
         history_before = HistSimpleItem.history.filter(id=item.pk).count()
 
         with patch(_SCHEDULE, side_effect=AssertionError("timer armed at apply time")), \
-             patch("lex.process_admin.utils.bitemporal_sync.BitemporalSynchronizer.sync_record_for_model",
+             patch("lex.model_admin.utils.bitemporal_sync.BitemporalSynchronizer.sync_record_for_model",
                    side_effect=AssertionError("Python synchroniser ran at apply time")):
             with connection.cursor() as cursor:
                 cursor.execute("SELECT lex_apply_due_activations()")

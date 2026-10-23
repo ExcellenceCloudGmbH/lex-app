@@ -63,7 +63,7 @@ else:
     PeriodicTask.objects.create(clocked=ClockedSchedule(...), one_off=True, ...)
 ```
 
-`LocalSchedulerBackend` (`lex/process_admin/utils/local_scheduler.py`) is a singleton
+`LocalSchedulerBackend` (`lex/model_admin/utils/local_scheduler.py`) is a singleton
 around `sched.scheduler` on a daemon thread. The queue is process memory. Nothing persists
 and nothing rehydrates it, so a restart, redeploy, node move or OOM silently drops every
 pending activation on that instance — the meta row stays `SCHEDULED` forever, nothing is
@@ -79,7 +79,7 @@ then flips meta rows from `SCHEDULED` to `DONE`. Failure is reported by **return
 (`"failed_model_lookup"`, `"skipped_missing_record"`, `"failed_too_early"`, `"success"`),
 not by raising.
 
-`sync_record_for_model` (`lex/process_admin/utils/bitemporal_sync.py`) is **convergent**.
+`sync_record_for_model` (`lex/model_admin/utils/bitemporal_sync.py`) is **convergent**.
 Inside one `transaction.atomic()`:
 
 ```python
@@ -110,7 +110,7 @@ signals fire (they do) but whether any receiver does anything. Every candidate:
 | Candidate side effect | Runs at activation? | Why not |
 |---|---|---|
 | Dependent recalculation (`do_post_save` → `CalculatedModelUpdateHandler.register_save`) | **No — dead code** | `register_save` returns on its first line: `if not hasattr(updated_entry, 'get_dependent_entries'): return`. That method is defined nowhere in the framework, nowhere in the example project, and not provided dynamically. The mixin that supplied it in v1 (`DependencyAnalysisMixin`) is commented out with *"was not migrated from old structure"*. |
-| Process-flow `update_handler` (`CreateOrUpdate.py:38`) | **No — broken** | `post_save.connect(update_handler)` is passed the *module* `lex.core.calculated_updates.update_handler`, not a callable. It raises on connect (the frontend's BUG-F-013). |
+| Process-flow `update_handler` (`CreateOrUpdate.py:38` — *the file and its `api/run_step/` route were removed on 2026-10-22 with the Process and ProcessFlow features; this row is kept as the record of what was true when the design was written*) | **No — broken** | `post_save.connect(update_handler)` is passed the *module* `lex.core.calculated_updates.update_handler`, not a callable. It raises on connect (the frontend's BUG-F-013). |
 | Audit log (`AuditLogMixin`) | **No — never on this path** | Mixed into the DRF views `One.py` / `Many.py`; its surface is `perform_create` / `perform_update` / `perform_destroy`. Activation is not a request. |
 | WebSocket `record_mutation` push | **No — never on this path** | `broadcast_model_mutation` is called only from `One.py` and `Many.py`. Not connected to any signal, not called from `sync_record_for_model` or `LexModel.save`. |
 | `edited_at` / `edited_by` stamping | Suppressed | `_should_skip_edited_fields_update` returns `True` under `skip_history_when_saving`; and it is a lifecycle hook, which `skip_hooks` bypasses anyway. |

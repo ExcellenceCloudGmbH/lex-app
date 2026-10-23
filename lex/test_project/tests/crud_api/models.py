@@ -72,6 +72,6 @@ class TrackedItem(LexModel):
 
 ALL_MODELS = [SimpleItem, TrackedItem]
 
-# URL names expected by ``process_admin_rest_api`` — lowercased model name.
+# URL names expected by ``lex_rest_api`` — lowercased model name.
 SIMPLE = "simpleitem"
 TRACKED = "trackeditem"

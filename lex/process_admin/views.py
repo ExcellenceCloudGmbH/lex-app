@@ -1,1 +1,0 @@
-# Process admin views will be moved here during refactoring

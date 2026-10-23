@@ -2,7 +2,7 @@
 
 Intent: the Celery worker-recovery system deliberately leaves a stuck
 ``IN_PROGRESS`` calculation row untouched at startup — the liveness-aware sweep
-(``process_admin.utils.model_registration._handle_calculation_model_reset``)
+(``model_admin.utils.model_registration._handle_calculation_model_reset``)
 skips any row a *tracked* recovery task owns, trusting a recovery-supervisor pod
 to requeue/resume it. When that pod is not running — local dev, CI, and any
 deployment that never provisioned it — the row is orphaned ``IN_PROGRESS``

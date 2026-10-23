@@ -72,7 +72,7 @@
 | 4.87 | no edit right | every PATCH refused; legacy applies it |
 | 4.88 | bulk PATCH | 400, nothing changed |
 | 4.89 | bulk DELETE | `permission_delete` per row, 400 `DELETE_NOT_ALLOWED` with ids |
-| 4.90 | run_step | 400 `EDIT_NOT_ALLOWED` / `CREATE_NOT_ALLOWED` |
+| 4.90 | ~~run_step~~ | **Retired 2026-10-22** — it pinned the ProcessFlow endpoint, removed with the Process feature; its absence is pinned by [10.91](../10-api_layer/cluster.md). The id is not reused. |
 | 4.91 | history | 404 for an unreadable record |
 | 4.92 | global search | only readable rows; legacy all |
 | 4.93 | export | only readable rows |
@@ -98,10 +98,10 @@
 | 4.102 | POST api/logs | plain user 404 with `error`, nothing logged; superuser and legacy 201 |
 | 4.103 | calculation-log tree | readable record's calculation 1, hidden 0, record-less 0, unfiltered 0; superuser and legacy all |
 | 4.104 | calculation-log PDF | readable 200; hidden, record-less and unknown 404; superuser 200 for the record-less log |
-| 4.105 | `auth.User` writes | PATCH, run_step create, bulk delete → 400 `EDIT_NOT_ALLOWED`, nothing changes; superuser PATCH 200 |
+| 4.105 | `auth.User` writes | PATCH, create, bulk delete → 400 `EDIT_NOT_ALLOWED`, nothing changes; superuser PATCH 200 |
 | 4.106 | `permission_list` false | list 404; legacy 200; allowing 200 |
 | 4.107 | PATCH/PUT history row | 400 `EDIT_NOT_ALLOWED` with `error`, history unchanged; superuser 200 |
-| 4.108 | other history writes | DELETE, POST, bulk PATCH/DELETE, run_step, meta-history PATCH → 400 `EDIT_NOT_ALLOWED`, never 403 |
+| 4.108 | other history writes | DELETE, POST, bulk PATCH/DELETE, meta-history PATCH → 400 `EDIT_NOT_ALLOWED`, never 403 |
 | 4.109 | opt-out | `LEX_SEC_HISTORY_WRITE=false` applies the correction (200) |
 | 4.110 | main record | PATCH of the record itself still 200 |
 

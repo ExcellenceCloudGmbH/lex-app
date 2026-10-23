@@ -14,42 +14,42 @@ class ModelContainer:
     """
     Container for model class and its admin configuration.
     
-    This class wraps a Django model class along with its process admin configuration,
+    This class wraps a Django model class along with its model admin configuration,
     providing a unified interface for accessing model metadata, serializers, and
     permission restrictions. It serves as the core component in the model collection
     system for organizing and managing model access patterns.
     
     Attributes:
         model_class: The Django model class being contained
-        process_admin: The admin configuration for the model
+        model_admin: The admin configuration for the model
         dependent_model_containers: Set of containers that depend on this one
         serializers_map: Dictionary mapping serializer names to serializer classes
         obj_serializer: Default serializer for list/detail endpoints
     """
-    def __init__(self, model_class: Type[Model], process_admin: Any) -> None:
+    def __init__(self, model_class: Type[Model], model_admin: Any) -> None:
         """
         Initialize ModelContainer with enhanced validation and error handling.
         
         Args:
             model_class: Django model class to be contained
-            process_admin: Admin configuration object for the model
+            model_admin: Admin configuration object for the model
             
         Raises:
             TypeError: If model_class is not a valid Django model class
-            ValueError: If process_admin is None or invalid
+            ValueError: If model_admin is None or invalid
         """
         if not model_class:
             raise ValueError("model_class cannot be None")
         
-        if not process_admin:
-            raise ValueError("process_admin cannot be None")
+        if not model_admin:
+            raise ValueError("model_admin cannot be None")
             
         # Validate that model_class is a Django model
         if not (hasattr(model_class, '_meta') or hasattr(model_class, '__name__')):
             raise TypeError(f"model_class must be a Django model class, got {type(model_class)}")
         
         self.model_class: Type[Model] = model_class
-        self.process_admin: Any = process_admin
+        self.model_admin: Any = model_admin
         self.dependent_model_containers: Set["ModelContainer"] = set()
         self.serializers_map: Optional[Dict[str, Any]] = None
         self.obj_serializer: Optional[Any] = None
@@ -90,7 +90,7 @@ class ModelContainer:
             self.obj_serializer = None
             return self.serializers_map
 
-        default_fields = self.process_admin.get_fields_in_table_view(self.model_class)
+        default_fields = self.model_admin.get_fields_in_table_view(self.model_class)
         signature = self._build_serializer_signature(default_fields)
 
         if (

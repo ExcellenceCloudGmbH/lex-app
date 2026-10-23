@@ -37,7 +37,7 @@ class ModuleAliasingFinder(importlib.abc.MetaPathFinder):
             # Check if this is a new-style app (utilities, core, authentication, etc.)
             parts = fullname.split('.')
             if len(parts) >= 2 and parts[1] in ('utilities', 'core', 'authentication', 
-                                                   'audit_logging', 'api', 'process_admin'):
+                                                   'audit_logging', 'api', 'model_admin'):
                 return None  # Let Django handle these normally
         
         # Determine if this is a short or long name
@@ -109,7 +109,7 @@ class ModuleAliasingFinder(importlib.abc.MetaPathFinder):
         if name.startswith('lex.'):
             parts = name.split('.')
             if len(parts) >= 2 and parts[1] in ('utilities', 'core', 'authentication',
-                                                   'audit_logging', 'api', 'process_admin'):
+                                                   'audit_logging', 'api', 'model_admin'):
                 return False
         
         # Get first component

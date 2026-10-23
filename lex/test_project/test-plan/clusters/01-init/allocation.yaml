@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 405
+max_scenario: 413
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1285,3 +1285,35 @@ letters:
       warnings.catch_warnings(), which drops the warning policy the settings install there,
       so the plugin reinstalls those filters in pytest_configure (1.393, third half). 1av
       (1.386-1.392) is reserved by an open PR, hence aw.
+  ax:
+    title: The Process name removed from the framework's public surface
+    scenarios: 1.406-1.413
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      Process (the abstract workflow model) and its registry are gone. lex.core.models no longer
+      imports or advertises Process (1.406); lexAdminSite keeps no processes dict,
+      registerProcess or get_process_structure_func, and ModelRegistration no longer carries
+      _register_process_model, while the HTMLReport equivalents all survive (1.407); 'Process' left
+      _RESERVED_CLASS_NAMES, so a project may now call its own model Process while LexModel /
+      CalculationModel / HTMLReport and the Historical* prefix stay reserved (1.408); the
+      model-structure payload types nodes Model / HTMLReport / Folder only, never Process (1.409).
+      Each scenario checks the kept HTMLReport sibling too, so a broken registration cannot pass as
+      a clean removal. The routes that served the feature are pinned by 10p. The same sweep took the name
+      out of the admin backbone, which was never the removed feature but carried Process through its
+      package and classes: lex.model_admin replaces lex.process_admin and the eight lazy names keep
+      working while ProcessAdminSite / processAdminSite raise AttributeError (1.410); LexModelAdmin
+      replaces ModelProcessAdmin and is what register() attaches by default, checked on the live
+      singleton with the registration undone afterwards (1.411); LexAppTestCase replaces the public
+      ProcessAdminTestCase with no compatibility alias, since an alias would keep the retired name
+      alive -- a deliberate breaking change for downstream projects (1.412). 1.413 is the gate for
+      the sweep itself: it imports every module the rename rewrote and then reads the whole lex/
+      tree for the retired spellings, because a half-finished rename raises at some importer and
+      which one depends on load order. The ban covers the feature's names too (ProcessStructure,
+      ProcessFlow, process_flow, run_step, registerProcess) and the search strings are assembled at
+      runtime so the test does not match itself; only the two files whose job is to assert the
+      absence -- this one and 10p -- are exempt, and the rest of lex/ is clean. 10.94 pins the matching namespace
+      rename and that no served URL moved.

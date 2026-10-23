@@ -287,7 +287,7 @@ def on_history_saved__sync_main_table(
     if getattr(instance, MAIN_TABLE_SYNC_NOT_NEEDED_ATTR, False):
         return
 
-    from lex.process_admin.utils.bitemporal_sync import BitemporalSynchronizer
+    from lex.model_admin.utils.bitemporal_sync import BitemporalSynchronizer
 
     pk_name = main_model._meta.pk.name
     pk_val = getattr(instance, pk_name)
@@ -534,7 +534,7 @@ def _schedule_future_activation(
 
     if os.getenv("CELERY_ACTIVE", "false").lower() != "true":
         # ── Local in-process scheduler ──
-        from lex.process_admin.utils.local_scheduler import LocalSchedulerBackend
+        from lex.model_admin.utils.local_scheduler import LocalSchedulerBackend
         from lex.lex_app.celery_tasks import activate_history_version
 
         scheduler = LocalSchedulerBackend()

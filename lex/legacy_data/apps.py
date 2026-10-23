@@ -216,7 +216,7 @@ class LegacyDataConfig(LexAppConfig):
         )
         return type(class_name, (models.Model,), attrs)
 
-    def _register_static_legacy_models(self, processAdminSite, read_only_restriction):
+    def _register_static_legacy_models(self, lexAdminSite, read_only_restriction):
         from lex.legacy_data.admin import (
             LegacyCalculationIdAdmin,
             LegacyCalculationLogAdmin,
@@ -294,11 +294,11 @@ class LegacyDataConfig(LexAppConfig):
 
             if not admin.site.is_registered(model):
                 admin.site.register(model, admin_model)
-            processAdminSite.register([model])
+            lexAdminSite.register([model])
             if model._meta.model_name not in self.untracked_models:
                 self.untracked_models.append(model._meta.model_name)
 
-    def _register_dynamic_legacy_models(self, processAdminSite, read_only_restriction):
+    def _register_dynamic_legacy_models(self, lexAdminSite, read_only_restriction):
         from lex.legacy_data.admin.read_only_admin import ReadOnlyAdmin
 
         if not self._has_table_introspection():
@@ -335,7 +335,7 @@ class LegacyDataConfig(LexAppConfig):
 
             if not admin.site.is_registered(dynamic_model):
                 admin.site.register(dynamic_model, dynamic_admin)
-            processAdminSite.register([dynamic_model])
+            lexAdminSite.register([dynamic_model])
             if dynamic_model._meta.model_name not in self.untracked_models:
                 self.untracked_models.append(dynamic_model._meta.model_name)
 
@@ -343,11 +343,11 @@ class LegacyDataConfig(LexAppConfig):
         from lex.core.mixins.ModelModificationRestriction import (
             AdminReportsModificationRestriction,
         )
-        from lex.process_admin.settings import processAdminSite
+        from lex.model_admin.settings import lexAdminSite
 
         if not hasattr(self, "untracked_models"):
             self.untracked_models = []
 
         read_only_restriction = AdminReportsModificationRestriction()
-        self._register_static_legacy_models(processAdminSite, read_only_restriction)
-        self._register_dynamic_legacy_models(processAdminSite, read_only_restriction)
+        self._register_static_legacy_models(lexAdminSite, read_only_restriction)
+        self._register_dynamic_legacy_models(lexAdminSite, read_only_restriction)

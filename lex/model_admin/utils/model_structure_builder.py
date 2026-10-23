@@ -4,7 +4,7 @@ import logging
 import os
 from typing import Dict, Iterable, List, Set
 
-from lex.process_admin.utils.model_structure import ModelStructure
+from lex.model_admin.utils.model_structure import ModelStructure
 
 # Under the lex.* namespace, so output is gated by LEX_LOG_LEVEL (see settings.py):
 # these messages are benign at startup and only surface with LEX_LOG_LEVEL=DEBUG.

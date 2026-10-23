@@ -20,7 +20,7 @@ from lex.audit_logging.utils.config import is_audit_logging_enabled
 from lex.lex_app import settings
 
 
-class ProcessAdminTestCase(TestCase):
+class LexAppTestCase(TestCase):
 
     def replace_tagged_parameters(self, object_parameters):
         for key in object_parameters:

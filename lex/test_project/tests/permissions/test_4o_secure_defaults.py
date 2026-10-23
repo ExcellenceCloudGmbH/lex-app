@@ -10,11 +10,10 @@ old behaviour; a per-flag setting wins over the umbrella switch):
 * NOT_FOUND – a record the caller may not read answers 404 on single and bulk
   endpoints, never 200 ``{}`` and never a new 403 (the bundled frontend signs
   the user out on 403).
-* EDIT – ``permission_edit`` is enforced on PATCH/PUT, bulk PATCH and
-  run_step (BUG-010); bulk DELETE asks ``permission_delete`` per row; run_step
-  asks ``permission_create``. Denials answer 400 with ``EDIT_NOT_ALLOWED``,
-  ``DELETE_NOT_ALLOWED`` or ``CREATE_NOT_ALLOWED`` and a ``{code, detail,
-  error}`` body.
+* EDIT – ``permission_edit`` is enforced on PATCH/PUT and bulk PATCH
+  (BUG-010); bulk DELETE asks ``permission_delete`` per row. Denials answer
+  400 with ``EDIT_NOT_ALLOWED``, ``DELETE_NOT_ALLOWED`` or
+  ``CREATE_NOT_ALLOWED`` and a ``{code, detail, error}`` body.
 * READ_SURFACES – history, global search, export and file download apply read
   permission. The HTML report endpoint requires sign-in; an unknown report is
   404.
@@ -27,13 +26,14 @@ duplicate evaluations), and a classic API key keeps its own context where the
 serializer decides a row.
 
 Cluster 4o — scenarios 4.80–4.100. Type: E (4.98–4.99: U).
+Scenario 4.90 is retired: the second write endpoint it pinned was removed
+with the feature that owned it (cluster 10p pins its absence).
 Covers: lex/core/security_flags.py, lex/api/security.py,
 lex/api/views/model_entries/{One,Many,History,filter_backends}.py,
-lex/api/views/process_flow/CreateOrUpdate.py,
 lex/api/views/global_search_for_models/Search.py,
 lex/api/views/file_operations/{ModelExport,FileDownload}.py,
 lex/api/filters/GenericFilters.py, lex/api/serializers/base_serializers.py,
-lex/process_admin/views/model_relation_views.py (Overview).
+lex/model_admin/views/model_relation_views.py (Overview).
 Run: python -m lex pytest lex/test_project/tests/permissions/test_4o_secure_defaults.py -v
 """
 
@@ -311,29 +311,6 @@ class TestCluster04o_EditEnforcement(_SecureDefaultsCase):
             self.client.delete(url)
         self.assertEqual(ProtectedItem.objects.count(), 0)
 
-    # -- 4.90 ----------------------------------------------------------
-    def test_4_90_run_step_applies_the_same_checks(self) -> None:
-        """
-        Scenario 4.90: run_step cannot bypass edit and create permissions.
-        Given: a ProtectedItem and a non-admin (may edit only "name", may not create)
-        When: run_step PATCHes "secret" on it, and PATCHes a new row for an unknown pk
-        Then: the first answers 400 EDIT_NOT_ALLOWED; the create answers 400
-              CREATE_NOT_ALLOWED; nothing changes.
-        """
-        item = ProtectedItem.objects.create(name="p", secret="original")
-        url = reverse("process_admin_rest_api:run_step", kwargs={"model_container": _Container(PROTECTED), "pk": item.pk})
-        response = self.client.patch(url, {"secret": "leaked"}, format="json")
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["code"], "EDIT_NOT_ALLOWED")
-        url = reverse("process_admin_rest_api:run_step", kwargs={"model_container": _Container(PROTECTED), "pk": 999999})
-        response = self.client.patch(url, {"name": "new"}, format="json")
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["code"], "CREATE_NOT_ALLOWED")
-        self.assertIn("ProtectedItem", response.json()["error"])
-        self.assertEqual(ProtectedItem.objects.count(), 1)
-        item.refresh_from_db()
-        self.assertEqual(item.secret, "original")
-
 
 class _PlainReport(HTMLReport):
     def get_html(self, user):
@@ -370,9 +347,9 @@ class TestCluster04o_ReadSurfaces(_SecureDefaultsCase):
         FilterBackendItem.objects.create(name="needle open")
         FilterBackendItem.objects.create(name="needle hidden", is_secret=True)
         from lex.api.views.global_search_for_models.Search import Search
-        from lex.process_admin.settings import processAdminSite
+        from lex.model_admin.settings import lexAdminSite
 
-        container = processAdminSite.model_collection.get_container(FILTER_BACKEND)
+        container = lexAdminSite.model_collection.get_container(FILTER_BACKEND)
 
         def descriptions():
             # Only this model's container: the test database has no tables for
@@ -419,7 +396,7 @@ class TestCluster04o_ReadSurfaces(_SecureDefaultsCase):
         secret = SecretDocument.objects.create(name="hidden", is_secret=True)
         secret.attachment.save("hidden.txt", ContentFile(b"secret bytes"))
         self.addCleanup(secret.attachment.delete, save=False)
-        url = reverse("process_admin_rest_api:file-download", kwargs={"model_container": _Container(SECRET_DOCUMENT)})
+        url = reverse("lex_rest_api:file-download", kwargs={"model_container": _Container(SECRET_DOCUMENT)})
         missing = self.client.get(url)
         self.assertEqual(missing.status_code, 400)
         self.assertTrue(missing.json()["error"])
@@ -439,16 +416,16 @@ class TestCluster04o_ReadSurfaces(_SecureDefaultsCase):
         Then: 200 with the HTML for the signed-in user, no 200 for the
               anonymous client, 404 (not 500) for the unknown report.
         """
-        from lex.process_admin.settings import processAdminSite
+        from lex.model_admin.settings import lexAdminSite
 
-        processAdminSite.html_reports["cluster4oreport"] = _PlainReport
-        self.addCleanup(processAdminSite.html_reports.pop, "cluster4oreport", None)
-        url = reverse("process_admin_rest_api:htmlreports", kwargs={"report_name": "cluster4oreport"})
+        lexAdminSite.html_reports["cluster4oreport"] = _PlainReport
+        self.addCleanup(lexAdminSite.html_reports.pop, "cluster4oreport", None)
+        url = reverse("lex_rest_api:htmlreports", kwargs={"report_name": "cluster4oreport"})
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), "<p>numbers</p>")
         self.assertNotEqual(APIClient().get(url).status_code, 200)
-        unknown = reverse("process_admin_rest_api:htmlreports", kwargs={"report_name": "nope"})
+        unknown = reverse("lex_rest_api:htmlreports", kwargs={"report_name": "nope"})
         self.assertEqual(self.client.get(unknown).status_code, 404)
 
 

@@ -183,7 +183,7 @@ POLICY_ITEM = "policyitem"
 POLICY_OWNER = "policyowner"
 POLICY_OPEN = "policyopenitem"
 
-# URL names expected by ``process_admin_rest_api`` — lowercased model name.
+# URL names expected by ``lex_rest_api`` — lowercased model name.
 CATEGORY = "querycategory"
 ITEM = "queryitem"
 

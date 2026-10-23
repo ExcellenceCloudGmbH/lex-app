@@ -1,7 +1,7 @@
 import copy
 import os
 
-from lex.process_admin.models.ModelCollection import ModelCollection
+from lex.model_admin.models.ModelCollection import ModelCollection
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -226,17 +226,6 @@ class Overview(APIView):
         return Response(html)
 
 
-class ProcessStructure(APIView):
-    http_method_names = ["get"]
-    processes = None
-
-    def get(self, request, *args, **kwargs):
-        class_name = kwargs["process_name"]
-        process_class = self.processes[class_name]
-        process_structure = process_class().get_structure()
-        return Response(process_structure)
-
-
 # import copy
 #
 # import copy
@@ -245,7 +234,7 @@ class ProcessStructure(APIView):
 # from rest_framework.views import APIView
 # from rest_framework_api_key.permissions import HasAPIKey
 #
-# from lex.process_admin.models.model_collection import ModelCollection
+# from lex.model_admin.models.model_collection import ModelCollection
 # from lex.api.views.authentication.KeycloakManager import KeycloakManager
 #
 #
