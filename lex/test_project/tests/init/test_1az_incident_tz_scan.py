@@ -9,7 +9,7 @@ place or, worse, sends a correct value to be "corrected" — so these scenarios
 pin how each verdict follows from the database's own evidence (audit log,
 history, meta-history) and that the scan never writes.
 
-Cluster 1az — scenarios 1.420–1.447. Type: U + E.
+Cluster 1az — scenarios 1.420–1.448. Type: U + E.
 Covers: lex/lex_app/incident_tz/scan.py, lex/lex_app/management/commands/incident_tz.py.
 Run: python -m lex pytest lex/test_project/tests/init/test_1az_incident_tz_scan.py -v
 """
@@ -936,4 +936,25 @@ class TestCluster01az_ScanDatabase(E2ETestCase):
             return (r["table"], r["column"], r["row"] or "", r["record"] or "")
 
         self.assertEqual(sorted(with_checkpoint["rows"], key=key), sorted(without["rows"], key=key))
+
+    def test_1_448_a_value_at_the_end_of_time_does_not_stop_the_scan(self) -> None:
+        """
+        Scenario 1.448: "never expires" sentinels sit at the edge of the calendar.
+        Given: a raw table holding 9999-12-31 23:59:59 UTC (the last instant Python
+               can hold; one hour later in Berlin it cannot) and 9999-12-31 22:00 UTC
+        When: the scan runs
+        Then: it completes; both values are judged, neither counts as a mirror value
+        """
+        self.seed_audit()
+        raw = self.make_raw_table()
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f'INSERT INTO "{raw}" (due_on, created_at, edited_at) VALUES '
+                "('9999-12-31 23:59:59+00', %s, %s), ('9999-12-31 22:00:00+00', %s, %s)",
+                [IN_WINDOW, IN_WINDOW, IN_WINDOW, IN_WINDOW],
+            )
+        report = self.run_scan(tables=[raw])
+        found = self.rows(report, raw, "due_on")
+        self.assertEqual(len(found), 2, f"Both values are judged: {found}")
+        self.assertFalse(any(r["mirror"] for r in found))
 

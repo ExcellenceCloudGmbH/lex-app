@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 447
+max_scenario: 448
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1287,10 +1287,10 @@ letters:
       (1.386-1.392) is reserved by an open PR, hence aw.
   az:
     title: lex incident_tz scan — read-only scan for the TIME_ZONE incident (exposure, census, verdicts A–E)
-    scenarios: 1.420-1.447
+    scenarios: 1.420-1.448
     status: complete
     tests:
-      pass: 28
+      pass: 29
       skip: 0
       xfail: 0
     note: >-
@@ -1309,3 +1309,5 @@ letters:
       judged; C values written before the first frontend build with PR #452 (2026-09-04 15:37 UTC)
       are marked as sent as local time; R11 mirror values and typed times written after it are
       counted; the standalone run reads each table once and ends its transaction after each table.
+      1.448: every timestamp is read as UTC digits in SQL, so a 9999-12-31 sentinel neither overflows
+      the driver (a Berlin session renders it as year 10000) nor the mirror check.

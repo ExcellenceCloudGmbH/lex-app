@@ -661,8 +661,9 @@ def _classes(v: str) -> dict:
             f"CASE WHEN {utc_time} = time '00:00' THEN 'midnight_utc' ELSE 'time_of_day' END"
         ),
         "digits": f"({v} AT TIME ZONE 'UTC')",
-        "fix_b": f"(date_trunc('day', {v} AT TIME ZONE 'UTC') AT TIME ZONE %(zone)s)",
-        "fix_c": f"(({v} AT TIME ZONE 'UTC') AT TIME ZONE %(zone)s)",
+        # Corrected values, as naive UTC digits like every timestamp the scan reads.
+        "fix_b": f"((date_trunc('day', {v} AT TIME ZONE 'UTC') AT TIME ZONE %(zone)s) AT TIME ZONE 'UTC')",
+        "fix_c": f"((({v} AT TIME ZONE 'UTC') AT TIME ZONE %(zone)s) AT TIME ZONE 'UTC')",
     }
 
 
@@ -686,8 +687,8 @@ def _table_stats(cursor, table: _Table, columns: Sequence[str], zone: str) -> di
                 f"count(*) FILTER (WHERE {c['midnight_local']})",
                 f"count(*) FILTER (WHERE {c['time_of_day']})",
                 f"count(*) FILTER (WHERE {c['r11_mirror']})",
-                f"min({v})",
-                f"max({v})",
+                f"(min({v}) AT TIME ZONE 'UTC')",
+                f"(max({v}) AT TIME ZONE 'UTC')",
             ]
         cursor.execute(f"SELECT {', '.join(parts)} FROM {table.sql}", {"zone": zone})
         row = cursor.fetchone()
@@ -787,7 +788,7 @@ def _audit_rows(cursor, table: _Table, zone: str) -> list:
     author = '"author"' if "author" in table.columns else "NULL::text"
     cursor.execute(
         f"""
-        SELECT "date", ("date" AT TIME ZONE 'UTC'), ("date" AT TIME ZONE %(zone)s),
+        SELECT ("date" AT TIME ZONE 'UTC'), ("date" AT TIME ZONE 'UTC'), ("date" AT TIME ZONE %(zone)s),
                ("payload"->>'edited_at'), {action}, {author}
           FROM {table.sql}
          WHERE {" AND ".join(conditions)}
@@ -877,10 +878,13 @@ def _is_mirror(value: Optional[dt.datetime], zone: str) -> bool:
     22:00 in summer, 23:00 in winter, the day before."""
     if value is None or ZoneInfo is None:
         return False
-    local = _aware(value).astimezone(ZoneInfo(zone))
-    if local.microsecond or local.second:
+    try:
+        local = _aware(value).astimezone(ZoneInfo(zone))
+        if local.microsecond or local.second:
+            return False
+        shifted = local.replace(tzinfo=None) + local.utcoffset()
+    except OverflowError:  # "never expires" sentinels at the end of the calendar
         return False
-    shifted = local.replace(tzinfo=None) + local.utcoffset()
     return shifted.time() == dt.time(0) and local.time() != dt.time(0)
 
 
@@ -928,14 +932,14 @@ def _classify_main(cursor, table, column, history, meta, periods, zone, layer) -
     c = _classes("t." + quote(column))
     record_key = table.primary_key
     has_bracket = {"created_at", "edited_at"} <= table.columns
-    created = 't."created_at"' if has_bracket else "NULL::timestamptz"
-    edited = 't."edited_at"' if has_bracket else "NULL::timestamptz"
+    created = """(t."created_at" AT TIME ZONE 'UTC')""" if has_bracket else "NULL::timestamp"
+    edited = """(t."edited_at" AT TIME ZONE 'UTC')""" if has_bracket else "NULL::timestamp"
     col = quote(column)
     if layer != "framework" and _history_ready(history, column, record_key):
         meta = meta if _meta_ready(meta, column) else None
         sql = _runs_cte(history, meta, column, record_key) + f"""
-            SELECT t.{quote(record_key)}, t.{col}, {c['digits']}, {c['kind']},
-                   {c['fix_b']}, {c['fix_c']}, r.written_at,
+            SELECT t.{quote(record_key)}, {c['digits']}, {c['digits']}, {c['kind']},
+                   {c['fix_b']}, {c['fix_c']}, (r.written_at AT TIME ZONE 'UTC'),
                    (r.rid IS NOT NULL AND t.{col} IS NOT DISTINCT FROM r.val),
                    {created}, {edited}
               FROM {table.sql} t
@@ -945,8 +949,8 @@ def _classify_main(cursor, table, column, history, meta, periods, zone, layer) -
         provenance = "history"
     else:
         sql = f"""
-            SELECT {table.key('t')}, t.{col}, {c['digits']}, {c['kind']},
-                   {c['fix_b']}, {c['fix_c']}, NULL::timestamptz, FALSE, {created}, {edited}
+            SELECT {table.key('t')}, {c['digits']}, {c['digits']}, {c['kind']},
+                   {c['fix_b']}, {c['fix_c']}, NULL::timestamp, FALSE, {created}, {edited}
               FROM {table.sql} t
              WHERE {c['candidate']}
         """
@@ -975,8 +979,8 @@ def _classify_history(cursor, history, meta, column, record_key, periods, zone) 
     meta = meta if _meta_ready(meta, column) else None
     c = _classes("r.val")
     sql = _runs_cte(history, meta, column, record_key) + f"""
-        SELECT r.hid, r.rid, r.val, {c['digits']}, {c['kind']}, {c['fix_b']}, {c['fix_c']},
-               r.written_at
+        SELECT r.hid, r.rid, {c['digits']}, {c['digits']}, {c['kind']}, {c['fix_b']}, {c['fix_c']},
+               (r.written_at AT TIME ZONE 'UTC')
           FROM runs r
          WHERE {c['candidate']}
     """
@@ -993,10 +997,10 @@ def _classify_meta(cursor, meta, history, column, record_key, periods, zone) -> 
     c = _classes("m." + quote(column))
     col = quote(column)
     sql = _runs_cte(history, meta, column, record_key) + f"""
-        SELECT {meta.key('m')}, m."history_object_id", m.{col}, {c['digits']}, {c['kind']},
-               {c['fix_b']}, {c['fix_c']}, r.written_at,
+        SELECT {meta.key('m')}, m."history_object_id", {c['digits']}, {c['digits']}, {c['kind']},
+               {c['fix_b']}, {c['fix_c']}, (r.written_at AT TIME ZONE 'UTC'),
                (r.hid IS NOT NULL AND m.{col} IS NOT DISTINCT FROM r.val),
-               r.t, m."sys_from"
+               (r.t AT TIME ZONE 'UTC'), (m."sys_from" AT TIME ZONE 'UTC')
           FROM {meta.sql} m
           LEFT JOIN runs r ON r.hid = m."history_object_id"
          WHERE {c['candidate']}
@@ -1022,7 +1026,7 @@ def _signature_only(cursor, table, column, zone, layer) -> list:
     c = _classes("t." + quote(column))
     cursor.execute(
         f"""
-        SELECT {table.key('t')}, t.{quote(column)}, {c['digits']}, {c['kind']},
+        SELECT {table.key('t')}, {c['digits']}, {c['digits']}, {c['kind']},
                {c['fix_b']}, {c['fix_c']}
           FROM {table.sql} t
          WHERE {c['candidate']}
@@ -1583,6 +1587,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # is read-only by default (see _connect), so every transaction is too.
         cursor.execute("SET lock_timeout = '5s'")
         cursor.execute("SET statement_timeout = %s", (args.statement_timeout,))
+        cursor.execute("SET TIME ZONE 'UTC'")
 
         def release_locks() -> None:
             connection.rollback()

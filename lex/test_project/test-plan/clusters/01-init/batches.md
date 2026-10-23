@@ -1794,14 +1794,14 @@ config each fail 1.404.
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.420 – 1.447 |
+| Scenario range | 1.420 – 1.448 |
 | Type | U / E |
 | Files covered | `lex/lex_app/incident_tz/scan.py` (new; one file, standard library plus a DB-API cursor, so it also runs on its own against an instance that has not been upgraded); `lex/lex_app/management/commands/incident_tz.py` (new; `lex incident_tz scan`) |
 | Test file | `lex/test_project/tests/init/test_1az_incident_tz_scan.py` |
 | Test model | `lex/test_project/tests/init/models.py` → `IncidentScanItem` (`due_on` a date, `meets_at` a time of day, `synced_at` a clock) |
-| Test classes | `TestCluster01az_ScanDecisions` (1.420–1.424, 1.436–1.439), `TestCluster01az_ScanDatabase` (1.425–1.435, 1.440–1.447) |
+| Test classes | `TestCluster01az_ScanDecisions` (1.420–1.424, 1.436–1.439), `TestCluster01az_ScanDatabase` (1.425–1.435, 1.440–1.448) |
 | Fixtures | none — audit rows and history versions are created through the ORM, then their times stamped with `.update()`; a raw table without a model for 1.427 and 1.434 |
-| Tests landed | **28 pass / 0 fail** |
+| Tests landed | **29 pass / 0 fail** |
 | Status | ✅ Complete |
 
 Q1 of the TZ remediation plan (LEX-747, step 3/8 LEX-1325): per database, the periods in which
@@ -1854,3 +1854,10 @@ explicit UTC instant; the first prod image with it was pushed 2026-09-04 15:37 U
 between 07-15 and then: C values written before that are marked as sent as local time, and
 R11 mirror values and typed times written after it are counted per column. Each of the eight
 rules removed fails one of 1.428 – 1.447.
+
+**Found on the first prod scan (1.448).** 1121's framework cache holds the sentinel
+9999-12-31 23:59:59+00. Converted to Berlin for the mirror check it overflowed Python's
+calendar, and in a Django connection, whose session zone is Berlin and whose adapter labels
+every timestamp with it, the driver could not even parse it (year 10000). Every timestamp the
+scan reads now comes back as UTC digits from SQL (`… AT TIME ZONE 'UTC'`), right under any
+session zone, and the mirror check stops at the calendar's end; removing either fails 1.448.
