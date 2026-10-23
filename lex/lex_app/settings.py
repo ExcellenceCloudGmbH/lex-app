@@ -300,7 +300,7 @@ INSTALLED_APPS = [
     "lex.authentication.apps.AuthenticationConfig",
     "lex.audit_logging.apps.LoggingConfig",
     "lex.api.apps.ApiConfig",
-    "lex.model_admin.apps.ModelAdminConfig",
+    "lex.process_admin.apps.ProcessAdminConfig",
     "lex.lex_app.apps.LexAppConfig",
     "simple_history",
     "celery",

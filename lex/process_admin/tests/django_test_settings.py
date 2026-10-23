@@ -1,7 +1,7 @@
 SECRET_KEY = "test-secret-key"
 DEBUG = True
 USE_TZ = True
-ROOT_URLCONF = "lex.model_admin.tests.urls"
+ROOT_URLCONF = "lex.process_admin.tests.urls"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 INSTALLED_APPS = [

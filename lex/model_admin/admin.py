@@ -1,1 +1,0 @@
-# Model admin configurations will be added here as needed

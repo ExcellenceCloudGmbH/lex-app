@@ -1,6 +1,6 @@
 from django.db.models import Model
 from lex.core.models.HTMLReport import HTMLReport
-from lex.model_admin.models.constants import RELATION_FIELD_TYPES
+from lex.process_admin.models.constants import RELATION_FIELD_TYPES
 
 
 # TODO: 2

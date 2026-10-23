@@ -319,7 +319,7 @@ ALL_MODELS = [
     AttachmentItem,
 ]
 
-# URL names expected by ``lex_rest_api`` — lowercased model name.
+# URL names expected by ``process_admin_rest_api`` — lowercased model name.
 RELATED = "relateditem"
 WIDE = "wideitem"
 PROTECTED_WIDE = "protectedwideitem"

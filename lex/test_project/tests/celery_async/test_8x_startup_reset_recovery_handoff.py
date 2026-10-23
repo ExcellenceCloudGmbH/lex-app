@@ -16,7 +16,7 @@ nothing tracked, so behavior is identical to today.
 Cluster 8x — scenarios 8.103–8.114. Type: U (helper logic, mocked registry) + I
 (real ``CalculationModel`` rows driven through the startup sweep).
 Covers: lex/lex_app/celery_recovery/supervisor.py,
-        lex/model_admin/utils/model_registration.py.
+        lex/process_admin/utils/model_registration.py.
 Run: python -m lex pytest lex/test_project/tests/celery_async/test_8x_startup_reset_recovery_handoff.py -v
 """
 
@@ -34,7 +34,7 @@ from django.test import SimpleTestCase
 
 from lex.core.models.CalculationModel import CalculationModel
 from lex.lex_app.celery_recovery import supervisor
-from lex.model_admin.utils.model_registration import ModelRegistration
+from lex.process_admin.utils.model_registration import ModelRegistration
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from .models import CelerySyncCalc

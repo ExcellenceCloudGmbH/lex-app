@@ -13,7 +13,7 @@
 #     permission_classes = [HasAPIKey | IsAuthenticated]
 #
 #     def get(self, request, *args, **kwargs):
-#         from lex.model_admin.settings import lexAdminSite
+#         from lex.lex_app.ProcessAdminSettings import processAdminSite
 #
 #         # # Replace with the actual base URL of your server
 #         # base_url = 'https://melihsunbul.excellence-cloud.dev'

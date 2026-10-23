@@ -40,7 +40,7 @@ When your prior knowledge conflicts with the docs, **the docs win.**
 ## Prime directive 2 — Changing framework source means writing cluster tests, automatically
 
 When you add or modify code under `lex/` (`lex/lex_app/`, `lex/core/`, `lex/api/`,
-`lex/audit_logging/`, `lex/model_admin/`, …), you write the paired tests in the **same change**,
+`lex/audit_logging/`, `lex/process_admin/`, …), you write the paired tests in the **same change**,
 following the **cluster test-plan** — without being asked. The CI coverage gate
 (`copilot_coverage_check.yml`) blocks any source change that arrives without a paired test, so local
 work must mirror what the cloud agent does.

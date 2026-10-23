@@ -39,7 +39,7 @@ class ModelRegistration:
             history_tracking_enabled: Project-level switch for history tracking.
                             When False, history is skipped for every model.
         """
-        from lex.model_admin.settings import lexAdminSite
+        from lex.process_admin.settings import processAdminSite
         from lex.core.models.HTMLReport import HTMLReport
         from lex.core.models.CalculationModel import CalculationModel
         from django.contrib.auth.models import User
@@ -52,7 +52,7 @@ class ModelRegistration:
             return f"{self.first_name} {self.last_name}"
 
         User.add_to_class("__str__", get_username)
-        lexAdminSite.register([User])
+        processAdminSite.register([User])
 
         history_ok = []
         history_skipped = []
@@ -123,11 +123,11 @@ class ModelRegistration:
 
     @classmethod
     def _register_html_report(cls, model: Type[models.Model]) -> None:
-        from lex.model_admin.settings import lexAdminSite
+        from lex.process_admin.settings import processAdminSite
 
         model_name = model.__name__.lower()
-        lexAdminSite.registerHTMLReport(model_name, model)
-        lexAdminSite.register([model])
+        processAdminSite.registerHTMLReport(model_name, model)
+        processAdminSite.register([model])
 
     # ── Reserved names managed by the framework ──
     # Class names that user models must not use.
@@ -280,7 +280,7 @@ class ModelRegistration:
         Returns:
             'ok' if history was enabled, 'skipped' if excluded, 'failed' on error.
         """
-        from lex.model_admin.settings import lexAdminSite, adminSite
+        from lex.process_admin.settings import processAdminSite, adminSite
         from simple_history import register
         from simple_history.exceptions import MultipleRegistrationsError
         from lex.core.services.StandardHistory import StandardHistory
@@ -289,7 +289,7 @@ class ModelRegistration:
 
         model_name = model.__name__.lower()
         result = "skipped"
-        lexAdminSite.register([model])
+        processAdminSite.register([model])
 
         exclusion_reason = get_model_exclusion_reason(model)
         is_already_tracked = exclusion_reason == "Already has history tracking"
@@ -315,7 +315,7 @@ class ModelRegistration:
                     return "failed"
 
                 historical_model = model.history.model
-                lexAdminSite.register([historical_model])
+                processAdminSite.register([historical_model])
 
                 # ── Level 2: Meta History ──
                 history = MetaLevelHistoricalRecords(
@@ -349,7 +349,7 @@ class ModelRegistration:
                     meta_historical_model=meta_historical_model,
                 )
 
-                lexAdminSite.register([meta_historical_model])
+                processAdminSite.register([meta_historical_model])
                 result = "ok"
 
             except Exception as e:
@@ -456,21 +456,21 @@ class ModelRegistration:
         structure: dict,
         auto_include_missing_models: bool = True,
     ):
-        from lex.model_admin.settings import lexAdminSite
+        from lex.process_admin.settings import processAdminSite
         if structure is not None:
-            lexAdminSite.register_model_structure(
+            processAdminSite.register_model_structure(
                 structure,
                 auto_include_missing_models=auto_include_missing_models,
             )
 
     @classmethod
     def register_model_styling(cls, styling: dict):
-        from lex.model_admin.settings import lexAdminSite
+        from lex.process_admin.settings import processAdminSite
         if styling:
-            lexAdminSite.register_model_styling(styling)
+            processAdminSite.register_model_styling(styling)
 
     @classmethod
     def register_widget_structure(cls, structure):
-        from lex.model_admin.settings import lexAdminSite
+        from lex.process_admin.settings import processAdminSite
         if structure:
-            lexAdminSite.register_widget_structure(structure)
+            processAdminSite.register_widget_structure(structure)

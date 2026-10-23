@@ -8,9 +8,9 @@
 | --- | --- |
 | Scenario range | 1.110 – 1.124 |
 | Type | U |
-| Files covered | `lex/model_admin/__init__.py`, `lex/lex_app/__init__.py`, `lex/lex_app/keycloak_exclusions.py`, `lex/lex_app/simple_history_config.py` |
+| Files covered | `lex/process_admin/__init__.py`, `lex/lex_app/__init__.py`, `lex/lex_app/keycloak_exclusions.py`, `lex/lex_app/simple_history_config.py` |
 | Test file | `lex/test_project/tests/init/test_1o_lazy_imports_and_helpers.py` |
-| Test classes | `TestCluster01o_ModelAdminLazyGetattr`, `TestCluster01o_KeycloakExclusions`, `TestCluster01o_SimpleHistoryConfig`, `TestCluster01o_LexAppPackageAlias` |
+| Test classes | `TestCluster01o_ProcessAdminLazyGetattr`, `TestCluster01o_KeycloakExclusions`, `TestCluster01o_SimpleHistoryConfig`, `TestCluster01o_LexAppPackageAlias` |
 | Fixtures | none (synthetic models built with `type()` + `types.SimpleNamespace`) |
 | Tests landed | **15 pass / 0 fail in 0.001s** |
 | Coverage gain | +0.4 % (estimated; measured on next coverage run) |
@@ -1502,7 +1502,7 @@ imports anything from `lex.lex_app`, whose settings module reads the environment
 | --- | --- |
 | Scenario range | 1.357 – 1.369 |
 | Type | U + I |
-| Files covered | `lex/lex_app/reflex/` (`config.py`, `auth.py` — `LexKeycloakAuthState`, `LexUser` —, `django_orm.py`, `dashboards.py`, `app.py`, `Reflex.py`, `examples/_reflex_structure.py`), `lex/reflex_app.py`, `lex/utilities/config/generic_app_config.py`, `lex/lex_app/apps.py` (`_apply_nest_asyncio`, `register_models`), `lex/model_admin/utils/model_structure_builder.py`, `lex/core/models/LexModel.py` (`reflex_main` / `reflex_class_main`) |
+| Files covered | `lex/lex_app/reflex/` (`config.py`, `auth.py` — `LexKeycloakAuthState`, `LexUser` —, `django_orm.py`, `dashboards.py`, `app.py`, `Reflex.py`, `examples/_reflex_structure.py`), `lex/reflex_app.py`, `lex/utilities/config/generic_app_config.py`, `lex/lex_app/apps.py` (`_apply_nest_asyncio`, `register_models`), `lex/process_admin/utils/model_structure_builder.py`, `lex/core/models/LexModel.py` (`reflex_main` / `reflex_class_main`) |
 | Test file | `lex/test_project/tests/init/test_1aq_reflex_dashboards.py` |
 | Test classes | `TestCluster01aq_Config` (1.357, 1.357b, 1.357c), `TestCluster01aq_KeycloakProvider` (1.358, 1.359, 1.369), `TestCluster01aq_Orm` (1.360–1.361), `TestCluster01aq_Dispatch` (1.362–1.363), `TestCluster01aq_PageChrome` (1.364), `TestCluster01aq_DispatchPage` (1.365, 1.365b), `TestCluster01aq_TheCompiledApp` (1.366), `TestCluster01aq_Registration` (1.367), `TestCluster01aq_EventLoops` (1.368) |
 | Fixtures | probe models `ReflexProbeFund` (both hooks), `ReflexProbeDefault` (`LexModel`, no overrides), `ReflexProbePlain` (plain Django model); a session's state tree built from Reflex's root `State`; `E2ETestCase` for the ORM and dispatch scenarios; subprocesses for 1.357c and 1.368 |
@@ -1790,17 +1790,17 @@ config each fail 1.404.
 
 ---
 
-### Batch 1ax — the Process name removed from the public surface ✅
+### Batch 1ax — the Process model feature removed from the public surface ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.406 – 1.413 |
+| Scenario range | 1.406 – 1.409 |
 | Type | I |
-| Files covered | `lex/core/models/Process.py` (deleted), `lex/core/models/__init__.py` (`__all__`), `lex/model_admin/sites/lex_admin_site.py` (process registry), `lex/model_admin/utils/model_registration.py` (Process branch, `_register_process_model`, `_RESERVED_CLASS_NAMES`), `lex/model_admin/models/utils.py` (structure node types); the rename: `lex/model_admin/**` (moved from `lex/process_admin/**`), `lex/model_admin/__init__.py` (lazy names), `lex/model_admin/apps.py` (`ModelAdminConfig`), `lex/lex_app/settings.py` (`INSTALLED_APPS`), `lex/lex_app/tests/LexAppTestCase.py` (moved from `ProcessAdminTestCase.py`) |
+| Files covered | `lex/core/models/Process.py` (deleted), `lex/core/models/__init__.py` (`__all__`), `lex/process_admin/sites/process_admin_site.py` (process registry), `lex/process_admin/utils/model_registration.py` (Process branch, `_register_process_model`, `_RESERVED_CLASS_NAMES`), `lex/process_admin/models/utils.py` (structure node types) |
 | Test file | `lex/test_project/tests/init/test_1ax_process_feature_removed.py` |
-| Test classes | `TestCluster01ax_ProcessFeatureRemoved` (1.406–1.413) |
-| Fixtures | a customer-shaped `Process(LexModel)` declared in the test module (`app_label="lex_app"`) — the name the framework gave back; `StructureProbeModel(LexModel)` and `StructureProbeReport(HTMLReport)` fed to a real `ModelCollection` with `auto_include_missing_models=False`; `RegistrationProbe(LexModel)` registered on the live `lexAdminSite` singleton in 1.411 and unregistered in cleanup (the site is shared by the whole suite) |
-| Tests landed | **8 pass / 0 fail** |
+| Test classes | `TestCluster01ax_ProcessFeatureRemoved` (1.406–1.409) |
+| Fixtures | a customer-shaped `Process(LexModel)` declared in the test module (`app_label="lex_app"`) — the name the framework gave back; `StructureProbeModel(LexModel)` and `StructureProbeReport(HTMLReport)` fed to a real `ModelCollection` with `auto_include_missing_models=False` |
+| Tests landed | **4 pass / 0 fail** |
 | Status | ✅ Complete |
 
 | Scenario | Title | Asserts |
@@ -1809,9 +1809,5 @@ config each fail 1.404.
 | 1.407 | no registry left | `processes`, `registerProcess`, `get_process_structure_func` and `_register_process_model` are all absent; `html_reports`, `registerHTMLReport`, `get_html_report_func` survive |
 | 1.408 | the name is the project's again | `_validate_model_definition` accepts `class Process(LexModel)`; `LexModel` / `CalculationModel` / `HTMLReport` and the `Historical` prefix still raise `ValueError` |
 | 1.409 | no `Process` node type | the `api/model-structure` payload types the model `Model`, the report `HTMLReport`, the branch `Folder`; no node anywhere carries `Process` |
-| 1.410 | the package is `lex.model_admin` | all eight lazy names resolve; `lex.process_admin` raises `ModuleNotFoundError`; `ProcessAdminSite` / `processAdminSite` raise `AttributeError` |
-| 1.411 | `LexModelAdmin` replaces `ModelProcessAdmin` | only the new name is exported, the old module is gone, and `register()` attaches a `LexModelAdmin` by default |
-| 1.412 | `LexAppTestCase` replaces `ProcessAdminTestCase` | the new module holds a `TestCase` subclass; the old module raises `ModuleNotFoundError` — no alias |
-| 1.413 | the sweep reached every importer | the nine modules the rename rewrote all import, and no `.py` under `lex/` names any retired spelling — the backbone's old names *or* the feature's (`ProcessStructure`, `ProcessFlow`, `process_flow`, `run_step`, `registerProcess`); search strings are assembled at runtime; this file, 10q and 4o's header are exempt |
 
 **Why a regression matters:** a half-removed feature is worse than either state — a `registerProcess` that still collects classes looks like a working feature while `api/process/<name>` 404s, and a stale `Process` entry in the reserved-name set keeps rejecting a project's own model for a framework class that no longer exists.

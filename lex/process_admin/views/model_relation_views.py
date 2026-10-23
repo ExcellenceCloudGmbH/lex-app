@@ -1,6 +1,6 @@
 import copy
 
-from lex.model_admin.models.ModelCollection import ModelCollection
+from lex.process_admin.models.ModelCollection import ModelCollection
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response

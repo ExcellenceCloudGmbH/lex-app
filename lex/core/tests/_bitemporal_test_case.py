@@ -2,7 +2,7 @@ from contextlib import suppress
 
 from django.db import connection
 from django.test import TransactionTestCase
-from lex.model_admin.utils.model_registration import ModelRegistration
+from lex.process_admin.utils.model_registration import ModelRegistration
 from simple_history.models import registered_models
 
 

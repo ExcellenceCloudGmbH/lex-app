@@ -27,7 +27,7 @@ import pytest
 
 from lex.api.views.global_search_for_models.Search import Search
 from lex.lex_app.reflex.Reflex import Reflex
-from lex.model_admin.models.ModelContainer import ModelContainer
+from lex.process_admin.models.ModelContainer import ModelContainer
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, SchemaItem
@@ -64,7 +64,7 @@ class TestCluster10d_ReflexSearchExclusion(E2ETestCase):
                like ``streamlit``, not queried as if it had a table.
         """
         item = SchemaItem.objects.create(name="quince", amount=1)
-        report = ModelContainer(Reflex, model_admin=SimpleNamespace(name="reflex"))
+        report = ModelContainer(Reflex, process_admin=SimpleNamespace(name="reflex"))
         self.assertEqual(report.id, "reflex", "the id lex-app registers the report under")
         searchable = SimpleNamespace(id="schemaitem", title="Schema Item", model_class=SchemaItem)
 

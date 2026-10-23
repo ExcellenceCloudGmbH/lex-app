@@ -26,7 +26,7 @@ from lex.api.views.model_entries.List import ListModelEntries
 from lex.api.views.model_entries.filter_backends import PrimaryKeyListFilterBackend
 from lex.audit_logging.mixins.FileOperationAuditMixin import FileOperationAuditMixin
 from lex.audit_logging.utils.file_operation_audit import ACTION_EXPORT
-from lex.model_admin.models.utils import get_relation_fields
+from lex.process_admin.models.utils import get_relation_fields
 from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_api_key.permissions import HasAPIKey

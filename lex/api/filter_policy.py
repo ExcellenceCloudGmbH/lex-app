@@ -50,9 +50,9 @@ def _is_exempt(model_class) -> bool:
 
 def _container(model_class):
     try:
-        from lex.model_admin.settings import lexAdminSite
+        from lex.process_admin.settings import processAdminSite
 
-        collection = lexAdminSite.model_collection
+        collection = processAdminSite.model_collection
         if collection is None:
             return None
         return collection.get_container(model_class._meta.model_name)

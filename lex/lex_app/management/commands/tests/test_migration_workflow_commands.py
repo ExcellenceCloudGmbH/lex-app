@@ -34,7 +34,7 @@ from django.test import TransactionTestCase
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 
-from lex.model_admin.utils.model_registration import ModelRegistration
+from lex.process_admin.utils.model_registration import ModelRegistration
 from lex.core.models.LexModel import LexModel
 from django.db import models
 

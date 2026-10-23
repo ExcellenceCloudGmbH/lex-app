@@ -10,7 +10,7 @@
 - `SimpleItem` — plain `LexModel` (name, value, description)
 - `TrackedItem` — `LexModel` used to verify `created_by`/`edited_by` actor resolution over API
 
-**Test setup:** All tests use `APIClient` with a force-logged-in user and the `lex_rest_api` URL namespace (same path the frontend uses).
+**Test setup:** All tests use `APIClient` with a force-logged-in user and the `process_admin_rest_api` URL namespace (same path the frontend uses).
 
 ### 2a. Create (POST)
 

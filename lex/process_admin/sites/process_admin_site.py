@@ -27,9 +27,9 @@ from lex.authentication.views.permissions import UserPermissionsView
 from lex.authentication.views.token_views import StreamlitTokenView
 from lex.core.mixins.CalculatedModelMixin import CalculatedModelMixin
 from lex.core.signals import do_post_save
-from lex.model_admin.models.ModelCollection import ModelCollection
-from lex.model_admin.models.LexModelAdmin import LexModelAdmin
-from lex.model_admin.views.model_relation_views import (
+from lex.process_admin.models.ModelCollection import ModelCollection
+from lex.process_admin.models.ModelProcessAdmin import ModelProcessAdmin
+from lex.process_admin.views.model_relation_views import (
     ModelStructureObtainView,
     Overview,
 )
@@ -37,17 +37,17 @@ from lex.utilities.decorators.singleton import LexSingleton
 
 
 @LexSingleton
-class LexAdminSite:
+class ProcessAdminSite:
     """
     Used as instance, i.e. inheriting this class is not necessary in order to use it.
     """
 
-    name = "lex_rest_api"
+    name = "process_admin_rest_api"
 
     def __init__(self) -> None:
         super().__init__()
 
-        self.registered_models = {}  # Model-classes to LexModelAdmin-instances
+        self.registered_models = {}  # Model-classes to ModelProcessAdmin-instances
         self.model_structure = {}
         self.auto_include_missing_models_in_structure = True
         self.model_styling = {}
@@ -107,9 +107,9 @@ class LexAdminSite:
         self.model_structure = model_structure
         self.auto_include_missing_models_in_structure = auto_include_missing_models
 
-    def register(self, model_or_iterable, model_admin=None):
-        if model_admin is None:
-            model_admin = LexModelAdmin()
+    def register(self, model_or_iterable, process_admin=None):
+        if process_admin is None:
+            process_admin = ModelProcessAdmin()
 
         if isinstance(model_or_iterable, ModelBase):
             model_or_iterable = [model_or_iterable]
@@ -119,7 +119,7 @@ class LexAdminSite:
                 # raise Exception('Model %s already registered' % model._meta.model_name)
                 pass
             else:
-                self.registered_models[model] = model_admin
+                self.registered_models[model] = process_admin
                 # TODO why was this in here in the first place?
                 # if not issubclass(model, CalculatedModelMixin):
                 post_save.connect(do_post_save, sender=model)
@@ -303,6 +303,6 @@ class LexAdminSite:
 
         return (
             self._get_urls(),
-            "model_admin",
+            "process_admin",
             self.name,
         )  # TODO: what is the name exactly for??

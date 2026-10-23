@@ -23,7 +23,7 @@ Covers: lex/core/security_flags.py (expose_tracebacks), lex/api/security.py
 (error_detail), lex/api/views/model_entries/One.py (error bodies),
 lex/authentication/middleware.py (OidcRedirectGuardMiddleware),
 lex/lex_app/settings.py (MIDDLEWARE), lex/react/views.py (serve_react),
-lex/model_admin/sites/lex_admin_site.py and
+lex/process_admin/sites/process_admin_site.py and
 lex/api/views/global_search_for_models/Search.py (?q=),
 lex/api/middleware/keycloak_permissions.py (_shared_manager).
 Run: python -m lex pytest lex/test_project/tests/api_layer/test_10o_error_and_route_hardening.py -v
@@ -272,12 +272,12 @@ class TestCluster10o_GlobalSearchQuery(E2ETestCase):
               query answers the "No match found" sentinel; the ?q= path resolves to
               the Search view.
         """
-        from lex.model_admin.settings import lexAdminSite
+        from lex.process_admin.settings import processAdminSite
 
         item = ApiSimpleItem.objects.create(name="needle in a haystack")
-        container = lexAdminSite.model_collection.get_container("apisimpleitem")
+        container = processAdminSite.model_collection.get_container("apisimpleitem")
         self.assertEqual(resolve("/api/global-search/").func.view_class.__name__, "Search")
-        collection_class = type(lexAdminSite.model_collection)
+        collection_class = type(processAdminSite.model_collection)
         with mock.patch.object(collection_class, "all_containers", new_callable=mock.PropertyMock, return_value=[container]):
             by_query = self.client.get("/api/global-search/", {"q": "needle"})
             by_path = self.client.get("/api/global-search/needle")

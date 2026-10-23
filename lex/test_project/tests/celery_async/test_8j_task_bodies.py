@@ -69,7 +69,7 @@ class TestCluster08j_LoadData(SimpleTestCase):
 
     Invoked by :class:`lex.lex_app.apps.LexAppConfig.ready` when the
     project's auth settings enable ``initial_data_load``.  The task
-    receives a ``LexAppTestCase``-shaped harness and drives it
+    receives a ``ProcessAdminTestCase``-shaped harness and drives it
     through one of four routes depending on ``STORAGE_TYPE`` +
     whether we're inside a Celery worker.  All four routes must
     finalize the audit batch.
@@ -500,7 +500,7 @@ class TestCluster08j_ActivateHistoryVersion(SimpleTestCase):
 
         with patch("django.apps.apps.get_model", return_value=fake_model), \
              patch(
-                 "lex.model_admin.utils.bitemporal_sync."
+                 "lex.process_admin.utils.bitemporal_sync."
                  "BitemporalSynchronizer.sync_record_for_model"
              ) as mock_sync:
             ret = activate_history_version("app", "M", 1)
@@ -546,7 +546,7 @@ class TestCluster08j_ActivateHistoryVersion(SimpleTestCase):
 
         with patch("django.apps.apps.get_model", return_value=fake_model), \
              patch(
-                 "lex.model_admin.utils.bitemporal_sync."
+                 "lex.process_admin.utils.bitemporal_sync."
                  "BitemporalSynchronizer.sync_record_for_model"
              ) as mock_sync:
             ret = activate_history_version("app", "M", 7)
@@ -583,7 +583,7 @@ class TestCluster08j_ActivateHistoryVersion(SimpleTestCase):
 
         with patch("django.apps.apps.get_model", return_value=fake_model), \
              patch(
-                 "lex.model_admin.utils.bitemporal_sync."
+                 "lex.process_admin.utils.bitemporal_sync."
                  "BitemporalSynchronizer.sync_record_for_model",
                  side_effect=RuntimeError("sync exploded"),
              ), \

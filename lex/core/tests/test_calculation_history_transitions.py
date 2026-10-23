@@ -20,7 +20,7 @@ from lex.core.mixins.ModelModificationRestriction import ModelModificationRestri
 from lex.core.models.CalculationModel import CalculationModel, CalculationModelException
 from lex.core.models.LexModel import PermissionResult
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
-from lex.model_admin.utils.model_registration import ModelRegistration
+from lex.process_admin.utils.model_registration import ModelRegistration
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 

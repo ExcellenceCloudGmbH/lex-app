@@ -6,7 +6,7 @@
 | --- | --- |
 | Scenario range | 5.30 – 5.48 |
 | Type | I |
-| Files covered | `core/services/Bitemporal.py`, `core/services/bitemporal_signals.py`, `core/services/StandardHistory.py`, `core/services/MetaHistory.py`, `model_admin/utils/bitemporal_sync.py` |
+| Files covered | `core/services/Bitemporal.py`, `core/services/bitemporal_signals.py`, `core/services/StandardHistory.py`, `core/services/MetaHistory.py`, `process_admin/utils/bitemporal_sync.py` |
 | Test file | `lex/test_project/tests/history/test_5e_bitemporal_services.py` |
 | Test classes | `TestBitemporalCore` (intervals, valid_from/to chaining), `TestBitemporalSignals` (pre_save → row close + new row), `TestStandardHistory` (non-bitemporal branch), `TestMetaHistory` (cross-model linking), `TestBitemporalSync` (legacy → bitemporal migration) |
 | Fixtures | `BitemporalItem`, `LegacyVersionedItem` |

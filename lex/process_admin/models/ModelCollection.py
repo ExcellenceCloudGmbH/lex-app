@@ -2,9 +2,9 @@ import copy
 from typing import Dict, Any, Set, Type, Union
 
 from django.db.models import Model
-from lex.model_admin.models.ModelContainer import ModelContainer
-from lex.model_admin.models.utils import enrich_model_structure_with_readable_names_and_types
-from lex.model_admin.utils import ModelStructureBuilder
+from lex.process_admin.models.ModelContainer import ModelContainer
+from lex.process_admin.models.utils import enrich_model_structure_with_readable_names_and_types
+from lex.process_admin.utils import ModelStructureBuilder
 
 
 def _sort_structure_recursive(d: Dict) -> Dict:
@@ -35,7 +35,7 @@ def _create_model_containers(models_to_admins: Dict[Type[Model], Any]) -> Dict[s
     """
     ids2containers = dict()
 
-    for model_class, model_admin in models_to_admins.items():
+    for model_class, process_admin in models_to_admins.items():
         from lex.core.models.HTMLReport import HTMLReport
         if not issubclass(model_class, HTMLReport):
             has_meta = hasattr(model_class, "_meta")
@@ -43,7 +43,7 @@ def _create_model_containers(models_to_admins: Dict[Type[Model], Any]) -> Dict[s
                 raise ValueError(
                     f'The model {model_class._meta.model_name} is abstract, but only concrete models can be registered'
                 )
-        model_container = ModelContainer(model_class, model_admin)
+        model_container = ModelContainer(model_class, process_admin)
         ids2containers[model_container.id] = model_container
 
     return ids2containers

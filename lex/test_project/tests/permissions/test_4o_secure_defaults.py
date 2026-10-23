@@ -33,7 +33,7 @@ lex/api/views/model_entries/{One,Many,History,filter_backends}.py,
 lex/api/views/global_search_for_models/Search.py,
 lex/api/views/file_operations/{ModelExport,FileDownload}.py,
 lex/api/filters/GenericFilters.py, lex/api/serializers/base_serializers.py,
-lex/model_admin/views/model_relation_views.py (Overview).
+lex/process_admin/views/model_relation_views.py (Overview).
 Run: python -m lex pytest lex/test_project/tests/permissions/test_4o_secure_defaults.py -v
 """
 
@@ -347,9 +347,9 @@ class TestCluster04o_ReadSurfaces(_SecureDefaultsCase):
         FilterBackendItem.objects.create(name="needle open")
         FilterBackendItem.objects.create(name="needle hidden", is_secret=True)
         from lex.api.views.global_search_for_models.Search import Search
-        from lex.model_admin.settings import lexAdminSite
+        from lex.process_admin.settings import processAdminSite
 
-        container = lexAdminSite.model_collection.get_container(FILTER_BACKEND)
+        container = processAdminSite.model_collection.get_container(FILTER_BACKEND)
 
         def descriptions():
             # Only this model's container: the test database has no tables for
@@ -396,7 +396,7 @@ class TestCluster04o_ReadSurfaces(_SecureDefaultsCase):
         secret = SecretDocument.objects.create(name="hidden", is_secret=True)
         secret.attachment.save("hidden.txt", ContentFile(b"secret bytes"))
         self.addCleanup(secret.attachment.delete, save=False)
-        url = reverse("lex_rest_api:file-download", kwargs={"model_container": _Container(SECRET_DOCUMENT)})
+        url = reverse("process_admin_rest_api:file-download", kwargs={"model_container": _Container(SECRET_DOCUMENT)})
         missing = self.client.get(url)
         self.assertEqual(missing.status_code, 400)
         self.assertTrue(missing.json()["error"])
@@ -416,16 +416,16 @@ class TestCluster04o_ReadSurfaces(_SecureDefaultsCase):
         Then: 200 with the HTML for the signed-in user, no 200 for the
               anonymous client, 404 (not 500) for the unknown report.
         """
-        from lex.model_admin.settings import lexAdminSite
+        from lex.process_admin.settings import processAdminSite
 
-        lexAdminSite.html_reports["cluster4oreport"] = _PlainReport
-        self.addCleanup(lexAdminSite.html_reports.pop, "cluster4oreport", None)
-        url = reverse("lex_rest_api:htmlreports", kwargs={"report_name": "cluster4oreport"})
+        processAdminSite.html_reports["cluster4oreport"] = _PlainReport
+        self.addCleanup(processAdminSite.html_reports.pop, "cluster4oreport", None)
+        url = reverse("process_admin_rest_api:htmlreports", kwargs={"report_name": "cluster4oreport"})
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), "<p>numbers</p>")
         self.assertNotEqual(APIClient().get(url).status_code, 200)
-        unknown = reverse("lex_rest_api:htmlreports", kwargs={"report_name": "nope"})
+        unknown = reverse("process_admin_rest_api:htmlreports", kwargs={"report_name": "nope"})
         self.assertEqual(self.client.get(unknown).status_code, 404)
 
 

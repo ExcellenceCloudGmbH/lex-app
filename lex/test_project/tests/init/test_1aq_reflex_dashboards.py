@@ -34,7 +34,7 @@ Covers: lex/lex_app/reflex/ (config.py, auth.py ``LexKeycloakAuthState`` and
 examples/_reflex_structure.py), lex/reflex_app.py,
 lex/utilities/config/generic_app_config.py, lex/lex_app/apps.py
 (``_apply_nest_asyncio``, ``register_models``),
-lex/model_admin/utils/model_structure_builder.py, lex/core/models/LexModel.py
+lex/process_admin/utils/model_structure_builder.py, lex/core/models/LexModel.py
 (``reflex_main`` / ``reflex_class_main``).
 Run: python -m lex pytest lex/test_project/tests/init/test_1aq_reflex_dashboards.py -v
 """
@@ -730,7 +730,7 @@ class TestCluster01aq_Registration(TestCase):
         from lex.lex_app.apps import LexAppConfig
         from lex.lex_app.reflex.Reflex import Reflex, reflex_enabled
         from lex.lex_app.streamlit.Streamlit import Streamlit
-        from lex.model_admin.utils.model_structure_builder import ModelStructureBuilder
+        from lex.process_admin.utils.model_structure_builder import ModelStructureBuilder
         from lex.utilities.config.generic_app_config import GenericAppConfig, _is_structure_file
 
         with patch.dict(os.environ, {}, clear=False):
@@ -776,9 +776,9 @@ class TestCluster01aq_Registration(TestCase):
             history_tracking_enabled=True, model_structure={}, model_structure_is_explicitly_defined=False,
             model_styling={}, widget_structure=[],
         )
-        with patch("lex.model_admin.utils.model_registration.ModelRegistration.register_models") as register, \
-                patch("lex.model_admin.utils.model_registration.ModelRegistration.register_model_styling"), \
-                patch("lex.model_admin.utils.model_registration.ModelRegistration.register_widget_structure"):
+        with patch("lex.process_admin.utils.model_registration.ModelRegistration.register_models") as register, \
+                patch("lex.process_admin.utils.model_registration.ModelRegistration.register_model_styling"), \
+                patch("lex.process_admin.utils.model_registration.ModelRegistration.register_widget_structure"):
             config.register_models()
         from lex.lex_app.streamlit.Streamlit import Streamlit
 

@@ -111,7 +111,7 @@ class CalculationModel(LexModel):
     # Two distinct "non-success" terminal states:
     #   ABORTED   — server-side recovery: a row was found stuck in IN_PROGRESS
     #               at startup (worker crashed / process killed mid-run) and is
-    #               flipped here by ``model_admin.utils.model_registration``.
+    #               flipped here by ``process_admin.utils.model_registration``.
     #               No human cancelled it; the framework gave up on its behalf.
     #   CANCELLED — explicit user-initiated cancel via ``CalculationModel.cancel()``
     #               (or the cooperative ``CalculationCancelled`` exception raised
@@ -432,7 +432,7 @@ class CalculationModel(LexModel):
                 and hasattr(model_class, "history")
             ):
                 try:
-                    from lex.model_admin.utils.bitemporal_sync import (
+                    from lex.process_admin.utils.bitemporal_sync import (
                         BitemporalSynchronizer,
                     )
 

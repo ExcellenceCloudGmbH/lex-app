@@ -21,7 +21,7 @@ from django.urls import path, include, re_path
 from lex.api.views.calculations.ActiveCalculations import ActiveCalculations
 from lex.authentication.views.user_api import CurrentUser
 from lex.lex_app import settings
-from lex.model_admin.settings import lexAdminSite, adminSite
+from lex.process_admin.settings import processAdminSite, adminSite
 from lex.react.views import serve_react
 
 from . import views
@@ -29,7 +29,7 @@ from . import views
 _raw_base_path = os.getenv("DJANGO_BASE_PATH")
 url_prefix = _raw_base_path.strip("/") if _raw_base_path else ""
 admin_route = f"{url_prefix}/admin/" if url_prefix else "admin/"
-model_admin_route = f"{url_prefix}/" if url_prefix else ""
+process_admin_route = f"{url_prefix}/" if url_prefix else ""
 
 urlpatterns = [
     path("health", views.HealthCheck.as_view(), name="health_view"),
@@ -39,7 +39,7 @@ urlpatterns = [
     path("api/quackback-widget-token", views.quackback_widget_token),
     path("api/quackback-widget-token/", views.quackback_widget_token, name="quackback-widget-token"),
     path(admin_route, adminSite.urls),
-    path(model_admin_route, lexAdminSite.urls),
+    path(process_admin_route, processAdminSite.urls),
     # path("oidc/", include("mozilla_django_oidc.urls")),
     path("oidc/", include("oauth2_authcodeflow.urls")),
     re_path(

@@ -47,9 +47,9 @@ These 10 files had **zero live references** after the second-pass symbol grep an
 | `lex/lex_app/groups.py` | `create_groups` — 0 refs. |
 | `lex/authentication/utils/auth_helpers.py` | `resolve_user` — 0 refs (sole hit was a commented-out import in `rbac/RBACInfo.py:5`). |
 | `lex/api/views/authentication/helpers.py` | `sync_user_permissions` — 0 refs. The `from .helpers import …` in `api/utils/__init__.py` resolves to **`api/utils/helpers.py`** (a different sibling, 12.9 KB, very much alive). |
-| `lex/api/views/utils.py` | `get_user_name` / `get_user_email` — 0 refs. The `title_for_model` hits all resolve to `model_admin/models/utils.py` via the relative `from .utils import` in `ModelContainer.py:149` (different file). |
-| `lex/model_admin/utils/temporal_reconciler.py` | `TemporalReconciler` — sole reference is in a multi-line commented-out block in `ModelEntryProviderMixin.py:50–56`. Decision from §2e is now resolved: dead. |
-| `lex/api/views/authentication/UserPermissionView.py` | **Bonus find.** Dead duplicate of `lex/authentication/views/permissions.py` — same class name `UserPermissionsView`, but 0 importers. The live one is in `authentication/views/permissions.py` (wired in `lex_admin_site.py:264`). |
+| `lex/api/views/utils.py` | `get_user_name` / `get_user_email` — 0 refs. The `title_for_model` hits all resolve to `process_admin/models/utils.py` via the relative `from .utils import` in `ModelContainer.py:149` (different file). |
+| `lex/process_admin/utils/temporal_reconciler.py` | `TemporalReconciler` — sole reference is in a multi-line commented-out block in `ModelEntryProviderMixin.py:50–56`. Decision from §2e is now resolved: dead. |
+| `lex/api/views/authentication/UserPermissionView.py` | **Bonus find.** Dead duplicate of `lex/authentication/views/permissions.py` — same class name `UserPermissionsView`, but 0 importers. The live one is in `authentication/views/permissions.py` (wired in `process_admin_site.py:264`). |
 | `lex/authentication/views.py` | Re-export shim — 0 importers. With `permissions.py`, `token_views.py`, `user_api.py` either staying or moving in their own PRs, the shim is unneeded either way. |
 
 **Verification after deletion:**
@@ -81,11 +81,11 @@ These 10 files had **zero live references** after the second-pass symbol grep an
 3. Delete `lex/authentication/models/Profile.py`.
 4. `python manage.py makemigrations authentication` to record the table drop.
 
-### 2d. Routed in `lex_admin_site.py` — supervisor decision needed
+### 2d. Routed in `process_admin_site.py` — supervisor decision needed
 
 These 5 files are **actively wired into URL routes**. Deleting them is a behaviour change (endpoints disappear). Listed for the supervisor to confirm the routes can be removed:
 
-| File | Live route in `lex_admin_site.py` |
+| File | Live route in `process_admin_site.py` |
 | --- | --- |
 | `lex/authentication/views/permissions.py` | `path("api/user_permissions/", UserPermissionsView.as_view())` (line 264) |
 | ~~`lex/api/views/process_flow/CreateOrUpdate.py`~~ | **Removed 2026-10-22** — the supervisor asked for the Process and ProcessFlow features to go; the `api/run_step/…` route went with the file. Pinned by [10q](clusters/10-api_layer/batches.md). |
@@ -97,11 +97,11 @@ These 5 files are **actively wired into URL routes**. Deleting them is a behavio
 
 ---
 
-## 3. `?????` — `lex/model_admin/__init__.py`
+## 3. `?????` — `lex/process_admin/__init__.py`
 
-Inspected: the file is a 52-line lazy-loader using `__getattr__` to dispatch 8 attribute names (`LexAdminSite`, `lexAdminSite`, `adminSite`, `ModelCollection`, `ModelContainer`, `ModelRegistration`, `ModelStructure`, `ModelStructureBuilder`) to their real modules, with a final `raise AttributeError` for anything else.
+Inspected: the file is a 52-line lazy-loader using `__getattr__` to dispatch 8 attribute names (`ProcessAdminSite`, `processAdminSite`, `adminSite`, `ModelCollection`, `ModelContainer`, `ModelRegistration`, `ModelStructure`, `ModelStructureBuilder`) to their real modules, with a final `raise AttributeError` for anything else.
 
-**Decision:** **Keep + test.** It's nine trivial branches; one parametrised test in `lex.test_project.tests.init.test_model_admin_lazy_imports` (cluster 1) gets every branch covered in ~20 lines.
+**Decision:** **Keep + test.** It's nine trivial branches; one parametrised test in `lex.test_project.tests.init.test_process_admin_lazy_imports` (cluster 1) gets every branch covered in ~20 lines.
 
 ---
 
@@ -115,7 +115,7 @@ Each ~95 file is slotted into an existing test-plan cluster. Where a file does n
 | --- | --- | --- |
 | `lex/lex_app/__init__.py` | U | App-init side effects, version export. |
 | `lex/lex_app/apps.py` | U | `AppConfig.ready()` signal wiring. |
-| `lex/model_admin/__init__.py` | U | Lazy `__getattr__` branches (see §3). |
+| `lex/process_admin/__init__.py` | U | Lazy `__getattr__` branches (see §3). |
 | `lex/lex_app/management/commands/init.py` | I | Full `lex Init` flow on a fresh DB. |
 | `lex/lex_app/keycloak_exclusions.py` | U | Excluded-path matcher edge cases. |
 | `lex/lex_app/settings.py` | U | Env-var resolution + DB target switching. |
@@ -164,7 +164,7 @@ Each ~95 file is slotted into an existing test-plan cluster. Where a file does n
 | `lex/core/services/bitemporal_signals.py` | I | Signal dispatch. |
 | `lex/core/services/StandardHistory.py` | I | Standard (non-bitemporal) history. |
 | `lex/core/services/MetaHistory.py` | I | Cross-model meta history. |
-| `lex/model_admin/utils/bitemporal_sync.py` | I | Sync legacy → bitemporal. |
+| `lex/process_admin/utils/bitemporal_sync.py` | I | Sync legacy → bitemporal. |
 | `lex/api/views/model_entries/History.py` | E | History API endpoint. |
 
 ### Cluster 6 — Audit Logging
@@ -212,7 +212,7 @@ Each ~95 file is slotted into an existing test-plan cluster. Where a file does n
 | `lex/lex_app/celery.py` | U | App config, autodiscover. |
 | `lex/lex_app/celery_tasks.py` | I | Task definitions. |
 | `lex/core/tasks/CeleryTaskDispatcher.py` | I | Local-vs-celery routing. |
-| `lex/model_admin/utils/local_scheduler.py` | I | Local fallback scheduler. |
+| `lex/process_admin/utils/local_scheduler.py` | I | Local fallback scheduler. |
 
 ### Cluster 9 — Signals & WebSocket
 
@@ -245,15 +245,15 @@ Each ~95 file is slotted into an existing test-plan cluster. Where a file does n
 
 | File | Type | Notes |
 | --- | --- | --- |
-| `lex/model_admin/sites/lex_admin_site.py` | I | After §2c cascade is applied. |
-| `lex/model_admin/models/ModelContainer.py` | U+I | Container resolution. |
-| `lex/model_admin/models/ModelCollection.py` | U | Collection structure. |
-| `lex/model_admin/models/LexModelAdmin.py` | U+I | Admin registration. |
-| `lex/model_admin/models/utils.py` | U | Utility helpers. |
-| `lex/model_admin/utils/model_structure.py` | U | Already partially covered. |
-| `lex/model_admin/utils/model_structure_builder.py` | U | Builder. |
-| `lex/model_admin/utils/model_registration.py` | I | Registration flow. |
-| `lex/model_admin/views/model_relation_views.py` | E | Relation endpoints. |
+| `lex/process_admin/sites/process_admin_site.py` | I | After §2c cascade is applied. |
+| `lex/process_admin/models/ModelContainer.py` | U+I | Container resolution. |
+| `lex/process_admin/models/ModelCollection.py` | U | Collection structure. |
+| `lex/process_admin/models/ModelProcessAdmin.py` | U+I | Admin registration. |
+| `lex/process_admin/models/utils.py` | U | Utility helpers. |
+| `lex/process_admin/utils/model_structure.py` | U | Already partially covered. |
+| `lex/process_admin/utils/model_structure_builder.py` | U | Builder. |
+| `lex/process_admin/utils/model_registration.py` | I | Registration flow. |
+| `lex/process_admin/views/model_relation_views.py` | E | Relation endpoints. |
 
 ---
 
@@ -295,7 +295,7 @@ Each ~95 file is slotted into an existing test-plan cluster. Where a file does n
 | Cluster 6 audit-log fill | 18 | +3.0 % |
 | Cluster 7 calc/LexModel fill | 10 | +3.0 % |
 | Cluster 10 API fill (incl. ModelExport, List) | 12 | +4.0 % |
-| Cluster 13 model_admin | 9 | +1.5 % |
+| Cluster 13 process_admin | 9 | +1.5 % |
 | Cluster 1 init/config | 11 | +1.0 % |
 | Cluster 2 CRUD fill | 14 | +1.5 % |
 | **Total target** |  | **62 % → 76–78 %** |

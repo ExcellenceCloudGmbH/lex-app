@@ -250,7 +250,7 @@ class CallbackTask(Task):
                 #   ERROR / anything else -> "failure"
                 # The startup-reset path already uses ``"aborted"`` for the
                 # crashed-worker recovery case (see
-                # ``model_admin.utils.model_registration``), so all four
+                # ``process_admin.utils.model_registration``), so all four
                 # non-pending terminal states are now distinguishable in
                 # AuditLogStatus.status without ever lying that a non-success
                 # outcome "completed OK".
@@ -991,7 +991,7 @@ def activate_history_version(model_app_label: str, model_name: str, history_id: 
     """
     from django.apps import apps
     from django.utils import timezone
-    from lex.model_admin.utils.bitemporal_sync import BitemporalSynchronizer
+    from lex.process_admin.utils.bitemporal_sync import BitemporalSynchronizer
     
     try:
         # 1. Resolve Model

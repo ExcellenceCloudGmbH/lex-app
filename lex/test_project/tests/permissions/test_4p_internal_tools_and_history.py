@@ -99,7 +99,7 @@ class TestCluster04p_InternalTools(_HardeningCase):
               the cleanup never runs; the admin and the superuser reach it (200);
               legacy lets the plain user through as before.
         """
-        url = reverse("lex_rest_api:delete-unused-files")
+        url = reverse("process_admin_rest_api:delete-unused-files")
         with mock.patch(
             "lex.api.views.sharepoint.DeleteUnusedFiles.DeleteUnusedFiles.cleanup_unused_files",
             return_value={"status": "success", "dry_run": True},
@@ -126,7 +126,7 @@ class TestCluster04p_InternalTools(_HardeningCase):
         Then: 404 with a readable error and nothing logged for the plain user;
               legacy and the superuser get 201 and the message reaches LexLogger.
         """
-        url = reverse("lex_rest_api:log")
+        url = reverse("process_admin_rest_api:log")
         with mock.patch("lex.api.views.LexLoggerView.LexLoggerView.LexLogger") as logger_class:
             response = self.client.post(url, {"message": "forged", "level": "ERROR"})
             self.assertEqual(response.status_code, 404)
@@ -163,7 +163,7 @@ class TestCluster04p_InternalTools(_HardeningCase):
               are empty); the superuser sees all three; legacy shows all three.
         """
         self._calculation_logs()
-        url = reverse("lex_rest_api:calculationlog-tree")
+        url = reverse("process_admin_rest_api:calculationlog-tree")
 
         def total(**params):
             response = self.client.get(url, params)
@@ -192,7 +192,7 @@ class TestCluster04p_InternalTools(_HardeningCase):
         seen, secret, orphan = self._calculation_logs()
 
         def pdf(pk):
-            url = reverse("lex_rest_api:download-markdown-pdf", kwargs={"pk": pk})
+            url = reverse("process_admin_rest_api:download-markdown-pdf", kwargs={"pk": pk})
             with mock.patch("lex.api.views.calculations.DownloadMarkdownPdf.render_pdf_bytes", return_value=b"%PDF-"):
                 return self.client.get(url).status_code
 

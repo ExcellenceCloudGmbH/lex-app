@@ -60,7 +60,7 @@ def check(condition: bool, label: str, detail: str = "") -> None:
 # ======================================================================
 section("1. ModelStructure._normalize_model_list — bare string tolerance")
 
-from lex.model_admin.utils.model_structure import ModelStructure
+from lex.process_admin.utils.model_structure import ModelStructure
 
 # 1a  Standard list  — ["A", "B"] → ["a", "b"]
 check(

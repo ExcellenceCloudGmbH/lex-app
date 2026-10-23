@@ -7,8 +7,8 @@ Intent
 Three small but customer-relevant surfaces that the existing 1a–1n
 sub-clusters never reached:
 
-1. ``lex/model_admin/__init__.py`` — lazy ``__getattr__`` that lets
-   ``from lex.model_admin import LexAdminSite`` work without
+1. ``lex/process_admin/__init__.py`` — lazy ``__getattr__`` that lets
+   ``from lex.process_admin import ProcessAdminSite`` work without
    pulling the heavy ``sites`` / ``settings`` / ``models`` / ``utils``
    modules at import time. Avoids circular-import storms and keeps
    the package's import cost near zero.
@@ -51,20 +51,20 @@ import pytest
 pytestmark = pytest.mark.init
 
 # ---------------------------------------------------------------------
-# 1.110–1.118 — model_admin lazy __getattr__
+# 1.110–1.118 — process_admin lazy __getattr__
 # ---------------------------------------------------------------------
-class TestCluster01o_ModelAdminLazyGetattr(TestCase):
-    """``lex/model_admin/__init__.py`` lazy ``__getattr__``.
+class TestCluster01o_ProcessAdminLazyGetattr(TestCase):
+    """``lex/process_admin/__init__.py`` lazy ``__getattr__``.
 
     Customer contract: every name in ``__all__`` must be importable
-    from ``lex.model_admin`` directly, and unknown names must raise
+    from ``lex.process_admin`` directly, and unknown names must raise
     ``AttributeError`` (not silently return ``None``, which would
     mask typos until first use).
     """
 
     EXPECTED_NAMES = {
-        "LexAdminSite",
-        "lexAdminSite",
+        "ProcessAdminSite",
+        "processAdminSite",
         "adminSite",
         "ModelCollection",
         "ModelContainer",
@@ -76,9 +76,9 @@ class TestCluster01o_ModelAdminLazyGetattr(TestCase):
     def test_1_110_all_advertises_eight_names(self):
         """1.110: ``__all__`` lists exactly the 8 lazy names.
 
-        Drift here would silently break ``from lex.model_admin import *``.
+        Drift here would silently break ``from lex.process_admin import *``.
         """
-        import lex.model_admin as pa
+        import lex.process_admin as pa
 
         self.assertEqual(
             set(pa.__all__), self.EXPECTED_NAMES,
@@ -94,7 +94,7 @@ class TestCluster01o_ModelAdminLazyGetattr(TestCase):
         sub-test per name so a regression names the failing branch
         instead of producing a generic ``AttributeError``.
         """
-        import lex.model_admin as pa
+        import lex.process_admin as pa
 
         for name in self.EXPECTED_NAMES:
             with self.subTest(name=name):
@@ -111,7 +111,7 @@ class TestCluster01o_ModelAdminLazyGetattr(TestCase):
         explicit ``raise`` at the end of ``__getattr__`` exists to
         prevent.
         """
-        import lex.model_admin as pa
+        import lex.process_admin as pa
 
         with self.assertRaises(AttributeError) as ctx:
             pa.ThisNameDoesNotExist
@@ -129,10 +129,10 @@ class TestCluster01o_ModelAdminLazyGetattr(TestCase):
         must be reference-stable. A regression that reconstructed the
         object per call would break ``isinstance`` checks downstream.
         """
-        import lex.model_admin as pa
+        import lex.process_admin as pa
 
-        a = pa.LexAdminSite
-        b = pa.LexAdminSite
+        a = pa.ProcessAdminSite
+        b = pa.ProcessAdminSite
         self.assertIs(a, b, "lazy import must be reference-stable")
 
 

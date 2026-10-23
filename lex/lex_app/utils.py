@@ -32,7 +32,7 @@ MIGRATION GUIDE:
     - Authentication -> lex.authentication
     - Logging -> lex.audit_logging
     - API -> lex.api
-    - Process Admin -> lex.model_admin
+    - Process Admin -> lex.process_admin
 """
 
 import warnings

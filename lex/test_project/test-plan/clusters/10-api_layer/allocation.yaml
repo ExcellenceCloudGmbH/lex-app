@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 100
+max_scenario: 99
 letters:
   a:
     title: ''
@@ -157,10 +157,7 @@ letters:
       DEBUG. OIDC_REDIRECT (10.85-10.86): next/fail on /oidc/* relative, own host, CSRF_TRUSTED_ORIGINS
       or the CORS allow-list, else 400 REDIRECT_NOT_ALLOWED before the OIDC view. Unknown api/ path is
       a JSON 404, SPA routes keep index.html (10.87-10.88). api/global-search/?q= routed (10.89). One
-      KeycloakManager per process (10.90). Ported from #815, #821 (manager only), #830. 2026-10-22:
-      10.83 no longer drives the second write path (the ProcessFlow endpoint was removed with the
-      Process feature); it keeps the CRUD create and the raising permission_create, so the scenario
-      is one probe lighter and the letter's pass count is unchanged at 8.
+      KeycloakManager per process (10.90). Ported from #815, #821 (manager only), #830.
   p:
     title: File-download endpoints write an audit entry
     scenarios: 10.91-10.96
@@ -179,24 +176,21 @@ letters:
       at the project boundary; `DownloadableDocument` is the cluster's own FileField model.
   q:
     title: The Process and ProcessFlow endpoints are gone from the route table
-    scenarios: 10.97-10.100
+    scenarios: 10.97-10.99
     status: complete
     tests:
-      pass: 4
+      pass: 3
       skip: 0
       xfail: 0
     note: >-
       Removing the Process feature took out two public routes and must have taken out nothing else.
       api/run_step/<model>/<pk> no longer reverses, no route is named run_step or served under
       api/run_step/, and lex.api.views.process_flow no longer imports (10.97). The same for
-      api/process/<name>, plus ProcessStructure gone from lex.model_admin.views and
+      api/process/<name>, plus ProcessStructure gone from lex.process_admin.views and
       lex.api.views.ModelStructureObtainView (10.98). The endpoints the bundled frontend loads a
       project with -- model-structure, project-info, calculationlog-tree, init-calculation-logs,
       clean-calculations, widget-structure, global-search-query, user-permissions, log and
       htmlreports -- all still reverse (10.99). This resolves pending decision 4 in clusters/README
-      for CreateOrUpdate. The model-side removal is pinned by 1ax. 10.100 covers the namespace
-      rename that came with taking Process out of the admin backbone: reverse() now takes
-      lex_rest_api, process_admin_rest_api raises NoReverseMatch, no served path carries the app
-      name under either spelling, and LOGIN_REDIRECT_URL is untouched -- it names a frontend route,
-      not anything in this package, so the rename deliberately left it alone. Originally allocated as 10p/10.91-10.94; #840 landed that
-      letter and range on lex-app-v2 first, so this batch re-took the next free pair on merge.
+      for CreateOrUpdate. The model-side removal is pinned by 1ax. Originally allocated as
+      10p/10.91-10.94; #840 landed that letter and range on lex-app-v2 first, so this batch re-took
+      the next free pair on merge.

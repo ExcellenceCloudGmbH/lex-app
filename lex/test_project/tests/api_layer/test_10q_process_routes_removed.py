@@ -16,21 +16,14 @@ routes went with them:
   class left the route can only 500.
 
 The removal must also be *surgical*: the neighbouring routes in the same
-``LexAdminSite`` url list are what the bundled frontend loads a project
+``ProcessAdminSite`` url list are what the bundled frontend loads a project
 with, and taking one of those out with the ProcessFlow cascade would break
 every screen. A customer upgrading across this change expects exactly two
 endpoints to disappear and nothing else.
 
-The same sweep renamed the URL *namespace* — ``process_admin_rest_api`` →
-``lex_rest_api`` — and 10.100 pins that it took no **served route** with it. The
-namespace is server-side only (it is what ``reverse()`` takes); the ``api/…``
-paths are the contract with the bundled frontend and are unchanged, and so is
-``LOGIN_REDIRECT_URL``, which names a frontend route rather than anything in
-this package.
-
-Cluster 10q — scenarios 10.97–10.100. Type: U.
-Covers: lex/model_admin/sites/lex_admin_site.py (the url list),
-lex/api/views/process_flow/ (deleted), lex/model_admin/views/__init__.py and
+Cluster 10q — scenarios 10.97–10.99. Type: U.
+Covers: lex/process_admin/sites/process_admin_site.py (the url list),
+lex/api/views/process_flow/ (deleted), lex/process_admin/views/__init__.py and
 lex/api/views/ModelStructureObtainView.py (``ProcessStructure`` deleted).
 Run: python -m lex pytest lex/test_project/tests/api_layer/test_10q_process_routes_removed.py -v
 """
@@ -77,7 +70,7 @@ class TestCluster10q_ProcessRoutesRemoved(SimpleTestCase):
               ``lex.api.views.process_flow`` no longer imports.
         """
         with self.assertRaises(NoReverseMatch):
-            reverse("lex_rest_api:run_step",
+            reverse("process_admin_rest_api:run_step",
                     kwargs={"model_container": "x", "pk": 1})
 
         names, paths = _routes()
@@ -104,7 +97,7 @@ class TestCluster10q_ProcessRoutesRemoved(SimpleTestCase):
               ``ProcessStructure`` any more.
         """
         with self.assertRaises(NoReverseMatch):
-            reverse("lex_rest_api:process",
+            reverse("process_admin_rest_api:process",
                     kwargs={"process_name": "datapipeline"})
 
         names, paths = _routes()
@@ -114,7 +107,7 @@ class TestCluster10q_ProcessRoutesRemoved(SimpleTestCase):
             "no path may be served under api/process/",
         )
 
-        views = importlib.import_module("lex.model_admin.views")
+        views = importlib.import_module("lex.process_admin.views")
         structure = importlib.import_module("lex.api.views.ModelStructureObtainView")
         for module in (views, structure):
             self.assertFalse(
@@ -146,7 +139,7 @@ class TestCluster10q_ProcessRoutesRemoved(SimpleTestCase):
         ):
             with self.subTest(route=name):
                 self.assertTrue(
-                    reverse(f"lex_rest_api:{name}"),
+                    reverse(f"process_admin_rest_api:{name}"),
                     f"{name} must still be routed",
                 )
 
@@ -154,31 +147,6 @@ class TestCluster10q_ProcessRoutesRemoved(SimpleTestCase):
         # process endpoint — it takes the same shape of argument and must
         # have survived the removal.
         self.assertTrue(
-            reverse("lex_rest_api:htmlreports",
+            reverse("process_admin_rest_api:htmlreports",
                     kwargs={"report_name": "anyreport"})
         )
-
-    # -- 10.100 --------------------------------------------------------
-    def test_10_100_the_namespace_was_renamed_but_no_url_moved(self) -> None:
-        """
-        Scenario 10.100: the namespace lost the Process name; no route moved.
-        Given: the URLconf after ``process_admin_rest_api`` became ``lex_rest_api``
-        When: a route is reversed under both namespaces, the served paths are
-              read, and ``LOGIN_REDIRECT_URL`` is read from settings
-        Then: the old namespace raises NoReverseMatch, the new one reverses to
-              the same ``/api/model-structure`` it always did, no served path
-              carries the app name under either spelling, and
-              ``LOGIN_REDIRECT_URL`` is untouched — it is a frontend route, not
-              an identifier, so the rename left it alone.
-        """
-        from django.conf import settings
-
-        with self.assertRaises(NoReverseMatch):
-            reverse("process_admin_rest_api:model-structure")
-        self.assertEqual(reverse("lex_rest_api:model-structure"), "/api/model-structure")
-
-        _, paths = _routes()
-        stale = [p for p in paths if "process_admin" in p or "model_admin" in p]
-        self.assertEqual(stale, [], f"no served path may carry the app name: {stale}")
-
-        self.assertEqual(settings.LOGIN_REDIRECT_URL, "/process_admin/all")

@@ -5,8 +5,8 @@ from pathlib import Path
 
 from django.apps import AppConfig
 from django.db import models
-from lex.model_admin.utils.model_registration import ModelRegistration
-from lex.model_admin.utils.model_structure_builder import ModelStructureBuilder
+from lex.process_admin.utils.model_registration import ModelRegistration
+from lex.process_admin.utils.model_structure_builder import ModelStructureBuilder
 from lex.utilities.import_system.import_utils import install_custom_import_system
 
 

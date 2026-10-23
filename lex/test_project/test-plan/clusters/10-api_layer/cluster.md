@@ -54,7 +54,7 @@
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 10.83 | no traceback by default | create and a raising `permission_create` answer 500 with `error`, no `traceback` (the second-write-path probe went with the endpoint it drove — 10q) |
+| 10.83 | no traceback by default | create and a raising `permission_create` answer 500 with `error`, no `traceback` (the `run_step` probe went with the ProcessFlow endpoint — 10q) |
 | 10.84 | traceback when allowed | `LEX_API_TRACEBACKS=true`, legacy, DEBUG show it; `LEX_API_TRACEBACKS=false` wins over DEBUG |
 | 10.85 | redirect targets | relative, own host, `CSRF_TRUSTED_ORIGINS` (wildcard, :3000), CORS origins pass; foreign, `//`, `/\`, `javascript:`, look-alike, userinfo hosts 400 on authenticate, logout, total_logout; other paths not inspected; opt-out passes |
 | 10.86 | guard in the stack | installed before the session middleware; `/oidc/authenticate` and `/oidc/total_logout` with a foreign `next` answer 400 |
@@ -95,6 +95,5 @@ branches again per ``STORAGE_TYPE``. Each is recorded as an ``AuditLog`` row wit
 | 10.97 | `run_step` is not routed | `NoReverseMatch`, no `run_step` name or `api/run_step/` path, `lex.api.views.process_flow` raises `ModuleNotFoundError` |
 | 10.98 | process structure is not routed | `NoReverseMatch`, no `process` name or `api/process/` path, no `ProcessStructure` on either module |
 | 10.99 | the neighbours are untouched | `model-structure`, `project-info`, `calculationlog-tree`, `init-calculation-logs`, `clean-calculations`, `widget-structure`, `global-search-query`, `user-permissions`, `log` and `htmlreports` all still reverse |
-| 10.100 | the namespace moved, no route did | `lex_rest_api` reverses, `process_admin_rest_api` does not, no served path carries the app name, `LOGIN_REDIRECT_URL` untouched |
 
-**Scenario range:** 10.97 – 10.100. **Test file:** `lex/test_project/tests/api_layer/test_10q_process_routes_removed.py`. **Type:** U. **Status:** ✅ Complete (2026-10-23). Batch: [10q](batches.md).
+**Scenario range:** 10.97 – 10.99. **Test file:** `lex/test_project/tests/api_layer/test_10q_process_routes_removed.py`. **Type:** U. **Status:** ✅ Complete (2026-10-23). Batch: [10q](batches.md).

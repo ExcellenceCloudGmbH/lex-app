@@ -158,7 +158,7 @@ class TestCluster08u_AuditStatusForTerminalStates(SimpleTestCase):
     * ``ERROR`` / anything else → ``"failure"`` — something broke.
 
     (The fourth value ``"aborted"`` is already produced by the startup
-    reset path in ``model_admin.utils.model_registration`` for the
+    reset path in ``process_admin.utils.model_registration`` for the
     crashed-worker recovery case, so all four non-pending audit-status
     values are now distinct.) Without this mapping a cancelled
     calculation would record ``"failure"`` and be indistinguishable

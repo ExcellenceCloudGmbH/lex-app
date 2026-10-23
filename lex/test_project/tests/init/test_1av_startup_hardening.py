@@ -269,9 +269,9 @@ class TestCluster01av_CacheTables(TransactionTestCase):
                 mock.patch.object(type(app_config), "is_running_in_celery", return_value=False), \
                 mock.patch.object(type(app_config), "validate_initial_data_path", return_value=True), \
                 mock.patch.object(LexProjectConfig, "load", return_value=config), \
-                mock.patch("lex.lex_app.tests.LexAppTestCase.LexAppTestCase.check_if_all_models_are_empty",
+                mock.patch("lex.lex_app.tests.ProcessAdminTestCase.ProcessAdminTestCase.check_if_all_models_are_empty",
                            autospec=True, side_effect=decide), \
-                mock.patch("lex.lex_app.tests.LexAppTestCase.LexAppTestCase.get_list_of_non_empty_models",
+                mock.patch("lex.lex_app.tests.ProcessAdminTestCase.ProcessAdminTestCase.get_list_of_non_empty_models",
                            return_value=[]):
             asyncio.run(app_config.async_ready({}))
         self.assertEqual(seen.get("tables"), {"default_cache", "oidc_cache"})

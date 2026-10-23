@@ -1,4 +1,4 @@
-from lex.model_admin.views.model_relation_views import (
+from lex.process_admin.views.model_relation_views import (
     ModelStructureObtainView,
     ModelStylingObtainView,
     Overview,

@@ -17,7 +17,7 @@
 9. [Serializers — API Data Layer](#9-serializers--api-data-layer)
 10. [Custom Fields (Bokeh, HTML, PDF, XLSX)](#10-custom-fields-bokeh-html-pdf-xlsx)
 11. [Filters](#11-filters)
-12. [Model Admin — Model Registration & Structure](#12-model-admin--model-registration--structure)
+12. [Process Admin — Model Registration & Structure](#12-process-admin--model-registration--structure)
 13. [Audit Logging](#13-audit-logging)
 14. [LexLogger — Fluent Markdown Logging](#14-lexlogger--fluent-markdown-logging)
 15. [Celery Integration — Async Task Dispatch](#15-celery-integration--async-task-dispatch)
@@ -70,7 +70,7 @@ Lex Framework (this repo)
     │
     ├── lex/core/           ← Base models, mixins, calculations, signals
     ├── lex/api/            ← REST API views, serializers, filters, WebSocket consumers
-    ├── lex/model_admin/  ← Model registry, structure, URL routing
+    ├── lex/process_admin/  ← Model registry, structure, URL routing
     ├── lex/audit_logging/  ← Audit trail, LexLogger, calculation logs
     ├── lex/authentication/ ← Keycloak, OIDC, JWT, user profiles
     ├── lex/utilities/      ← App config, singletons, import system, storage
@@ -750,14 +750,14 @@ FilterTree JSON → create_filter_queries_from_tree_paths() → Django ORM Q obj
 
 ---
 
-## 12. Model Admin — Model Registration & Structure
+## 12. Process Admin — Model Registration & Structure
 
-### LexAdminSite (Singleton)
+### ProcessAdminSite (Singleton)
 
 Central registry for all models, HTML reports and structures. Accessed via:
 
 ```python
-from lex.model_admin import lexAdminSite
+from lex.process_admin import processAdminSite
 ```
 
 ### Model Registration
@@ -766,7 +766,7 @@ Models are auto-discovered and registered. You rarely need to register manually.
 
 1. Walks your project directory
 2. Finds all `models.Model` subclasses
-3. Calls `lexAdminSite.register(model_class)` for each
+3. Calls `processAdminSite.register(model_class)` for each
 4. Connects `post_save` signal → `do_post_save` for dependency cascading
 5. Registers with `django-simple-history` (unless excluded)
 
@@ -775,7 +775,7 @@ Models are auto-discovered and registered. You rarely need to register manually.
 Wraps a Django model with metadata:
 
 ```python
-container = lexAdminSite.model_collection.get_container_by_id('product')
+container = processAdminSite.model_collection.get_container_by_id('product')
 container.model_class      # → Product
 container.model_id         # → 'product'
 container.display_title    # → 'Product'
@@ -836,14 +836,14 @@ def get_widget_structure():
     return {}
 ```
 
-### LexModelAdmin
+### ModelProcessAdmin
 
 Controls how a model appears in the admin:
 
 ```python
-from lex.model_admin.models import LexModelAdmin
+from lex.process_admin.models import ModelProcessAdmin
 
-class ProductAdmin(LexModelAdmin):
+class ProductAdmin(ModelProcessAdmin):
     fields_not_in_table_view = ['description', 'internal_notes']
     main_field = 'name'
     allow_quick_instance_creation = True
@@ -1309,7 +1309,7 @@ class SalesDashboard(HTMLReport):
         """
 ```
 
-HTMLReports are registered via `lexAdminSite.registerHTMLReport(name, report_instance)` during auto-discovery.
+HTMLReports are registered via `processAdminSite.registerHTMLReport(name, report_instance)` during auto-discovery.
 
 ---
 
@@ -1595,11 +1595,11 @@ from lex.audit_logging.handlers import LexLogger
 from lex.audit_logging.utils import model_logging_context
 ```
 
-### Model Admin
+### Process Admin
 
 ```python
-from lex.model_admin import lexAdminSite, ModelRegistration
-from lex.model_admin.models import LexModelAdmin
+from lex.process_admin import processAdminSite, ModelRegistration
+from lex.process_admin.models import ModelProcessAdmin
 ```
 
 ### Authentication

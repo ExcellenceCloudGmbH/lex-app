@@ -22,7 +22,7 @@ from django.db import connection
 from django.test import TransactionTestCase
 from django.urls import clear_url_caches
 from django.utils import timezone
-from lex.model_admin.utils.model_registration import ModelRegistration
+from lex.process_admin.utils.model_registration import ModelRegistration
 from rest_framework.test import APIClient
 
 
@@ -523,15 +523,15 @@ class E2ETestCase(TransactionTestCase):
             return real_register(converter, type_name)
 
         converter_patch = patch(
-            "lex.model_admin.sites.lex_admin_site.register_converter",
+            "lex.process_admin.sites.process_admin_site.register_converter",
             new=idempotent_register,
         )
         converter_patch.start()
         try:
-            from lex.model_admin.settings import lexAdminSite
+            from lex.process_admin.settings import processAdminSite
 
-            lexAdminSite.initialized = False
-            _ = lexAdminSite.urls
+            processAdminSite.initialized = False
+            _ = processAdminSite.urls
             from django.conf import settings
 
             clear_url_caches()
@@ -541,10 +541,10 @@ class E2ETestCase(TransactionTestCase):
             converter_patch.stop()
 
     def _url(self, view_name: str, **kwargs):
-        """Reverse a ``lex_rest_api`` URL."""
+        """Reverse a ``process_admin_rest_api`` URL."""
         from django.urls import reverse
 
-        return reverse(f"lex_rest_api:{view_name}", kwargs=kwargs)
+        return reverse(f"process_admin_rest_api:{view_name}", kwargs=kwargs)
 
     def url_create(self, model_name, calc_id="default"):
         return self._url(
