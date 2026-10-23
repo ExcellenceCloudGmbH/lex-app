@@ -9,7 +9,7 @@ place or, worse, sends a correct value to be "corrected" — so these scenarios
 pin how each verdict follows from the database's own evidence (audit log,
 history, meta-history) and that the scan never writes.
 
-Cluster 1az — scenarios 1.420–1.451. Type: U + E.
+Cluster 1az — scenarios 1.420–1.452. Type: U + E.
 Covers: lex/lex_app/incident_tz/scan.py, lex/lex_app/management/commands/incident_tz.py.
 Run: python -m lex pytest lex/test_project/tests/init/test_1az_incident_tz_scan.py -v
 """
@@ -946,9 +946,10 @@ class TestCluster01az_ScanDatabase(E2ETestCase):
                signature) written on 20 Sep, the same signature written on 20 Aug,
                and a time typed on 20 Sep
         When: the scan runs
-        Then: all three are D (no affected period); one mirror value and one typed
-              time are counted as written after the frontend switch, the August
-              mirror is not; the Markdown report has an R11 section
+        Then: the typed time is D (no affected period); both mirror values are E,
+              an early value nothing in the periods explains (1.452); one mirror
+              value and one typed time are counted as written after the frontend
+              switch, the August mirror is not; the Markdown report has an R11 section
         """
         self.seed_audit([
             (utc(2026, 6, 22, 11, 44, 39), "2026-06-22T13:44:39.943377"),
@@ -958,10 +959,11 @@ class TestCluster01az_ScanDatabase(E2ETestCase):
         mirror_aug = self.seed([(utc(2026, 8, 20, 9), {"due_on": utc(2026, 8, 19, 20)})], name="m-aug")
         typed = self.seed([(utc(2026, 9, 20, 9), {"meets_at": utc(2026, 9, 20, 7, 30)})], name="typed")
         report = self.run_scan(running_version="2.0.0rc199")
-        for item, column in ((mirror_sept, "due_on"), (mirror_aug, "due_on"), (typed, "meets_at")):
+        for item, column, letter in ((mirror_sept, "due_on", "E"), (mirror_aug, "due_on", "E"),
+                                     (typed, "meets_at", "D")):
             with self.subTest(item=item.name):
                 row = self.only(self.rows(report, self.main, column, row=item.pk), "main row")
-                self.assertEqual(row["verdict"], "D")
+                self.assertEqual(row["verdict"], letter)
         due = self.column(report, self.main, "due_on")
         self.assertEqual((due["r11_mirror"], due["r11_mirror_after_switch"]), (2, 1),
                          "Only the mirror written after 4 Sep counts.")
@@ -1013,18 +1015,18 @@ class TestCluster01az_ScanDatabase(E2ETestCase):
     def test_1_450_a_time_with_seconds_was_written_by_code_not_typed(self) -> None:
         """
         Scenario 1.450: the frontend's date-time input works to the minute.
-        Given: inside the period, 09:30:00 (typed) and 07:48:18 without microseconds
+        Given: inside the period, 09:30:00 (typed) and 07:41:53 without microseconds
                (code that truncated a clock, or read a time from a file); after the
-               fix, 07:48:18 again
+               fix, 07:41:53 again
         When: the scan runs
-        Then: 09:30:00 is C; 07:48:18 inside the period is E with a reason naming
+        Then: 09:30:00 is C; 07:41:53 inside the period is E with a reason naming
               both sources (a truncated clock is right, a file's local time is not),
               and is never marked as sent by the frontend; after the fix it is D
         """
         self.seed_audit()
         typed = self.seed([(IN_WINDOW, {"meets_at": TIME_WRONG})], name="typed")
-        machine = self.seed([(IN_WINDOW, {"meets_at": utc(2026, 7, 21, 7, 48, 18)})], name="machine")
-        later = self.seed([(AFTER_FIX, {"meets_at": utc(2026, 9, 2, 7, 48, 18)})], name="later")
+        machine = self.seed([(IN_WINDOW, {"meets_at": utc(2026, 7, 21, 7, 41, 53)})], name="machine")
+        later = self.seed([(AFTER_FIX, {"meets_at": utc(2026, 9, 2, 7, 41, 53)})], name="later")
         report = self.run_scan()
         typed_row = self.only(self.rows(report, self.main, "meets_at", row=typed.pk), "main row")
         self.assertEqual((typed_row["verdict"], typed_row["kind"]), ("C", "time_of_day"))
@@ -1070,3 +1072,27 @@ class TestCluster01az_ScanDatabase(E2ETestCase):
             row = self.only(self.rows(exposed, raw, "due_on", row=row_id), "row")
             self.assertEqual((row["verdict"], row["position"]), ("E", tzscan.UNKNOWN))
 
+
+    def test_1_452_a_date_stored_early_is_not_correct_outside_the_periods(self) -> None:
+        """
+        Scenario 1.452: no affected code wrote it, yet the value is two hours early.
+        Given: before the period, a pre-incident version stored a picked 20 Jun as
+               19 Jun 22:00 Berlin (the UTC digits of 20 Jun 00:00, read as Berlin);
+               after the fix, a picked 15 Jan stored as 14 Jan 23:00 Berlin; and a
+               typed 09:30 before the period
+        When: the scan runs
+        Then: both mirror values are E, with a reason saying UTC digits were read as
+              local time, so neither is passed as correct; the typed 09:30 stays D
+        """
+        self.seed_audit()
+        summer = self.seed([(BEFORE_RC212, {"meets_at": utc(2026, 6, 19, 20)})], name="summer")
+        winter = self.seed([(AFTER_FIX, {"meets_at": utc(2026, 1, 14, 22)})], name="winter")
+        typed = self.seed([(BEFORE_RC212, {"meets_at": TIME_RIGHT})], name="typed")
+        report = self.run_scan()
+        for item in (summer, winter):
+            row = self.only(self.rows(report, self.main, "meets_at", row=item.pk), "main row")
+            self.assertTrue(row["mirror"], row)
+            self.assertEqual((row["verdict"], row["position"]), ("E", tzscan.OUT), row)
+            self.assertIn("UTC digits", row["reason"])
+        typed_row = self.only(self.rows(report, self.main, "meets_at", row=typed.pk), "main row")
+        self.assertEqual(typed_row["verdict"], "D")

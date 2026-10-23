@@ -529,5 +529,6 @@ does not remove user launch configurations.
 | 1.449 | a report that travels | the standalone JSON keeps B, C, E and R11 suspects, records what it left out, and renders the same gzipped |
 | 1.450 | made by code | a time with seconds and no microseconds is machine_time: E inside a period (check the source), D outside, never C |
 | 1.451 | no exposure, no write time | with no period or gap, an undatable value is outside (D, or E for its source); with one it stays E |
+| 1.452 | early, outside the periods | a mirror value (22:00 or 23:00 local the day before a date) written outside every period is E, never D |
 
-**Scenario range:** 1.420 – 1.451. **Test file:** `lex/test_project/tests/init/test_1az_incident_tz_scan.py`. **Type:** U / E. **Status:** ✅ Complete (2026-10-21; 1.436 – 1.451 on 2026-10-23). Batch: [1az](batches.md).
+**Scenario range:** 1.420 – 1.452. **Test file:** `lex/test_project/tests/init/test_1az_incident_tz_scan.py`. **Type:** U / E. **Status:** ✅ Complete (2026-10-21; 1.436 – 1.452 on 2026-10-23). Batch: [1az](batches.md).

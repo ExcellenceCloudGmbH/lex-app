@@ -1794,14 +1794,14 @@ config each fail 1.404.
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.420 – 1.451 |
+| Scenario range | 1.420 – 1.452 |
 | Type | U / E |
 | Files covered | `lex/lex_app/incident_tz/scan.py` (new; one file, standard library plus a DB-API cursor, so it also runs on its own against an instance that has not been upgraded); `lex/lex_app/management/commands/incident_tz.py` (new; `lex incident_tz scan`) |
 | Test file | `lex/test_project/tests/init/test_1az_incident_tz_scan.py` |
 | Test model | `lex/test_project/tests/init/models.py` → `IncidentScanItem` (`due_on` a date, `meets_at` a time of day, `synced_at` a clock) |
-| Test classes | `TestCluster01az_ScanDecisions` (1.420–1.424, 1.436–1.439, 1.449), `TestCluster01az_ScanDatabase` (1.425–1.435, 1.440–1.448, 1.450–1.451) |
+| Test classes | `TestCluster01az_ScanDecisions` (1.420–1.424, 1.436–1.439, 1.449), `TestCluster01az_ScanDatabase` (1.425–1.435, 1.440–1.448, 1.450–1.452) |
 | Fixtures | none — audit rows and history versions are created through the ORM, then their times stamped with `.update()`; a raw table without a model for 1.427 and 1.434 |
-| Tests landed | **32 pass / 0 fail** |
+| Tests landed | **33 pass / 0 fail** |
 | Status | ✅ Complete |
 
 Q1 of the TZ remediation plan (LEX-747, step 3/8 LEX-1325): per database, the periods in which
@@ -1865,15 +1865,24 @@ Piping a 43 MB report out of a pod through `kubectl exec` arrived cut short thre
 four; run on its own the JSON now leaves out D rows other than R11 suspects and can travel
 gzipped (`--gzip`), and `--render` reads either form (1.449).
 
-**Found in the AGI scans (1.450).** 407 values the scan called C carried seconds (07:48:18 on
-127 rows), the same instant across many records: code wrote them, since the frontend's
+**Found in the prod scans (1.450).** On one instance, 407 values the scan called C carried
+seconds, the same instant across many records: code wrote them, since the frontend's
 date-time input works to the minute. A truncated clock is right on affected code, a local time
 read from a file is not, so such a value is now `machine_time`: E inside a period with that
 reason, never C, and never marked as sent by the frontend. The R11 section is shown only for
 instances running pre-incident (or unknown) code.
 
-**Found in the PFE scans (1.451).** About 1,250 values per PFE database sit in calculation
-tables without history or row stamps, and were E for want of a write time, although those
+**Found in the prod scans (1.451).** About 1,250 values per database, on three databases that
+never ran affected code, sit in calculation tables without history or row stamps, and were E
+for want of a write time, although those
 databases never ran affected code. With no exposure period or gap at all, there is nothing a
 write time could fall inside: such a value is now placed outside (D, or E for its source if
 midnight UTC). Where an exposure exists it stays E.
+
+**Found in the prod scans (1.452).** An instance that never ran affected code holds a record
+saved by its pre-incident version with a start date of 22:00 Berlin the day before a quarter
+began and an end two hours before 23:59:59: the UTC digits of the intended values, read as
+Berlin time. That is R11's reverse shift, though no frontend sent instants yet, so another
+client or code can cause it at any time. Outside every exposure period such a mirror value
+(22:00 or 23:00 local the day before a date) was D; it is now E with that reason. 1.446 now
+expects its two mirror values to be E. Removing the rule fails 1.446 and 1.452.

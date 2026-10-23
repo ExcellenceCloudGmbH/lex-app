@@ -155,6 +155,9 @@ REASONS = {
                                "late if a local time was read from a file: check its source",
     ("E", "midnight_utc", OUT): "midnight UTC written outside every exposure "
                                 "period: not this incident, check the source",
+    ("E", "mirror", OUT): "22:00 or 23:00 local time the day before a date, written outside "
+                          "every exposure period: the UTC digits of a midnight read as local "
+                          "time, so 1-2 h early unless that hour was meant; check its source",
     ("E", EDGE): "written in the gap around an exposure period's start or end",
     ("E", AMBIGUOUS): "the row was written both inside and outside an exposure "
                       "period; this field's own write time is unknown",
@@ -502,8 +505,14 @@ def span_position(
 # ---------------------------------------------------------------------------
 
 
-def verdict(kind: str, position: str) -> tuple[str, str]:
-    """``(verdict, reason)`` for a value without microseconds."""
+def verdict(kind: str, position: str, mirror: bool = False) -> tuple[str, str]:
+    """``(verdict, reason)`` for a value without microseconds.
+
+    A ``mirror`` value (22:00 or 23:00 local time the day before a date) is the
+    reverse shift: a client or code sent UTC digits to a version that read them
+    as local time (R11's mechanism, which needs no new frontend). Outside the
+    periods nothing explains it, so it is never passed as correct.
+    """
     if kind == "midnight_utc":
         if position == IN:
             return "B", REASONS[("B", IN)]
@@ -515,6 +524,8 @@ def verdict(kind: str, position: str) -> tuple[str, str]:
             return "E", REASONS[("E", "machine_time", IN)]
         return "C", REASONS[("C", IN)]
     if position == OUT:
+        if mirror:
+            return "E", REASONS[("E", "mirror", OUT)]
         return "D", REASONS[("D", OUT)]
     return "E", REASONS[("E", position)]
 
@@ -911,7 +922,8 @@ def _frontend(letter: str, written: Any) -> Optional[str]:
 
 def _row(layer, table, column, row_id, record_id, value, digits, kind,
          fix_b, fix_c, written, position, zone) -> dict:
-    letter, reason = verdict(kind, position)
+    mirror = kind == "time_of_day" and _is_mirror(value, zone)
+    letter, reason = verdict(kind, position, mirror)
     if isinstance(written, tuple):
         written_out: Any = [_iso(written[0]), _iso(written[1])]
         written_start = written[0]
@@ -934,7 +946,7 @@ def _row(layer, table, column, row_id, record_id, value, digits, kind,
                               and dst_ambiguous(digits, zone)),
         "reason": reason,
         "frontend": _frontend(letter, written),
-        "mirror": kind == "time_of_day" and _is_mirror(value, zone),
+        "mirror": mirror,
         "after_switch": bool(written_start is not None and written_start >= FRONTEND_INSTANTS_SINCE),
     }
 
