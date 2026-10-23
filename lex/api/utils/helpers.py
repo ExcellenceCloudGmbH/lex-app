@@ -1,9 +1,12 @@
+import logging
 from io import BytesIO
 
 import pandas as pd
 from django.core.files.storage import default_storage
 from lex.core.fields import XLSXField
 from pandas.api.types import is_datetime64_any_dtype as is_datetime
+
+logger = logging.getLogger(__name__)
 
 
 def convert_dfs_in_excel(path, data_frames, sheet_names=None, merge_cells=False, formats={}, index=True):
@@ -317,6 +320,67 @@ def build_shadow_instance(model_class: type[Model], payload: dict) -> Model | No
         return None
 
 
+def _can_read_file_operation(request, audit_log, model_class) -> bool | None:
+    """Who may read an export or download entry (LEX_SEC_READ_SURFACES).
+
+    Such a payload names no field of the record, so a shadow built from it is a
+    blank record and says nothing about who may see it. Instead:
+
+    * a download (``object_id`` set) is readable by whoever may read that
+      record — the rule the download endpoint itself applies;
+    * a model-wide export (no ``object_id``) is readable by whoever may export
+      the model: its ``permission_list`` does not refuse the caller and its
+      ``permission_export`` allows a blank record;
+    * a superuser reads every entry.
+
+    Returns ``None`` when the payload check applies instead: another action,
+    the hardening switched off, or a record that no longer exists.
+    """
+    from lex.audit_logging.models.AuditLog import AuditLog
+    from lex.core.security_flags import is_superuser, strict
+
+    if getattr(audit_log, "action", None) not in AuditLog.FILE_OPERATION_ACTIONS:
+        return None
+    if not strict("READ_SURFACES"):
+        return None
+    if is_superuser(request):
+        return True
+
+    cache = getattr(request, "_audit_log_file_operation_cache", None)
+    if cache is None:
+        cache = {}
+        setattr(request, "_audit_log_file_operation_cache", cache)
+
+    object_id = getattr(audit_log, "object_id", None)
+    key = (model_class, object_id)
+    if key in cache:
+        return cache[key]
+
+    from lex.api.security import guarded, is_readable, list_denied
+    from lex.core.models.LexModel import PermissionResult, UserContext
+
+    if object_id is not None:
+        instance = model_class._default_manager.filter(pk=object_id).first()
+        result = None if instance is None else is_readable(request, instance)
+    elif list_denied(request, model_class):
+        result = False
+    elif not hasattr(model_class, "permission_export"):
+        result = True
+    else:
+        instance = model_class()
+        export = guarded(
+            instance.permission_export,
+            UserContext.from_request(request, instance),
+            deny=PermissionResult.deny("permission_export raised"),
+            allow=PermissionResult.allow_all("permission_export raised (legacy allow)"),
+            what=f"{model_class.__name__}.permission_export",
+        )
+        result = bool(export.allowed)
+
+    cache[key] = result
+    return result
+
+
 def can_read_from_payload(request, audit_log, base_user_context=None) -> bool:
     """
     Check if user can read an audit log entry based on the target model's permissions.
@@ -329,6 +393,10 @@ def can_read_from_payload(request, audit_log, base_user_context=None) -> bool:
     model_class = resolve_target_model(audit_log)
     if not model_class:
         return True  # preserve allow-by-default behavior
+
+    file_operation_result = _can_read_file_operation(request, audit_log, model_class)
+    if file_operation_result is not None:
+        return file_operation_result
 
     fast_path_result = _can_read_with_default_permission_scope(
         request,
@@ -367,5 +435,13 @@ def can_read_from_payload(request, audit_log, base_user_context=None) -> bool:
         return True
 
     except Exception:
-        # Preserve allow-by-default behavior on any error
+        from lex.core.security_flags import strict
+
+        if strict("FAIL_CLOSED"):
+            logger.exception(
+                "permission_read of %s raised on an audit-log entry; entry hidden (LEX_SEC_FAIL_CLOSED).",
+                getattr(model_class, "__name__", model_class),
+            )
+            return False
+        # Legacy (LEX_SEC_FAIL_CLOSED=false): allow on any error
         return True

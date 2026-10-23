@@ -274,6 +274,71 @@ class SecretDocument(LexModel):
         return True
 
 
+class RaisingParent(LexModel):
+    """Cluster 4r: permission_read raises for the name "boom"; permission_edit always raises."""
+
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        if self.name == "boom":
+            raise RuntimeError("cluster 4r: permission_read failed on purpose")
+        return PermissionResult.allow_all("cluster 4r")
+
+    def permission_edit(self, uc):
+        raise RuntimeError("cluster 4r: permission_edit failed on purpose")
+
+    def permission_list(self, uc):
+        return True
+
+
+class RaisingChild(LexModel):
+    """Cluster 4r: a readable record whose audit payload names a RaisingParent."""
+
+    name = models.CharField(max_length=200)
+    parent = models.ForeignKey(RaisingParent, on_delete=models.CASCADE, null=True, blank=True)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 4r")
+
+    def permission_list(self, uc):
+        return True
+
+
+class RaisingExportItem(LexModel):
+    """Cluster 4r: permission_export raises for the name "boom"."""
+
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 4r")
+
+    def permission_export(self, uc):
+        if self.name == "boom":
+            raise RuntimeError("cluster 4r: permission_export failed on purpose")
+        return PermissionResult.allow_all("cluster 4r")
+
+    def permission_list(self, uc):
+        return True
+
+
 class CreateParent(LexModel):
     """Cluster 4q: a parent that is open or closed for new children."""
 
@@ -347,5 +412,9 @@ EXPORT_DENIED = "exportdenieditem"
 OWNED = "owneditem"
 RAISING_READ = "raisingreaditem"
 SECRET_DOCUMENT = "secretdocument"
+RAISING_SURFACE_MODELS = [RaisingParent, RaisingChild, RaisingExportItem, RaisingReadItem]
+RAISING_PARENT = "raisingparent"
+RAISING_CHILD = "raisingchild"
+RAISING_EXPORT = "raisingexportitem"
 CREATE_MODELS = [CreateParent, ScopedCreateItem]
 SCOPED_CREATE = "scopedcreateitem"

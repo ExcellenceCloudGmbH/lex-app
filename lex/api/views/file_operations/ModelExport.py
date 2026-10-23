@@ -162,7 +162,16 @@ class ModelExportView(FileOperationAuditMixin, GenericAPIView):
                 # Default to all fields if no permission method
                 exportable_fields = {f.name for f in obj._meta.fields}
         except Exception:
-            # Default to all fields on error
+            from lex.core.security_flags import strict
+
+            if strict("FAIL_CLOSED"):
+                # A raising export check withholds the row (no identifying fields either).
+                logger.exception(
+                    "permission_export of %s raised; row withheld from the export (LEX_SEC_FAIL_CLOSED)",
+                    type(obj).__name__,
+                )
+                return set()
+            # Legacy (LEX_SEC_FAIL_CLOSED=false): all fields on error
             exportable_fields = {f.name for f in obj._meta.fields}
         
         # Always include basic identifying fields
