@@ -20,14 +20,23 @@ The scan never writes. Callers open a READ ONLY transaction first, and
 How it decides
 --------------
 1. Exposure, from the database's own audit log. An ``update`` audit row stores
-   the record's ``edited_at`` in its payload exactly as the app rendered it,
-   next to the row's own ``date``, which is always a correct instant.
+   the record's ``edited_at`` in its payload exactly as the app's API rendered
+   it, next to the row's own ``date``, which is always a correct instant.
    Pre-incident versions rendered Berlin wall-clock digits, affected versions
    UTC digits (v2.1.1 – v2.1.3 with a trailing ``Z``), fixed versions an
-   explicit offset such as ``+02:00``. Each row gets one of those eras. A run
-   of affected rows is one exposure period, kept as two brackets: it started
-   after the last earlier row and by the first affected row, and it ended
-   after the last affected row and by the next row.
+   explicit offset such as ``+02:00``. Each row gets one of those eras. Only
+   updates made through the app are read: creates carry what the browser sent,
+   deletes the record's previous edit, data loads their file's values. Digits
+   without microseconds are unreadable: a calculation rewrites its click's row
+   with a plain copy that drops them and writes UTC digits in every version,
+   fixed ones included. A run of affected rows is one exposure period, kept as
+   two brackets: it started after the last earlier row and by the first
+   affected row, and it ended after the last affected row and by the next row.
+   Where the era changes between a pre-incident and a fixed row, or the first
+   row is fixed, the code in between is unknown. Run inside the instance, the
+   lex-app version it runs counts as a reading at scan time. Stretches of more
+   than a week without a readable row are listed for a check against the
+   version history; a stated ``--window`` adds to the audit log's periods.
 2. Census: every ``timestamp with time zone`` column in the scanned schemas,
    by layer: project table, history, meta-history, framework.
 3. Value classes. A value with microseconds was written by a clock, whose zone
@@ -50,6 +59,7 @@ How it decides
 from __future__ import annotations
 
 import argparse
+import collections
 import datetime as dt
 import json
 import os
@@ -75,6 +85,14 @@ RC212_RELEASED_AT = dt.datetime(2026, 6, 26, 10, 6, 8, tzinfo=UTC)
 # An update audit row's ``date`` and the ``edited_at`` in its payload are taken
 # moments apart; the offsets that separate the eras are an hour or more.
 AUDIT_TOLERANCE = dt.timedelta(minutes=30)
+
+# Rows the initial-data loader writes carry the loaded file's values, not the
+# moment of the change.
+DATA_LOAD_AUTHOR = "system (initial_data_upload)"
+
+# Longer than this without a readable audit row, and the report asks for a
+# check against the instance's version history.
+SILENT_STRETCH = dt.timedelta(days=7)
 
 # Tables of Django, lex and the third-party apps lex installs. Their values are
 # reported, never corrected.
@@ -165,35 +183,103 @@ def parse_stamp(text: str) -> Optional[tuple[dt.datetime, Optional[int]]]:
     return digits, sign * (int(compact[:2]) * 60 + int(compact[2:]))
 
 
+def read_audit_stamp(
+    text: Any,
+    date_utc: dt.datetime,
+    date_local: dt.datetime,
+    tolerance: dt.timedelta = AUDIT_TOLERANCE,
+) -> tuple[str, str]:
+    """``(era, reason)``: which code rendered this audit payload's ``edited_at``?
+
+    ``date_utc`` and ``date_local`` are the audit row's own ``date`` as naive
+    wall clocks in UTC and in the source zone. Only the API writes microseconds,
+    so digits without them name no version: a calculation's rewrite of the row
+    writes UTC digits whatever version runs.
+    """
+    if not isinstance(text, str):
+        return ERA_UNKNOWN, "no edited_at"
+    match = _STAMP.match(text.strip())
+    parsed = parse_stamp(text) if match else None
+    if parsed is None:
+        return ERA_UNKNOWN, "not a timestamp"
+    digits, _offset = parsed
+    suffix = match["tz"]
+    if suffix is not None and suffix != "Z":
+        # Only versions with time zones on write an offset, +00:00 included.
+        return ERA_FIXED, "explicit offset"
+    if match["f"] is None:
+        return ERA_UNKNOWN, "no microseconds"
+    near_utc = abs(digits - date_utc) <= tolerance
+    near_local = abs(digits - date_local) <= tolerance
+    if near_utc and near_local:
+        return ERA_UNKNOWN, "matches both"
+    if suffix == "Z":
+        # v2.1.1 – v2.1.3 rendered their naive UTC values with a literal "Z".
+        return (ERA_AFFECTED, "UTC digits with Z") if near_utc else (ERA_UNKNOWN, "Z without UTC digits")
+    if near_local:
+        return ERA_PRE, "local digits"
+    if near_utc:
+        return ERA_AFFECTED, "UTC digits"
+    return ERA_UNKNOWN, "matches neither"
+
+
 def audit_era(
     text: Any,
     date_utc: dt.datetime,
     date_local: dt.datetime,
     tolerance: dt.timedelta = AUDIT_TOLERANCE,
 ) -> str:
-    """Which code rendered this audit payload's ``edited_at``?
+    """Which code rendered this audit payload's ``edited_at``? See ``read_audit_stamp``."""
+    return read_audit_stamp(text, date_utc, date_local, tolerance)[0]
 
-    ``date_utc`` and ``date_local`` are the audit row's own ``date`` as naive
-    wall clocks in UTC and in the source zone.
+
+_VERSION = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-?rc(\d+))?$")
+
+
+def era_of_version(version: Optional[str], deployment_target: Optional[str] = None) -> Optional[str]:
+    """The era a lex-app version writes in, or ``None`` when it cannot be told.
+
+    rc84 – rc211 and v1.x read and wrote Berlin time; rc212 – rc221, the
+    2.0.0-azure build and v2.1.1 – v2.1.3 UTC; v2.1.4 and later have time zones
+    on. On a deployment target other than GCP time zones were always on.
     """
-    if not isinstance(text, str):
-        return ERA_UNKNOWN
-    parsed = parse_stamp(text)
-    if parsed is None:
-        return ERA_UNKNOWN
-    digits, offset = parsed
-    if offset not in (None, 0):
+    if not version:
+        return None
+    if deployment_target and deployment_target not in ("default", "GCP"):
         return ERA_FIXED
-    near_utc = abs(digits - date_utc) <= tolerance
-    near_local = abs(digits - date_local) <= tolerance
-    if offset == 0:
-        # v2.1.1 – v2.1.3 rendered their naive UTC values with a literal "Z".
-        return ERA_AFFECTED if near_utc and not near_local else ERA_UNKNOWN
-    if near_local and not near_utc:
-        return ERA_PRE
-    if near_utc and not near_local:
+    text = str(version).strip().lower()
+    if text.lstrip("v") == "2.0.0-azure":
         return ERA_AFFECTED
-    return ERA_UNKNOWN
+    match = _VERSION.match(text)
+    if match is None:
+        return None
+    major, minor, patch = (int(match[i]) for i in (1, 2, 3))
+    rc = int(match[4]) if match[4] else None
+    if major < 2:
+        return ERA_PRE
+    if (major, minor, patch) == (2, 0, 0):
+        if rc is None or rc < 84:
+            return None
+        if rc < 212:
+            return ERA_PRE
+        return ERA_AFFECTED if rc <= 221 else None
+    if (major, minor) == (2, 0):
+        return None  # side branches such as the 2.0.8 AI builds
+    if (major, minor) == (2, 1):
+        if patch >= 4:
+            return ERA_FIXED
+        return ERA_AFFECTED if patch >= 1 and rc is None else None
+    return ERA_FIXED
+
+
+def installed_lex_app_version() -> Optional[str]:
+    """The lex-app version installed in this Python, if any."""
+    try:
+        from importlib import metadata
+
+        return metadata.version("lex-app")
+    except Exception:  # noqa: BLE001 - absent or unreadable metadata
+        return None
 
 
 def _aware(value: Optional[dt.datetime]) -> Optional[dt.datetime]:
@@ -250,22 +336,32 @@ class Period:
         }
 
 
-def exposure_periods(rows: Iterable[tuple[dt.datetime, str]]) -> list[Period]:
-    """Turn audit rows ``(date, era)``, oldest first, into exposure periods."""
+def exposure_periods(rows: Iterable[tuple]) -> list[Period]:
+    """Turn readable audit rows ``(date, era)``, oldest first, into exposure periods.
+
+    A third element ``False`` marks a reading that is not an audit row (the
+    version running at scan time): it opens, extends or closes a period like a
+    row but is not counted as one.
+    """
     periods: list[Period] = []
     current: Optional[Period] = None
     last_other: Optional[dt.datetime] = None
-    for when, era in rows:
+    for row in rows:
+        when, era = row[0], row[1]
+        is_row = row[2] if len(row) > 2 else True
         if era == ERA_UNKNOWN:
             continue
         if era == ERA_AFFECTED:
             if current is None:
                 current = Period(
-                    started_by=when, ended_after=when,
-                    started_after=last_other, affected_rows=1,
+                    started_by=when, ended_after=when, started_after=last_other,
+                    source="audit_log" if is_row else "running_version",
                 )
             else:
                 current.ended_after = when
+                if not is_row and current.source == "audit_log":
+                    current.source = "audit_log+running_version"
+            if is_row:
                 current.affected_rows += 1
             continue
         if current is not None:
@@ -276,6 +372,70 @@ def exposure_periods(rows: Iterable[tuple[dt.datetime, str]]) -> list[Period]:
     if current is not None:
         periods.append(current)
     return periods
+
+
+@dataclass
+class Gap:
+    """A stretch in which the code changed with no affected row to date it.
+
+    Its whole length is uncertain: an affected version may have run there.
+    It answers ``position`` and ``touches`` like a ``Period``.
+    """
+
+    start: dt.datetime
+    end: dt.datetime
+    before: Optional[str]
+    after: str
+
+    def position(self, when: dt.datetime) -> str:
+        return EDGE if self.start < when < self.end else OUT
+
+    def touches(self, start: dt.datetime, end: dt.datetime) -> bool:
+        return start < self.end and end > self.start
+
+    def as_dict(self) -> dict:
+        return {"start": _iso(self.start), "end": _iso(self.end),
+                "before": self.before, "after": self.after}
+
+
+def era_change_gaps(rows: Iterable[tuple]) -> list[Gap]:
+    """Where the era changes between two readings that are not affected.
+
+    A pre-incident row followed by a fixed one (or the reverse), and a first
+    reading that is fixed, leave open whether an affected version ran in
+    between. Next to affected rows a period's own edges already say so.
+    """
+    points = [(row[0], row[1]) for row in rows if row[1] != ERA_UNKNOWN]
+    gaps: list[Gap] = []
+    if points and points[0][1] == ERA_FIXED and points[0][0] > RC212_RELEASED_AT:
+        gaps.append(Gap(RC212_RELEASED_AT, points[0][0], None, ERA_FIXED))
+    for (start, before), (end, after) in zip(points, points[1:]):
+        if before != after and ERA_AFFECTED not in (before, after) and end > RC212_RELEASED_AT:
+            gaps.append(Gap(max(start, RC212_RELEASED_AT), end, before, after))
+    return gaps
+
+
+def silent_stretches(
+    rows: Iterable[tuple], now: Optional[dt.datetime], minimum: dt.timedelta = SILENT_STRETCH,
+) -> list[dict]:
+    """Stretches after rc212's release longer than ``minimum`` with no readable row.
+
+    With the same era on both sides the scan assumes the same code ran; a round
+    trip through an affected version could hide there, so each one is listed
+    for a check against the instance's version history.
+    """
+    times = sorted(row[0] for row in rows if row[1] != ERA_UNKNOWN and row[0] > RC212_RELEASED_AT)
+    marks = [RC212_RELEASED_AT] + times
+    if now is not None and now > RC212_RELEASED_AT:
+        marks.append(now)
+    stretches = []
+    for start, end in zip(marks, marks[1:]):
+        if end - start > minimum:
+            stretches.append({
+                "start": _iso(start), "end": _iso(end),
+                "days": round((end - start).total_seconds() / 86400, 1),
+            })
+    return stretches
 
 
 def manual_period(start: dt.datetime, end: dt.datetime) -> Period:
@@ -586,10 +746,12 @@ def _find_audit_tables(tables: dict) -> list:
 
 
 def _audit_rows(cursor, table: _Table, zone: str) -> list:
+    action = '"action"' if "action" in table.columns else "NULL::text"
+    author = '"author"' if "author" in table.columns else "NULL::text"
     cursor.execute(
         f"""
         SELECT "date", ("date" AT TIME ZONE 'UTC'), ("date" AT TIME ZONE %(zone)s),
-               ("payload"->>'edited_at')
+               ("payload"->>'edited_at'), {action}, {author}
           FROM {table.sql}
          WHERE ("payload"->>'edited_at') IS NOT NULL
          ORDER BY "date"
@@ -599,26 +761,54 @@ def _audit_rows(cursor, table: _Table, zone: str) -> list:
     return list(cursor.fetchall())
 
 
-def detect_exposure(cursor, tables: dict, zone: str) -> dict:
+def detect_exposure(
+    cursor, tables: dict, zone: str,
+    running_era: Optional[str] = None, now: Optional[dt.datetime] = None,
+) -> dict:
+    """Periods, gaps and silent stretches, from the audit log and the running version."""
     eras = dict.fromkeys(ERAS, 0)
+    skipped = {"create": 0, "delete": 0, "other_action": 0, "data_load": 0}
+    unreadable: collections.Counter = collections.Counter()
+    anomalies: list = []
     classified: list = []
     audit_tables = _find_audit_tables(tables)
     for table in audit_tables:
-        for when, date_utc, date_local, text in _audit_rows(cursor, table, zone):
-            era = audit_era(text, date_utc, date_local)
+        for when, date_utc, date_local, text, action, author in _audit_rows(cursor, table, zone):
+            if action is not None and action != "update":
+                skipped[action if action in ("create", "delete") else "other_action"] += 1
+                continue
+            if author == DATA_LOAD_AUTHOR:
+                skipped["data_load"] += 1
+                continue
+            when = _aware(when)
+            era, why = read_audit_stamp(text, date_utc, date_local)
+            if era == ERA_AFFECTED and when < RC212_RELEASED_AT:
+                # Affected code did not exist yet: a misread, not a period.
+                anomalies.append(when)
+                era, why = ERA_UNKNOWN, "affected before rc212's release"
             eras[era] += 1
-            classified.append((_aware(when), era))
+            if era == ERA_UNKNOWN:
+                unreadable[why] += 1
+            classified.append((when, era))
     classified.sort(key=lambda item: item[0])
     readable = [item for item in classified if item[1] != ERA_UNKNOWN]
+    points = list(readable)
+    if running_era in (ERA_PRE, ERA_AFFECTED, ERA_FIXED) and now is not None:
+        points.append((now, running_era, False))
     return {
         "source": "audit_log" if audit_tables else "none",
         "audit_tables": [t.name for t in audit_tables],
         "eras": eras,
+        "unreadable": dict(unreadable),
+        "skipped": skipped,
+        "anomalies": [_iso(when) for when in sorted(anomalies)],
         # The audit log only speaks for the time its readable rows cover.
         "readable_rows": len(readable),
         "first_readable": _iso(readable[0][0]) if readable else None,
         "last_readable": _iso(readable[-1][0]) if readable else None,
-        "periods": exposure_periods(readable),
+        "periods": exposure_periods(points),
+        "gaps": era_change_gaps(points),
+        "silent_stretches": silent_stretches(readable, now),
     }
 
 
@@ -774,14 +964,21 @@ def scan(
     framework_tables: Iterable[str] = (),
     expected_columns: Optional[Iterable[tuple[str, str]]] = None,
     database: Optional[str] = None,
+    audit_periods: bool = True,
+    running_version: Optional[str] = None,
+    deployment_target: Optional[str] = None,
 ) -> dict:
     """Scan the database behind ``cursor`` and return the report as a dict.
 
-    ``windows`` replaces the audit-log exposure with periods the operator
-    states. ``tables`` limits the classification to those table names (the
-    audit log is always read). ``expected_columns`` is the ``(table, column)``
-    list of DateTimeFields the app's models declare; the report lists any that
-    the database lacks and any database column no model declares.
+    ``windows`` are periods the operator states, from the version history; they
+    add to the audit log's periods, or replace them with ``audit_periods=False``
+    (the audit log's view is still reported). ``running_version`` is the lex-app
+    version the instance runs now, read at the scan's start; with
+    ``deployment_target`` it says which era is writing at that moment.
+    ``tables`` limits the classification to those table names (the audit log is
+    always read). ``expected_columns`` is the ``(table, column)`` list of
+    DateTimeFields the app's models declare; the report lists any that the
+    database lacks and any database column no model declares.
     """
     if not _is_read_only(cursor):
         raise ScanError(
@@ -791,15 +988,25 @@ def scan(
         )
     framework = frozenset(framework_tables)
     started = dt.datetime.now(tz=UTC)
+    running_era = era_of_version(running_version, deployment_target)
     catalogue = _load_tables(cursor, schemas)
-    exposure = detect_exposure(cursor, catalogue, zone)
-    periods: list[Period] = [manual_period(_aware(a), _aware(b)) for a, b in windows]
-    if periods:
-        exposure["source"] = "manual"
-        exposure["audit_periods"] = [p.as_dict() for p in exposure["periods"]]
+    exposure = detect_exposure(cursor, catalogue, zone, running_era=running_era, now=started)
+    stated = [manual_period(_aware(a), _aware(b)) for a, b in windows]
+    if audit_periods:
+        periods: list = exposure["periods"] + stated
+        gaps: list = exposure["gaps"]
+        if stated:
+            base = exposure["source"]
+            exposure["source"] = "manual" if base == "none" else f"{base}+manual"
     else:
-        periods = exposure["periods"]
+        exposure["audit_periods"] = [p.as_dict() for p in exposure["periods"]]
+        exposure["audit_gaps"] = [g.as_dict() for g in exposure["gaps"]]
+        exposure["source"] = "manual"
+        periods, gaps = stated, []
     exposure["periods"] = [p.as_dict() for p in periods]
+    exposure["gaps"] = [g.as_dict() for g in gaps]
+    # Gaps answer position() like periods: one list places every write.
+    periods = periods + gaps
 
     # Which tables belong together: <app>_<model>, its history
     # <app>_historical<model>, and the meta-history, which lex names after the
@@ -905,6 +1112,9 @@ def scan(
             "schemas": list(schemas),
             "tables_filter": sorted(wanted) if wanted is not None else None,
             "read_only": True,
+            "running_version": running_version,
+            "running_era": running_era,
+            "deployment_target": deployment_target,
         },
         "exposure": exposure,
         "census": {
@@ -942,6 +1152,12 @@ def render_markdown(report: dict, max_rows: int = 50) -> str:
         "## Exposure",
         "",
     ]
+    running = meta.get("running_version")
+    if running:
+        out += [f"Running at scan time: lex-app {running} ({meta.get('running_era') or 'era unknown'}).", ""]
+    else:
+        out += ["Running at scan time: not known (the scan ran from outside the instance; "
+                "pass --running-version).", ""]
     if exposure["periods"]:
         out.append(
             f"{len(exposure['periods'])} period(s) of writes by affected code "
@@ -950,10 +1166,10 @@ def render_markdown(report: dict, max_rows: int = 50) -> str:
         )
         out.append("")
         out += _md_table(
-            ["#", "Started after", "Started by", "Ended after", "Ended by", "Affected rows"],
+            ["#", "Started after", "Started by", "Ended after", "Ended by", "Affected rows", "Source"],
             [
                 (i + 1, p["started_after"] or "rc212 release", p["started_by"],
-                 p["ended_after"], p["ended_by"] or "open", p["affected_rows"])
+                 p["ended_after"], p["ended_by"] or "open", p["affected_rows"], p.get("source", ""))
                 for i, p in enumerate(exposure["periods"])
             ],
         )
@@ -970,9 +1186,42 @@ def render_markdown(report: dict, max_rows: int = 50) -> str:
             f"{exposure['last_readable']}, and none of them was written by affected code. "
             "Exposure outside that range cannot be ruled out from the audit log."
         )
+    if exposure.get("gaps"):
+        out += ["", "The code changed between these readings with no row from affected code "
+                    "to date it; an affected version may have run there, so values written in "
+                    "between are reported as E.", ""]
+        out += _md_table(
+            ["From", "To", "Before", "After"],
+            [(g["start"], g["end"], g["before"] or "rc212 release", g["after"])
+             for g in exposure["gaps"]],
+        )
     eras = exposure["eras"]
-    out += ["", f"Audit rows by era: pre-incident {eras['pre']}, affected {eras['affected']}, "
-                f"fixed {eras['fixed']}, unreadable {eras['unknown']}.", ""]
+    reasons = ", ".join(f"{why} {count}" for why, count in sorted(exposure.get("unreadable", {}).items()))
+    out += ["", f"Audit rows read (updates): pre-incident {eras['pre']}, affected {eras['affected']}, "
+                f"fixed {eras['fixed']}, unreadable {eras['unknown']}"
+                + (f" ({reasons})" if reasons else "") + "."]
+    skipped = exposure.get("skipped") or {}
+    if any(skipped.values()):
+        out.append(
+            "Skipped, because they do not hold the moment of the change: "
+            f"creates {skipped.get('create', 0)}, deletes {skipped.get('delete', 0)}, "
+            f"data loads {skipped.get('data_load', 0)}, other actions {skipped.get('other_action', 0)}."
+        )
+    if exposure.get("anomalies"):
+        shown = ", ".join(exposure["anomalies"][:5])
+        out.append(
+            f"**Anomalies:** {len(exposure['anomalies'])} row(s) read as affected but dated before "
+            f"rc212's release, which cannot be: {shown}. They open no period; check them."
+        )
+    if exposure.get("silent_stretches"):
+        out += ["", f"Silent stretches: no readable audit row for more than {SILENT_STRETCH.days} days. "
+                    "Check each against the instance's version history and pass any that "
+                    "overlaps an affected version with --window.", ""]
+        out += _md_table(
+            ["From", "To", "Days"],
+            [(st["start"], st["end"], st["days"]) for st in exposure["silent_stretches"]],
+        )
+    out.append("")
 
     out += ["## Verdicts", ""]
     out += _md_table(
@@ -1114,10 +1363,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--schema", action="append", dest="schemas")
     parser.add_argument("--table", action="append", dest="tables")
     parser.add_argument("--window", action="append", default=[],
-                        help="START/END of an exposure period; overrides the audit log")
+                        help="START/END of an exposure period, from the version history; "
+                             "adds to the audit log's periods")
+    parser.add_argument("--window-only", action="store_true",
+                        help="apply only the --window periods; the audit log's are still reported")
+    parser.add_argument("--running-version",
+                        help="lex-app version the instance runs; read from this Python "
+                             "when the scan uses the instance's own settings (no --dsn)")
     parser.add_argument("--render", metavar="SCAN_JSON",
                         help="write scan.md from a saved JSON report; no database needed")
     args = parser.parse_args(argv)
+    if args.window_only and not args.window:
+        parser.error("--window-only needs at least one --window")
     if args.render:
         # A scan run inside a pod prints JSON; the Markdown is made here, locally.
         with open(args.render, encoding="utf-8") as handle:
@@ -1127,6 +1384,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
         sys.stderr.write(f"Wrote {md_path}\n")
         return 0
+    running_version = args.running_version
+    deployment_target = None
+    if not args.dsn:
+        # Inside the instance: its own lex-app and settings are the running ones.
+        running_version = running_version or installed_lex_app_version()
+        deployment_target = os.environ.get("DATABASE_DEPLOYMENT_TARGET")
     connection = _connect(args.dsn)
     try:
         cursor = connection.cursor()
@@ -1139,6 +1402,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             tables=args.tables,
             database=connection.get_dsn_parameters().get("dbname")
             if hasattr(connection, "get_dsn_parameters") else None,
+            audit_periods=not args.window_only,
+            running_version=running_version,
+            deployment_target=deployment_target,
         )
     finally:
         connection.rollback()

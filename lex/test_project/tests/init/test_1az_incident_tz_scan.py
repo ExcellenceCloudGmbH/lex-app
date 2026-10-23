@@ -9,7 +9,7 @@ place or, worse, sends a correct value to be "corrected" — so these scenarios
 pin how each verdict follows from the database's own evidence (audit log,
 history, meta-history) and that the scan never writes.
 
-Cluster 1az — scenarios 1.420–1.435. Type: U + E.
+Cluster 1az — scenarios 1.420–1.443. Type: U + E.
 Covers: lex/lex_app/incident_tz/scan.py, lex/lex_app/management/commands/incident_tz.py.
 Run: python -m lex pytest lex/test_project/tests/init/test_1az_incident_tz_scan.py -v
 """
@@ -17,6 +17,7 @@ Run: python -m lex pytest lex/test_project/tests/init/test_1az_incident_tz_scan.
 from __future__ import annotations
 
 import datetime as dt
+import importlib.metadata
 import json
 import os
 import tempfile
@@ -212,6 +213,122 @@ class TestCluster01az_ScanDecisions(SimpleTestCase):
         with self.assertRaises(tzscan.ScanError):
             tzscan.parse_window("2026-10-21T00:00Z/2026-07-06T00:00Z")
 
+    def test_1_436_rows_that_cannot_name_their_version_are_unreadable(self) -> None:
+        """
+        Scenario 1.436: only text the app's API wrote out names the version.
+        Given: an update row written at 10:00:05 UTC (12:00:05 in Berlin), in the
+               forms other code paths leave behind
+        When: read_audit_stamp() reads each one
+        Then: digits without microseconds (a calculation's rewrite of the row) are
+              unreadable, with or without a Z; +00:00 is fixed like any explicit
+              offset; digits that match both readings (a zone equal to UTC) are
+              unreadable; each answer carries its reason
+        """
+        date_utc = dt.datetime(2026, 7, 15, 10, 0, 5)
+        date_local = dt.datetime(2026, 7, 15, 12, 0, 5)
+        cases = [
+            ("2026-07-15T10:00:05", tzscan.ERA_UNKNOWN, "no microseconds"),
+            ("2026-07-15T12:00:05", tzscan.ERA_UNKNOWN, "no microseconds"),
+            ("2026-07-15T10:00:05Z", tzscan.ERA_UNKNOWN, "no microseconds"),
+            ("2026-07-15T10:00:05.180000+00:00", tzscan.ERA_FIXED, "explicit offset"),
+            ("2026-07-15T12:00:05+02:00", tzscan.ERA_FIXED, "explicit offset"),
+            ("2026-07-15T10:00:05.180000", tzscan.ERA_AFFECTED, "UTC digits"),
+            ("2026-07-15T12:00:05.180000", tzscan.ERA_PRE, "local digits"),
+        ]
+        for text, era, why in cases:
+            with self.subTest(text=text):
+                self.assertEqual(
+                    tzscan.read_audit_stamp(text, date_utc, date_local), (era, why),
+                    f"{text!r} should read as {era} ({why}).",
+                )
+        self.assertEqual(
+            tzscan.read_audit_stamp("2026-07-15T10:00:05.180000", date_utc, date_utc),
+            (tzscan.ERA_UNKNOWN, "matches both"),
+            "Where the zone equals UTC, no row can name its version.",
+        )
+
+    def test_1_437_a_change_of_version_without_affected_rows_is_uncertain(self) -> None:
+        """
+        Scenario 1.437: between rows of different eras, nobody knows what ran.
+        Given: readable rows from a pre-incident version (1 Jul) and a fixed one
+               (20 Aug) with nothing in between; and a log whose first readable row
+               is fixed (10 Sep)
+        When: era_change_gaps() reads them and writes are placed
+        Then: a write between the pre-incident and the fixed row is on an edge, one
+              after the fixed row is out; with a fixed first row, writes from
+              rc212's release up to it are on an edge and older ones out; rows of
+              one era, or a change that runs through affected rows, leave no gap
+        """
+        gaps = tzscan.era_change_gaps([(LAST_PRE, tzscan.ERA_PRE), (FIRST_FIXED, tzscan.ERA_FIXED)])
+        self.assertEqual([(g.start, g.end) for g in gaps], [(LAST_PRE, FIRST_FIXED)])
+        self.assertEqual(tzscan.position_of(IN_WINDOW, gaps), tzscan.EDGE,
+                         "Affected code may have run between a pre-incident and a fixed row.")
+        self.assertEqual(tzscan.position_of(AFTER_FIX, gaps), tzscan.OUT)
+        self.assertEqual(tzscan.span_position(BEFORE_RC212, IN_WINDOW, gaps), tzscan.AMBIGUOUS)
+        first_fixed = tzscan.era_change_gaps([(utc(2026, 9, 10), tzscan.ERA_FIXED)])
+        self.assertEqual([(g.start, g.end) for g in first_fixed],
+                         [(tzscan.RC212_RELEASED_AT, utc(2026, 9, 10))])
+        self.assertEqual(tzscan.position_of(utc(2026, 8, 1), first_fixed), tzscan.EDGE)
+        self.assertEqual(tzscan.position_of(BEFORE_RC212, first_fixed), tzscan.OUT)
+        self.assertEqual(
+            tzscan.era_change_gaps([(LAST_PRE, tzscan.ERA_PRE), (utc(2026, 9, 10), tzscan.ERA_PRE)]), [],
+            "Rows of one era leave no gap; silent stretches cover the rest.",
+        )
+        self.assertEqual(
+            tzscan.era_change_gaps([(LAST_PRE, tzscan.ERA_PRE), (FIRST_AFFECTED, tzscan.ERA_AFFECTED),
+                                    (FIRST_FIXED, tzscan.ERA_FIXED)]), [],
+            "Next to affected rows the period's own edges apply.",
+        )
+
+    def test_1_438_the_lex_app_version_names_its_era(self) -> None:
+        """
+        Scenario 1.438: the version running at scan time is a reading of its own.
+        Given: lex-app versions from each era, side branches and unparseable ones
+        When: era_of_version() reads them, on the GCP target and on another one
+        Then: rc84 – rc211 and v1.x are pre-incident; rc212 – rc221, 2.0.0-azure and
+              v2.1.1 – v2.1.3 affected; v2.1.4 and later fixed; anything else
+              unknown; on a target other than GCP time zones were always on: fixed
+        """
+        cases = {
+            "1.4.2": tzscan.ERA_PRE, "2.0.0rc84": tzscan.ERA_PRE, "v2.0.0rc211": tzscan.ERA_PRE,
+            "2.0.0rc212": tzscan.ERA_AFFECTED, "2.0.0rc221": tzscan.ERA_AFFECTED,
+            "2.0.0-azure": tzscan.ERA_AFFECTED, "2.1.1": tzscan.ERA_AFFECTED, "v2.1.3": tzscan.ERA_AFFECTED,
+            "2.1.4": tzscan.ERA_FIXED, "2.1.11": tzscan.ERA_FIXED, "2.1.7rc1": tzscan.ERA_FIXED,
+            "2.2.1": tzscan.ERA_FIXED, "2.3.5": tzscan.ERA_FIXED, "3.0.0": tzscan.ERA_FIXED,
+            "2.0.0rc40": None, "2.0.8rc173": None, "2.1.0": None, "0.0.0.dev0": None, "": None, None: None,
+        }
+        for version, era in cases.items():
+            with self.subTest(version=version):
+                self.assertEqual(tzscan.era_of_version(version), era, f"{version!r} should be {era}.")
+        self.assertEqual(tzscan.era_of_version("2.0.0rc221", deployment_target="GCP"), tzscan.ERA_AFFECTED)
+        self.assertEqual(tzscan.era_of_version("2.0.0rc221", deployment_target="AZURE"), tzscan.ERA_FIXED)
+
+    def test_1_439_silent_stretches_are_listed_from_rc212_to_the_scan(self) -> None:
+        """
+        Scenario 1.439: long silences in the audit log are named for a cross-check.
+        Given: readable rows on 20 Jun, 2 Jul, 6 Jul and 31 Jul, a scan on 23 Oct;
+               a log whose only row is on 1 Aug; and an empty log
+        When: silent_stretches() reads them
+        Then: only stretches after rc212's release longer than 7 days are listed —
+              6 Jul → 31 Jul and 31 Jul → scan; rc212 → 1 Aug for the late log; the
+              whole of rc212 → scan for the empty one
+        """
+        now = utc(2026, 10, 23, 11, 25)
+        rows = [(t, tzscan.ERA_PRE) for t in (utc(2026, 6, 20), utc(2026, 7, 2, 10, 53),
+                                              utc(2026, 7, 6), utc(2026, 7, 31))]
+        self.assertEqual(
+            [(s["start"], s["end"]) for s in tzscan.silent_stretches(rows, now)],
+            [(iso(utc(2026, 7, 6)), iso(utc(2026, 7, 31))), (iso(utc(2026, 7, 31)), iso(now))],
+        )
+        self.assertEqual(
+            [(s["start"], s["end"]) for s in tzscan.silent_stretches([(utc(2026, 8, 1), tzscan.ERA_FIXED)], utc(2026, 8, 3))],
+            [(iso(tzscan.RC212_RELEASED_AT), iso(utc(2026, 8, 1)))],
+        )
+        self.assertEqual(
+            [(s["start"], s["end"]) for s in tzscan.silent_stretches([], now)],
+            [(iso(tzscan.RC212_RELEASED_AT), iso(now))],
+        )
+
 
 class TestCluster01az_ScanDatabase(E2ETestCase):
     """Cluster 1az: the scan against real lex tables — main, history, meta-history."""
@@ -230,9 +347,12 @@ class TestCluster01az_ScanDatabase(E2ETestCase):
     # ── helpers ──────────────────────────────────────────────────────────
 
     def seed_audit(self, rows=AUDIT_ROWS) -> None:
-        for when, edited_at in rows:
+        """Audit rows ``(date, edited_at[, action[, author]])``; updates by a user by default."""
+        for when, edited_at, *rest in rows:
+            action = rest[0] if rest else "update"
+            author = rest[1] if len(rest) > 1 else "scan-test"
             log = AuditLog.objects.create(
-                author="scan-test", resource="incidentscanitem", action="update",
+                author=author, resource="incidentscanitem", action=action,
                 payload={"id": 1, "edited_at": edited_at},
             )
             AuditLog.objects.filter(pk=log.pk).update(date=when)
@@ -539,8 +659,9 @@ class TestCluster01az_ScanDatabase(E2ETestCase):
         When: the command runs, then runs again with a stated --window
         Then: scan.json and scan.md are written, the saved JSON renders the same
               Markdown on its own (--render, as after a run inside a pod), the data
-              and history are unchanged, and a stated window replaces the audit
-              log's period
+              and history are unchanged, the report names the lex-app version the
+              command runs on, a stated window adds to the audit log's period, and
+              --window-only replaces it
         """
         self.seed_audit()
         item = self.seed([(IN_WINDOW, {"due_on": SUMMER_DATE_WRONG})])
@@ -559,6 +680,7 @@ class TestCluster01az_ScanDatabase(E2ETestCase):
             with open(os.path.join(rendered, "scan.md"), encoding="utf-8") as handle:
                 self.assertEqual(handle.read(), markdown, "The JSON must carry the whole report.")
         self.assertTrue(report["meta"]["read_only"])
+        self.assertEqual(report["meta"]["running_version"], importlib.metadata.version("lex-app"))
         row = self.only(self.rows(report, self.main, "due_on", row=item.pk), "main row")
         self.assertEqual(row["verdict"], "B")
         self.assertIn("## B: dates stored at midnight UTC", markdown)
@@ -567,14 +689,127 @@ class TestCluster01az_ScanDatabase(E2ETestCase):
                          before, "The scan must not change any record.")
         self.assertEqual(self.History.objects.count(), versions_before, "Nor any history.")
 
+        window = ["--window", "2026-09-01T00:00Z/2026-09-30T00:00Z"]
         with tempfile.TemporaryDirectory() as out:
-            call_command(
-                "incident_tz", "scan", "--out", out, *table_args,
-                "--window", "2026-09-01T00:00Z/2026-09-30T00:00Z", stdout=StringIO(),
-            )
+            call_command("incident_tz", "scan", "--out", out, *table_args, *window, stdout=StringIO())
             with open(os.path.join(out, "scan.json"), encoding="utf-8") as handle:
                 stated = json.load(handle)
-        self.assertEqual(stated["exposure"]["source"], "manual")
-        self.assertEqual(len(stated["exposure"]["audit_periods"]), 1, "The audit view is kept.")
-        moved = self.only(self.rows(stated, self.main, "due_on", row=item.pk), "main row")
-        self.assertEqual(moved["verdict"], "E", "Outside the stated window it is no longer B.")
+        self.assertEqual(stated["exposure"]["source"], "audit_log+manual")
+        self.assertEqual(len(stated["exposure"]["periods"]), 2, "The stated window adds a period.")
+        kept = self.only(self.rows(stated, self.main, "due_on", row=item.pk), "main row")
+        self.assertEqual(kept["verdict"], "B", "The audit log's period still applies.")
+
+        with tempfile.TemporaryDirectory() as out:
+            call_command("incident_tz", "scan", "--out", out, *table_args, *window,
+                         "--window-only", stdout=StringIO())
+            with open(os.path.join(out, "scan.json"), encoding="utf-8") as handle:
+                only_window = json.load(handle)
+        self.assertEqual(only_window["exposure"]["source"], "manual")
+        self.assertEqual(len(only_window["exposure"]["audit_periods"]), 1, "The audit view is kept.")
+        moved = self.only(self.rows(only_window, self.main, "due_on", row=item.pk), "main row")
+        self.assertEqual(moved["verdict"], "E", "Outside the only window it is no longer B.")
+
+    def test_1_440_rows_that_would_mislead_open_no_period(self) -> None:
+        """
+        Scenario 1.440: no false period from rows that do not hold the save moment.
+        Given: a fixed instance's audit log — fixed updates on 20 Aug and 1 Oct, and
+               on 10 Sep a calculation's rewritten row (UTC digits, no microseconds),
+               a delete and a create whose edited-at would pass for affected, and a
+               data load
+        When: the scan runs over a 00:00 UTC date written on 10 Sep
+        Then: no exposure period; the rows are counted as unreadable or skipped, by
+              kind; the date is E (outside every period, check its source), never B
+        """
+        sep10 = utc(2026, 9, 10, 9, 0, 5)
+        self.seed_audit([
+            (FIRST_FIXED, "2026-08-20T18:51:00.400000+02:00"),
+            (sep10, "2026-09-10T09:00:05"),
+            (sep10, "2026-09-10T09:00:05.180000", "delete"),
+            (sep10, "2026-09-10T09:00:05.180000", "create"),
+            (sep10, "2026-09-10T09:00:05.180000", "update", "system (initial_data_upload)"),
+            (utc(2026, 10, 1, 8), "2026-10-01T10:00:00.500000+02:00"),
+        ])
+        item = self.seed([(sep10 + dt.timedelta(minutes=1), {"due_on": utc(2026, 9, 15)})])
+        report = self.run_scan()
+        exposure = report["exposure"]
+        self.assertEqual(exposure["periods"], [], "None of these rows may open a period.")
+        self.assertEqual(exposure["eras"], {"pre": 0, "affected": 0, "fixed": 2, "unknown": 1})
+        self.assertEqual(exposure["unreadable"], {"no microseconds": 1})
+        self.assertEqual(exposure["skipped"], {"create": 1, "delete": 1, "other_action": 0, "data_load": 1})
+        row = self.only(self.rows(report, self.main, "due_on", row=item.pk), "main row")
+        self.assertEqual(row["verdict"], "E", "Without a period a midnight-UTC date is not B.")
+        self.assertIn("outside every exposure period", row["reason"])
+
+    def test_1_441_the_version_running_at_scan_time_reopens_a_quiet_exposure(self) -> None:
+        """
+        Scenario 1.441: an audit log that went quiet cannot hide a switch (as on 1121).
+        Given: readable rows only from a pre-incident version, the last on 2 Jul; a
+               00:00 UTC date written on 20 Jul; the scan running on rc221
+        When: the scan runs without, then with, the deploy history's window
+        Then: without it, the running version opens a period after 2 Jul, the date
+              is E on its edge, and the stretch since 2 Jul is listed as silent;
+              with the window from 6 Jul 08:04 added, the date is B
+        """
+        last_pre = utc(2026, 7, 2, 10, 53, 53)
+        self.seed_audit([
+            (utc(2026, 6, 22, 11, 44, 39), "2026-06-22T13:44:39.943377"),
+            (last_pre, "2026-07-02T12:53:53.943038"),
+        ])
+        item = self.seed([(utc(2026, 7, 20, 9), {"due_on": SUMMER_DATE_WRONG})])
+        quiet = self.run_scan(running_version="2.0.0rc221")
+        self.assertEqual(quiet["meta"]["running_era"], tzscan.ERA_AFFECTED)
+        period = self.only(quiet["exposure"]["periods"], "period")
+        self.assertEqual((period["started_after"], period["source"]), (iso(last_pre), "running_version"))
+        row = self.only(self.rows(quiet, self.main, "due_on", row=item.pk), "main row")
+        self.assertEqual(row["verdict"], "E", "When the switch happened is unknown.")
+        self.assertIn(iso(last_pre), [s["start"] for s in quiet["exposure"]["silent_stretches"]])
+        self.assertIn("running", tzscan.render_markdown(quiet))
+
+        stated = self.run_scan(running_version="2.0.0rc221",
+                               windows=[(utc(2026, 7, 6, 8, 4, 21), utc(2026, 12, 31))])
+        self.assertEqual(stated["exposure"]["source"], "audit_log+manual")
+        row = self.only(self.rows(stated, self.main, "due_on", row=item.pk), "main row")
+        self.assertEqual(row["verdict"], "B", "Inside the deploy history's window it is B.")
+
+    def test_1_442_a_switch_from_pre_incident_to_fixed_is_not_assumed_clean(self) -> None:
+        """
+        Scenario 1.442: between a pre-incident and a fixed row the path is unknown.
+        Given: readable rows from a pre-incident version until 1 Jul and a fixed one
+               from 20 Aug, nothing in between; a time typed on 15 Jul and one on 1 Sep
+        When: the scan runs
+        Then: the gap is in the report; the 15 Jul time is E (an affected version may
+              have run then), the 1 Sep one is D
+        """
+        self.seed_audit([AUDIT_ROWS[0], AUDIT_ROWS[3]])
+        mid = self.seed([(IN_WINDOW, {"meets_at": TIME_WRONG})], name="mid")
+        after = self.seed([(AFTER_FIX, {"meets_at": utc(2026, 9, 1, 8, 15)})], name="after")
+        report = self.run_scan()
+        self.assertEqual(
+            [(g["start"], g["end"]) for g in report["exposure"]["gaps"]],
+            [(iso(LAST_PRE), iso(FIRST_FIXED))],
+        )
+        self.assertEqual(report["exposure"]["periods"], [])
+        mid_row = self.only(self.rows(report, self.main, "meets_at", row=mid.pk), "main row")
+        self.assertEqual(mid_row["verdict"], "E", "It may have been written by affected code.")
+        after_row = self.only(self.rows(report, self.main, "meets_at", row=after.pk), "main row")
+        self.assertEqual(after_row["verdict"], "D")
+
+    def test_1_443_an_affected_row_before_rc212_is_an_anomaly_not_a_period(self) -> None:
+        """
+        Scenario 1.443: affected code cannot have written before it was released.
+        Given: pre-incident rows on 1 and 20 Jun, and on 10 Jun a row with UTC digits
+        When: the scan runs
+        Then: no period; the 10 Jun row is listed as an anomaly, counted unreadable
+              with that reason, and named in the Markdown report
+        """
+        self.seed_audit([
+            (utc(2026, 6, 1, 8), "2026-06-01T10:00:00.100000"),
+            (utc(2026, 6, 10, 8), "2026-06-10T08:00:00.100000"),
+            (utc(2026, 6, 20, 8), "2026-06-20T10:00:00.100000"),
+        ])
+        report = self.run_scan()
+        exposure = report["exposure"]
+        self.assertEqual(exposure["periods"], [])
+        self.assertEqual(exposure["anomalies"], [iso(utc(2026, 6, 10, 8))])
+        self.assertEqual(exposure["unreadable"], {"affected before rc212's release": 1})
+        self.assertIn("Anomal", tzscan.render_markdown(report))

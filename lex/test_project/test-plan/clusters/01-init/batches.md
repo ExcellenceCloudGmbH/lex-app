@@ -1794,14 +1794,14 @@ config each fail 1.404.
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.420 – 1.435 |
+| Scenario range | 1.420 – 1.443 |
 | Type | U / E |
 | Files covered | `lex/lex_app/incident_tz/scan.py` (new; one file, standard library plus a DB-API cursor, so it also runs on its own against an instance that has not been upgraded); `lex/lex_app/management/commands/incident_tz.py` (new; `lex incident_tz scan`) |
 | Test file | `lex/test_project/tests/init/test_1az_incident_tz_scan.py` |
 | Test model | `lex/test_project/tests/init/models.py` → `IncidentScanItem` (`due_on` a date, `meets_at` a time of day, `synced_at` a clock) |
-| Test classes | `TestCluster01az_ScanDecisions` (1.420–1.424), `TestCluster01az_ScanDatabase` (1.425–1.435) |
+| Test classes | `TestCluster01az_ScanDecisions` (1.420–1.424, 1.436–1.439), `TestCluster01az_ScanDatabase` (1.425–1.435, 1.440–1.443) |
 | Fixtures | none — audit rows and history versions are created through the ORM, then their times stamped with `.update()`; a raw table without a model for 1.427 and 1.434 |
-| Tests landed | **16 pass / 0 fail** |
+| Tests landed | **24 pass / 0 fail** |
 | Status | ✅ Complete |
 
 Q1 of the TZ remediation plan (LEX-747, step 3/8 LEX-1325): per database, the periods in which
@@ -1824,3 +1824,20 @@ skipping the read-only check fails 1.425.
 0.3 s, no exposure claimed (its 5 audit rows with `edited_at` are deletions carrying the string
 `"None"`, so the report asks for a stated period). Against a 106-table project schema with
 history and meta-history: 323 columns, 0.7 s.
+
+**Audit-log rules (1.436 – 1.443, 2026-10-23).** Read against the lex source, the audit log
+holds rows that do not carry the moment of the change: creates (what the browser sent),
+deletes (the record's previous edit), data loads (the file's values), and Calculate rows,
+which `ensure_terminal_calculation_audit` rewrites with `generic_instance_payload` — seconds
+only, UTC digits in every version since rc102, fixed ones included. Only updates by the app
+are read now, and digits without microseconds are unreadable; `+00:00` is fixed. Where the era
+changes between a pre-incident and a fixed row, or the first row is fixed, the stretch is a
+gap (E). Run in the pod, the installed lex-app version is a reading at scan time
+(`--running-version` from outside); stretches of over seven days without a readable row are
+listed; affected-looking rows before rc212's release are anomalies; `--window` adds to the
+audit log's periods, `--window-only` replaces them. Mutation check: each of the ten rules
+removed fails at least one of 1.435 – 1.443 (subtest failures counted).
+
+**Run on a copy of an affected instance.** On 1510, a copy of an internal instance on rc221
+since 6 Jul: 109 columns in 41 tables in about 2 s, read-only. The audit log alone dates no
+exposure (all 61 readable rows pre-incident, the last on 2 Jul), the case 1.441 covers.

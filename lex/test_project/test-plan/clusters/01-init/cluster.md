@@ -512,6 +512,14 @@ does not remove user launch configurations.
 | 1.432 | times of day | inside the window C, corrected by the offset, DST hours flagged; after the fix D |
 | 1.433 | the start gap | a write between the last pre-incident row and the first affected one is E |
 | 1.434 | no history | `created_at`/`edited_at` bracket the write: both inside → B; straddling the start → E |
-| 1.435 | the command | writes `scan.json` and `scan.md`, changes no record or history; the JSON renders the same Markdown on its own (`--render`); `--window` replaces the audit log's period |
+| 1.435 | the command | writes `scan.json` and `scan.md`, changes no record or history; the JSON renders the same Markdown on its own (`--render`); names the running lex-app version; `--window` adds to the audit log's period, `--window-only` replaces it |
+| 1.436 | unreadable rows | no microseconds (a calculation's rewrite) → unreadable, with or without `Z`; `+00:00` → fixed; digits matching both readings → unreadable; each with its reason |
+| 1.437 | era-change gaps | between a pre-incident and a fixed row, and before a fixed first row, writes are on an edge; one era on both sides, or affected rows between, leave no gap |
+| 1.438 | the version's era | rc84 – rc211 and v1.x pre-incident; rc212 – rc221, 2.0.0-azure, v2.1.1 – v2.1.3 affected; v2.1.4+ fixed; side branches unknown; another deployment target fixed |
+| 1.439 | silent stretches | over seven days without a readable row, from rc212's release to the scan, are listed |
+| 1.440 | misleading rows | a calculation's rewrite, a delete, a create and a data load open no period on a fixed instance; counted by kind; a midnight-UTC date then is E, not B |
+| 1.441 | a quiet audit log | the version running at scan time (rc221) opens a period after the last pre-incident row: the date is E and the stretch is listed; with the deploy history's window added, B |
+| 1.442 | pre-incident to fixed | the gap is reported; a time written in it is E, one after the fixed row D |
+| 1.443 | anomalies | an affected row before rc212's release is listed and opens no period |
 
-**Scenario range:** 1.420 – 1.435. **Test file:** `lex/test_project/tests/init/test_1az_incident_tz_scan.py`. **Type:** U / E. **Status:** ✅ Complete (2026-10-21). Batch: [1az](batches.md).
+**Scenario range:** 1.420 – 1.443. **Test file:** `lex/test_project/tests/init/test_1az_incident_tz_scan.py`. **Type:** U / E. **Status:** ✅ Complete (2026-10-21; 1.436 – 1.443 on 2026-10-23). Batch: [1az](batches.md).

@@ -9,7 +9,8 @@ against an instance that has not been upgraded.
 Run::
 
     lex incident_tz scan --out ./scan-report
-    lex incident_tz scan --window 2026-07-06T08:04Z/2026-10-21T09:00Z   # state the period
+    lex incident_tz scan --window 2026-07-06T08:04Z/2026-10-21T09:00Z   # add a period
+    lex incident_tz scan --window ... --window-only                     # only that period
 """
 
 from __future__ import annotations
@@ -52,8 +53,10 @@ class Command(BaseCommand):
         scan.add_argument("--table", action="append", dest="tables",
                           help="Only classify these tables (repeatable).")
         scan.add_argument("--window", action="append", default=[],
-                          help="START/END of an exposure period in ISO 8601 (repeatable); "
-                               "replaces the periods read from the audit log.")
+                          help="START/END of an exposure period in ISO 8601, from the "
+                               "version history (repeatable); adds to the audit log's periods.")
+        scan.add_argument("--window-only", action="store_true",
+                          help="Apply only the --window periods; the audit log's are still reported.")
         scan.add_argument("--database", default="default", help="Django database alias.")
         scan.add_argument("--print", action="store_true", dest="print_markdown",
                           help="Also print the Markdown report.")
@@ -74,6 +77,8 @@ class Command(BaseCommand):
             windows = [tzscan.parse_window(text) for text in options["window"]]
         except tzscan.ScanError as exc:
             raise CommandError(str(exc)) from exc
+        if options["window_only"] and not windows:
+            raise CommandError("--window-only needs at least one --window.")
         name = connection.settings_dict.get("NAME") or alias
         with transaction.atomic(using=alias):
             with connection.cursor() as cursor:
@@ -88,14 +93,25 @@ class Command(BaseCommand):
                     tables=options["tables"],
                     expected_columns=declared_datetime_columns(),
                     database=name,
+                    audit_periods=not options["window_only"],
+                    # This process is the instance: its lex-app is the one writing.
+                    running_version=tzscan.installed_lex_app_version(),
+                    deployment_target=os.getenv("DATABASE_DEPLOYMENT_TARGET"),
                 )
         stamp = dt.datetime.now(tz=dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         out_dir = options["out"] or os.path.join("incident_tz_scan", f"{name}-{stamp}")
         json_path, md_path = tzscan.write_report(report, out_dir)
 
         periods = report["exposure"]["periods"]
+        meta = report["meta"]
         self.stdout.write(
-            f"Exposure: {len(periods)} period(s), source {report['exposure']['source']}."
+            f"Running lex-app {meta['running_version'] or 'unknown'} "
+            f"({meta['running_era'] or 'era unknown'})."
+        )
+        self.stdout.write(
+            f"Exposure: {len(periods)} period(s), {len(report['exposure']['gaps'])} gap(s), "
+            f"{len(report['exposure']['silent_stretches'])} silent stretch(es), "
+            f"source {report['exposure']['source']}."
         )
         for layer in ("main", "history", "meta_history"):
             counts = report["totals"][layer]
