@@ -122,3 +122,19 @@
 | 4.120 | serializer mixin, edit/create check raises | `PermissionDenied`; opt-out validates |
 
 **Scenario range:** 4.116 – 4.120. **Test file:** `lex/test_project/tests/permissions/test_4r_fail_closed_remaining_surfaces.py`. **Type:** E (4.118, 4.120 I). **Status:** ✅ Complete (2026-10-23). Batch: [4r](batches.md).
+
+---
+
+### 4q. permission_create on the record the request fills ✅
+
+**Gap:** `POST …/create` asked `permission_create` only on a blank `model_class()`, before any request value was set. A rule that depends on the parent or a value ("may add an investor only to her own fund") could not be decided there, so projects re-checked creation in `pre_validation`. With `LEX_SEC_CREATE` (on by default) the hook is asked again on the record filled with the validated values, foreign keys set, before the audit entry and `pre_validation`. The blank check stays first (it is what a UI asks before offering a form). Refusal shape unchanged: 401/403 `{message}`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.111 | refused under a closed parent | 403 `{message}`, nothing stored, no audit entry; open parent 201 |
+| 4.112 | what the hook sees | blank record, then the filled unsaved record with values and FK |
+| 4.113 | refused on a plain value | 403, nothing stored |
+| 4.114 | hook raises on the filled record | 500 with the create check's error, nothing stored; `LEX_SEC_FAIL_CLOSED=false` stores |
+| 4.115 | opt-out | `LEX_SEC_CREATE=false` and `LEX_LEGACY_SECURITY=true` store; blank check only |
+
+**Scenario range:** 4.111 – 4.115. **Test file:** `lex/test_project/tests/permissions/test_4q_create_on_filled_record.py`. **Type:** E. **Status:** ✅ Complete (2026-10-23). Batch: [4q](batches.md).

@@ -125,3 +125,19 @@ must not open a check on the whole model.
 | Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-23-fail-closed-remaining-surfaces.md) |
 
 ---
+
+### Batch 4q — permission_create on the filled record ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.111 – 4.115 |
+| Type | E |
+| Files covered | `lex/core/security_flags.py` (`CREATE`), `lex/api/security.py` (`filled_record`, `ask_create`), `lex/api/views/model_entries/One.py` (`create`, `perform_create`, `_check_create_on_filled_record`) |
+| Test file | `lex/test_project/tests/permissions/test_4q_create_on_filled_record.py` |
+| Test classes | `TestCluster04q_CreateOnFilledRecord` (4.111–4.115) |
+| Fixtures | `CreateParent`, `ScopedCreateItem` (new in `permissions/models.py`); `LEX_SEC_*`/`LEX_LEGACY_SECURITY` cleared per test |
+| Tests landed | **5 pass / 0 fail** — 4.111–4.114 fail on lex-app-v2 `0ac01da8`, 4.115 (opt-out) passes on both |
+| Also changed | 4.98 lists the tenth flag |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-23-create-on-filled-record.md) |
+
+---

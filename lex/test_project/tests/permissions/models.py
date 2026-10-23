@@ -339,6 +339,66 @@ class RaisingExportItem(LexModel):
         return True
 
 
+class CreateParent(LexModel):
+    """Cluster 4q: a parent that is open or closed for new children."""
+
+    name = models.CharField(max_length=200)
+    is_open = models.BooleanField(default=True)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 4q")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
+class ScopedCreateItem(LexModel):
+    """Cluster 4q: whether a child may be created depends on its parent and its values.
+
+    The blank record (no parent) is allowed, as a UI asks "may I create one at all";
+    a filled record is refused under a closed parent or with the name "forbidden",
+    and the check raises for the name "boom". Every record the hook sees is noted
+    in ``SEEN`` so a scenario can tell what it was asked on.
+    """
+
+    SEEN: list = []
+
+    name = models.CharField(max_length=200)
+    parent = models.ForeignKey(CreateParent, on_delete=models.CASCADE, null=True, blank=True)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 4q")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 4q")
+
+    def permission_create(self, uc):
+        ScopedCreateItem.SEEN.append((self.pk, self.name, self.parent_id))
+        if self.name == "boom":
+            raise RuntimeError("cluster 4q: permission_create failed on purpose")
+        if self.name == "forbidden":
+            return False
+        return self.parent_id is None or self.parent.is_open
+
+    def permission_list(self, uc):
+        return True
+
+
 ALL_MODELS = [ProtectedItem, FieldLevelItem, KeycloakItem, FilterBackendItem, ExportDeniedItem, OwnedItem]
 SECURE_DEFAULT_MODELS = [ProtectedItem, FieldLevelItem, KeycloakItem, FilterBackendItem, RaisingReadItem,
                          SecretDocument]
@@ -356,3 +416,5 @@ RAISING_SURFACE_MODELS = [RaisingParent, RaisingChild, RaisingExportItem, Raisin
 RAISING_PARENT = "raisingparent"
 RAISING_CHILD = "raisingchild"
 RAISING_EXPORT = "raisingexportitem"
+CREATE_MODELS = [CreateParent, ScopedCreateItem]
+SCOPED_CREATE = "scopedcreateitem"
