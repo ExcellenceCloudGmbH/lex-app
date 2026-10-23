@@ -110,3 +110,18 @@ must not open a check on the whole model.
 | Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-18-v2-security-hardening-internal-config.md) |
 
 ---
+
+### Batch 4r — a raising permission hook denies on the remaining surfaces ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.116 – 4.120 |
+| Type | E (4.118, 4.120: I) |
+| Files covered | `lex/api/utils/helpers.py` (`can_read_from_payload`), `lex/api/serializers/base_serializers.py` (`_can_read_related_payload_reference`, audit-log payload filtering), `lex/api/views/file_operations/ModelExport.py` (`get_exportable_fields_for_object`), `lex/api/views/model_entries/mixins/PermissionAwareSerializerMixin.py` (`run_validation`) |
+| Test file | `lex/test_project/tests/permissions/test_4r_fail_closed_remaining_surfaces.py` |
+| Test classes | `TestCluster04r_AuditLogRead` (4.116–4.118), `TestCluster04r_Export` (4.119), `TestCluster04r_SerializerMixin` (4.120) |
+| Fixtures | `RaisingParent`, `RaisingChild`, `RaisingExportItem` (new in `permissions/models.py`), `RaisingReadItem`; `AuditLog` rows written directly; `LEX_SEC_*`/`LEX_LEGACY_SECURITY` cleared per test |
+| Tests landed | **5 pass / 0 fail** — all five fail without the change |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-23-fail-closed-remaining-surfaces.md) |
+
+---
