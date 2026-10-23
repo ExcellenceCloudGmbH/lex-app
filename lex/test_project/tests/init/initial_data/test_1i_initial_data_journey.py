@@ -427,15 +427,15 @@ class TestCluster01i_FullSeedJourney(E2ETestCase):
         ``test_data`` from our own fixture file instead of the
         per-test-class default.
         """
-        class _ConfigurableHarness(LexAppTestCase):
+        class _ConfigurableProcessAdmin(LexAppTestCase):
             # LexAppTestCase is itself a ``unittest.TestCase`` —
             # instantiate without a method name via the ``runTest``
             # placeholder; we only call ``setUp`` on it, never the
             # unittest lifecycle.
             pass
 
-        _ConfigurableHarness.runTest = lambda self: None
-        harness = _ConfigurableHarness()
+        _ConfigurableProcessAdmin.runTest = lambda self: None
+        harness = _ConfigurableProcessAdmin()
         fixture_path = FIXTURES / fixture_name
         # Pin the test path to our fixture. ``get_test_data`` reads from
         # ``$PROJECT_ROOT`` + test_path; emulate by stubbing get_test_data.

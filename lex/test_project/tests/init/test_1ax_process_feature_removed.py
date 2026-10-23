@@ -362,12 +362,15 @@ class TestCluster01ax_ProcessFeatureRemoved(TestCase):
             f"{_p}AdminConfig", f"{_lower}_admin_rest_api", f"{_p}Structure",
             f"{_p}Flow", f"{_lower}_flow", "run_step", f"register{_p}",
         )
-        # Only the two files whose job is to assert the absence may name it:
-        # this one and 10q, which pins that the routes and the old namespace
-        # are gone. Everything else under lex/ must be clean.
+        # Three files may name it: the two that assert the absence (this one
+        # and 10q, which pins that the routes and the old namespace are gone),
+        # and 4o, whose header records why scenario 4.90 was retired. Naming a
+        # retired surface in prose that explains its retirement is the record,
+        # not residue. Everything else under lex/ must be clean.
         allowed = {
             pathlib.Path(__file__).resolve(),
             (_LEX_ROOT / "test_project/tests/api_layer/test_10q_process_routes_removed.py").resolve(),
+            (_LEX_ROOT / "test_project/tests/permissions/test_4o_secure_defaults.py").resolve(),
         }
         offenders = []
         for path in _LEX_ROOT.rglob("*.py"):

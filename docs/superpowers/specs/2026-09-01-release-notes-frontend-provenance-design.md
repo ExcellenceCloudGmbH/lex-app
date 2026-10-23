@@ -413,7 +413,7 @@ The design is done when:
 - **Quackback / Hub publishing.** `quackback.publish()` stays `NotImplementedError`. Tracked as
   LEX-590; blocked on one unknown — whether Quackback exposes a create-post API, or accepts
   inbound email per board, which would make it a one-line config change.
-- **Reviving PAC semver releases** and the v1 `versions_override: {"model_admin_client": …}`
+- **Reviving PAC semver releases** and the v1 `versions_override: {"process_admin_client": …}`
   channel into instance-controller provisioning. Contradicts the identity decision.
 - **Backfilling the 200 release candidates**, and the other 55 of 58 historical bundles.
 - **Repairing `frontend_build.yml`.** Superseded by G1.

@@ -24,12 +24,9 @@ endpoints to disappear and nothing else.
 The same sweep renamed the URL *namespace* — ``process_admin_rest_api`` →
 ``lex_rest_api`` — and 10.100 pins that it took no **served route** with it. The
 namespace is server-side only (it is what ``reverse()`` takes); the ``api/…``
-paths are the contract with the bundled frontend and are unchanged. The one
-path-shaped string that did follow the rename is ``LOGIN_REDIRECT_URL``, and
-it is dead configuration: nothing in lex-app reads it, the OIDC library does
-not either, and the shipped frontend bundle contains no route by either
-spelling — so 10.100 pins its new value rather than pretending it was load
-bearing.
+paths are the contract with the bundled frontend and are unchanged, and so is
+``LOGIN_REDIRECT_URL``, which names a frontend route rather than anything in
+this package.
 
 Cluster 10q — scenarios 10.97–10.100. Type: U.
 Covers: lex/model_admin/sites/lex_admin_site.py (the url list),
@@ -170,8 +167,9 @@ class TestCluster10q_ProcessRoutesRemoved(SimpleTestCase):
               read, and ``LOGIN_REDIRECT_URL`` is read from settings
         Then: the old namespace raises NoReverseMatch, the new one reverses to
               the same ``/api/model-structure`` it always did, no served path
-              carries the app name under either spelling, and the dead
-              ``LOGIN_REDIRECT_URL`` follows the new one.
+              carries the app name under either spelling, and
+              ``LOGIN_REDIRECT_URL`` is untouched — it is a frontend route, not
+              an identifier, so the rename left it alone.
         """
         from django.conf import settings
 
@@ -183,4 +181,4 @@ class TestCluster10q_ProcessRoutesRemoved(SimpleTestCase):
         stale = [p for p in paths if "process_admin" in p or "model_admin" in p]
         self.assertEqual(stale, [], f"no served path may carry the app name: {stale}")
 
-        self.assertEqual(settings.LOGIN_REDIRECT_URL, "/model_admin/all")
+        self.assertEqual(settings.LOGIN_REDIRECT_URL, "/process_admin/all")

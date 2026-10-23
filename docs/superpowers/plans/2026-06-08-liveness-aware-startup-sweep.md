@@ -16,7 +16,7 @@
 ## File Structure
 
 - **Modify** `lex/lex_app/celery_recovery/supervisor.py` — add `tracked_calculation_record_ids()` beside the existing `_extract_calculation_models`. Pure read of the registry; reuses the extractor.
-- **Modify** `lex/model_admin/utils/model_registration.py`
+- **Modify** `lex/process_admin/utils/model_registration.py`
   - `_handle_calculation_model_reset` — add optional `tracked_record_ids` param + the skip-if-owned filter (`_meta.label_lower, pk`).
   - `register_models` loop (~line 96) — compute the set once and pass it down.
 - **Create** `lex/test_project/tests/celery_async/test_8x_startup_reset_recovery_handoff.py` — the paired tests (cluster 8x, scenarios 8.103–8.114). Reuses `CelerySyncCalc` from `tests/celery_async/models.py` and `E2ETestCase`.
@@ -53,7 +53,7 @@ nothing tracked, so behavior is identical to today.
 Cluster 8x — scenarios 8.103–8.114. Type: U (helper logic, mocked registry) + I
 (real ``CalculationModel`` rows driven through the startup sweep).
 Covers: lex/lex_app/celery_recovery/supervisor.py,
-        lex/model_admin/utils/model_registration.py.
+        lex/process_admin/utils/model_registration.py.
 Run: python -m lex pytest lex/test_project/tests/celery_async/test_8x_startup_reset_recovery_handoff.py -v
 """
 
@@ -67,7 +67,7 @@ from django.test import SimpleTestCase
 
 from lex.core.models.CalculationModel import CalculationModel
 from lex.lex_app.celery_recovery import supervisor
-from lex.model_admin.utils.model_registration import ModelRegistration
+from lex.process_admin.utils.model_registration import ModelRegistration
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from .models import CelerySyncCalc
@@ -203,7 +203,7 @@ def tracked_calculation_record_ids() -> set:
     """``(_meta.label_lower, pk)`` for every calculation row a tracked recovery
     task currently owns — whether its worker is alive or merely tracked.
 
-    The startup reset sweep (``model_admin.utils.model_registration``) consults
+    The startup reset sweep (``process_admin.utils.model_registration``) consults
     this to decide which stuck ``IN_PROGRESS`` rows it must NOT abort: a row owned
     by a tracked task will either be finished by its still-running worker or
     requeued/resumed by :func:`scan_and_recover`. Aborting it at startup would,
@@ -242,7 +242,7 @@ git commit -m "Add tracked_calculation_record_ids recovery-ownership lookup (8x:
 ## Task 2: startup sweep defers to ownership + its E2E tests (8.109–8.114)
 
 **Files:**
-- Modify: `lex/model_admin/utils/model_registration.py:384-430` (`_handle_calculation_model_reset`) and the caller loop at `:96-97`.
+- Modify: `lex/process_admin/utils/model_registration.py:384-430` (`_handle_calculation_model_reset`) and the caller loop at `:96-97`.
 - Modify: `lex/test_project/tests/celery_async/test_8x_startup_reset_recovery_handoff.py` (append Component B classes)
 
 - [ ] **Step 1: Write the failing E2E tests (Component B)**
@@ -383,7 +383,7 @@ Note (local env): the 6 real-row scenarios run on `E2ETestCase` (TransactionTest
 
 - [ ] **Step 3: Implement the filter in `_handle_calculation_model_reset`**
 
-In `lex/model_admin/utils/model_registration.py`, replace the method signature and body at `:384` so it accepts the optional set, computes it when absent, and skips owned rows. The `asyncio`/`nest_asyncio` wrapper and audit call are left exactly as-is.
+In `lex/process_admin/utils/model_registration.py`, replace the method signature and body at `:384` so it accepts the optional set, computes it when absent, and skips owned rows. The `asyncio`/`nest_asyncio` wrapper and audit call are left exactly as-is.
 
 ```python
     @classmethod
@@ -468,7 +468,7 @@ Expected: PASS on every assertion (modulo the documented local teardown-flush er
 
 - [ ] **Step 5: Thread the ownership set through the caller (compute once)**
 
-In `lex/model_admin/utils/model_registration.py`, in `register_models`, compute the set lazily on the first CalculationModel and reuse it for the rest of the loop. Initialize the local before the `for model in models:` loop (around line 63):
+In `lex/process_admin/utils/model_registration.py`, in `register_models`, compute the set lazily on the first CalculationModel and reuse it for the rest of the loop. Initialize the local before the `for model in models:` loop (around line 63):
 
 ```python
         history_ok = []
@@ -503,7 +503,7 @@ Expected: no new failures introduced by this change (some are pre-skipped — un
 - [ ] **Step 7: Commit**
 
 ```bash
-git add lex/model_admin/utils/model_registration.py \
+git add lex/process_admin/utils/model_registration.py \
         lex/test_project/tests/celery_async/test_8x_startup_reset_recovery_handoff.py
 git commit -m "Startup reset defers IN_PROGRESS rows owned by recovery (8x: 8.109-8.114)"
 ```

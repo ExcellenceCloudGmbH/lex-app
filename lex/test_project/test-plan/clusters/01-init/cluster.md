@@ -506,6 +506,6 @@ does not remove user launch configurations.
 | 1.410 | the package is `lex.model_admin` | the eight lazy names resolve; `lex.process_admin` and the two old site spellings are gone |
 | 1.411 | `LexModelAdmin` | replaces `ModelProcessAdmin`, including what `register()` attaches by default |
 | 1.412 | `LexAppTestCase` | replaces the public `ProcessAdminTestCase`, with no compatibility alias |
-| 1.413 | the sweep reached every importer | every rewritten module imports; no `.py` under `lex/` names a retired spelling, the feature's included — only this file and 10q are exempt |
+| 1.413 | the sweep reached every importer | every rewritten module imports; no `.py` under `lex/` names a retired spelling, the feature's included — this file, 10q and 4o's header are exempt |
 
 **Scenario range:** 1.406 – 1.413. **Test file:** `lex/test_project/tests/init/test_1ax_process_feature_removed.py`. **Type:** I. **Status:** ✅ Complete (2026-10-22). Batch: [1ax](batches.md).

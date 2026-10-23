@@ -114,7 +114,7 @@
 | 10.97 | `run_step` is not routed | `reverse` raises `NoReverseMatch`, no route named `run_step` or served under `api/run_step/`, `lex.api.views.process_flow[.CreateOrUpdate]` raises `ModuleNotFoundError` |
 | 10.98 | process structure is not routed | `reverse` raises `NoReverseMatch`, no route named `process` or served under `api/process/`, neither module exposes `ProcessStructure` |
 | 10.99 | the neighbours are untouched | the ten endpoints the bundled frontend loads a project with all still reverse |
-| 10.100 | the namespace moved, no route did | `process_admin_rest_api` raises `NoReverseMatch`, `lex_rest_api:model-structure` reverses to `/api/model-structure`, no served path carries the app name, and the dead `LOGIN_REDIRECT_URL` follows the new name |
+| 10.100 | the namespace moved, no route did | `process_admin_rest_api` raises `NoReverseMatch`, `lex_rest_api:model-structure` reverses to `/api/model-structure`, no served path carries the app name, and `LOGIN_REDIRECT_URL` is untouched |
 
 **Why a regression matters:** `run_step` was a second write path into every model, carrying its own copy of the permission checks the generic CRUD endpoints apply. A route that comes back by accident is a write surface nobody audits any more. And the removal had to be surgical — it ran through the one url list the whole frontend is served from, so 10.99 is the half that proves nothing else went with it.
 

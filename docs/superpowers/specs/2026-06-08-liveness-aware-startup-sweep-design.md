@@ -18,7 +18,7 @@ state is silently lost.**
 ## Root cause
 
 `ProcessAdminModelRegistration._handle_calculation_model_reset`
-(`lex/model_admin/utils/model_registration.py`) runs on boot
+(`lex/process_admin/utils/model_registration.py`) runs on boot
 (`CALLED_FROM_START_COMMAND`) and does a **blind, unconditional** sweep:
 
 ```python

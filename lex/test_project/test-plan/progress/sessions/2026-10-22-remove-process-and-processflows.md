@@ -47,12 +47,18 @@ files, plus two dead placeholders deleted (`model_admin/models.py` and `views.py
 "will be moved here during refactoring" comments, permanently shadowed by the packages of the
 same name).
 
-**`LOGIN_REDIRECT_URL`.** The sweep rewrote `/process_admin/all` → `/model_admin/all`; it was
-first reverted on the assumption that the bundled frontend owned that route, then restored when
-that assumption was checked and proved wrong. The evidence: nothing in lex-app reads
-`LOGIN_REDIRECT_URL` (only the new 10.100 does), `oauth2_authcodeflow` does not read it either,
-and `grep` over the shipped bundle in `lex/react/build/` finds no `process_admin` string at all.
-It is dead configuration, so it follows the app's new name and 10.100 pins the new value.
+**`LOGIN_REDIRECT_URL` stays `/process_admin/all`.** The blanket sweep rewrote it; that was out
+of scope and it is reverted. The rename covers identifiers in this package, and this is a URL
+naming a route on the frontend — a different codebase's namespace, whatever this package is
+called. 10.100 pins that it did not move, alongside the `api/…` paths.
+
+**Scope correction (2026-10-23).** A review pass found the sweep had reached past the rename into
+things that were never Process: `LOGIN_REDIRECT_URL` (above), the two `DjangoProcessAdminGeneric`
+comments in `lex/lex_app/settings.py` — a pointer to a retired external repository, which the sweep
+had replaced with invented text — and the local helper `_ConfigurableProcessAdmin` in 1i, renamed to
+an unrelated word. All three are reverted; `lex/lex_app/settings.py` now differs from the base by
+its `INSTALLED_APPS` entry alone. 4o's header was also restored to naming `run_step` plainly, having
+been made vaguer only to satisfy this change's own sweep — the test was widened to allow it instead.
 
 **One name genuinely cannot move: `process-admin-general-client`.** It is the frontend's actual
 GitHub repository, `ExcellenceCloudGmbH/process-admin-general-client`, hard-coded in ten places
@@ -107,9 +113,10 @@ the same counts as before and 4o drops 21 → 20.
 1.413 is the gate for the sweep itself — it imports every module the rename rewrote and then
 reads the whole `lex/` tree for the retired spellings, the feature's names included
 (`ProcessStructure`, `ProcessFlow`, `process_flow`, `run_step`, `registerProcess`). Its search
-strings are assembled at runtime so the file does not match itself, and exactly two files are
-exempt: this one and 10q, the two whose job is to assert the absence. Everything else under
-`lex/` is clean. It earned its place immediately — on its first run it failed, correctly, on 10q.
+strings are assembled at runtime so the file does not match itself, and three files are exempt:
+this one and 10q, whose job is to assert the absence, and 4o, whose header records why 4.90 was
+retired — prose explaining a retirement is the record, not residue. Everything else under `lex/`
+is clean. It earned its place immediately — on its first run it failed, correctly, on 10q.
 
 Over the four clusters this change reaches — `init`, `permissions`, `api_layer`,
 `calculation_logging` — **882 pass / 24 fail** after the rename (the final `init`, `permissions`

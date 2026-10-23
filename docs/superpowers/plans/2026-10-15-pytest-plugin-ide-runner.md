@@ -329,9 +329,9 @@ import pytest
 CONFIG_FILENAME = "lex_test_config.yaml"
 PAYLOAD_ENV_VAR = "LEX_TEST_CONFIG_PAYLOAD"
 
-#: The name ``lexAdminSite.urls`` looks ``register_converter`` up under; see
+#: The name ``processAdminSite.urls`` looks ``register_converter`` up under; see
 #: :func:`_idempotent_register_converter`.
-CONVERTER_LOOKUP = "lex.model_admin.sites.lex_admin_site.register_converter"
+CONVERTER_LOOKUP = "lex.process_admin.sites.process_admin_site.register_converter"
 
 
 @dataclass
@@ -462,7 +462,7 @@ def _set_up_test_run(run: _Run) -> None:
 
 
 def _idempotent_register_converter():
-    """A patch that lets ``lexAdminSite.urls`` register its converter again.
+    """A patch that lets ``processAdminSite.urls`` register its converter again.
 
     ``_get_urls`` calls ``register_converter(..., "model")`` each time the URLs are
     built, and Django raises "Converter 'model' is already registered" the second

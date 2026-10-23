@@ -1314,6 +1314,7 @@ letters:
       tree for the retired spellings, because a half-finished rename raises at some importer and
       which one depends on load order. The ban covers the feature's names too (ProcessStructure,
       ProcessFlow, process_flow, run_step, registerProcess) and the search strings are assembled at
-      runtime so the test does not match itself; only the two files whose job is to assert the
-      absence -- this one and 10q -- are exempt, and the rest of lex/ is clean. 10.100 pins the matching namespace
+      runtime so the test does not match itself. Three files are exempt: the two that assert the
+      absence (this one and 10q) and 4o, whose header records why 4.90 was retired -- prose that
+      explains a retirement is the record, not residue. The rest of lex/ is clean. 10.100 pins the matching namespace
       rename and that no served URL moved.

@@ -95,6 +95,6 @@ branches again per ``STORAGE_TYPE``. Each is recorded as an ``AuditLog`` row wit
 | 10.97 | `run_step` is not routed | `NoReverseMatch`, no `run_step` name or `api/run_step/` path, `lex.api.views.process_flow` raises `ModuleNotFoundError` |
 | 10.98 | process structure is not routed | `NoReverseMatch`, no `process` name or `api/process/` path, no `ProcessStructure` on either module |
 | 10.99 | the neighbours are untouched | `model-structure`, `project-info`, `calculationlog-tree`, `init-calculation-logs`, `clean-calculations`, `widget-structure`, `global-search-query`, `user-permissions`, `log` and `htmlreports` all still reverse |
-| 10.100 | the namespace moved, no route did | `lex_rest_api` reverses, `process_admin_rest_api` does not, no served path carries the app name, the dead `LOGIN_REDIRECT_URL` follows the new name |
+| 10.100 | the namespace moved, no route did | `lex_rest_api` reverses, `process_admin_rest_api` does not, no served path carries the app name, `LOGIN_REDIRECT_URL` untouched |
 
 **Scenario range:** 10.97 – 10.100. **Test file:** `lex/test_project/tests/api_layer/test_10q_process_routes_removed.py`. **Type:** U. **Status:** ✅ Complete (2026-10-23). Batch: [10q](batches.md).

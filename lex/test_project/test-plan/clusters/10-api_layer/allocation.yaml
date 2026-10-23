@@ -197,7 +197,6 @@ letters:
       for CreateOrUpdate. The model-side removal is pinned by 1ax. 10.100 covers the namespace
       rename that came with taking Process out of the admin backbone: reverse() now takes
       lex_rest_api, process_admin_rest_api raises NoReverseMatch, no served path carries the app
-      name under either spelling, and LOGIN_REDIRECT_URL (dead configuration -- nothing in lex-app
-      reads it, the OIDC library does not, and the shipped frontend bundle has no route by either
-      spelling) follows the new name. Originally allocated as 10p/10.91-10.94; #840 landed that
+      name under either spelling, and LOGIN_REDIRECT_URL is untouched -- it names a frontend route,
+      not anything in this package, so the rename deliberately left it alone. Originally allocated as 10p/10.91-10.94; #840 landed that
       letter and range on lex-app-v2 first, so this batch re-took the next free pair on merge.

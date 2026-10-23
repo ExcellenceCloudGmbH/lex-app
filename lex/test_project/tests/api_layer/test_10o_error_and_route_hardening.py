@@ -146,7 +146,7 @@ class TestCluster10o_OidcRedirects(SimpleTestCase):
               {code: REDIRECT_NOT_ALLOWED, error}; paths outside /oidc/ are not inspected.
         """
         allowed = [
-            "/", "/model_admin/all?tab=1", "https://lex.example.com/funds",
+            "/", "/process_admin/all?tab=1", "https://lex.example.com/funds",
             "https://portal.example.org/", "http://localhost:3000/", "https://app.partner.test/x",
             "https://grid.partner.test",
         ]
