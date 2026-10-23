@@ -1794,14 +1794,14 @@ config each fail 1.404.
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.420 – 1.443 |
+| Scenario range | 1.420 – 1.447 |
 | Type | U / E |
 | Files covered | `lex/lex_app/incident_tz/scan.py` (new; one file, standard library plus a DB-API cursor, so it also runs on its own against an instance that has not been upgraded); `lex/lex_app/management/commands/incident_tz.py` (new; `lex incident_tz scan`) |
 | Test file | `lex/test_project/tests/init/test_1az_incident_tz_scan.py` |
 | Test model | `lex/test_project/tests/init/models.py` → `IncidentScanItem` (`due_on` a date, `meets_at` a time of day, `synced_at` a clock) |
-| Test classes | `TestCluster01az_ScanDecisions` (1.420–1.424, 1.436–1.439), `TestCluster01az_ScanDatabase` (1.425–1.435, 1.440–1.443) |
+| Test classes | `TestCluster01az_ScanDecisions` (1.420–1.424, 1.436–1.439), `TestCluster01az_ScanDatabase` (1.425–1.435, 1.440–1.447) |
 | Fixtures | none — audit rows and history versions are created through the ORM, then their times stamped with `.update()`; a raw table without a model for 1.427 and 1.434 |
-| Tests landed | **24 pass / 0 fail** |
+| Tests landed | **28 pass / 0 fail** |
 | Status | ✅ Complete |
 
 Q1 of the TZ remediation plan (LEX-747, step 3/8 LEX-1325): per database, the periods in which
@@ -1841,3 +1841,16 @@ removed fails at least one of 1.435 – 1.443 (subtest failures counted).
 **Run on a copy of an affected instance.** On 1510, a copy of an internal instance on rc221
 since 6 Jul: 109 columns in 41 tables in about 2 s, read-only. The audit log alone dates no
 exposure (all 61 readable rows pre-incident, the last on 2 Jul), the case 1.441 covers.
+
+**Before the prod scans (1.444 – 1.447).** A catalogue preflight of 29 prod databases found
+up to 2,000 timestamptz columns and tables of 1.2M rows on a shared database server, and one
+database (1262) holding `lex_midnight_fix_backup`. The census now reads each table once
+(columns in chunks of 100) instead of once per column, and run on its own the scan sets
+session `lock_timeout` and `statement_timeout` and ends its read-only transaction after the
+audit log and after each table, so a deploy's migration never queues behind it for long. An
+earlier correction's backup table is reported (rows, corrected columns) and never judged.
+process-admin-general-client PR #452 (merged 2026-07-22) made `DateTimeInput` send an
+explicit UTC instant; the first prod image with it was pushed 2026-09-04 15:37 UTC, none
+between 07-15 and then: C values written before that are marked as sent as local time, and
+R11 mirror values and typed times written after it are counted per column. Each of the eight
+rules removed fails one of 1.428 – 1.447.

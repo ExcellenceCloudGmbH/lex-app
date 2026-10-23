@@ -521,5 +521,9 @@ does not remove user launch configurations.
 | 1.441 | a quiet audit log | the version running at scan time (rc221) opens a period after the last pre-incident row: the date is E and the stretch is listed; with the deploy history's window added, B |
 | 1.442 | pre-incident to fixed | the gap is reported; a time written in it is E, one after the fixed row D |
 | 1.443 | anomalies | an affected row before rc212's release is listed and opens no period |
+| 1.444 | an earlier correction | `lex_midnight_fix_backup` is reported with its rows and corrected columns; its values are never judged |
+| 1.445 | C and the frontend | a C value written before 2026-09-04 15:37 UTC (the first frontend build with explicit instants) is marked as sent as local time; a later one needs the frontend checked |
+| 1.446 | R11 | on a pre-incident backend, mirror values (22:00/23:00 local the day before) and typed times written after the frontend switch are counted per column |
+| 1.447 | locks | the checkpoint runs after the audit log and after each table; the report is the same with or without it |
 
-**Scenario range:** 1.420 – 1.443. **Test file:** `lex/test_project/tests/init/test_1az_incident_tz_scan.py`. **Type:** U / E. **Status:** ✅ Complete (2026-10-21; 1.436 – 1.443 on 2026-10-23). Batch: [1az](batches.md).
+**Scenario range:** 1.420 – 1.447. **Test file:** `lex/test_project/tests/init/test_1az_incident_tz_scan.py`. **Type:** U / E. **Status:** ✅ Complete (2026-10-21; 1.436 – 1.447 on 2026-10-23). Batch: [1az](batches.md).

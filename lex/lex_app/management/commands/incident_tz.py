@@ -57,6 +57,8 @@ class Command(BaseCommand):
                                "version history (repeatable); adds to the audit log's periods.")
         scan.add_argument("--window-only", action="store_true",
                           help="Apply only the --window periods; the audit log's are still reported.")
+        scan.add_argument("--statement-timeout", default="120s",
+                          help="Cancel any single query running longer (default 120s).")
         scan.add_argument("--database", default="default", help="Django database alias.")
         scan.add_argument("--print", action="store_true", dest="print_markdown",
                           help="Also print the Markdown report.")
@@ -85,6 +87,7 @@ class Command(BaseCommand):
                 # First statement of the transaction: nothing after it can write.
                 cursor.execute("SET TRANSACTION READ ONLY")
                 cursor.execute("SET LOCAL lock_timeout = '5s'")
+                cursor.execute("SET LOCAL statement_timeout = %s", [options["statement_timeout"]])
                 report = tzscan.scan(
                     cursor,
                     zone=options["zone"],

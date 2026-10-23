@@ -94,6 +94,22 @@ DATA_LOAD_AUTHOR = "system (initial_data_upload)"
 # check against the instance's version history.
 SILENT_STRETCH = dt.timedelta(days=7)
 
+# The first frontend image with process-admin-general-client PR #452 (its
+# DateTimeInput sends an explicit UTC instant instead of the typed local wall
+# clock) was pushed to the prod registry at this moment; no build between
+# 2026-07-15 and it exists. Before it, every frontend sent local time without a
+# zone: on affected code a typed time was stored late (C is proven). After it, a
+# pod that pulled the new image sends instants: correct on affected and fixed
+# code, early on a pre-incident backend (risk R11).
+FRONTEND_INSTANTS_SINCE = dt.datetime(2026, 9, 4, 15, 37, 39, tzinfo=UTC)
+
+# Backup tables an earlier correction left behind (apply_fix_prod.sql). Their
+# values are the old, wrong ones: reported as evidence, never judged as data.
+PRIOR_CORRECTION_TABLES = ("lex_midnight_fix_backup",)
+
+# Columns per statement when the census reads a table's statistics in one pass.
+STATS_CHUNK = 100
+
 # Tables of Django, lex and the third-party apps lex installs. Their values are
 # reported, never corrected.
 FRAMEWORK_PREFIXES = (
@@ -539,6 +555,8 @@ class ColumnReport:
     midnight_local: int = 0
     time_of_day: int = 0
     r11_mirror: int = 0
+    r11_mirror_after_switch: int = 0
+    typed_after_switch: int = 0
     first: Optional[str] = None
     last: Optional[str] = None
     provenance: str = "none"
@@ -648,21 +666,34 @@ def _classes(v: str) -> dict:
     }
 
 
-def _column_stats(cursor, table: _Table, column: str, zone: str) -> tuple:
-    v = quote(column)
-    c = _classes(v)
-    sql = f"""
-        SELECT count({v}),
-               count(*) FILTER (WHERE {c['clock']}),
-               count(*) FILTER (WHERE {c['midnight_utc']}),
-               count(*) FILTER (WHERE {c['midnight_local']}),
-               count(*) FILTER (WHERE {c['time_of_day']}),
-               count(*) FILTER (WHERE {c['r11_mirror']}),
-               min({v}), max({v})
-          FROM {table.sql}
+def _table_stats(cursor, table: _Table, columns: Sequence[str], zone: str) -> dict:
+    """Value classes of every column in ``columns``, reading ``table`` once per chunk.
+
+    Returns ``{column: (values, clock, midnight_utc, midnight_local,
+    time_of_day, r11_mirror, min, max)}``.
     """
-    cursor.execute(sql, {"zone": zone})
-    return cursor.fetchone()
+    stats: dict = {}
+    for start in range(0, len(columns), STATS_CHUNK):
+        chunk = list(columns[start:start + STATS_CHUNK])
+        parts: list = []
+        for column in chunk:
+            v = quote(column)
+            c = _classes(v)
+            parts += [
+                f"count({v})",
+                f"count(*) FILTER (WHERE {c['clock']})",
+                f"count(*) FILTER (WHERE {c['midnight_utc']})",
+                f"count(*) FILTER (WHERE {c['midnight_local']})",
+                f"count(*) FILTER (WHERE {c['time_of_day']})",
+                f"count(*) FILTER (WHERE {c['r11_mirror']})",
+                f"min({v})",
+                f"max({v})",
+            ]
+        cursor.execute(f"SELECT {', '.join(parts)} FROM {table.sql}", {"zone": zone})
+        row = cursor.fetchone()
+        for i, column in enumerate(chunk):
+            stats[column] = tuple(row[i * 8:(i + 1) * 8])
+    return stats
 
 
 # ---------------------------------------------------------------------------
@@ -746,6 +777,12 @@ def _find_audit_tables(tables: dict) -> list:
 
 
 def _audit_rows(cursor, table: _Table, zone: str) -> list:
+    """The update rows by the app that carry an edited_at, oldest first."""
+    conditions = ["(\"payload\"->>'edited_at') IS NOT NULL"]
+    if "action" in table.columns:
+        conditions.append("\"action\" = 'update'")
+    if "author" in table.columns:
+        conditions.append("\"author\" IS DISTINCT FROM %(data_load)s")
     action = '"action"' if "action" in table.columns else "NULL::text"
     author = '"author"' if "author" in table.columns else "NULL::text"
     cursor.execute(
@@ -753,12 +790,36 @@ def _audit_rows(cursor, table: _Table, zone: str) -> list:
         SELECT "date", ("date" AT TIME ZONE 'UTC'), ("date" AT TIME ZONE %(zone)s),
                ("payload"->>'edited_at'), {action}, {author}
           FROM {table.sql}
-         WHERE ("payload"->>'edited_at') IS NOT NULL
+         WHERE {" AND ".join(conditions)}
          ORDER BY "date"
         """,
-        {"zone": zone},
+        {"zone": zone, "data_load": DATA_LOAD_AUTHOR},
     )
     return list(cursor.fetchall())
+
+
+def _audit_skipped(cursor, table: _Table) -> dict:
+    """How many rows with an edited_at are not updates by the app, by kind."""
+    skipped = {"create": 0, "delete": 0, "other_action": 0, "data_load": 0}
+    if "action" not in table.columns and "author" not in table.columns:
+        return skipped
+    action = '"action"' if "action" in table.columns else "'update'"
+    author = '"author"' if "author" in table.columns else "NULL::text"
+    cursor.execute(
+        f"""
+        SELECT {action}, ({author} IS NOT DISTINCT FROM %(data_load)s), count(*)
+          FROM {table.sql}
+         WHERE ("payload"->>'edited_at') IS NOT NULL
+         GROUP BY 1, 2
+        """,
+        {"data_load": DATA_LOAD_AUTHOR},
+    )
+    for kind, data_load, count in cursor.fetchall():
+        if kind != "update":
+            skipped[kind if kind in ("create", "delete") else "other_action"] += count
+        elif data_load:
+            skipped["data_load"] += count
+    return skipped
 
 
 def detect_exposure(
@@ -773,13 +834,11 @@ def detect_exposure(
     classified: list = []
     audit_tables = _find_audit_tables(tables)
     for table in audit_tables:
+        for kind, count in _audit_skipped(cursor, table).items():
+            skipped[kind] += count
         for when, date_utc, date_local, text, action, author in _audit_rows(cursor, table, zone):
-            if action is not None and action != "update":
-                skipped[action if action in ("create", "delete") else "other_action"] += 1
-                continue
-            if author == DATA_LOAD_AUTHOR:
-                skipped["data_load"] += 1
-                continue
+            if (action is not None and action != "update") or author == DATA_LOAD_AUTHOR:
+                continue  # counted by _audit_skipped
             when = _aware(when)
             era, why = read_audit_stamp(text, date_utc, date_local)
             if era == ERA_AFFECTED and when < RC212_RELEASED_AT:
@@ -812,13 +871,38 @@ def detect_exposure(
     }
 
 
+def _is_mirror(value: Optional[dt.datetime], zone: str) -> bool:
+    """Is this a date picked on a pre-incident backend through a frontend that sent an
+    instant (R11)? Its wall clock in ``zone`` is exactly midnight minus the offset:
+    22:00 in summer, 23:00 in winter, the day before."""
+    if value is None or ZoneInfo is None:
+        return False
+    local = _aware(value).astimezone(ZoneInfo(zone))
+    if local.microsecond or local.second:
+        return False
+    shifted = local.replace(tzinfo=None) + local.utcoffset()
+    return shifted.time() == dt.time(0) and local.time() != dt.time(0)
+
+
+def _frontend(letter: str, written: Any) -> Optional[str]:
+    """For a C value: was it sent as local time (before any frontend with instants)?"""
+    if letter != "C":
+        return None
+    start, end = written if isinstance(written, tuple) else (written, written)
+    if end is not None and end < FRONTEND_INSTANTS_SINCE:
+        return "local"
+    return "check"
+
+
 def _row(layer, table, column, row_id, record_id, value, digits, kind,
          fix_b, fix_c, written, position, zone) -> dict:
     letter, reason = verdict(kind, position)
     if isinstance(written, tuple):
         written_out: Any = [_iso(written[0]), _iso(written[1])]
+        written_start = written[0]
     else:
         written_out = _iso(written)
+        written_start = written
     return {
         "layer": layer,
         "table": table,
@@ -834,6 +918,9 @@ def _row(layer, table, column, row_id, record_id, value, digits, kind,
         "dst_ambiguous": bool(kind == "time_of_day" and digits is not None
                               and dst_ambiguous(digits, zone)),
         "reason": reason,
+        "frontend": _frontend(letter, written),
+        "mirror": kind == "time_of_day" and _is_mirror(value, zone),
+        "after_switch": bool(written_start is not None and written_start >= FRONTEND_INSTANTS_SINCE),
     }
 
 
@@ -954,6 +1041,28 @@ def _is_read_only(cursor) -> bool:
     return str(cursor.fetchone()[0]).lower() == "on"
 
 
+def _prior_corrections(cursor, catalogue: dict) -> list:
+    """Backup tables of earlier corrections: how many values, which columns."""
+    found = []
+    for (_schema, name), table in sorted(catalogue.items()):
+        if name not in PRIOR_CORRECTION_TABLES:
+            continue
+        cursor.execute(f"SELECT count(*) FROM {table.sql}")
+        entry: dict = {"table": name, "rows": cursor.fetchone()[0], "corrected": []}
+        if {"table_name", "column_name"} <= table.columns:
+            layer = '"layer"' if "layer" in table.columns else "NULL::text"
+            cursor.execute(
+                f"""SELECT {layer}, "table_name", "column_name", count(*) FROM {table.sql}
+                     GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"""
+            )
+            entry["corrected"] = [
+                {"layer": lay, "table": t, "column": col, "rows": n}
+                for lay, t, col, n in cursor.fetchall()
+            ]
+        found.append(entry)
+    return found
+
+
 def scan(
     cursor,
     *,
@@ -967,6 +1076,7 @@ def scan(
     audit_periods: bool = True,
     running_version: Optional[str] = None,
     deployment_target: Optional[str] = None,
+    checkpoint: Optional[Any] = None,
 ) -> dict:
     """Scan the database behind ``cursor`` and return the report as a dict.
 
@@ -978,7 +1088,10 @@ def scan(
     ``tables`` limits the classification to those table names (the audit log is
     always read). ``expected_columns`` is the ``(table, column)`` list of
     DateTimeFields the app's models declare; the report lists any that the
-    database lacks and any database column no model declares.
+    database lacks and any database column no model declares. ``checkpoint``,
+    when given, is called after the audit log and after each table: run on its
+    own, the scan ends its transaction there so no table stays locked for the
+    whole run.
     """
     if not _is_read_only(cursor):
         raise ScanError(
@@ -991,6 +1104,9 @@ def scan(
     running_era = era_of_version(running_version, deployment_target)
     catalogue = _load_tables(cursor, schemas)
     exposure = detect_exposure(cursor, catalogue, zone, running_era=running_era, now=started)
+    prior_corrections = _prior_corrections(cursor, catalogue)
+    if checkpoint is not None:
+        checkpoint()
     stated = [manual_period(_aware(a), _aware(b)) for a, b in windows]
     if audit_periods:
         periods: list = exposure["periods"] + stated
@@ -1038,52 +1154,66 @@ def scan(
     columns: list[ColumnReport] = []
     rows: list[dict] = []
     naive_columns: list[str] = []
+    by_table: dict = {}
     for schema, table_name, column, data_type in _datetime_columns(cursor, schemas):
         if data_type != "timestamp with time zone":
             naive_columns.append(f"{table_name}.{column}")
             continue
         if wanted is not None and table_name not in wanted:
             continue
+        if table_name in PRIOR_CORRECTION_TABLES:
+            continue  # reported in prior_corrections, never judged
+        by_table.setdefault((schema, table_name), []).append(column)
+    for (schema, table_name), table_columns in by_table.items():
         table = catalogue[(schema, table_name)]
         layer = layer_of(table_name, framework)
-        stats = _column_stats(cursor, table, column, zone)
-        report = ColumnReport(
-            schema, table_name, column, layer, *stats[:6],
-            first=_iso(stats[6]), last=_iso(stats[7]),
-        )
-        report.verdicts["A"] = report.clock
-        report.verdicts["D"] = report.midnight_local
-        found: list[dict] = []
-        if report.midnight_utc or report.time_of_day:
-            if layer in ("main", "framework"):
-                found, report.provenance = _classify_main(
-                    cursor, table, column, history_of.get(table_name),
-                    meta_for(table_name), periods, zone, layer,
-                )
-                if layer == "framework":
-                    report.provenance = "none"
-            elif layer == "history":
-                main = main_of_history.get(table_name)
-                key = main.primary_key if main is not None else "id"
-                meta = (meta_for(main.name) if main is not None
-                        else by_name.get(table_name + "_meta_history"))
-                if _history_ready(table, column, key):
-                    found = _classify_history(cursor, table, meta, column, key, periods, zone)
-                    report.provenance = "history"
-                else:
-                    found = _signature_only(cursor, table, column, zone, layer)
-            else:  # meta_history
-                main, history = owners_of_meta.get(table_name, (None, None))
-                key = main.primary_key if main is not None else "id"
-                if _history_ready(history, column, key) and _meta_ready(table, column):
-                    found = _classify_meta(cursor, table, history, column, key, periods, zone)
-                    report.provenance = "history"
-                else:
-                    found = _signature_only(cursor, table, column, zone, layer)
-        for row in found:
-            report.verdicts[row["verdict"]] += 1
-        rows.extend(found)
-        columns.append(report)
+        all_stats = _table_stats(cursor, table, table_columns, zone)
+        for column in table_columns:
+            stats = all_stats[column]
+            report = ColumnReport(
+                schema, table_name, column, layer, *stats[:6],
+                first=_iso(stats[6]), last=_iso(stats[7]),
+            )
+            report.verdicts["A"] = report.clock
+            report.verdicts["D"] = report.midnight_local
+            found: list[dict] = []
+            if report.midnight_utc or report.time_of_day:
+                if layer in ("main", "framework"):
+                    found, report.provenance = _classify_main(
+                        cursor, table, column, history_of.get(table_name),
+                        meta_for(table_name), periods, zone, layer,
+                    )
+                    if layer == "framework":
+                        report.provenance = "none"
+                elif layer == "history":
+                    main = main_of_history.get(table_name)
+                    key = main.primary_key if main is not None else "id"
+                    meta = (meta_for(main.name) if main is not None
+                            else by_name.get(table_name + "_meta_history"))
+                    if _history_ready(table, column, key):
+                        found = _classify_history(cursor, table, meta, column, key, periods, zone)
+                        report.provenance = "history"
+                    else:
+                        found = _signature_only(cursor, table, column, zone, layer)
+                else:  # meta_history
+                    main, history = owners_of_meta.get(table_name, (None, None))
+                    key = main.primary_key if main is not None else "id"
+                    if _history_ready(history, column, key) and _meta_ready(table, column):
+                        found = _classify_meta(cursor, table, history, column, key, periods, zone)
+                        report.provenance = "history"
+                    else:
+                        found = _signature_only(cursor, table, column, zone, layer)
+            for row in found:
+                report.verdicts[row["verdict"]] += 1
+                if row["after_switch"] and row["kind"] == "time_of_day":
+                    if row["mirror"]:
+                        report.r11_mirror_after_switch += 1
+                    else:
+                        report.typed_after_switch += 1
+            rows.extend(found)
+            columns.append(report)
+        if checkpoint is not None:
+            checkpoint()
 
     totals = {layer: dict.fromkeys(VERDICTS, 0) for layer in LAYERS}
     for report in columns:
@@ -1117,6 +1247,15 @@ def scan(
             "deployment_target": deployment_target,
         },
         "exposure": exposure,
+        "prior_corrections": prior_corrections,
+        "frontend": {
+            "instants_since": _iso(FRONTEND_INSTANTS_SINCE),
+            "c_local": sum(1 for r in rows if r["frontend"] == "local" and r["layer"] != "framework"),
+            "c_check": sum(1 for r in rows if r["frontend"] == "check" and r["layer"] != "framework"),
+            "r11_mirror_after_switch": sum(c.r11_mirror_after_switch for c in columns
+                                           if c.layer != "framework"),
+            "typed_after_switch": sum(c.typed_after_switch for c in columns if c.layer != "framework"),
+        },
         "census": {
             "columns": len(columns),
             "tables": len({(c.schema, c.table) for c in columns}),
@@ -1223,6 +1362,15 @@ def render_markdown(report: dict, max_rows: int = 50) -> str:
         )
     out.append("")
 
+    for entry in report.get("prior_corrections") or []:
+        out += [f"**Earlier correction found:** `{entry['table']}` holds {entry['rows']} value(s) "
+                "corrected before, at their old values. Those values are never corrected again "
+                "(STOP 2); the table is reported, not judged.", ""]
+        if entry["corrected"]:
+            out += _md_table(["Layer", "Table", "Column", "Values"],
+                             [(c["layer"], c["table"], c["column"], c["rows"]) for c in entry["corrected"]])
+            out.append("")
+
     out += ["## Verdicts", ""]
     out += _md_table(
         ["Layer", "A clock", "B date wrong", "C time to prove", "D correct", "E owner decides"],
@@ -1246,7 +1394,7 @@ def render_markdown(report: dict, max_rows: int = 50) -> str:
 
     titles = {
         "B": "B: dates stored at midnight UTC by affected code",
-        "C": "C: times written by affected code (need frontend proof)",
+        "C": "C: times written by affected code",
         "E": "E: values the evidence cannot settle",
     }
     project_rows = [r for r in report["rows"] if r["layer"] != "framework"]
@@ -1256,10 +1404,24 @@ def render_markdown(report: dict, max_rows: int = 50) -> str:
         if not picked:
             out += ["None.", ""]
             continue
+        if letter == "C":
+            local = sum(1 for r in picked if r.get("frontend") == "local")
+            out += [f"{local} of {len(picked)} were written before "
+                    f"{_iso(FRONTEND_INSTANTS_SINCE)}, when no frontend build sent explicit "
+                    "instants yet: sent as local time without a zone, so stored late. The "
+                    "rest need the instance's frontend checked for the time they were written.", ""]
         if letter == "E":
             body = [(r["table"], r["column"], r["row"], r["value"], r["written"], r["reason"])
                     for r in picked[:max_rows]]
             out += _md_table(["Table", "Column", "Row", "Value (UTC)", "Written", "Why"], body)
+        elif letter == "C":
+            body = [(r["table"], r["column"], r["row"], r["value"], r["written"], r["corrected"],
+                     r.get("frontend") or "", "yes" if r["dst_ambiguous"] else "")
+                    for r in picked[:max_rows]]
+            out += _md_table(
+                ["Table", "Column", "Row", "Value (UTC)", "Written", "Corrected", "Frontend", "DST hour"],
+                body,
+            )
         else:
             body = [(r["table"], r["column"], r["row"], r["value"], r["written"], r["corrected"],
                      "yes" if r["dst_ambiguous"] else "") for r in picked[:max_rows]]
@@ -1269,6 +1431,28 @@ def render_markdown(report: dict, max_rows: int = 50) -> str:
             )
         if len(picked) > max_rows:
             out.append(f"\n{len(picked) - max_rows} more in scan.json.")
+        out.append("")
+
+    r11 = [c for c in report["columns"] if c["layer"] != "framework"
+           and (c.get("r11_mirror_after_switch") or c.get("typed_after_switch"))]
+    if meta.get("running_era") == ERA_PRE or r11:
+        out += ["## R11: a pre-incident backend with the new frontend", ""]
+        out.append(
+            f"From {_iso(FRONTEND_INSTANTS_SINCE)} a frontend pod could serve a build that sends "
+            "explicit instants. A pre-incident backend stores those 1–2 h early: a picked date "
+            "lands at 22:00 or 23:00 local time the day before (a mirror value), a typed time "
+            "1–2 h early. It applies only while this instance ran a pre-incident version; its "
+            "frontend pods' images and start times say from when."
+        )
+        out.append("")
+        if r11:
+            out += _md_table(
+                ["Table", "Column", "Layer", "Mirror values after the switch", "Typed times after the switch"],
+                [(c["table"], c["column"], c["layer"], c.get("r11_mirror_after_switch", 0),
+                  c.get("typed_after_switch", 0)) for c in r11],
+            )
+        else:
+            out.append("No mirror value or typed time was written after the switch.")
         out.append("")
 
     recon = report["census"]["reconciliation"]
@@ -1370,6 +1554,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--running-version",
                         help="lex-app version the instance runs; read from this Python "
                              "when the scan uses the instance's own settings (no --dsn)")
+    parser.add_argument("--statement-timeout", default="120s",
+                        help="cancel any single query running longer (default 120s)")
     parser.add_argument("--render", metavar="SCAN_JSON",
                         help="write scan.md from a saved JSON report; no database needed")
     args = parser.parse_args(argv)
@@ -1393,7 +1579,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     connection = _connect(args.dsn)
     try:
         cursor = connection.cursor()
-        cursor.execute("SET LOCAL lock_timeout = '5s'")
+        # Session settings outlive each transaction the checkpoint ends; the session
+        # is read-only by default (see _connect), so every transaction is too.
+        cursor.execute("SET lock_timeout = '5s'")
+        cursor.execute("SET statement_timeout = %s", (args.statement_timeout,))
+
+        def release_locks() -> None:
+            connection.rollback()
+            if not _is_read_only(cursor):
+                raise ScanError("The session stopped being read-only; scan aborted.")
+
         report = scan(
             cursor,
             zone=args.zone,
@@ -1405,6 +1600,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             audit_periods=not args.window_only,
             running_version=running_version,
             deployment_target=deployment_target,
+            checkpoint=release_locks,
         )
     finally:
         connection.rollback()

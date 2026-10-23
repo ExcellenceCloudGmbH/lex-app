@@ -9,7 +9,7 @@ place or, worse, sends a correct value to be "corrected" — so these scenarios
 pin how each verdict follows from the database's own evidence (audit log,
 history, meta-history) and that the scan never writes.
 
-Cluster 1az — scenarios 1.420–1.443. Type: U + E.
+Cluster 1az — scenarios 1.420–1.447. Type: U + E.
 Covers: lex/lex_app/incident_tz/scan.py, lex/lex_app/management/commands/incident_tz.py.
 Run: python -m lex pytest lex/test_project/tests/init/test_1az_incident_tz_scan.py -v
 """
@@ -813,3 +813,127 @@ class TestCluster01az_ScanDatabase(E2ETestCase):
         self.assertEqual(exposure["anomalies"], [iso(utc(2026, 6, 10, 8))])
         self.assertEqual(exposure["unreadable"], {"affected before rc212's release": 1})
         self.assertIn("Anomal", tzscan.render_markdown(report))
+
+    def test_1_444_an_earlier_corrections_ledger_is_reported_not_judged(self) -> None:
+        """
+        Scenario 1.444: the backup table of an earlier correction is evidence, not data.
+        Given: a lex_midnight_fix_backup table, as apply_fix_prod.sql leaves it,
+               holding three corrected values (two main, one history) at their old
+               midnight-UTC instants
+        When: the scan runs over the whole schema
+        Then: the table is listed as an earlier correction with its row count and the
+              columns it corrected; none of its values is judged, so nothing in it can
+              be corrected a second time; the Markdown report names it
+        """
+        name = "lex_midnight_fix_backup"
+        with connection.cursor() as cursor:
+            cursor.execute(f'DROP TABLE IF EXISTS "{name}"')
+            cursor.execute(
+                f'CREATE TABLE "{name}" (layer text, table_name text, column_name text, id bigint, '
+                "history_id bigint, meta_history_id bigint, old_value timestamptz)"
+            )
+            cursor.execute(
+                f'INSERT INTO "{name}" (layer, table_name, column_name, id, history_id, old_value) '
+                "VALUES (%s, %s, 'due_on', 1, NULL, %s), (%s, %s, 'due_on', 2, NULL, %s), "
+                "(%s, %s, 'due_on', 1, 10, %s)",
+                ["main", self.main, SUMMER_DATE_WRONG, "main", self.main, WINTER_DATE_WRONG,
+                 "history", self.history, SUMMER_DATE_WRONG],
+            )
+        self.addCleanup(self._drop_table, name)
+        report = self.run_scan(tables=None)
+        self.assertEqual(report["prior_corrections"], [{
+            "table": name, "rows": 3,
+            "corrected": [
+                {"layer": "history", "table": self.history, "column": "due_on", "rows": 1},
+                {"layer": "main", "table": self.main, "column": "due_on", "rows": 2},
+            ],
+        }])
+        self.assertEqual([c for c in report["columns"] if c["table"] == name], [],
+                         "The ledger's values are never judged.")
+        self.assertEqual([r for r in report["rows"] if r["table"] == name], [])
+        self.assertIn("Earlier correction", tzscan.render_markdown(report))
+
+    def test_1_445_c_values_before_the_first_frontend_with_instants_were_sent_as_local_time(self) -> None:
+        """
+        Scenario 1.445: until 4 Sep 2026 no frontend build sent explicit instants.
+        Given: the audit log's period (6 Jul – 3 Aug) and a stated window for
+               September; a time typed on 21 Jul and one typed on 20 Sep, both while
+               affected code ran
+        When: the scan runs
+        Then: both are C; the July one is marked as sent as local time (no frontend
+              build with PR #452 existed yet), the September one as needing the
+              instance's frontend checked; the report counts both kinds across the
+              project layers
+        """
+        self.seed_audit()
+        july = self.seed([(IN_WINDOW, {"meets_at": TIME_WRONG})], name="july")
+        sept = self.seed([(utc(2026, 9, 20, 9), {"meets_at": utc(2026, 9, 20, 9, 30)})], name="sept")
+        report = self.run_scan(windows=[(utc(2026, 9, 1), utc(2026, 9, 30))])
+        july_row = self.only(self.rows(report, self.main, "meets_at", row=july.pk), "main row")
+        self.assertEqual((july_row["verdict"], july_row["frontend"]), ("C", "local"),
+                         "Before 4 Sep the frontend sent the typed wall clock without a zone.")
+        sept_row = self.only(self.rows(report, self.main, "meets_at", row=sept.pk), "main row")
+        self.assertEqual((sept_row["verdict"], sept_row["frontend"]), ("C", "check"),
+                         "After 4 Sep a frontend with explicit instants may have served it.")
+        frontend = report["frontend"]
+        self.assertEqual(frontend["instants_since"], iso(tzscan.FRONTEND_INSTANTS_SINCE))
+        c_rows = [r for r in report["rows"] if r["verdict"] == "C" and r["layer"] != "framework"]
+        self.assertEqual(
+            (frontend["c_local"], frontend["c_check"]),
+            (sum(r["frontend"] == "local" for r in c_rows), sum(r["frontend"] == "check" for r in c_rows)),
+            "The totals count C values in every project layer, like the verdict totals.",
+        )
+        self.assertTrue(frontend["c_local"] and frontend["c_check"])
+        self.assertIn("sent as local time", tzscan.render_markdown(report))
+
+    def test_1_446_r11_values_written_after_the_frontend_switch_are_counted(self) -> None:
+        """
+        Scenario 1.446: a pre-incident backend paired with the new frontend stores early (R11).
+        Given: an audit log from a pre-incident version only and the scan running on
+               rc199; a date stored at 22:00 Berlin the day before (the mirror
+               signature) written on 20 Sep, the same signature written on 20 Aug,
+               and a time typed on 20 Sep
+        When: the scan runs
+        Then: all three are D (no affected period); one mirror value and one typed
+              time are counted as written after the frontend switch, the August
+              mirror is not; the Markdown report has an R11 section
+        """
+        self.seed_audit([
+            (utc(2026, 6, 22, 11, 44, 39), "2026-06-22T13:44:39.943377"),
+            (utc(2026, 9, 25, 8), "2026-09-25T10:00:00.100000"),
+        ])
+        mirror_sept = self.seed([(utc(2026, 9, 20, 9), {"due_on": utc(2026, 9, 19, 20)})], name="m-sep")
+        mirror_aug = self.seed([(utc(2026, 8, 20, 9), {"due_on": utc(2026, 8, 19, 20)})], name="m-aug")
+        typed = self.seed([(utc(2026, 9, 20, 9), {"meets_at": utc(2026, 9, 20, 7, 30)})], name="typed")
+        report = self.run_scan(running_version="2.0.0rc199")
+        for item, column in ((mirror_sept, "due_on"), (mirror_aug, "due_on"), (typed, "meets_at")):
+            with self.subTest(item=item.name):
+                row = self.only(self.rows(report, self.main, column, row=item.pk), "main row")
+                self.assertEqual(row["verdict"], "D")
+        due = self.column(report, self.main, "due_on")
+        self.assertEqual((due["r11_mirror"], due["r11_mirror_after_switch"]), (2, 1),
+                         "Only the mirror written after 4 Sep counts.")
+        self.assertEqual(self.column(report, self.main, "meets_at")["typed_after_switch"], 1)
+        self.assertIn("R11", tzscan.render_markdown(report))
+
+    def test_1_447_locks_are_released_between_tables(self) -> None:
+        """
+        Scenario 1.447: on a live database the scan holds no table's locks for long.
+        Given: the scan model's three tables and a checkpoint that records its calls
+        When: the scan runs with it, and again without
+        Then: it is called once after reading the audit log and once after each
+              table, and both reports judge every value alike
+        """
+        self.seed_audit()
+        self.seed([(IN_WINDOW, {"due_on": SUMMER_DATE_WRONG, "meets_at": TIME_WRONG})])
+        calls: list = []
+        with_checkpoint = self.run_scan(checkpoint=lambda: calls.append(1))
+        without = self.run_scan()
+        self.assertEqual(len(calls), 1 + len(self.tables), "Audit log, then each table.")
+        self.assertEqual(with_checkpoint["totals"], without["totals"])
+
+        def key(r):
+            return (r["table"], r["column"], r["row"] or "", r["record"] or "")
+
+        self.assertEqual(sorted(with_checkpoint["rows"], key=key), sorted(without["rows"], key=key))
+

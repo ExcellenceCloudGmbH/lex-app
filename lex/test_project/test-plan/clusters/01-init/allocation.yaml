@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 443
+max_scenario: 447
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1287,10 +1287,10 @@ letters:
       (1.386-1.392) is reserved by an open PR, hence aw.
   az:
     title: lex incident_tz scan — read-only scan for the TIME_ZONE incident (exposure, census, verdicts A–E)
-    scenarios: 1.420-1.443
+    scenarios: 1.420-1.447
     status: complete
     tests:
-      pass: 24
+      pass: 28
       skip: 0
       xfail: 0
     note: >-
@@ -1304,4 +1304,8 @@ letters:
       means unreadable (a calculation's rewrite writes UTC digits in every version), +00:00 is
       fixed, era changes without affected rows are uncertain, the running lex-app version is a
       reading at scan time, silent stretches are listed, pre-rc212 anomalies open no period, and
-      a stated --window adds to the audit log's periods (--window-only replaces them).
+      a stated --window adds to the audit log's periods (--window-only replaces them). 1.444–1.447
+      (2026-10-23, before the prod scans): an earlier correction's backup table is reported, never
+      judged; C values written before the first frontend build with PR #452 (2026-09-04 15:37 UTC)
+      are marked as sent as local time; R11 mirror values and typed times written after it are
+      counted; the standalone run reads each table once and ends its transaction after each table.
