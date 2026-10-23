@@ -61,6 +61,7 @@ from __future__ import annotations
 import argparse
 import collections
 import datetime as dt
+import gzip
 import json
 import os
 import re
@@ -1473,6 +1474,25 @@ def render_markdown(report: dict, max_rows: int = 50) -> str:
     return "\n".join(out)
 
 
+def slim_report(report: dict) -> dict:
+    """The report without the D rows nobody acts on, for piping out of a pod.
+
+    B, C and E rows stay. D rows go, except, on an instance running a
+    pre-incident version (or an unknown one), the R11 suspects: mirror values
+    and times typed after the frontend switch. Column counts are unchanged.
+    """
+    keep_r11 = (report.get("meta") or {}).get("running_era") in (ERA_PRE, None)
+    kept = [
+        r for r in report["rows"]
+        if r["verdict"] != "D"
+        or (keep_r11 and (r.get("mirror") or (r.get("after_switch") and r.get("kind") == "time_of_day")))
+    ]
+    slim = dict(report)
+    slim["rows"] = kept
+    slim["rows_omitted"] = {"D": len(report["rows"]) - len(kept)}
+    return slim
+
+
 def to_json(report: dict) -> str:
     return json.dumps(report, indent=2, default=str)
 
@@ -1558,6 +1578,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--running-version",
                         help="lex-app version the instance runs; read from this Python "
                              "when the scan uses the instance's own settings (no --dsn)")
+    parser.add_argument("--all-rows", action="store_true",
+                        help="keep every D row in the JSON (default: only R11 suspects)")
+    parser.add_argument("--gzip", action="store_true",
+                        help="with --json-stdout, write the JSON gzipped (smaller to pipe out of a pod)")
     parser.add_argument("--statement-timeout", default="120s",
                         help="cancel any single query running longer (default 120s)")
     parser.add_argument("--render", metavar="SCAN_JSON",
@@ -1567,8 +1591,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("--window-only needs at least one --window")
     if args.render:
         # A scan run inside a pod prints JSON; the Markdown is made here, locally.
-        with open(args.render, encoding="utf-8") as handle:
-            report = json.load(handle)
+        with open(args.render, "rb") as handle:
+            raw = handle.read()
+        if raw[:2] == b"\x1f\x8b":  # gzip
+            raw = gzip.decompress(raw)
+        report = json.loads(raw.decode("utf-8"))
         json_path, md_path = write_report(
             report, args.out or os.path.dirname(os.path.abspath(args.render))
         )
@@ -1610,8 +1637,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     finally:
         connection.rollback()
         connection.close()
+    if not args.all_rows:
+        report = slim_report(report)
     if args.json_stdout or not args.out:
-        sys.stdout.write(to_json(report) + "\n")
+        if args.gzip:
+            sys.stdout.buffer.write(gzip.compress((to_json(report) + "\n").encode("utf-8")))
+            sys.stdout.buffer.flush()
+        else:
+            sys.stdout.write(to_json(report) + "\n")
     if args.out:
         json_path, md_path = write_report(report, args.out)
         sys.stderr.write(f"Wrote {json_path} and {md_path}\n")

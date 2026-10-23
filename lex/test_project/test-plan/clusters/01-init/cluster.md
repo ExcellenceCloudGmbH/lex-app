@@ -526,5 +526,6 @@ does not remove user launch configurations.
 | 1.446 | R11 | on a pre-incident backend, mirror values (22:00/23:00 local the day before) and typed times written after the frontend switch are counted per column |
 | 1.447 | locks | the checkpoint runs after the audit log and after each table; the report is the same with or without it |
 | 1.448 | the end of time | a 9999-12-31 sentinel is judged like any value; nothing overflows, whatever the session zone |
+| 1.449 | a report that travels | the standalone JSON keeps B, C, E and R11 suspects, records what it left out, and renders the same gzipped |
 
-**Scenario range:** 1.420 – 1.448. **Test file:** `lex/test_project/tests/init/test_1az_incident_tz_scan.py`. **Type:** U / E. **Status:** ✅ Complete (2026-10-21; 1.436 – 1.448 on 2026-10-23). Batch: [1az](batches.md).
+**Scenario range:** 1.420 – 1.449. **Test file:** `lex/test_project/tests/init/test_1az_incident_tz_scan.py`. **Type:** U / E. **Status:** ✅ Complete (2026-10-21; 1.436 – 1.449 on 2026-10-23). Batch: [1az](batches.md).

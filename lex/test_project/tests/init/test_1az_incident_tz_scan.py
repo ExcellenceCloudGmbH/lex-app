@@ -9,7 +9,7 @@ place or, worse, sends a correct value to be "corrected" — so these scenarios
 pin how each verdict follows from the database's own evidence (audit log,
 history, meta-history) and that the scan never writes.
 
-Cluster 1az — scenarios 1.420–1.448. Type: U + E.
+Cluster 1az — scenarios 1.420–1.449. Type: U + E.
 Covers: lex/lex_app/incident_tz/scan.py, lex/lex_app/management/commands/incident_tz.py.
 Run: python -m lex pytest lex/test_project/tests/init/test_1az_incident_tz_scan.py -v
 """
@@ -17,6 +17,7 @@ Run: python -m lex pytest lex/test_project/tests/init/test_1az_incident_tz_scan.
 from __future__ import annotations
 
 import datetime as dt
+import gzip
 import importlib.metadata
 import json
 import os
@@ -328,6 +329,57 @@ class TestCluster01az_ScanDecisions(SimpleTestCase):
             [(s["start"], s["end"]) for s in tzscan.silent_stretches([], now)],
             [(iso(tzscan.RC212_RELEASED_AT), iso(now))],
         )
+
+    def test_1_449_the_standalone_report_travels_small(self) -> None:
+        """
+        Scenario 1.449: a report piped out of a pod must arrive whole.
+        Given: a report with B, C, E and D rows, among them one D row that is an R11
+               suspect, from a pre-incident instance and from a fixed one
+        When: slim_report() trims it, and --render reads it gzipped
+        Then: B, C and E rows stay; D rows go, except R11 suspects on the pre-incident
+              instance; the count left out is recorded; the gzipped report renders like
+              the plain one
+        """
+        def row(verdict, **extra):
+            base = {"layer": "main", "table": "t", "column": "c", "row": "1", "record": None,
+                    "value": "2026-07-20T00:00:00Z", "kind": "time_of_day", "written": None,
+                    "position": "in", "verdict": verdict, "corrected": None, "dst_ambiguous": False,
+                    "reason": "", "frontend": None, "mirror": False, "after_switch": False}
+            base.update(extra)
+            return base
+
+        rows = [row("B"), row("C"), row("E"), row("D"), row("D", mirror=True, after_switch=True)]
+        for era, kept in ((tzscan.ERA_PRE, ["B", "C", "E", "D"]), (tzscan.ERA_FIXED, ["B", "C", "E"])):
+            with self.subTest(era=era):
+                slim = tzscan.slim_report({"meta": {"running_era": era}, "rows": rows})
+                self.assertEqual([r["verdict"] for r in slim["rows"]], kept)
+                self.assertEqual(slim["rows_omitted"], {"D": len(rows) - len(kept)})
+
+        report = {
+            "meta": {"scan_version": "1", "database": "db", "scanned_at": "2026-10-23T00:00:00Z",
+                     "zone": "Europe/Berlin", "schemas": ["public"], "tables_filter": None,
+                     "read_only": True, "running_version": None, "running_era": None},
+            "exposure": {"source": "none", "audit_tables": [], "periods": [], "gaps": [],
+                         "eras": dict.fromkeys(tzscan.ERAS, 0), "readable_rows": 0,
+                         "first_readable": None, "last_readable": None},
+            "census": {"columns": 0, "tables": 0, "naive_timestamp_columns": [], "reconciliation": None},
+            "totals": {layer: dict.fromkeys(tzscan.VERDICTS, 0) for layer in tzscan.LAYERS},
+            "columns": [], "rows": [],
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            plain = os.path.join(folder, "plain", "scan.json")
+            packed = os.path.join(folder, "packed", "scan.json.gz")
+            os.makedirs(os.path.dirname(plain))
+            os.makedirs(os.path.dirname(packed))
+            with open(plain, "w", encoding="utf-8") as handle:
+                handle.write(tzscan.to_json(report))
+            with open(packed, "wb") as handle:
+                handle.write(gzip.compress(tzscan.to_json(report).encode("utf-8")))
+            self.assertEqual(tzscan.main(["--render", plain]), 0)
+            self.assertEqual(tzscan.main(["--render", packed]), 0)
+            with open(os.path.join(folder, "plain", "scan.md"), encoding="utf-8") as one, \
+                    open(os.path.join(folder, "packed", "scan.md"), encoding="utf-8") as two:
+                self.assertEqual(one.read(), two.read())
 
 
 class TestCluster01az_ScanDatabase(E2ETestCase):
