@@ -317,7 +317,7 @@ class TestCluster1ae_ConfigWriter:
 
     # -- 1.281 --------------------------------------------------------
     def test_1_281_global_only_keys_never_land_in_a_mode_block(self) -> None:
-        """Scenario 1.281: the 4 global-only keys appear at [theme] only.
+        """Scenario 1.281: the global-only keys appear at [theme] only.
 
         Streamlit rejects unrecognised config options outright, so a chart
         palette inside [theme.light] would break every dashboard rather than
