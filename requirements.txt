@@ -22,7 +22,7 @@ channels-redis==4.3.0
 uvicorn[standard]==0.54.0
 nest_asyncio==1.6.0
 Office365-REST-Python-Client==3.3.0
-streamlit==1.61.0
+streamlit==1.66.1
 streamlit-keycloak-lex==1.0.5
 # `lex reflex`. Upper-bounded like streamlit: lex.lex_app.reflex.auth extends
 # reflex-enterprise's OIDC provider hooks, which a 0.10 is free to change.

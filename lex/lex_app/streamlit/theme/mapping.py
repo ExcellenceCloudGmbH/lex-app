@@ -12,12 +12,11 @@ _MODES = ("light", "dark")
 # have no `theme.light.*` / `theme.dark.*` twin. The config writer must not
 # place these inside a per-mode block: Streamlit rejects unrecognised config
 # options outright. Verified against the installed Streamlit by scenario
-# 1.209b, which fails if this set drifts from reality.
+# 1.209b, which fails if this set drifts from reality. Streamlit 1.66 added
+# per-mode twins for the three chart palettes, so only showSidebarBorder is
+# left here; the palettes now go into each mode block.
 GLOBAL_ONLY_KEYS: frozenset = frozenset(
     {
-        "chartCategoricalColors",
-        "chartDivergingColors",
-        "chartSequentialColors",
         "showSidebarBorder",
     }
 )
