@@ -13,4 +13,4 @@ Calculate rows rewritten without microseconds) no longer decide an era, a change
 pre-incident and a fixed version without affected rows is uncertain, and the lex-app version
 running at scan time counts as a reading. Silent stretches and pre-rc212 anomalies are
 reported, and a stated `--window` now adds to the audit log's periods. Each rule removed fails
-a named scenario; a run on a copy of an rc221 instance is recorded in the batch.
+a named scenario.

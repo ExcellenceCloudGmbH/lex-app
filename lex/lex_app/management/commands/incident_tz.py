@@ -9,7 +9,7 @@ against an instance that has not been upgraded.
 Run::
 
     lex incident_tz scan --out ./scan-report
-    lex incident_tz scan --window 2026-07-06T08:04Z/2026-10-21T09:00Z   # add a period
+    lex incident_tz scan --window 2026-07-06T08:00Z/2026-08-20T16:00Z   # add a period
     lex incident_tz scan --window ... --window-only                     # only that period
 """
 

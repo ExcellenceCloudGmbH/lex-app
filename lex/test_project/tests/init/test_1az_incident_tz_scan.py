@@ -9,7 +9,7 @@ place or, worse, sends a correct value to be "corrected" — so these scenarios
 pin how each verdict follows from the database's own evidence (audit log,
 history, meta-history) and that the scan never writes.
 
-Cluster 1az — scenarios 1.420–1.452. Type: U + E.
+Cluster 1az — scenarios 1.420–1.454. Type: U + E.
 Covers: lex/lex_app/incident_tz/scan.py, lex/lex_app/management/commands/incident_tz.py.
 Run: python -m lex pytest lex/test_project/tests/init/test_1az_incident_tz_scan.py -v
 """
@@ -794,18 +794,18 @@ class TestCluster01az_ScanDatabase(E2ETestCase):
 
     def test_1_441_the_version_running_at_scan_time_reopens_a_quiet_exposure(self) -> None:
         """
-        Scenario 1.441: an audit log that went quiet cannot hide a switch (as on 1121).
+        Scenario 1.441: an audit log that went quiet cannot hide a switch.
         Given: readable rows only from a pre-incident version, the last on 2 Jul; a
                00:00 UTC date written on 20 Jul; the scan running on rc221
         When: the scan runs without, then with, the deploy history's window
         Then: without it, the running version opens a period after 2 Jul, the date
               is E on its edge, and the stretch since 2 Jul is listed as silent;
-              with the window from 6 Jul 08:04 added, the date is B
+              with the window from 6 Jul 08:00 added, the date is B
         """
-        last_pre = utc(2026, 7, 2, 10, 53, 53)
+        last_pre = utc(2026, 7, 2, 14, 15)
         self.seed_audit([
-            (utc(2026, 6, 22, 11, 44, 39), "2026-06-22T13:44:39.943377"),
-            (last_pre, "2026-07-02T12:53:53.943038"),
+            (utc(2026, 6, 22, 9, 30), "2026-06-22T11:30:00.500000"),
+            (last_pre, "2026-07-02T16:15:00.600000"),
         ])
         item = self.seed([(utc(2026, 7, 20, 9), {"due_on": SUMMER_DATE_WRONG})])
         quiet = self.run_scan(running_version="2.0.0rc221")
@@ -818,7 +818,7 @@ class TestCluster01az_ScanDatabase(E2ETestCase):
         self.assertIn("running", tzscan.render_markdown(quiet))
 
         stated = self.run_scan(running_version="2.0.0rc221",
-                               windows=[(utc(2026, 7, 6, 8, 4, 21), utc(2026, 12, 31))])
+                               windows=[(utc(2026, 7, 6, 8, 0), utc(2026, 12, 31))])
         self.assertEqual(stated["exposure"]["source"], "audit_log+manual")
         row = self.only(self.rows(stated, self.main, "due_on", row=item.pk), "main row")
         self.assertEqual(row["verdict"], "B", "Inside the deploy history's window it is B.")
@@ -952,7 +952,7 @@ class TestCluster01az_ScanDatabase(E2ETestCase):
               switch, the August mirror is not; the Markdown report has an R11 section
         """
         self.seed_audit([
-            (utc(2026, 6, 22, 11, 44, 39), "2026-06-22T13:44:39.943377"),
+            (utc(2026, 6, 22, 9, 30), "2026-06-22T11:30:00.500000"),
             (utc(2026, 9, 25, 8), "2026-09-25T10:00:00.100000"),
         ])
         mirror_sept = self.seed([(utc(2026, 9, 20, 9), {"due_on": utc(2026, 9, 19, 20)})], name="m-sep")
@@ -1096,3 +1096,55 @@ class TestCluster01az_ScanDatabase(E2ETestCase):
             self.assertIn("UTC digits", row["reason"])
         typed_row = self.only(self.rows(report, self.main, "meets_at", row=typed.pk), "main row")
         self.assertEqual(typed_row["verdict"], "D")
+
+    def test_1_453_an_end_of_day_stored_early_is_not_correct_either(self) -> None:
+        """
+        Scenario 1.453: the same reverse shift, on a value that ends a day.
+        Given: before the period, a pre-incident version stored a 30 Jun 23:59:59
+               end as 21:59:59 Berlin (its UTC digits read as Berlin); after the fix,
+               a 15 Jan end stored as 22:59:59 Berlin; and before the period a
+               30 Jun 23:59:59 stored right
+        When: the scan runs
+        Then: both early ends are mirror values and E with the early-value reason,
+              and the column counts them as mirror values; the right one stays D
+        """
+        self.seed_audit()
+        summer = self.seed([(BEFORE_RC212, {"meets_at": utc(2026, 6, 30, 19, 59, 59)})], name="summer")
+        winter = self.seed([(AFTER_FIX, {"meets_at": utc(2026, 1, 15, 21, 59, 59)})], name="winter")
+        right = self.seed([(BEFORE_RC212, {"meets_at": utc(2026, 6, 30, 21, 59, 59)})], name="right")
+        report = self.run_scan()
+        for item in (summer, winter):
+            row = self.only(self.rows(report, self.main, "meets_at", row=item.pk), "main row")
+            self.assertEqual((row["kind"], row["mirror"]), ("machine_time", True), row)
+            self.assertEqual((row["verdict"], row["position"]), ("E", tzscan.OUT), row)
+            self.assertIn("UTC digits", row["reason"])
+        right_row = self.only(self.rows(report, self.main, "meets_at", row=right.pk), "main row")
+        self.assertEqual((right_row["verdict"], right_row["mirror"]), ("D", False), right_row)
+        self.assertEqual(self.column(report, self.main, "meets_at")["r11_mirror"], 2)
+
+    def test_1_454_a_column_that_stores_midnight_utc_anyway_holds_no_b(self) -> None:
+        """
+        Scenario 1.454: B needs a column whose own dates do not explain the value.
+        Given: a record whose due_on held midnight UTC written by a pre-incident
+               version, then midnight UTC again written inside the period; and a
+               record whose meets_at got midnight UTC only inside the period
+        When: the scan runs
+        Then: the due_on value inside the period is E in every layer, with a reason
+              saying the column holds midnight UTC written outside the periods, and
+              no due_on value is B; the meets_at value is B with its corrected value
+        """
+        self.seed_audit()
+        mixed = self.seed([(BEFORE_RC212, {"due_on": utc(2026, 6, 5)}),
+                           (IN_WINDOW, {"due_on": SUMMER_DATE_WRONG})], name="mixed")
+        clean = self.seed([(IN_WINDOW, {"meets_at": SUMMER_DATE_WRONG})], name="clean")
+        report = self.run_scan()
+        main_row = self.only(self.rows(report, self.main, "due_on", row=mixed.pk), "main row")
+        self.assertEqual(main_row["verdict"], "E", main_row)
+        self.assertIn("also holds midnight UTC", main_row["reason"])
+        self.assertIsNone(main_row["corrected"])
+        for table in self.tables:
+            self.assertEqual(self.column(report, table, "due_on")["verdicts"]["B"], 0, table)
+            self.assertFalse([r for r in self.rows(report, table, "due_on") if r["verdict"] == "B"], table)
+        clean_row = self.only(self.rows(report, self.main, "meets_at", row=clean.pk), "main row")
+        self.assertEqual(clean_row["verdict"], "B", clean_row)
+        self.assertEqual(clean_row["corrected"], iso(SUMMER_DATE_RIGHT))

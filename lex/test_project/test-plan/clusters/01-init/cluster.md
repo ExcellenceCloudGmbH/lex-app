@@ -530,5 +530,7 @@ does not remove user launch configurations.
 | 1.450 | made by code | a time with seconds and no microseconds is machine_time: E inside a period (check the source), D outside, never C |
 | 1.451 | no exposure, no write time | with no period or gap, an undatable value is outside (D, or E for its source); with one it stays E |
 | 1.452 | early, outside the periods | a mirror value (22:00 or 23:00 local the day before a date) written outside every period is E, never D |
+| 1.453 | an early end of day | 21:59:59 or 22:59:59 local, an end of day 1–2 h early, is a mirror value too: E outside the periods, counted per column |
+| 1.454 | the column's own convention | no B where the column, with its history and meta-history, also holds midnight UTC written outside every period |
 
-**Scenario range:** 1.420 – 1.452. **Test file:** `lex/test_project/tests/init/test_1az_incident_tz_scan.py`. **Type:** U / E. **Status:** ✅ Complete (2026-10-21; 1.436 – 1.452 on 2026-10-23). Batch: [1az](batches.md).
+**Scenario range:** 1.420 – 1.454. **Test file:** `lex/test_project/tests/init/test_1az_incident_tz_scan.py`. **Type:** U / E. **Status:** ✅ Complete (2026-10-21; 1.436 – 1.454 on 2026-10-23). Batch: [1az](batches.md).

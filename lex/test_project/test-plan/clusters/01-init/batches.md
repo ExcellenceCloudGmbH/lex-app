@@ -1794,14 +1794,14 @@ config each fail 1.404.
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.420 – 1.452 |
+| Scenario range | 1.420 – 1.454 |
 | Type | U / E |
 | Files covered | `lex/lex_app/incident_tz/scan.py` (new; one file, standard library plus a DB-API cursor, so it also runs on its own against an instance that has not been upgraded); `lex/lex_app/management/commands/incident_tz.py` (new; `lex incident_tz scan`) |
 | Test file | `lex/test_project/tests/init/test_1az_incident_tz_scan.py` |
 | Test model | `lex/test_project/tests/init/models.py` → `IncidentScanItem` (`due_on` a date, `meets_at` a time of day, `synced_at` a clock) |
-| Test classes | `TestCluster01az_ScanDecisions` (1.420–1.424, 1.436–1.439, 1.449), `TestCluster01az_ScanDatabase` (1.425–1.435, 1.440–1.448, 1.450–1.452) |
+| Test classes | `TestCluster01az_ScanDecisions` (1.420–1.424, 1.436–1.439, 1.449), `TestCluster01az_ScanDatabase` (1.425–1.435, 1.440–1.448, 1.450–1.454) |
 | Fixtures | none — audit rows and history versions are created through the ORM, then their times stamped with `.update()`; a raw table without a model for 1.427 and 1.434 |
-| Tests landed | **33 pass / 0 fail** |
+| Tests landed | **35 pass / 0 fail** |
 | Status | ✅ Complete |
 
 Q1 of the TZ remediation plan (LEX-747, step 3/8 LEX-1325): per database, the periods in which
@@ -1822,8 +1822,8 @@ skipping the read-only check fails 1.425.
 
 **Run outside the suite.** Against the local Northwind demo database: 69 columns in 26 tables,
 0.3 s, no exposure claimed (its 5 audit rows with `edited_at` are deletions carrying the string
-`"None"`, so the report asks for a stated period). Against a 106-table project schema with
-history and meta-history: 323 columns, 0.7 s.
+`"None"`, so the report asks for a stated period). Against a larger local project schema
+with history and meta-history: under a second.
 
 **Audit-log rules (1.436 – 1.443, 2026-10-23).** Read against the lex source, the audit log
 holds rows that do not carry the moment of the change: creates (what the browser sent),
@@ -1838,13 +1838,9 @@ listed; affected-looking rows before rc212's release are anomalies; `--window` a
 audit log's periods, `--window-only` replaces them. Mutation check: each of the ten rules
 removed fails at least one of 1.435 – 1.443 (subtest failures counted).
 
-**Run on a copy of an affected instance.** On 1510, a copy of an internal instance on rc221
-since 6 Jul: 109 columns in 41 tables in about 2 s, read-only. The audit log alone dates no
-exposure (all 61 readable rows pre-incident, the last on 2 Jul), the case 1.441 covers.
-
-**Before the prod scans (1.444 – 1.447).** A catalogue preflight of 29 prod databases found
-up to 2,000 timestamptz columns and tables of 1.2M rows on a shared database server, and one
-database (1262) holding `lex_midnight_fix_backup`. The census now reads each table once
+**Production safety (1.444 – 1.447).** A production database can hold thousands of
+`timestamptz` columns and tables of a million rows on a shared server, and may hold the
+backup table an earlier correction left (`lex_midnight_fix_backup`). The census now reads each table once
 (columns in chunks of 100) instead of once per column, and run on its own the scan sets
 session `lock_timeout` and `statement_timeout` and ends its read-only transaction after the
 audit log and after each table, so a deploy's migration never queues behind it for long. An
@@ -1855,34 +1851,38 @@ between 07-15 and then: C values written before that are marked as sent as local
 R11 mirror values and typed times written after it are counted per column. Each of the eight
 rules removed fails one of 1.428 – 1.447.
 
-**Found on the first prod scan (1.448).** 1121's framework cache holds the sentinel
+**The end of time (1.448).** A framework cache stores "never expires" as
 9999-12-31 23:59:59+00. Converted to Berlin for the mirror check it overflowed Python's
 calendar, and in a Django connection, whose session zone is Berlin and whose adapter labels
 every timestamp with it, the driver could not even parse it (year 10000). Every timestamp the
 scan reads now comes back as UTC digits from SQL (`… AT TIME ZONE 'UTC'`), right under any
 session zone, and the mirror check stops at the calendar's end; removing either fails 1.448.
-Piping a 43 MB report out of a pod through `kubectl exec` arrived cut short three times out of
-four; run on its own the JSON now leaves out D rows other than R11 suspects and can travel
+A large report piped out of a pod through `kubectl exec` can arrive cut short; run on its
+own the JSON now leaves out D rows other than R11 suspects and can travel
 gzipped (`--gzip`), and `--render` reads either form (1.449).
 
-**Found in the prod scans (1.450).** On one instance, 407 values the scan called C carried
-seconds, the same instant across many records: code wrote them, since the frontend's
-date-time input works to the minute. A truncated clock is right on affected code, a local time
+**Made by code (1.450).** A time with seconds but no microseconds, often the same instant
+across many records, was written by code: the frontend's date-time input works to the minute. A truncated clock is right on affected code, a local time
 read from a file is not, so such a value is now `machine_time`: E inside a period with that
 reason, never C, and never marked as sent by the frontend. The R11 section is shown only for
 instances running pre-incident (or unknown) code.
 
-**Found in the prod scans (1.451).** About 1,250 values per database, on three databases that
-never ran affected code, sit in calculation tables without history or row stamps, and were E
-for want of a write time, although those
-databases never ran affected code. With no exposure period or gap at all, there is nothing a
-write time could fall inside: such a value is now placed outside (D, or E for its source if
+**No exposure, no write time (1.451).** Calculation tables often have no history or row
+stamps. In a database with no exposure period or gap at all, there is nothing a write time
+could fall inside: such a value is now placed outside (D, or E for its source if
 midnight UTC). Where an exposure exists it stays E.
 
-**Found in the prod scans (1.452).** An instance that never ran affected code holds a record
-saved by its pre-incident version with a start date of 22:00 Berlin the day before a quarter
-began and an end two hours before 23:59:59: the UTC digits of the intended values, read as
-Berlin time. That is R11's reverse shift, though no frontend sent instants yet, so another
-client or code can cause it at any time. Outside every exposure period such a mirror value
-(22:00 or 23:00 local the day before a date) was D; it is now E with that reason. 1.446 now
-expects its two mirror values to be E. Removing the rule fails 1.446 and 1.452.
+**Early values (1.452 – 1.453).** R11's shift, UTC digits read as local time, needs no new
+frontend: any client or code that hands a version reading local time the UTC digits of a value
+causes it, at any time. A day's start or end stored 1–2 h early (22:00 or 23:00 local the day
+before; 21:59:59 or 22:59:59 on the day) was D outside the periods; it is now E with that
+reason, and the column's mirror count includes ends of day. 1.446 now expects its two mirror
+values to be E. Removing the start-of-day form fails 1.446 and 1.452; the end-of-day form,
+in Python or in SQL, 1.453.
+
+**A column that explains its own dates (1.454).** B says only affected code explains a date
+stored at midnight UTC. A column, counted with its history and meta-history, that also holds
+midnight UTC written outside every period (an import that hands over UTC instants does this in
+any version) gives no such proof: its values inside the periods are now E with that reason, so
+a correction never moves values that follow the column's own convention. Removing the rule,
+or applying it per layer only, fails 1.454.

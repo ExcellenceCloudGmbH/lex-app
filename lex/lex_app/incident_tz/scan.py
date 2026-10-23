@@ -155,9 +155,14 @@ REASONS = {
                                "late if a local time was read from a file: check its source",
     ("E", "midnight_utc", OUT): "midnight UTC written outside every exposure "
                                 "period: not this incident, check the source",
-    ("E", "mirror", OUT): "22:00 or 23:00 local time the day before a date, written outside "
-                          "every exposure period: the UTC digits of a midnight read as local "
-                          "time, so 1-2 h early unless that hour was meant; check its source",
+    ("E", "mirror", OUT): "1-2 h before a day's start or end (22:00 or 23:00 the day before, "
+                          "21:59:59 or 22:59:59 on the day), written outside every exposure "
+                          "period: UTC digits read as local time, so early unless that hour "
+                          "was meant; check its source",
+    ("E", "midnight_utc", "column"): "midnight UTC written while affected code ran, in a column "
+                                     "that also holds midnight UTC written outside every exposure "
+                                     "period: its source stores dates that way in any version, "
+                                     "so this is no proof of the incident; check its source",
     ("E", EDGE): "written in the gap around an exposure period's start or end",
     ("E", AMBIGUOUS): "the row was written both inside and outside an exposure "
                       "period; this field's own write time is unknown",
@@ -670,7 +675,10 @@ def _classes(v: str) -> dict:
         "time_of_day": (
             f"{micro} = 0 AND {utc_time} <> time '00:00' AND {local_time} <> time '00:00'"
         ),
-        "r11_mirror": f"{micro} = 0 AND {local_time} = time '00:00' - {offset}",
+        "r11_mirror": (
+            f"{micro} = 0 AND ({local_time} = time '00:00' - {offset} "
+            f"OR {local_time} = time '23:59:59' - {offset})"
+        ),
         # Values whose write time decides their verdict.
         "candidate": (
             f"{micro} = 0 AND ({utc_time} = time '00:00' OR {local_time} <> time '00:00')"
@@ -895,19 +903,25 @@ def detect_exposure(
 
 
 def _is_mirror(value: Optional[dt.datetime], zone: str) -> bool:
-    """Is this a date picked on a pre-incident backend through a frontend that sent an
-    instant (R11)? Its wall clock in ``zone`` is exactly midnight minus the offset:
-    22:00 in summer, 23:00 in winter, the day before."""
+    """Is this a day's start or end stored 1-2 h early, the UTC digits of the intended
+    value read as local time (R11's shift, from whatever client or code sent them)?
+
+    Its wall clock in ``zone`` is exactly midnight minus the offset (22:00 in summer,
+    23:00 in winter, the day before) or 23:59:59 minus the offset (21:59:59 or
+    22:59:59 on the day)."""
     if value is None or ZoneInfo is None:
         return False
     try:
         local = _aware(value).astimezone(ZoneInfo(zone))
-        if local.microsecond or local.second:
+        if local.microsecond:
             return False
-        shifted = local.replace(tzinfo=None) + local.utcoffset()
+        shifted = (local.replace(tzinfo=None) + local.utcoffset()).time()
     except OverflowError:  # "never expires" sentinels at the end of the calendar
         return False
-    return shifted.time() == dt.time(0) and local.time() != dt.time(0)
+    for meant in (dt.time(0), dt.time(23, 59, 59)):
+        if shifted == meant and local.time() != meant:
+            return True
+    return False
 
 
 def _frontend(letter: str, written: Any) -> Optional[str]:
@@ -922,7 +936,7 @@ def _frontend(letter: str, written: Any) -> Optional[str]:
 
 def _row(layer, table, column, row_id, record_id, value, digits, kind,
          fix_b, fix_c, written, position, zone) -> dict:
-    mirror = kind == "time_of_day" and _is_mirror(value, zone)
+    mirror = kind in ("time_of_day", "machine_time") and _is_mirror(value, zone)
     letter, reason = verdict(kind, position, mirror)
     if isinstance(written, tuple):
         written_out: Any = [_iso(written[0]), _iso(written[1])]
@@ -1066,6 +1080,32 @@ def _signature_only(cursor, table, column, zone, layer, periods=()) -> list:
 def _is_read_only(cursor) -> bool:
     cursor.execute("SHOW transaction_read_only")
     return str(cursor.fetchone()[0]).lower() == "on"
+
+
+def _no_b_where_the_column_explains_it(rows: list, columns: list,
+                                       main_of_history: dict, owners_of_meta: dict) -> None:
+    """Turn B into E in every column that also holds midnight UTC written outside the periods.
+
+    B says only affected code explains a midnight-UTC date. A column, counted with its
+    history and meta-history, whose dates were stored at midnight UTC by a pre-incident
+    or fixed version too (an import that hands over UTC instants, say) gives no such
+    proof: shifting its values would move correct ones.
+    """
+    def owner(table_name: str) -> str:
+        main = main_of_history.get(table_name) or owners_of_meta.get(table_name, (None, None))[0]
+        return main.name if main is not None else table_name
+
+    mixed = {(owner(r["table"]), r["column"]) for r in rows
+             if r["kind"] == "midnight_utc" and r["position"] == OUT}
+    if not mixed:
+        return
+    by_column = {(c.table, c.column): c for c in columns}
+    for r in rows:
+        if r["verdict"] == "B" and (owner(r["table"]), r["column"]) in mixed:
+            r["verdict"], r["reason"], r["corrected"] = "E", REASONS[("E", "midnight_utc", "column")], None
+            report = by_column[(r["table"], r["column"])]
+            report.verdicts["B"] -= 1
+            report.verdicts["E"] += 1
 
 
 def _prior_corrections(cursor, catalogue: dict) -> list:
@@ -1232,15 +1272,17 @@ def scan(
                         found = _signature_only(cursor, table, column, zone, layer, periods)
             for row in found:
                 report.verdicts[row["verdict"]] += 1
-                if row["after_switch"] and row["kind"] == "time_of_day":
+                if row["after_switch"]:
                     if row["mirror"]:
                         report.r11_mirror_after_switch += 1
-                    else:
+                    elif row["kind"] == "time_of_day":
                         report.typed_after_switch += 1
             rows.extend(found)
             columns.append(report)
         if checkpoint is not None:
             checkpoint()
+
+    _no_b_where_the_column_explains_it(rows, columns, main_of_history, owners_of_meta)
 
     totals = {layer: dict.fromkeys(VERDICTS, 0) for layer in LAYERS}
     for report in columns:
