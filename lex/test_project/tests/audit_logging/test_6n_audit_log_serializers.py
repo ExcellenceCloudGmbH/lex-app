@@ -173,7 +173,15 @@ class TestCluster06n_StatusFields(SimpleTestCase):
 
     # 6.145 -------------------------------------------------------------
     def test_6_145_all_status_fields_surface_record_values(self) -> None:
-        """Live record → every value flows through (datetimes via isoformat)."""
+        """Live record → every value flows through (datetimes via isoformat).
+
+        Read as a superuser: the traceback is withheld from everyone else
+        (LEX_SEC_READ_SURFACES, scenario 6.165).
+        """
+        self.ser._context = {"request": SimpleNamespace(
+            user=SimpleNamespace(is_authenticated=True, is_superuser=True),
+        )}
+        self.ser.parent = None
         ts_created = datetime.datetime(2026, 5, 12, 9, 0, 0)
         ts_updated = datetime.datetime(2026, 5, 12, 9, 0, 5)
         record = _status_record(

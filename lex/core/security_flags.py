@@ -13,7 +13,9 @@ Flags (name → what "on" means):
 
 * ``FAIL_CLOSED``   – an exception inside a permission hook denies access.
 * ``NOT_FOUND``     – a record the user may not read answers 404 (not 200 ``{}``).
-* ``READ_SURFACES`` – history, global search, export and file download apply read permission.
+* ``READ_SURFACES`` – history, global search, export and file download apply read permission; an
+  export/download audit entry is visible to who may read its record (or export its model), its
+  status row follows it, and audit tracebacks are superuser-only.
 * ``EDIT``          – ``permission_edit`` is enforced on every write path (BUG-010).
 * ``FILTERS``       – list filters/ordering only on fields the user may see.
 * ``TRACEBACKS``    – error responses carry no traceback unless ``DEBUG`` or ``LEX_API_TRACEBACKS=true``.
