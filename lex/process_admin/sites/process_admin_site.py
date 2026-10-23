@@ -18,7 +18,6 @@ from lex.api.views.model_entries.One import OneModelEntry
 from lex.api.views.model_info.Fields import Fields
 from lex.api.views.model_info.Widgets import Widgets
 from lex.api.views.permissions.ModelPermissions import ModelPermissions
-from lex.api.views.process_flow.CreateOrUpdate import CreateOrUpdate
 from lex.api.views.project_info.ProjectInfo import ProjectInfo
 from lex.api.views.sharepoint.DeleteUnusedFiles import DeleteUnusedFiles
 from lex.api.views.sharepoint.SharePointFileDownload import SharePointFileDownload
@@ -33,7 +32,6 @@ from lex.process_admin.models.ModelProcessAdmin import ModelProcessAdmin
 from lex.process_admin.views.model_relation_views import (
     ModelStructureObtainView,
     Overview,
-    ProcessStructure,
 )
 from lex.utilities.decorators.singleton import LexSingleton
 
@@ -54,7 +52,6 @@ class ProcessAdminSite:
         self.auto_include_missing_models_in_structure = True
         self.model_styling = {}
         self.html_reports = {}
-        self.processes = {}
         self.widget_structure = []
 
         self.initialized = False
@@ -74,9 +71,6 @@ class ProcessAdminSite:
 
     def registerHTMLReport(self, name, report):
         self.html_reports[name] = report
-
-    def registerProcess(self, name, process):
-        self.processes[name] = process
 
     def register_model_structure(
         self,
@@ -152,9 +146,6 @@ class ProcessAdminSite:
         # Define the function that returns the HTML report
         return self.html_reports[report_name].get_html(user)
 
-    def get_process_structure_func(self, process_name):
-        return self.processes[process_name]()
-
     # TODO: Put urls definitions in the correct place (e.g. in a urls.py file)
     def _get_urls(self):
         register_converter(
@@ -186,11 +177,6 @@ class ProcessAdminSite:
                 Overview.as_view(HTML_reports=self.html_reports),
                 name="htmlreports",
             ),
-            path(
-                "api/process/<str:process_name>",
-                ProcessStructure.as_view(processes=self.processes),
-                name="process",
-            ),
             path('api/auth/streamlit-token/', StreamlitTokenView.as_view(), name='streamlit_token'),
 
         ]
@@ -215,11 +201,6 @@ class ProcessAdminSite:
                 "api/model_entries/<model:model_container>/<str:calculationId>/history/<int:pk>",
                 HistoryModelEntry.as_view(),
                 name="model-history-list",
-            ),
-            path(
-                "api/run_step/<model:model_container>/<str:pk>",
-                CreateOrUpdate.as_view(),
-                name="run_step",
             ),
             path(
                 "api/model_entries/<model:model_container>/many",

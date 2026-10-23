@@ -10,11 +10,10 @@ old behaviour; a per-flag setting wins over the umbrella switch):
 * NOT_FOUND – a record the caller may not read answers 404 on single and bulk
   endpoints, never 200 ``{}`` and never a new 403 (the bundled frontend signs
   the user out on 403).
-* EDIT – ``permission_edit`` is enforced on PATCH/PUT, bulk PATCH and
-  run_step (BUG-010); bulk DELETE asks ``permission_delete`` per row; run_step
-  asks ``permission_create``. Denials answer 400 with ``EDIT_NOT_ALLOWED``,
-  ``DELETE_NOT_ALLOWED`` or ``CREATE_NOT_ALLOWED`` and a ``{code, detail,
-  error}`` body.
+* EDIT – ``permission_edit`` is enforced on PATCH/PUT and bulk PATCH
+  (BUG-010); bulk DELETE asks ``permission_delete`` per row. Denials answer
+  400 with ``EDIT_NOT_ALLOWED``, ``DELETE_NOT_ALLOWED`` or
+  ``CREATE_NOT_ALLOWED`` and a ``{code, detail, error}`` body.
 * READ_SURFACES – history, global search, export and file download apply read
   permission. The HTML report endpoint requires sign-in; an unknown report is
   404.
@@ -27,9 +26,10 @@ duplicate evaluations), and a classic API key keeps its own context where the
 serializer decides a row.
 
 Cluster 4o — scenarios 4.80–4.100. Type: E (4.98–4.99: U).
+Scenario 4.90 is retired: it pinned run_step, and the ProcessFlow endpoint it
+drove was removed with the Process feature (cluster 10q pins its absence).
 Covers: lex/core/security_flags.py, lex/api/security.py,
 lex/api/views/model_entries/{One,Many,History,filter_backends}.py,
-lex/api/views/process_flow/CreateOrUpdate.py,
 lex/api/views/global_search_for_models/Search.py,
 lex/api/views/file_operations/{ModelExport,FileDownload}.py,
 lex/api/filters/GenericFilters.py, lex/api/serializers/base_serializers.py,
@@ -310,29 +310,6 @@ class TestCluster04o_EditEnforcement(_SecureDefaultsCase):
         with _legacy():
             self.client.delete(url)
         self.assertEqual(ProtectedItem.objects.count(), 0)
-
-    # -- 4.90 ----------------------------------------------------------
-    def test_4_90_run_step_applies_the_same_checks(self) -> None:
-        """
-        Scenario 4.90: run_step cannot bypass edit and create permissions.
-        Given: a ProtectedItem and a non-admin (may edit only "name", may not create)
-        When: run_step PATCHes "secret" on it, and PATCHes a new row for an unknown pk
-        Then: the first answers 400 EDIT_NOT_ALLOWED; the create answers 400
-              CREATE_NOT_ALLOWED; nothing changes.
-        """
-        item = ProtectedItem.objects.create(name="p", secret="original")
-        url = reverse("process_admin_rest_api:run_step", kwargs={"model_container": _Container(PROTECTED), "pk": item.pk})
-        response = self.client.patch(url, {"secret": "leaked"}, format="json")
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["code"], "EDIT_NOT_ALLOWED")
-        url = reverse("process_admin_rest_api:run_step", kwargs={"model_container": _Container(PROTECTED), "pk": 999999})
-        response = self.client.patch(url, {"name": "new"}, format="json")
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["code"], "CREATE_NOT_ALLOWED")
-        self.assertIn("ProtectedItem", response.json()["error"])
-        self.assertEqual(ProtectedItem.objects.count(), 1)
-        item.refresh_from_db()
-        self.assertEqual(item.secret, "original")
 
 
 class _PlainReport(HTMLReport):

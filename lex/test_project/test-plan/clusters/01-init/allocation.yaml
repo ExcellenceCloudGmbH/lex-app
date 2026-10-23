@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 405
+max_scenario: 409
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1285,3 +1285,21 @@ letters:
       warnings.catch_warnings(), which drops the warning policy the settings install there,
       so the plugin reinstalls those filters in pytest_configure (1.393, third half). 1av
       (1.386-1.392) is reserved by an open PR, hence aw.
+  ax:
+    title: The Process model feature removed from the framework's public surface
+    scenarios: 1.406-1.409
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      Process (the abstract workflow model) and its registry are gone. lex.core.models no longer
+      imports or advertises Process (1.406); processAdminSite keeps no processes dict,
+      registerProcess or get_process_structure_func, and ModelRegistration no longer carries
+      _register_process_model, while the HTMLReport equivalents all survive (1.407); 'Process' left
+      _RESERVED_CLASS_NAMES, so a project may now call its own model Process while LexModel /
+      CalculationModel / HTMLReport and the Historical* prefix stay reserved (1.408); the
+      model-structure payload types nodes Model / HTMLReport / Folder only, never Process (1.409).
+      Each scenario checks the kept HTMLReport sibling too, so a broken registration cannot pass as
+      a clean removal. The routes that served the feature are pinned by 10q.

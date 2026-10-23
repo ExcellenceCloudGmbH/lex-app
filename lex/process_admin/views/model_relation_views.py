@@ -203,14 +203,3 @@ class Overview(APIView):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         html = html_report_class().get_html(user)
         return Response(html)
-
-
-class ProcessStructure(APIView):
-    http_method_names = ["get"]
-    processes = None
-
-    def get(self, request, *args, **kwargs):
-        class_name = kwargs["process_name"]
-        process_class = self.processes[class_name]
-        process_structure = process_class().get_structure()
-        return Response(process_structure)

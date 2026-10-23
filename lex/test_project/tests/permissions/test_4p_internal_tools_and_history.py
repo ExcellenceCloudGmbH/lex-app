@@ -19,7 +19,7 @@ A model's own ``permission_list`` is honoured by the list endpoint: refused →
 
 History tables (``Historical*``, ``MetaHistorical*``) are the record of what
 was true and when. With ``LEX_SEC_HISTORY_WRITE`` only a superuser may write
-them: PATCH, PUT, POST, DELETE, bulk PATCH/DELETE and run_step answer 400
+them: PATCH, PUT, POST, DELETE and bulk PATCH/DELETE answer 400
 ``EDIT_NOT_ALLOWED`` for everyone else (never 403 — the bundled frontend signs
 out on 403). ``LEX_LEGACY_SECURITY=true`` / ``LEX_SEC_<FLAG>=false`` restore
 the old behaviour.
@@ -32,8 +32,7 @@ lex/api/views/LexLoggerView/LexLoggerView.py,
 lex/api/views/model_entries/CalculationLogTreeView.py,
 lex/api/views/calculations/DownloadMarkdownPdf.py,
 lex/api/views/model_entries/{One,Many,List}.py,
-lex/api/views/model_entries/mixins/DestroyOneWithPayloadMixin.py,
-lex/api/views/process_flow/CreateOrUpdate.py.
+lex/api/views/model_entries/mixins/DestroyOneWithPayloadMixin.py.
 Run: python -m lex pytest lex/test_project/tests/permissions/test_4p_internal_tools_and_history.py -v
 """
 
@@ -70,11 +69,6 @@ def _legacy():
     return _env(LEX_LEGACY_SECURITY="true")
 
 
-class _Container:
-    def __init__(self, model_id):
-        self.id = model_id
-
-
 class _HardeningCase(E2ETestCase):
     e2e_models = SECURE_DEFAULT_MODELS
     e2e_framework_models = [CalculationLog]
@@ -89,9 +83,6 @@ class _HardeningCase(E2ETestCase):
     def make_superuser(self) -> None:
         self.user.is_superuser = True
         self.user.save(update_fields=["is_superuser"])
-
-    def run_step_url(self, model_name, pk):
-        return reverse("process_admin_rest_api:run_step", kwargs={"model_container": _Container(model_name), "pk": pk})
 
 
 class TestCluster04p_InternalTools(_HardeningCase):
@@ -215,7 +206,8 @@ class TestCluster04p_InternalTools(_HardeningCase):
         Scenario 4.105: editing auth.User through the generic API needs a superuser.
         Given: another user and a signed-in non-superuser
         When: the user patches the other user's e-mail and superuser flag, creates
-              a user through run_step and deletes the other user through /many
+              a user through the create endpoint and deletes the other user
+              through /many
         Then: each answers 400 EDIT_NOT_ALLOWED with a readable error and nothing
               changes; a superuser may change the e-mail (200).
         """
@@ -225,7 +217,7 @@ class TestCluster04p_InternalTools(_HardeningCase):
         self.assertEqual(response.status_code, 400, response.content[:300])
         self.assertEqual(response.json()["code"], "EDIT_NOT_ALLOWED")
         self.assertTrue(response.json()["error"])
-        created = self.client.patch(self.run_step_url("user", 999999), {"username": "c4p-new"}, format="json")
+        created = self.client.post(self.url_create("user"), {"username": "c4p-new"}, format="json")
         self.assertEqual(created.status_code, 400, created.content[:300])
         self.assertEqual(created.json()["code"], "EDIT_NOT_ALLOWED")
         deleted = self.client.delete(f"{self.url_many('user')}?ids={other.pk}")
@@ -301,10 +293,10 @@ class TestCluster04p_HistoryWrites(_HardeningCase):
     # -- 4.108 ---------------------------------------------------------
     def test_4_108_every_other_write_path_is_refused(self) -> None:
         """
-        Scenario 4.108: delete, create, bulk and run_step refuse history writes too.
+        Scenario 4.108: delete, create and bulk refuse history writes too.
         Given: the same history rows and their meta-history
         When: the user DELETEs one, POSTs a new one, bulk-PATCHes and bulk-DELETEs
-              them, writes one through run_step and PATCHes a meta-history row
+              them and PATCHes a meta-history row
         Then: every answer is 400 EDIT_NOT_ALLOWED (never 403) and no history row
               changed, appeared or disappeared.
         """
@@ -317,7 +309,6 @@ class TestCluster04p_HistoryWrites(_HardeningCase):
             "create": self.client.post(self.url_create(name), {"name": "forged", "id": item.pk}, format="json"),
             "bulk patch": self.client.patch(many, {"name": "rewritten"}, format="json"),
             "bulk delete": self.client.delete(many),
-            "run_step": self.client.patch(self.run_step_url(name, row.history_id), {"name": "x"}, format="json"),
         }
         meta_model = history_model.meta_history.model
         meta_row = meta_model.objects.first()

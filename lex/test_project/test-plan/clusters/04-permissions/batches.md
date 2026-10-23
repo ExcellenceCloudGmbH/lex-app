@@ -85,11 +85,11 @@ must not open a check on the whole model.
 | --- | --- |
 | Scenario range | 4.80 – 4.100 |
 | Type | E (4.98–4.99 U) |
-| Files covered | `lex/core/security_flags.py`, `lex/api/security.py`, `lex/api/views/model_entries/{One,Many,History,filter_backends}.py`, `lex/api/views/process_flow/CreateOrUpdate.py`, `lex/api/views/global_search_for_models/Search.py`, `lex/api/views/file_operations/{ModelExport,FileDownload}.py`, `lex/api/filters/GenericFilters.py`, `lex/api/serializers/base_serializers.py`, `lex/process_admin/views/model_relation_views.py` (`Overview`) |
+| Files covered | `lex/core/security_flags.py`, `lex/api/security.py`, `lex/api/views/model_entries/{One,Many,History,filter_backends}.py`, `lex/api/views/global_search_for_models/Search.py`, `lex/api/views/file_operations/{ModelExport,FileDownload}.py`, `lex/api/filters/GenericFilters.py`, `lex/api/serializers/base_serializers.py`, `lex/process_admin/views/model_relation_views.py` (`Overview`) |
 | Test file | `lex/test_project/tests/permissions/test_4o_secure_defaults.py` |
-| Test classes | `TestCluster04o_FailClosedAndNotFound` (4.80–4.84), `TestCluster04o_EditEnforcement` (4.85–4.90), `TestCluster04o_ReadSurfaces` (4.91–4.95), `TestCluster04o_SignedOut` (4.100), `TestCluster04o_ReadOncePerRow` (4.96), `TestCluster04o_ApiKeyReadContext` (4.97), `TestCluster04o_SecurityFlags` (4.98), `TestCluster04o_SuperuserOrAdmin` (4.99) |
+| Test classes | `TestCluster04o_FailClosedAndNotFound` (4.80–4.84), `TestCluster04o_EditEnforcement` (4.85–4.89), `TestCluster04o_ReadSurfaces` (4.91–4.95), `TestCluster04o_SignedOut` (4.100), `TestCluster04o_ReadOncePerRow` (4.96), `TestCluster04o_ApiKeyReadContext` (4.97), `TestCluster04o_SecurityFlags` (4.98), `TestCluster04o_SuperuserOrAdmin` (4.99) |
 | Fixtures | `RaisingReadItem`, `SecretDocument` (new in `permissions/models.py`), `ProtectedItem`, `FilterBackendItem`, `KeycloakItem`; `LEX_SEC_*`/`LEX_LEGACY_SECURITY` cleared per test |
-| Tests landed | **21 pass / 0 fail** |
+| Tests landed | **20 pass / 0 fail** — 4.90 retired 2026-10-22 with the ProcessFlow endpoint (see [10q](../10-api_layer/batches.md)); the id is not reused |
 | Also changed | 4.4 live again (BUG-010 resolved); 4.41 asserts 404 by default and the old `200 {}` under `LEX_LEGACY_SECURITY=true`; 10.47–10.54 mocks report a real `FileField` and stand in for the read check; 12h `AttachmentItem` opens read/edit |
 | Status | ✅ Complete — ported from #816 without `permission_read_queryset`, `permission_serializer`, `HTMLReport.permission_view`, `lex_strict_input`, `EXPOSE_AUTO_SERIALIZER` |
 
@@ -101,11 +101,11 @@ must not open a check on the whole model.
 | --- | --- |
 | Scenario range | 4.101 – 4.110 |
 | Type | E |
-| Files covered | `lex/core/security_flags.py` (`is_superuser`, `superuser_only`), `lex/api/security.py` (`write_denial`, `list_denied`, `is_history_model`), `lex/api/views/sharepoint/DeleteUnusedFiles.py`, `lex/api/views/LexLoggerView/LexLoggerView.py`, `lex/api/views/model_entries/CalculationLogTreeView.py`, `lex/api/views/calculations/DownloadMarkdownPdf.py`, `lex/api/views/model_entries/{One,Many,List}.py`, `lex/api/views/model_entries/mixins/DestroyOneWithPayloadMixin.py`, `lex/api/views/process_flow/CreateOrUpdate.py` |
+| Files covered | `lex/core/security_flags.py` (`is_superuser`, `superuser_only`), `lex/api/security.py` (`write_denial`, `list_denied`, `is_history_model`), `lex/api/views/sharepoint/DeleteUnusedFiles.py`, `lex/api/views/LexLoggerView/LexLoggerView.py`, `lex/api/views/model_entries/CalculationLogTreeView.py`, `lex/api/views/calculations/DownloadMarkdownPdf.py`, `lex/api/views/model_entries/{One,Many,List}.py`, `lex/api/views/model_entries/mixins/DestroyOneWithPayloadMixin.py` |
 | Test file | `lex/test_project/tests/permissions/test_4p_internal_tools_and_history.py` |
 | Test classes | `TestCluster04p_InternalTools` (4.101–4.105), `TestCluster04p_PermissionList` (4.106), `TestCluster04p_HistoryWrites` (4.107–4.110) |
 | Fixtures | `SECURE_DEFAULT_MODELS` (`ProtectedItem`, `FilterBackendItem`), `CalculationLog` rows with and without a record, `auth.User`; SharePoint cleanup, `LexLogger` and PDF rendering stubbed; `LEX_SEC_*`/`LEX_LEGACY_SECURITY` cleared per test |
-| Tests landed | **10 pass / 0 fail** |
+| Tests landed | **10 pass / 0 fail** — 2026-10-22: 4.105 creates through the CRUD endpoint and 4.108 dropped its `run_step` probe, the ProcessFlow endpoint having been removed (see [10q](../10-api_layer/batches.md)) |
 | Also changed | 10.61–10.66 drive the tree as a superuser and 15.32–15.38 download as one: their logs belong to no record, which only operators may read now |
 | Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-18-v2-security-hardening-internal-config.md) |
 
