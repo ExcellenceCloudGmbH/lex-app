@@ -1,9 +1,12 @@
+import logging
 from io import BytesIO
 
 import pandas as pd
 from django.core.files.storage import default_storage
 from lex.core.fields import XLSXField
 from pandas.api.types import is_datetime64_any_dtype as is_datetime
+
+logger = logging.getLogger(__name__)
 
 
 def convert_dfs_in_excel(path, data_frames, sheet_names=None, merge_cells=False, formats={}, index=True):
@@ -432,5 +435,13 @@ def can_read_from_payload(request, audit_log, base_user_context=None) -> bool:
         return True
 
     except Exception:
-        # Preserve allow-by-default behavior on any error
+        from lex.core.security_flags import strict
+
+        if strict("FAIL_CLOSED"):
+            logger.exception(
+                "permission_read of %s raised on an audit-log entry; entry hidden (LEX_SEC_FAIL_CLOSED).",
+                getattr(model_class, "__name__", model_class),
+            )
+            return False
+        # Legacy (LEX_SEC_FAIL_CLOSED=false): allow on any error
         return True

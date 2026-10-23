@@ -627,7 +627,11 @@ class LexSerializer(serializers.ModelSerializer):
         allowed = True
         try:
             related_obj = related_model.objects.get(pk=related_id)
-
+        except Exception:
+            # The related record is gone (or the id is malformed): nothing to judge.
+            cache[cache_key] = True
+            return True
+        try:
             if hasattr(related_obj, "permission_read"):
                 if base_user_context is not None:
                     user_context = base_user_context.with_instance(request, related_obj)
@@ -642,7 +646,14 @@ class LexSerializer(serializers.ModelSerializer):
                 else:
                     allowed = bool(readable_fields)
         except Exception:
-            allowed = True
+            if _fail_closed():
+                logger.exception(
+                    "permission_read of %s raised on an audit-log payload reference; reference withheld",
+                    related_model.__name__,
+                )
+                allowed = False
+            else:
+                allowed = True
 
         cache[cache_key] = allowed
         return allowed
@@ -931,7 +942,10 @@ class LexSerializer(serializers.ModelSerializer):
                         else:
                             representation['payload'] = filtered_payload
         except Exception:
-            pass
+            if _fail_closed():
+                # The payload could not be judged: withhold it rather than show it unfiltered.
+                logger.exception("Filtering the audit-log payload raised; payload withheld")
+                representation['payload'] = {}
 
         # Add FK display-name companions (<fk>__short_description) for the
         # detail / single-object path. During list serialization this is

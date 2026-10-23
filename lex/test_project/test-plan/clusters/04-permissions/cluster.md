@@ -106,3 +106,19 @@
 | 4.110 | main record | PATCH of the record itself still 200 |
 
 **Scenario range:** 4.101 – 4.110. **Test file:** `lex/test_project/tests/permissions/test_4p_internal_tools_and_history.py`. **Type:** E. **Status:** ✅ Complete (2026-10-18). Batch: [4p](batches.md).
+
+---
+
+### 4r. A raising permission hook denies on the remaining surfaces ✅
+
+**Gap:** 4o made a raising permission hook deny on the record endpoints, but four places still caught the exception and allowed: the audit-log list (`can_read_from_payload`), the audit-log payload's foreign-key references and its field filtering, the export's per-row field selection, and `PermissionAwareSerializerMixin`. Under `LEX_SEC_FAIL_CLOSED` (on by default) each denies; `LEX_SEC_FAIL_CLOSED=false` restores the allow.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.116 | audit entry, record's read raises | entry hidden; opt-out lists it |
+| 4.117 | payload reference, referenced record's read raises | reference dropped from the payload; opt-out keeps it |
+| 4.118 | payload filtering raises | payload `{}`; opt-out returns it unfiltered |
+| 4.119 | export, row's export check raises | row left out; opt-out exports it |
+| 4.120 | serializer mixin, edit/create check raises | `PermissionDenied`; opt-out validates |
+
+**Scenario range:** 4.116 – 4.120. **Test file:** `lex/test_project/tests/permissions/test_4r_fail_closed_remaining_surfaces.py`. **Type:** E (4.118, 4.120 I). **Status:** ✅ Complete (2026-10-23). Batch: [4r](batches.md).

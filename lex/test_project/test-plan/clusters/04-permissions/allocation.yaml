@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 110
+max_scenario: 120
 letters:
   a:
     title: ''
@@ -185,3 +185,20 @@ letters:
       admin role; E1 is new. 2026-10-22: 4.105 creates through the CRUD endpoint and 4.108 dropped
       its run_step probe -- the ProcessFlow endpoint was removed with the Process feature (10q).
       Both scenarios keep every other write path; pass stays 10.
+  r:
+    title: A raising permission hook denies on the remaining surfaces (LEX_SEC_FAIL_CLOSED)
+    scenarios: 4.116-4.120
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      4o made raising hooks deny on the record endpoints; four places still allowed. Now, under
+      FAIL_CLOSED: an audit-log entry whose record's permission_read raises is hidden (4.116,
+      can_read_from_payload); a payload reference to a record whose permission_read raises is dropped
+      (4.117); a payload whose filtering raises is withheld as {} (4.118); a row whose
+      permission_export raises is left out of the export (4.119); PermissionAwareSerializerMixin
+      refuses an edit/create whose check raises (4.120). LEX_SEC_FAIL_CLOSED=false restores the allow
+      in each. All five fail on fix/audit-log-read-side-v2 (lex-app-v2 0ac01da8 + #842). 4.111-4.115 are
+      reserved for 4q (permission_create on the filled record, separate PR).
