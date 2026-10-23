@@ -44,6 +44,8 @@ Cluster 1ax — scenarios 1.406–1.412. Type: I.
 Covers: lex/core/models/__init__.py (``Process`` dropped from ``__all__``),
 lex/core/models/Process.py (deleted),
 lex/model_admin/sites/lex_admin_site.py (process registry),
+lex/model_admin/settings/lex_admin_settings.py (renamed from
+lex/process_admin/settings/process_admin_settings.py; 1.413 imports it),
 lex/model_admin/utils/model_registration.py (Process branch and reserved
 name), lex/model_admin/models/utils.py (structure node types).
 Run: python -m lex pytest lex/test_project/tests/init/test_1ax_process_feature_removed.py -v
@@ -361,11 +363,11 @@ class TestCluster01ax_ProcessFeatureRemoved(TestCase):
             f"{_p}Flow", f"{_lower}_flow", "run_step", f"register{_p}",
         )
         # Only the two files whose job is to assert the absence may name it:
-        # this one and 10p, which pins that the routes and the old namespace
+        # this one and 10q, which pins that the routes and the old namespace
         # are gone. Everything else under lex/ must be clean.
         allowed = {
             pathlib.Path(__file__).resolve(),
-            (_LEX_ROOT / "test_project/tests/api_layer/test_10p_process_routes_removed.py").resolve(),
+            (_LEX_ROOT / "test_project/tests/api_layer/test_10q_process_routes_removed.py").resolve(),
         }
         offenders = []
         for path in _LEX_ROOT.rglob("*.py"):

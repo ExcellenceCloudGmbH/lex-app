@@ -698,7 +698,10 @@ class TestCluster1ae_StreamlitFloor:
 
         assert len(streamlit_entries) == 1, f"expected one streamlit entry, got {streamlit_entries}"
         entry = streamlit_entries[0]
-        assert ">=" in entry, (
+        # An exact pin (`streamlit==1.61.0`) records its version as the floor;
+        # a range records it after ">=".
+        operator = "==" if "==" in entry else ">="
+        assert operator in entry, (
             f"streamlit requirement records no minimum version: {entry!r}. The theme "
             f"needs >= {'.'.join(map(str, self.MINIMUM))} for the modern theme keys."
         )
@@ -706,7 +709,7 @@ class TestCluster1ae_StreamlitFloor:
         # (`streamlit>=1.61,<1.62`), and splitting only on ">=" then leaves
         # "1.61,<1.62" — whose second component is not an integer. The floor is
         # the part before any further specifier.
-        floor = entry.split(">=", 1)[1].split(",")[0].strip()
+        floor = entry.split(operator, 1)[1].split(",")[0].strip()
         parsed = tuple(int(part) for part in floor.split(".")[:2])
         assert parsed >= self.MINIMUM, f"floor {floor} is below the required {self.MINIMUM}"
 

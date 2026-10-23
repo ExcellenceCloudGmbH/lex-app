@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 94
+max_scenario: 100
 letters:
   a:
     title: ''
@@ -158,12 +158,28 @@ letters:
       or the CORS allow-list, else 400 REDIRECT_NOT_ALLOWED before the OIDC view. Unknown api/ path is
       a JSON 404, SPA routes keep index.html (10.87-10.88). api/global-search/?q= routed (10.89). One
       KeycloakManager per process (10.90). Ported from #815, #821 (manager only), #830. 2026-10-22:
-      10.83 no longer drives run_step (the ProcessFlow endpoint was removed with the Process
-      feature); it keeps the CRUD create and the raising permission_create, so the scenario is one
-      probe lighter and the letter's pass count is unchanged at 8.
+      10.83 no longer drives the second write path (the ProcessFlow endpoint was removed with the
+      Process feature); it keeps the CRUD create and the raising permission_create, so the scenario
+      is one probe lighter and the letter's pass count is unchanged at 8.
   p:
+    title: File-download endpoints write an audit entry
+    scenarios: 10.91-10.96
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      Four endpoints serve a file and each has its own machine. `file-download` on local storage
+      records the record, field, filename, byte size and `delivery: stream` (10.91); a refused
+      download is a `failure` entry with its status code and no record attached (10.92); on GCS the
+      caller gets a URL, recorded as `delivery: url` so "bytes streamed" and "access handed out"
+      stay distinguishable (10.93). The SharePoint download (10.94), share link (10.95) and preview
+      link (10.96) are audited as downloads too, told apart by `delivery`. SharePoint's SDK is mocked
+      at the project boundary; `DownloadableDocument` is the cluster's own FileField model.
+  q:
     title: The Process and ProcessFlow endpoints are gone from the route table
-    scenarios: 10.91-10.94
+    scenarios: 10.97-10.100
     status: complete
     tests:
       pass: 4
@@ -172,16 +188,16 @@ letters:
     note: >-
       Removing the Process feature took out two public routes and must have taken out nothing else.
       api/run_step/<model>/<pk> no longer reverses, no route is named run_step or served under
-      api/run_step/, and lex.api.views.process_flow no longer imports (10.91). The same for
+      api/run_step/, and lex.api.views.process_flow no longer imports (10.97). The same for
       api/process/<name>, plus ProcessStructure gone from lex.model_admin.views and
-      lex.api.views.ModelStructureObtainView (10.92). The endpoints the bundled frontend loads a
+      lex.api.views.ModelStructureObtainView (10.98). The endpoints the bundled frontend loads a
       project with -- model-structure, project-info, calculationlog-tree, init-calculation-logs,
       clean-calculations, widget-structure, global-search-query, user-permissions, log and
-      htmlreports -- all still reverse (10.93). This resolves pending decision 4 in clusters/README
-      for CreateOrUpdate. The model-side removal is pinned by 1ax. 10.94 covers the namespace rename
-      that came with taking Process out of the admin backbone: reverse() now takes lex_rest_api,
-      process_admin_rest_api raises NoReverseMatch, and no served path carries the app name under
-      either spelling -- the api/... routes are the contract with the bundled frontend and did not
-      move. LOGIN_REDIRECT_URL followed the new name: it is dead configuration (nothing in lex-app
+      htmlreports -- all still reverse (10.99). This resolves pending decision 4 in clusters/README
+      for CreateOrUpdate. The model-side removal is pinned by 1ax. 10.100 covers the namespace
+      rename that came with taking Process out of the admin backbone: reverse() now takes
+      lex_rest_api, process_admin_rest_api raises NoReverseMatch, no served path carries the app
+      name under either spelling, and LOGIN_REDIRECT_URL (dead configuration -- nothing in lex-app
       reads it, the OIDC library does not, and the shipped frontend bundle has no route by either
-      spelling), so the scenario pins its new value rather than treating it as load bearing.
+      spelling) follows the new name. Originally allocated as 10p/10.91-10.94; #840 landed that
+      letter and range on lex-app-v2 first, so this batch re-took the next free pair on merge.

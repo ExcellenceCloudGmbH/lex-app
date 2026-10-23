@@ -97,3 +97,19 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Status | ✅ Complete — paired with 7t. Checked to fail when the run shares the create's entry, or is filed under the create request's id |
 
 ---
+
+### Batch 6s — Export & download audit mechanism ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 6.121 – 6.124 |
+| Type | I |
+| Files covered | `lex/audit_logging/models/AuditLog.py` (`ACTION_CHOICES`), `lex/audit_logging/utils/file_operation_audit.py`, `lex/audit_logging/mixins/FileOperationAuditMixin.py` |
+| Test file | `lex/test_project/tests/audit_logging/test_6s_file_operation_audit.py` |
+| Test classes | `TestCluster06s_FileOperationAudit` (6.121 `export` / `download` are recordable actions and round-trip through the table and `to_dict`; 6.122 an API-key download is authored by `Technical User`, not `AnonymousUser`; 6.123 the entry exists and reads `pending` from inside the view, before the file is served, and is `success` afterwards; 6.124 a failure the API layer has no answer for still leaves a `failure` entry carrying its traceback) |
+| Fixtures | `AuditFileItem` in `tests/audit_logging/models.py` — the cluster's own `FileField` model; `AuditLog` + `AuditLogStatus` in `e2e_framework_models`; `authenticate_as_api_key` for 6.122 |
+| Tests landed | **4 pass / 0 fail** |
+| Coverage gain | the shared opener/finaliser behind every export and download entry — the per-endpoint surfaces are 10p, 13i and 15l |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-22-export-download-audit.md) |
+
+---

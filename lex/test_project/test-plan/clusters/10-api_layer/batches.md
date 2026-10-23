@@ -77,27 +77,45 @@
 
 ---
 
----
-
-### Batch 10p — the Process and ProcessFlow endpoints are gone from the route table ✅
+### Batch 10p — File-download endpoints write an audit entry ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 10.91 – 10.94 |
+| Scenario range | 10.91 – 10.96 |
+| Type | E |
+| Files covered | `lex/api/views/file_operations/FileDownload.py`, `lex/api/views/sharepoint/SharePointFileDownload.py`, `SharePointShareLink.py`, `SharePointPreview.py` |
+| Test file | `lex/test_project/tests/api_layer/test_10p_file_download_audit.py` |
+| Test classes | `TestCluster10p_FileDownloadAudit` (10.91 local download → record, field, filename, size and `delivery: stream`, generic relation pointing at the record; 10.92 a refused download → `failure` with its status code and nothing attached; 10.93 GCS → `delivery: url`) · `TestCluster10p_SharePointDownloadAudit` (10.94 SharePoint stream; 10.95 share link; 10.96 preview link, each told apart by `delivery`) |
+| Fixtures | `DownloadableDocument` in `tests/api_layer/models.py` — the cluster's own `FileField` model; `AuditLog` + `AuditLogStatus` in `e2e_framework_models`; SharePoint's SDK mocked at the project boundary |
+| Tests landed | **6 pass / 0 fail** |
+| Coverage gain | audit coverage for all four file-serving endpoints and both storage branches of `file-download`; 10l's `FieldFile` stubs completed with `name` / `size` |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-22-export-download-audit.md) |
+
+---
+
+---
+
+### Batch 10q — the Process and ProcessFlow endpoints are gone from the route table ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.97 – 10.100 |
 | Type | U |
 | Files covered | `lex/model_admin/sites/lex_admin_site.py` (the url list and the namespace), `lex/api/views/process_flow/` (deleted), `lex/model_admin/views/__init__.py` and `lex/api/views/ModelStructureObtainView.py` (`ProcessStructure` deleted), `lex/lex_app/urls.py` and `lex/lex_app/settings.py` (`LOGIN_REDIRECT_URL`) |
-| Test file | `lex/test_project/tests/api_layer/test_10p_process_routes_removed.py` |
-| Test classes | `TestCluster10p_ProcessRoutesRemoved` (10.91–10.94) |
+| Test file | `lex/test_project/tests/api_layer/test_10q_process_routes_removed.py` |
+| Test classes | `TestCluster10q_ProcessRoutesRemoved` (10.97–10.100) |
 | Fixtures | none — the project's own URLconf, walked for every `(name, path)` it serves |
 | Tests landed | **4 pass / 0 fail** |
-| Also changed | 10.83 no longer drives `run_step`; 4.90 retired (it pinned `run_step` alone); 4.105 creates through the CRUD endpoint instead; 4.108 drops its `run_step` probe |
+| Also changed | 10.83 no longer drives the removed second write path; 4.90 retired (it pinned that endpoint alone); 4.105 creates through the CRUD endpoint instead; 4.108 drops its probe |
 | Status | ✅ Complete — resolves pending decision 4 in [clusters/README.md](../README.md) for `CreateOrUpdate` |
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 10.91 | `run_step` is not routed | `reverse` raises `NoReverseMatch`, no route named `run_step` or served under `api/run_step/`, `lex.api.views.process_flow[.CreateOrUpdate]` raises `ModuleNotFoundError` |
-| 10.92 | process structure is not routed | `reverse` raises `NoReverseMatch`, no route named `process` or served under `api/process/`, neither module exposes `ProcessStructure` |
-| 10.93 | the neighbours are untouched | the ten endpoints the bundled frontend loads a project with all still reverse |
-| 10.94 | the namespace moved, no route did | `process_admin_rest_api` raises `NoReverseMatch`, `lex_rest_api:model-structure` reverses to `/api/model-structure`, no served path carries the app name, and the dead `LOGIN_REDIRECT_URL` follows the new name |
+| 10.97 | `run_step` is not routed | `reverse` raises `NoReverseMatch`, no route named `run_step` or served under `api/run_step/`, `lex.api.views.process_flow[.CreateOrUpdate]` raises `ModuleNotFoundError` |
+| 10.98 | process structure is not routed | `reverse` raises `NoReverseMatch`, no route named `process` or served under `api/process/`, neither module exposes `ProcessStructure` |
+| 10.99 | the neighbours are untouched | the ten endpoints the bundled frontend loads a project with all still reverse |
+| 10.100 | the namespace moved, no route did | `process_admin_rest_api` raises `NoReverseMatch`, `lex_rest_api:model-structure` reverses to `/api/model-structure`, no served path carries the app name, and the dead `LOGIN_REDIRECT_URL` follows the new name |
 
-**Why a regression matters:** `run_step` was a second write path into every model, carrying its own copy of the permission checks the generic CRUD endpoints apply. A route that comes back by accident is a write surface nobody audits any more. And the removal had to be surgical — it ran through the one url list the whole frontend is served from, so 10.93 is the half that proves nothing else went with it.
+**Why a regression matters:** `run_step` was a second write path into every model, carrying its own copy of the permission checks the generic CRUD endpoints apply. A route that comes back by accident is a write surface nobody audits any more. And the removal had to be surgical — it ran through the one url list the whole frontend is served from, so 10.99 is the half that proves nothing else went with it.
+
+**Allocation note:** first written as 10p/10.91–10.94. [10p](#batch-10p--file-download-endpoints-write-an-audit-entry-) (#840) landed that letter and range on `lex-app-v2` while this branch was open, so the batch re-took the next free pair when the base was merged in. Letters are never renumbered; this one moved before it ever landed.

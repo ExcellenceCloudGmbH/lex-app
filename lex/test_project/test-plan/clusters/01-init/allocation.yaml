@@ -1302,7 +1302,7 @@ letters:
       CalculationModel / HTMLReport and the Historical* prefix stay reserved (1.408); the
       model-structure payload types nodes Model / HTMLReport / Folder only, never Process (1.409).
       Each scenario checks the kept HTMLReport sibling too, so a broken registration cannot pass as
-      a clean removal. The routes that served the feature are pinned by 10p. The same sweep took the name
+      a clean removal. The routes that served the feature are pinned by 10q. The same sweep took the name
       out of the admin backbone, which was never the removed feature but carried Process through its
       package and classes: lex.model_admin replaces lex.process_admin and the eight lazy names keep
       working while ProcessAdminSite / processAdminSite raise AttributeError (1.410); LexModelAdmin
@@ -1315,5 +1315,5 @@ letters:
       which one depends on load order. The ban covers the feature's names too (ProcessStructure,
       ProcessFlow, process_flow, run_step, registerProcess) and the search strings are assembled at
       runtime so the test does not match itself; only the two files whose job is to assert the
-      absence -- this one and 10p -- are exempt, and the rest of lex/ is clean. 10.94 pins the matching namespace
+      absence -- this one and 10q -- are exempt, and the rest of lex/ is clean. 10.100 pins the matching namespace
       rename and that no served URL moved.

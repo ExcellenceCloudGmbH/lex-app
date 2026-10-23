@@ -88,7 +88,7 @@ These 5 files are **actively wired into URL routes**. Deleting them is a behavio
 | File | Live route in `lex_admin_site.py` |
 | --- | --- |
 | `lex/authentication/views/permissions.py` | `path("api/user_permissions/", UserPermissionsView.as_view())` (line 264) |
-| ~~`lex/api/views/process_flow/CreateOrUpdate.py`~~ | **Removed 2026-10-22** — the supervisor asked for the Process and ProcessFlow features to go; the `api/run_step/…` route went with the file. Pinned by [10p](clusters/10-api_layer/batches.md). |
+| ~~`lex/api/views/process_flow/CreateOrUpdate.py`~~ | **Removed 2026-10-22** — the supervisor asked for the Process and ProcessFlow features to go; the `api/run_step/…` route went with the file. Pinned by [10q](clusters/10-api_layer/batches.md). |
 | `lex/api/views/LexLoggerView/LexLoggerView.py` | `path("api/logs", LexLoggerView.as_view(), name="log")` (line 256) |
 | `lex/api/views/model_info/Widgets.py` | `path("api/widget_structure", Widgets.as_view(), name="widget-structure")` (line 245) |
 | `lex/authentication/views/token_views.py` | `path('api/auth/streamlit-token/', StreamlitTokenView.as_view())` (line 194) — also tied to whether Streamlit support is being dropped wholesale. |

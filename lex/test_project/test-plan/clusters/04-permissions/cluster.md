@@ -72,7 +72,7 @@
 | 4.87 | no edit right | every PATCH refused; legacy applies it |
 | 4.88 | bulk PATCH | 400, nothing changed |
 | 4.89 | bulk DELETE | `permission_delete` per row, 400 `DELETE_NOT_ALLOWED` with ids |
-| 4.90 | ~~run_step~~ | **Retired 2026-10-22** — it pinned the ProcessFlow endpoint, removed with the Process feature; its absence is pinned by [10.91](../10-api_layer/cluster.md). The id is not reused. |
+| 4.90 | ~~run_step~~ | **Retired 2026-10-22** — it pinned the ProcessFlow endpoint, removed with the Process feature; its absence is pinned by [10.97](../10-api_layer/cluster.md). The id is not reused. |
 | 4.91 | history | 404 for an unreadable record |
 | 4.92 | global search | only readable rows; legacy all |
 | 4.93 | export | only readable rows |

@@ -22,20 +22,20 @@ every screen. A customer upgrading across this change expects exactly two
 endpoints to disappear and nothing else.
 
 The same sweep renamed the URL *namespace* — ``process_admin_rest_api`` →
-``lex_rest_api`` — and 10.94 pins that it took no **served route** with it. The
+``lex_rest_api`` — and 10.100 pins that it took no **served route** with it. The
 namespace is server-side only (it is what ``reverse()`` takes); the ``api/…``
 paths are the contract with the bundled frontend and are unchanged. The one
 path-shaped string that did follow the rename is ``LOGIN_REDIRECT_URL``, and
 it is dead configuration: nothing in lex-app reads it, the OIDC library does
 not either, and the shipped frontend bundle contains no route by either
-spelling — so 10.94 pins its new value rather than pretending it was load
+spelling — so 10.100 pins its new value rather than pretending it was load
 bearing.
 
-Cluster 10p — scenarios 10.91–10.94. Type: U.
+Cluster 10q — scenarios 10.97–10.100. Type: U.
 Covers: lex/model_admin/sites/lex_admin_site.py (the url list),
 lex/api/views/process_flow/ (deleted), lex/model_admin/views/__init__.py and
 lex/api/views/ModelStructureObtainView.py (``ProcessStructure`` deleted).
-Run: python -m lex pytest lex/test_project/tests/api_layer/test_10p_process_routes_removed.py -v
+Run: python -m lex pytest lex/test_project/tests/api_layer/test_10q_process_routes_removed.py -v
 """
 
 from __future__ import annotations
@@ -65,13 +65,13 @@ def _routes():
     return names, paths
 
 
-class TestCluster10p_ProcessRoutesRemoved(SimpleTestCase):
-    """Cluster 10p: the Process and ProcessFlow endpoints no longer exist."""
+class TestCluster10q_ProcessRoutesRemoved(SimpleTestCase):
+    """Cluster 10q: the Process and ProcessFlow endpoints no longer exist."""
 
-    # -- 10.91 ---------------------------------------------------------
-    def test_10_91_run_step_is_not_routed(self) -> None:
+    # -- 10.97 ---------------------------------------------------------
+    def test_10_97_run_step_is_not_routed(self) -> None:
         """
-        Scenario 10.91: the ProcessFlow step endpoint is gone.
+        Scenario 10.97: the ProcessFlow step endpoint is gone.
         Given: the project's URLconf after the ProcessFlow removal
         When: ``run_step`` is reversed, the route table is read, and the view
               module is imported
@@ -95,10 +95,10 @@ class TestCluster10p_ProcessRoutesRemoved(SimpleTestCase):
         with self.assertRaises(ModuleNotFoundError):
             importlib.import_module("lex.api.views.process_flow.CreateOrUpdate")
 
-    # -- 10.92 ---------------------------------------------------------
-    def test_10_92_process_structure_is_not_routed(self) -> None:
+    # -- 10.98 ---------------------------------------------------------
+    def test_10_98_process_structure_is_not_routed(self) -> None:
         """
-        Scenario 10.92: the process-structure endpoint is gone.
+        Scenario 10.98: the process-structure endpoint is gone.
         Given: the same URLconf
         When: ``process`` is reversed, the route table is read, and
               ``ProcessStructure`` is looked up on both modules that defined it
@@ -126,10 +126,10 @@ class TestCluster10p_ProcessRoutesRemoved(SimpleTestCase):
             )
         self.assertNotIn("ProcessStructure", views.__all__)
 
-    # -- 10.93 ---------------------------------------------------------
-    def test_10_93_the_surrounding_routes_are_untouched(self) -> None:
+    # -- 10.99 ---------------------------------------------------------
+    def test_10_99_the_surrounding_routes_are_untouched(self) -> None:
         """
-        Scenario 10.93: only the two Process routes went.
+        Scenario 10.99: only the two Process routes went.
         Given: the same URLconf
         When: the endpoints the bundled frontend loads a project with are
               reversed
@@ -161,10 +161,10 @@ class TestCluster10p_ProcessRoutesRemoved(SimpleTestCase):
                     kwargs={"report_name": "anyreport"})
         )
 
-    # -- 10.94 ---------------------------------------------------------
-    def test_10_94_the_namespace_was_renamed_but_no_url_moved(self) -> None:
+    # -- 10.100 --------------------------------------------------------
+    def test_10_100_the_namespace_was_renamed_but_no_url_moved(self) -> None:
         """
-        Scenario 10.94: the namespace lost the Process name; no route moved.
+        Scenario 10.100: the namespace lost the Process name; no route moved.
         Given: the URLconf after ``process_admin_rest_api`` became ``lex_rest_api``
         When: a route is reversed under both namespaces, the served paths are
               read, and ``LOGIN_REDIRECT_URL`` is read from settings

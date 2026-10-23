@@ -164,7 +164,7 @@ letters:
       (4.96), API-key read context (4.97), flag resolution (4.98), admin helper (4.99), signed-out
       callers keep their sign-in answer (4.100). Ported from #816 without the 3.0 extension hooks.
       2026-10-22: 4.90 is RETIRED -- it pinned run_step alone, and the ProcessFlow endpoint was
-      removed with the Process feature (10p pins its absence). The scenario id is not reused.
+      removed with the Process feature (10q pins its absence). The scenario id is not reused.
       Pass 21 -> 20.
   p:
     title: Internal tools, Django users, permission_list and history writes (v2 security hardening)
@@ -183,5 +183,5 @@ letters:
       (4.107-4.110). Against the tree without these changes 8 of 10 fail (4.109 and 4.110 pin the
       opt-out and the unaffected main record). Ported from #826 (B2-B4, A9) with B1 widened to the
       admin role; E1 is new. 2026-10-22: 4.105 creates through the CRUD endpoint and 4.108 dropped
-      its run_step probe -- the ProcessFlow endpoint was removed with the Process feature (10p).
+      its run_step probe -- the ProcessFlow endpoint was removed with the Process feature (10q).
       Both scenarios keep every other write path; pass stays 10.

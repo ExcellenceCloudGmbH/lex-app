@@ -45,7 +45,7 @@ Covered in [cleanup-and-coverage-plan.md §5](cleanup-and-coverage-plan.md#5-lat
 | 1 | `audit_logging/utils/WebSocketNotifier.py` — used anywhere? If no → DELETE. If yes → add a class to **6i**. | 6i final scope |
 | 2 | `api/views/authentication/UserAPIView.py` vs `authentication/views/user_api.py` — which is live? Delete the other. | **4l** can be opened |
 | 3 | `api/consumers/CalculationLogConsumer.py` — still used? If no → DELETE. If yes → add to **9b** as a 5th consumer. | 9b final scope |
-| 4 | `lex_admin_site.py` route cascade (cleanup §2d) — supervisor confirmation to drop `api/widget_structure`, `api/logs`, `streamlit-token`, `user_permissions` routes. **`CreateOrUpdate` is settled: the supervisor asked for the Process and ProcessFlow features to be removed on 2026-10-22, so `api/run_step/…` and `api/process/…` are gone — [10p](10-api_layer/batches.md) pins their absence and 10.93 pins that the other four routes survived.** The remaining four still need confirmation. | **13c** |
+| 4 | `lex_admin_site.py` route cascade (cleanup §2d) — supervisor confirmation to drop `api/widget_structure`, `api/logs`, `streamlit-token`, `user_permissions` routes. **`CreateOrUpdate` is settled: the supervisor asked for the Process and ProcessFlow features to be removed on 2026-10-22, so `api/run_step/…` and `api/process/…` are gone — [10q](10-api_layer/batches.md) pins their absence and 10.99 pins that the other four routes survived.** The remaining four still need confirmation. | **13c** |
 
 ### 6a. Model Admin batches (planned "Cluster 13" block — never opened)
 

@@ -27,7 +27,7 @@ serializer decides a row.
 
 Cluster 4o — scenarios 4.80–4.100. Type: E (4.98–4.99: U).
 Scenario 4.90 is retired: the second write endpoint it pinned was removed
-with the feature that owned it (cluster 10p pins its absence).
+with the feature that owned it (cluster 10q pins its absence).
 Covers: lex/core/security_flags.py, lex/api/security.py,
 lex/api/views/model_entries/{One,Many,History,filter_backends}.py,
 lex/api/views/global_search_for_models/Search.py,

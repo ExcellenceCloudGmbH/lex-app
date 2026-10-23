@@ -1,7 +1,7 @@
 cluster: 15
 slug: calculation_logging
 title: Calculation Logging Surface
-max_scenario: 51
+max_scenario: 55
 letters:
   a:
     title: LexLogger builder API and content shape
@@ -142,3 +142,18 @@ letters:
       A run started by creating a record is filed under <model>_<pk>_update_<uuid>, the prefix the list
       view's latest-run lookup reads, so the new row's log button opens it. Filed under the create
       request's own id (<model>_create_<uuid>, no pk), the row could never find it.
+  l:
+    title: The calculation-log PDF download writes an audit entry
+    scenarios: 15.52-15.55
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      Downloading a log as PDF is recorded against the log itself, with the PDF's name and size and
+      `include_descendants: false` (15.52). A subtree download records that scope plus the section
+      count — "one log" and "a log and everything under it" are different amounts of data leaving
+      the system (15.53). A rendering failure is a `failure` entry with the 500 and no delivered
+      size (15.54), and a log the caller may not see is a recorded refusal keeping the 404's
+      traceback, with nothing attached (15.55).
