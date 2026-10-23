@@ -331,6 +331,28 @@ def delete_allowed(request, instance) -> bool:
     return True
 
 
+def filled_record(model_class, validated_data):
+    """An unsaved ``model_class`` carrying the request's validated values.
+
+    Only concrete fields are set (a foreign key as its related object); many-to-many
+    values and serializer-only fields are left out, as ``save()`` would set them later.
+    """
+    concrete = {field.name for field in model_class._meta.concrete_fields}
+    values = {name: value for name, value in (validated_data or {}).items() if name in concrete}
+    return model_class(**values)
+
+
+def ask_create(request, instance) -> bool:
+    """``permission_create`` (or legacy ``can_create``) on ``instance``, raising as the hook raises."""
+    from lex.core.models.LexModel import UserContext
+
+    if hasattr(instance, "permission_create"):
+        return bool(instance.permission_create(UserContext.from_request(request, instance)))
+    if hasattr(instance, "can_create"):
+        return bool(instance.can_create(request))
+    return True
+
+
 def create_allowed(request, model_class) -> bool:
     """``permission_create`` for a model (fail-closed aware)."""
     from lex.core.models.LexModel import UserContext

@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 110
+max_scenario: 115
 letters:
   a:
     title: ''
@@ -185,3 +185,19 @@ letters:
       admin role; E1 is new. 2026-10-22: 4.105 creates through the CRUD endpoint and 4.108 dropped
       its run_step probe -- the ProcessFlow endpoint was removed with the Process feature (10q).
       Both scenarios keep every other write path; pass stays 10.
+  q:
+    title: permission_create on the record the request fills (LEX_SEC_CREATE)
+    scenarios: 4.111-4.115
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      The create endpoint asks permission_create a second time, on the record filled with the
+      request's validated values (foreign keys set), before the audit entry and pre_validation: a
+      refusal answers the blank check's 401/403 {message} and stores nothing (4.111, 4.113); the hook
+      sees the blank, then the filled unsaved record (4.112); a hook raising there refuses with 500
+      under FAIL_CLOSED (4.114); LEX_SEC_CREATE=false / LEX_LEGACY_SECURITY=true keep the blank check
+      only (4.115). 4.98 now lists ten flags. 4.111-4.114 fail on lex-app-v2 0ac01da8; 4.115 passes on
+      both.

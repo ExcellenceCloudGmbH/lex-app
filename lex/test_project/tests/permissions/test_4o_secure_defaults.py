@@ -519,7 +519,7 @@ class TestCluster04o_SecurityFlags(SimpleTestCase):
         """
         Scenario 4.98: every flag is on by default; the umbrella turns all off;
         a per-flag setting wins over the umbrella; unknown names are an error.
-        Given: the nine flags
+        Given: the ten flags (CREATE added with cluster 4q)
         When: strict() is asked with no setting, LEX_LEGACY_SECURITY=true,
               LEX_LEGACY_SECURITY=true + LEX_SEC_EDIT=true, LEX_SEC_FILTERS=false
         Then: all True; all False; only EDIT True; only FILTERS False;
@@ -528,7 +528,7 @@ class TestCluster04o_SecurityFlags(SimpleTestCase):
         self.assertEqual(
             set(FLAGS),
             {"FAIL_CLOSED", "NOT_FOUND", "READ_SURFACES", "EDIT", "FILTERS", "TRACEBACKS",
-             "OIDC_REDIRECT", "INTERNAL", "HISTORY_WRITE"},
+             "OIDC_REDIRECT", "INTERNAL", "HISTORY_WRITE", "CREATE"},
         )
         with _env():
             self.assertTrue(all(strict(flag) for flag in FLAGS))
