@@ -131,7 +131,7 @@ no migration, or a re-register after editing the realm by hand.
 | -------------------- | --------------------------------------------- |
 | `lex create_db`      | Create the PostgreSQL database if it doesn't exist yet; does nothing on SQLite |
 | `lex flush`          | Delete every row in the database, after asking you to confirm (`--noinput` skips the question). The next `lex start` loads your initial data again |
-| `lex migrate`        | Apply pending Django migrations               |
+| `lex migrate`        | Apply pending Django migrations, then create the cache tables if they are missing (no separate `createcachetable` needed on a fresh database) |
 | `lex makemigrations` | Create new migration files from model changes |
 | `lex sqlflush`       | Print SQL statements to flush the database    |
 | `lex lex_migrate`    | `makemigrations` then `migrate` in one step. `--no-makemigrations` applies existing migration files only — which is what you want on a deployed instance, where migration files should come from the release, not from the running container. |
@@ -262,6 +262,10 @@ than a gap:
 > mean starting Django just to render help. This page is the complete list, and
 > CI checks that it stays complete — a new management command with no entry here
 > fails the build.
+
+## Where lex looks for the project
+
+The CLI takes the nearest folder at or above the current directory that holds `lex_config.py` as the project root, before falling back to the git top level. A Lex project in a subfolder of a larger repository (a monorepo) therefore runs with plain `lex <command>` from that subfolder — no `PROJECT_ROOT` or `GIT_CEILING_DIRECTORIES` needed.
 
 ## Usage Pattern
 

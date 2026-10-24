@@ -4,6 +4,9 @@ title: "lex_config.py — project settings"
 
 `lex_config.py` lives at your project root and holds project-wide settings the framework reads at boot. It's a plain Python module — the framework imports it once and pulls the keys it cares about. Most projects only set two or three of these.
 
+> [!warning] A broken file stops startup
+> If `lex_config.py` fails to import, or one of the keys below has the wrong type (`INITIAL_DATA` and `DEFAULT_SERIALIZER_NAME` strings, `PROJECT_GROUPS` a list, `TAB_DISPLAY_NAMES` a dict), the app refuses to start with `ImproperlyConfigured` naming the problem. It used to fall back to the defaults silently.
+
 > [!note]
 > This page is a one-stop index. The individual feature pages linked from each section are the place to go for examples and edge cases.
 

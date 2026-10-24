@@ -62,8 +62,6 @@ class MyModel(LexModel):
 
 > [!note]
 > When `permission_create` returns `False`, the API responds with **401 Unauthorized** for unauthenticated requests and **403 Forbidden** for authenticated-but-denied requests — not a generic 400. Frontends and API clients can use these status codes to redirect to login (401) or show a "permission denied" message (403).
->
-> `POST …/create` asks `permission_create` twice: first on a blank record ("may this user create one at all" — what a UI asks before it offers a form), then on the record filled with the request's values, foreign keys set, before `pre_validation` and before anything is stored. Decide parent- or value-dependent rules in `permission_create` itself and let the blank record pass where the answer depends on values it does not have yet; there is no need to re-check creation in `pre_validation`. Both refusals answer the same 401/403 `{"message": …}`. `LEX_SEC_CREATE=false` keeps the blank check only.
 
 ### `PermissionResult` Factory Methods
 
