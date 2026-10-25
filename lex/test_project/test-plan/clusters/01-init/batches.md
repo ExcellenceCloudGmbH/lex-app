@@ -1811,3 +1811,28 @@ config each fail 1.404.
 | 1.409 | no `Process` node type | the `api/model-structure` payload types the model `Model`, the report `HTMLReport`, the branch `Folder`; no node anywhere carries `Process` |
 
 **Why a regression matters:** a half-removed feature is worse than either state — a `registerProcess` that still collects classes looks like a working feature while `api/process/<name>` 404s, and a stale `Process` entry in the reserved-name set keeps rejecting a project's own model for a framework class that no longer exists.
+
+### Batch 1ay — `ALLOWED_HOSTS` accepts the instance's own backend Service name ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.410 – 1.414 |
+| Type | U |
+| Files covered | `lex/lex_app/settings.py` (`K8S_NAMESPACE_FILE`, `BACKEND_SERVICE_PREFIX`, `_k8s_namespace`, `_cluster_service_hosts`, `ALLOWED_HOSTS`) |
+| Test file | `lex/test_project/tests/init/test_1ay_allowed_hosts_in_cluster.py` |
+| Test classes | `TestCluster1ay_AllowedHostsAcceptsTheInClusterService` (1.410–1.414) |
+| Fixtures | none — the two helpers are pure, so no settings re-import and no environment patching is needed |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.410 | short Service name accepted | `lex-backend-<instance>` is among the derived hosts |
+| 1.411 | the three longer DNS forms accepted | `.<ns>`, `.<ns>.svc` and `.<ns>.svc.cluster.local` are all present |
+| 1.412 | nothing added off-cluster | no instance identifier yields `[]`, whatever the namespace says |
+| 1.413 | unreadable namespace degrades | an empty namespace yields exactly the short name, and does not raise |
+| 1.414 | the namespace file is read safely | `_k8s_namespace` on a missing path returns `""` rather than raising |
+
+**Why a regression matters:** Django compares `Host:` against `ALLOWED_HOSTS` in `CommonMiddleware`, before any view, permission class or model code runs — so a Service name missing from the list is not a permission failure and not a routing failure, it is a `DisallowedHost` with nothing downstream reached. It breaks every service-to-service call an instance makes while leaving the browser-facing surface working, which is exactly how it was found: on a customer instance on 2026-10-25 every file write failed with `OSError` and the backend logged `Invalid HTTP_HOST header: 'lex-backend-armira-self-servi-prod-1492:7000'`, with a valid registered API key and a correct route. `POD_IP`, already in the list, does not cover it — it is the reading pod's own address, so it says nothing about how other pods address the backend by name, and a caller has no way to learn it.
+
+**Why the namespace comes from a file:** `POD_NAMESPACE` is not set in the platform's pods (measured), while `/var/run/secrets/kubernetes.io/serviceaccount/namespace` is mounted in every pod with a service account. Reading it introduces no new required environment variable — which matters here, because `settings.py` already refuses to start when `DOMAIN_HOSTED` is missing, and a second such variable would turn a missing value into a crash-loop rather than a fix.

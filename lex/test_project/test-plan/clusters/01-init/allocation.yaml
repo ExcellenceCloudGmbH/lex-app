@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 409
+max_scenario: 414
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1303,3 +1303,23 @@ letters:
       model-structure payload types nodes Model / HTMLReport / Folder only, never Process (1.409).
       Each scenario checks the kept HTMLReport sibling too, so a broken registration cannot pass as
       a clean removal. The routes that served the feature are pinned by 10q.
+  ay:
+    title: ALLOWED_HOSTS accepts the instance's own backend Service name in the cluster
+    scenarios: 1.410-1.414
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: A lex instance is several pods sharing one database, and the non-backend pods reach
+      the backend by its Kubernetes Service name so the traffic stays inside the cluster, off the
+      ingress and off TLS. ALLOWED_HOSTS held only DOMAIN_HOSTED, the loopback pair and POD_IP,
+      so CommonMiddleware answered DisallowedHost before any view, permission class or model code
+      ran - measured on a customer instance 2026-10-25, where every service-to-service file write
+      failed on this alone with a valid registered API key and a correct route. The short Service
+      name (1.410) and the three longer Kubernetes DNS forms (1.411) are now accepted; a checkout
+      with no instance identifier gains nothing (1.412); an unreadable namespace degrades to the
+      short name (1.413); and the namespace file is read without raising off-cluster (1.414),
+      which matters because settings are imported before anything can catch an error. The
+      namespace comes from the mounted serviceaccount file, not an env var - POD_NAMESPACE is not
+      set in the platform's pods - so no new required variable is introduced.

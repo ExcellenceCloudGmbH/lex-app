@@ -187,12 +187,80 @@ if os.getenv("LEX_ENVIRONMENT_TAG", "envvar_not_existing") == "dev":
 else:
     DEBUG = False
 
+#: Where Kubernetes mounts the pod's own namespace. Present in every pod with a service account,
+#: which is every pod the platform runs, and readable without any API call or new env var.
+K8S_NAMESPACE_FILE = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
+#: How the platform names an instance's backend Service: this prefix plus the instance identifier.
+BACKEND_SERVICE_PREFIX = "lex-backend-"
+
+
+def _k8s_namespace(path: str = K8S_NAMESPACE_FILE) -> str:
+    """This pod's namespace, or `""` outside a cluster.
+
+    Read from the mounted file rather than an environment variable because there is no namespace
+    variable to rely on - `POD_NAMESPACE` is NOT set in the platform's pods (measured). Any read
+    error means "not in a cluster", which is the correct answer on a developer's machine.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+def _cluster_service_hosts(instance: str, namespace: str) -> list:
+    """The DNS names this pod's own backend Service answers to from inside the cluster.
+
+    WHY THIS EXISTS. A lex instance is several pods sharing one database, and the ones that are not
+    the backend reach it by its Kubernetes Service name - `lex-backend-<instance>:7000` - because
+    that keeps the traffic inside the cluster, off the ingress and off TLS. Django then sees that
+    Service name in `Host:`, and until this function existed `ALLOWED_HOSTS` held only
+    `DOMAIN_HOSTED`, the loopback pair and `POD_IP`, so `CommonMiddleware` refused the request
+    before any view, permission class or model code ran:
+
+        django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header:
+        'lex-backend-<instance>:7000'. You may need to add 'lex-backend-<instance>'
+        to ALLOWED_HOSTS.
+
+    Measured on a customer instance on 2026-10-25: every service-to-service file write failed on
+    this and nothing else - the API key was registered and valid, and the route was correct.
+
+    `POD_IP` does not cover it. It is the address of whichever pod is reading these settings, so it
+    lets a caller reach THAT pod by IP; it says nothing about how other pods address the backend by
+    name, and a caller in another pod has no way to learn it.
+
+    Args:
+        instance: `INSTANCE_RESOURCE_IDENTIFIER`, or `""` outside a deployment.
+        namespace: the pod's namespace, or `""` when it could not be read.
+
+    Returns:
+        The short Service name plus the three longer Kubernetes DNS forms, or `[]` when there is no
+        instance identifier - which is a developer's machine, where nothing should be added.
+    """
+    if not instance:
+        return []
+    short = f"{BACKEND_SERVICE_PREFIX}{instance}"
+    if not namespace:
+        # In a cluster the namespace file is always there; without it the short name is still
+        # correct for a same-namespace caller, which is the only one that can use a short name.
+        return [short]
+    return [
+        short,
+        f"{short}.{namespace}",
+        f"{short}.{namespace}.svc",
+        f"{short}.{namespace}.svc.cluster.local",
+    ]
+
+
 ALLOWED_HOSTS = [
     os.getenv("DOMAIN_HOSTED", "localhost"),
     "127.0.0.1",
     "localhost",
     os.environ.get("POD_IP", default="envvar_not_existing"),
-]
+] + _cluster_service_hosts(
+    (os.getenv("INSTANCE_RESOURCE_IDENTIFIER") or "").strip(), _k8s_namespace()
+)
 
 LOGIN_REDIRECT_URL = "/process_admin/all"
 
