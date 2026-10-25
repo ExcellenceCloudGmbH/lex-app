@@ -1,3 +1,8 @@
+## [2.4.1] - 2026-10-25
+
+### Changed
+- **backend** Bump exc-djangorestframework-api-key to 1.0.1 (missing APIKey column-width migration) ([0f266ee6](https://github.com/ExcellenceCloudGmbH/lex-app/commit/0f266ee6)) (#852)
+
 ## [2.4.0] - 2026-10-23
 
 ### Added
