@@ -4,7 +4,7 @@ authlib==1.9.1
 itsdangerous==2.2.0
 django==6.0.9
 django-cors-headers==4.9.0
-exc-djangorestframework-api-key==1.0.0
+exc-djangorestframework-api-key==1.0.1
 django-filter==26.2
 XlsxWriter==3.2.9
 pandas==3.0.6
