@@ -1811,3 +1811,33 @@ config each fail 1.404.
 | 1.409 | no `Process` node type | the `api/model-structure` payload types the model `Model`, the report `HTMLReport`, the branch `Folder`; no node anywhere carries `Process` |
 
 **Why a regression matters:** a half-removed feature is worse than either state — a `registerProcess` that still collects classes looks like a working feature while `api/process/<name>` 404s, and a stale `Process` entry in the reserved-name set keeps rejecting a project's own model for a framework class that no longer exists.
+
+### Batch 1az — a machine endpoint on the dashboard origin cannot take over the user's tab ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.415 – 1.422 |
+| Type | U |
+| Files covered | `lex/proxy.py` (`_NON_LANDING_PREFIXES`, `_NON_LANDING_PATHS`, `_is_landing_path`, `_safe_next_path`, `_unauthenticated_response`, `_is_top_level_document_request`, `theme_relay`, `_THEME_RELAY_CONFIGURED`) |
+| Test file | `lex/test_project/tests/init/test_1az_proxy_tab_takeover.py` |
+| Test classes | `TestCluster01az_WhereALoginMayReturnTo` (1.415–1.417), `TestCluster01az_WhoMayMoveTheTopWindow` (1.418–1.419), `TestCluster01az_LandingOnTheRelayAnyway` (1.420–1.422) |
+| Fixtures | none — a hand-built Starlette `Request` per case; `PUBLIC_URL`, `_THEME_RELAY_CONFIGURED` and `_THEME_RELAY_ALLOWED` patched per scenario, `_put_tokens`/`oauth.oidc` stubbed for the callback |
+| Tests landed | **8 pass / 0 fail** (13 subtests) |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.415 | a utility path is never a return target | `_safe_next_path` rejects `/_lex/theme-relay`, `/_stcore/health`, `/_stcore/host-config`, `/auth/token`, `/auth/adopt` and `/_lex/theme-relay?mode=dark`; `/`, a deep view and one with query + fragment survive unchanged |
+| 1.416 | a stashed utility path lands on `/` | `auth_callback` with `/_lex/theme-relay` in the session redirects to `/` |
+| 1.417 | no return target for a top-level utility visit | an unauthenticated `Sec-Fetch-Dest: document` load of `/auth/token` redirects to a bare `/auth/login`, with no `next` |
+| 1.418 | a hidden utility frame gets a 401, not a breakout | a framed load of each utility path returns `JSONResponse` 401 whose body carries no `window.top.location` |
+| 1.419 | a framed dashboard still breaks out | a framed load of `/?model=Period` is still the 401 HTML breakout, still attempting top-nav, still carrying `next=%2F%3Fmodel%3DPeriod` |
+| 1.420 | a top-level visit is sent back to the frontend | with `_THEME_RELAY_CONFIGURED`, `theme_relay` answers a `document` request with a 303 to that origin |
+| 1.421 | an unconfigured deployment does not bounce to localhost | with nothing configured, the same request is served the relay (200), not redirected |
+| 1.422 | the framed relay is untouched | a `Sec-Fetch-Dest: iframe` request still gets 200, the shared storage key, and `frame-ancestors <frontend>` |
+
+**Why a regression matters:** this is LEX-1477, and the shape of the failure is why it took a customer to find it. Nothing errors. The frontend frames a hidden, zero-sized `/_lex/theme-relay`; on 2.1.11 the proxy had no such route (it arrived in 2.2.0 with `8780a119`), so that frame fell into the authenticated catch-all, 401'd, and was handed the frame-breakout page — whose entire purpose is `window.top.location = <login>`. Keycloak had a live SSO session, so the round trip returned immediately and `auth_callback` honoured `next=/_lex/theme-relay`. The result was a tab that, intermittently and only when clicking a model with an embedded dashboard, left the instance frontend and parked on a blank storage document at `https://<instance>-streamlit.../\_lex/theme-relay`, with no error, no log line the user could see, and nothing to connect it to a theme shim.
+
+**Why the route existing is not the fix:** adding `/_lex/theme-relay` removes the one 401 that was observed. It does not remove the rule that produced the outcome — *whatever* 401s inside a frame may move the top window, and *whatever* path 401'd becomes where the browser is left afterwards. Both halves are now bounded by what the path is: only a page may escalate, and only a page may be returned to. 1.419 is the counterweight that keeps the narrowing honest — withhold the breakout from everything and an expired dashboard shows Keycloak's "refused to connect" wall again, which is the failure the breakout was written for in the first place (1.211).
+
+**Frontend twin:** `process-admin-general-client` batch F12u (F12.104–F12.108) closes the same hole from the other side — the relay frame is sandboxed so nothing served there can navigate the tab at all, and the shell attributes a `lex-auth-required` message to the dashboard frame rather than to its origin, which is what let an invisible frame on that origin drive a full-page navigation.
