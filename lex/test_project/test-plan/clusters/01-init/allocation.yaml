@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 409
+max_scenario: 422
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1303,3 +1303,30 @@ letters:
       model-structure payload types nodes Model / HTMLReport / Folder only, never Process (1.409).
       Each scenario checks the kept HTMLReport sibling too, so a broken registration cannot pass as
       a clean removal. The routes that served the feature are pinned by 10q.
+  az:
+    title: A machine endpoint on the dashboard origin cannot take over the user's tab
+    scenarios: 1.415-1.422
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      LEX-1477, reported against 2.1.11 as "clicking a model that has a streamlit embedding
+      sends the whole browser tab to the streamlit site". The frontend frames a hidden,
+      zero-sized /_lex/theme-relay; 2.1.11's proxy had no such route (added in 2.2.0 by
+      8780a119), so the frame fell into the authenticated catch-all, 401'd, and was answered
+      with the frame-breakout page - whose job is to send the TOP window to a login. Keycloak
+      had a live SSO session, so the callback came straight back and honoured
+      next=/_lex/theme-relay, parking the whole tab on a blank storage shim. The route exists
+      now, so these scenarios defend the consequence rather than the one cause. A utility path
+      is no longer a valid return target, on the way in or out of the OIDC round trip (1.415,
+      1.416, 1.417); a framed utility path gets a plain 401 instead of the breakout, so nothing
+      invisible can ask the shell to move the tab (1.418) while a framed dashboard still
+      recovers exactly as before (1.419); and a tab that reaches the relay anyway - bookmark,
+      history, an older proxy in the chain - is sent back to the configured frontend (1.420)
+      without inventing a localhost destination when none is configured (1.421), with the
+      framed relay itself unchanged (1.422). 1ay (1.410-1.414) is reserved by open PR #853,
+      hence az. Frontend twin is process-admin-general-client batch F12u, which sandboxes the
+      relay frame and makes the shell attribute a re-auth request to the dashboard frame
+      rather than to its origin.
