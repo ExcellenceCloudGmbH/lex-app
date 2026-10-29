@@ -222,3 +222,4 @@ letters:
       asserts the "usage" key matches usage_payload() for the same user;
       10.116 shows that a failure building it still answers 200 with
       {"enabled": false} and a WARNING, so sign-in never depends on it.
+      10r (10.100-10.101) is reserved by an open PR, hence s.
