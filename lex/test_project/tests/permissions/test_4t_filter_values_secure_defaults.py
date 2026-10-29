@@ -13,13 +13,13 @@ model whose own permission_list refuses the caller has no list, so it has no
 value list either (LEX_SEC_NOT_FOUND). Every switch that restores the list's old
 behaviour restores the value list's too. A regression counts a row the grid
 withholds, or offers a filter the grid refuses.
-Cluster 4r — scenarios 4.119–4.124. Type: E.
+Cluster 4t — scenarios 4.129–4.134. Type: E.
 Covers: lex/api/views/model_entries/FilterValues.py (``_filterable_field``, ``_count_per_row``,
 ``_count_in_database``), lex/api/utils/filterable_fields.py (``value_list_field``),
 lex/api/views/model_info/Fields.py (``value_list``),
 lex/api/serializers/base_serializers.py (``readable_field_names``),
 lex/api/views/model_entries/filter_backends.py (the read filter), lex/api/filter_policy.py.
-Run: python -m lex pytest lex/test_project/tests/permissions/test_4r_filter_values_secure_defaults.py -v
+Run: python -m lex pytest lex/test_project/tests/permissions/test_4t_filter_values_secure_defaults.py -v
 """
 
 from __future__ import annotations
@@ -69,8 +69,8 @@ class _NoPerRowCheck(drf_serializers.ModelSerializer):
         fields = ["id", "name"]
 
 
-class TestCluster04r_FilterValuesSecureDefaults(E2ETestCase):
-    """Cluster 4r: filter_values under LEX_SEC_FAIL_CLOSED, LEX_SEC_FILTERS and LEX_SEC_NOT_FOUND."""
+class TestCluster04t_FilterValuesSecureDefaults(E2ETestCase):
+    """Cluster 4t: filter_values under LEX_SEC_FAIL_CLOSED, LEX_SEC_FILTERS and LEX_SEC_NOT_FOUND."""
 
     e2e_models = [RowFieldItem, FieldLevelItem, RaisingReadItem, ReadCheckRaisesItem]
 
@@ -107,10 +107,10 @@ class TestCluster04r_FilterValuesSecureDefaults(E2ETestCase):
     def _join_hr(self) -> None:
         self.user.groups.add(Group.objects.get_or_create(name="hr")[0])
 
-    # -- 4.119 ---------------------------------------------------------
-    def test_04_119_a_raising_permission_read_withholds_the_row_row_by_row(self):
+    # -- 4.129 ---------------------------------------------------------
+    def test_04_129_a_raising_permission_read_withholds_the_row_row_by_row(self):
         """
-        Scenario 4.119: per-row counting, a permission_read that raises
+        Scenario 4.129: per-row counting, a permission_read that raises
         Given: RaisingReadItem rows "fine" and "boom"; permission_read raises for "boom"
         When: name values are asked for, by default and with LEX_SEC_FAIL_CLOSED=false
         Then: by default "boom" is counted nowhere and the counts match the list, which shows
@@ -128,10 +128,10 @@ class TestCluster04r_FilterValuesSecureDefaults(E2ETestCase):
                 "legacy: a check that raises still keeps the row out of the value list",
             )
 
-    # -- 4.120 ---------------------------------------------------------
-    def test_04_120_a_raising_can_read_withholds_the_row_row_by_row(self):
+    # -- 4.130 ---------------------------------------------------------
+    def test_04_130_a_raising_can_read_withholds_the_row_row_by_row(self):
         """
-        Scenario 4.120: per-row counting, a can_read that raises
+        Scenario 4.130: per-row counting, a can_read that raises
         Given: ReadCheckRaisesItem rows "fine" and "boom"; permission_read admits both, so the read
                filter keeps both, and can_read raises for "boom"
         When: name values are asked for
@@ -143,10 +143,10 @@ class TestCluster04r_FilterValuesSecureDefaults(E2ETestCase):
         self.assertEqual(self._list_names(READ_CHECK_RAISES), ["fine"], "premise: the list withholds the record")
         self.assertEqual(self._counts(READ_CHECK_RAISES, "name"), {"fine": 1}, "a withheld record is never counted")
 
-    # -- 4.121 ---------------------------------------------------------
-    def test_04_121_a_raising_permission_read_withholds_the_row_in_the_database_count(self):
+    # -- 4.131 ---------------------------------------------------------
+    def test_04_131_a_raising_permission_read_withholds_the_row_in_the_database_count(self):
         """
-        Scenario 4.121: database counting, a permission_read that raises
+        Scenario 4.131: database counting, a permission_read that raises
         Given: RaisingReadItem rows "fine" and "boom", served by a serializer with no per-row read
                check, so filter_values counts in the database what the read filter leaves
         When: name values are asked for, by default and with LEX_SEC_FAIL_CLOSED=false
@@ -172,10 +172,10 @@ class TestCluster04r_FilterValuesSecureDefaults(E2ETestCase):
                     "legacy: the count follows the list",
                 )
 
-    # -- 4.122 ---------------------------------------------------------
-    def test_04_122_a_field_the_caller_may_not_filter_by_has_no_value_list(self):
+    # -- 4.132 ---------------------------------------------------------
+    def test_04_132_a_field_the_caller_may_not_filter_by_has_no_value_list(self):
         """
-        Scenario 4.122: LEX_SEC_FILTERS -- a field withheld on every record is treated as absent
+        Scenario 4.132: LEX_SEC_FILTERS -- a field withheld on every record is treated as absent
         Given: FieldLevelItem rows with salaries 10 and 20; a regular user's permission_read admits
                every row but withholds sensitive_salary on all of them, so the list ignores a
                filter on it
@@ -208,10 +208,10 @@ class TestCluster04r_FilterValuesSecureDefaults(E2ETestCase):
             "a caller who may read the field gets its values",
         )
 
-    # -- 4.123 ---------------------------------------------------------
-    def test_04_123_the_fields_endpoint_agrees_with_filter_values(self):
+    # -- 4.133 ---------------------------------------------------------
+    def test_04_133_the_fields_endpoint_agrees_with_filter_values(self):
         """
-        Scenario 4.123: the frontend is told the same thing filter_values answers
+        Scenario 4.133: the frontend is told the same thing filter_values answers
         Given: FieldLevelItem, and a regular user whose permission_read withholds sensitive_salary on
                every record
         When: GET .../fields is asked by default, with LEX_SEC_FILTERS=false, and as an "hr" member
@@ -235,10 +235,10 @@ class TestCluster04r_FilterValuesSecureDefaults(E2ETestCase):
         flags = _flags()
         self.assertIs(flags["sensitive_salary"], True, "a caller who may read the field gets a value list")
 
-    # -- 4.124 ---------------------------------------------------------
-    def test_04_124_no_list_means_no_value_list(self):
+    # -- 4.134 ---------------------------------------------------------
+    def test_04_134_no_list_means_no_value_list(self):
         """
-        Scenario 4.124: LEX_SEC_NOT_FOUND -- permission_list refuses the caller
+        Scenario 4.134: LEX_SEC_NOT_FOUND -- permission_list refuses the caller
         Given: RowFieldItem rows, and a permission_list that refuses this user
         When: the list and filter_values are asked, by default and with LEX_SEC_NOT_FOUND=false or
               LEX_LEGACY_SECURITY=true

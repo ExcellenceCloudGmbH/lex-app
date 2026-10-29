@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 124
+max_scenario: 134
 letters:
   a:
     title: ''
@@ -218,9 +218,9 @@ letters:
       refuses an edit/create whose check raises (4.120). LEX_SEC_FAIL_CLOSED=false restores the allow
       in each. All five fail on fix/audit-log-read-side-v2 (lex-app-v2 0ac01da8 + #842). 4.111-4.115 are
       reserved for 4q (permission_create on the filled record, separate PR).
-  q:
+  s:
     title: filter_values honours row and field read permissions
-    scenarios: 4.111-4.118
+    scenarios: 4.121-4.128
     status: complete
     tests:
       pass: 8
@@ -228,25 +228,27 @@ letters:
       xfail: 0
     note: >-
       Value lists come from filter_values, outside the serializer that hides fields per row in the
-      grid. RowFieldItem hides region on private rows and denies hidden rows. 4.111 counts region
-      only where readable, 4.112 never counts hidden rows, 4.113 gives an empty list for a field
-      readable on no row, 4.114 refuses a field the requested serializer does not expose. Mutation:
-      forcing _count_per_row's readable-field membership test to always succeed fails 4.111 and 4.113.
+      grid. RowFieldItem hides region on private rows and denies hidden rows. 4.121 counts region
+      only where readable, 4.122 never counts hidden rows, 4.123 gives an empty list for a field
+      readable on no row, 4.124 refuses a field the requested serializer does not expose. Mutation:
+      forcing _count_per_row's readable-field membership test to always succeed fails 4.121 and 4.123.
       Final review -- only what the grid renders can be listed: value_list_field now takes the
       requested serializer instance and refuses a write-only field, extra_kwargs or HiddenField
-      (4.115), a field whose class takes get_attribute or to_representation from outside
+      (4.125), a field whose class takes get_attribute or to_representation from outside
       rest_framework -- DRF's Serializer.to_representation calls both on every field; no framework
-      field class overrides either for a value-list column type, so nothing is whitelisted (4.116,
+      field class overrides either for a value-list column type, so nothing is whitelisted (4.126,
       one subtest per method), and every field of a serializer whose class hierarchy defines
-      to_representation outside LexSerializer and DRF (4.117). The whole MRO is walked because a wrapped custom serializer puts LexSerializer ahead
-      of the custom class; the framework's id-only wrapper carries KEEPS_FIELD_VALUES. 4.118 pins the
+      to_representation outside LexSerializer and DRF (4.127). The whole MRO is walked because a wrapped custom serializer puts LexSerializer ahead
+      of the custom class; the framework's id-only wrapper carries KEEPS_FIELD_VALUES. 4.128 pins the
       read filter on the database path: KeycloakItem keeps both read methods at the LexModel
       default, and a record-level UMA grant on one of three rows lists only that row's label.
-      Mutation: FilterValues.filter_queryset patched to the identity fails 4.118 alone; the other
+      Mutation: FilterValues.filter_queryset patched to the identity fails 4.128 alone; the other
       seven pass, because the per-row check also drops denied rows.
-  r:
+      Allocation: first 4q/4.111-4.118. lex-app-v2 landed 4q and 4r (4.111-4.120) while this branch
+      was open, so the batch moved to the next free letter on merge.
+  t:
     title: filter_values follows the list under lex-app-v2's secure defaults
-    scenarios: 4.119-4.124
+    scenarios: 4.129-4.134
     status: complete
     tests:
       pass: 6
@@ -254,19 +256,21 @@ letters:
       xfail: 0
     note: >-
       Merged with lex-app-v2 (#833). A raising permission check withholds its row from the value
-      list as the list withholds the record: per row for a raising permission_read (4.119, the read
-      filter) and a raising can_read (4.120, the serializer's fail-closed read decision), and in
-      the database count when no per-row check applies (4.121, a serializer that is not a
+      list as the list withholds the record: per row for a raising permission_read (4.129, the read
+      filter) and a raising can_read (4.130, the serializer's fail-closed read decision), and in
+      the database count when no per-row check applies (4.131, a serializer that is not a
       LexSerializer); LEX_SEC_FAIL_CLOSED=false lets the database count follow the list again.
       LEX_SEC_FILTERS: a column the caller may not filter by -- FieldLevelItem.sensitive_salary,
       withheld from a regular user on every record -- is the standard 400 "is not filterable"
-      (4.122) and has value_list false on the fields endpoint (4.123); an hr member,
+      (4.132) and has value_list false on the fields endpoint (4.133); an hr member,
       LEX_SEC_FILTERS=false and LEX_LEGACY_SECURITY=true get it back. A refusing
-      permission_list makes filter_values 404 like the list (4.124, LEX_SEC_NOT_FOUND; the per-flag
-      switch and the umbrella restore 200). 4.122 and 4.123 failed before
+      permission_list makes filter_values 404 like the list (4.134, LEX_SEC_NOT_FOUND; the per-flag
+      switch and the umbrella restore 200). 4.132 and 4.133 failed before
       value_list_field took the request (200 with an empty list; value_list true); the others pin
-      behaviour the merge already gives. 4.113 moved to a per-row empty list (private rows only),
-      since the model-wide case is now 4.122's refusal (spec Amendment 17).
-      Native column filters (spec Amendment 18): the filter bar is withdrawn, so 4.123 no longer
+      behaviour the merge already gives. 4.123 moved to a per-row empty list (private rows only),
+      since the model-wide case is now 4.132's refusal (spec Amendment 17).
+      Native column filters (spec Amendment 18): the filter bar is withdrawn, so 4.133 no longer
       checks list_ui.filter_bar, which the fields endpoint no longer sends; its value_list checks
       are unchanged.
+      Allocation: first 4r/4.119-4.124. lex-app-v2 landed 4q and 4r (4.111-4.120) while this branch
+      was open, so the batch moved to the next free letter on merge, after 4s.

@@ -6,11 +6,11 @@ list renders through, so the frontend offers Set and Multi lists only where they
 work. The grid's own column filters are the only filter UI (spec Amendment 18):
 list_ui carries no filter_bar, even for a model or serializer that still
 declares one, so no client is told to draw a bar.
-Cluster 10p — scenarios 10.91–10.92. Type: U.
+Cluster 10r — scenarios 10.100–10.101. Type: U.
 Covers: lex/api/views/model_info/Fields.py (``Fields.get``'s ``value_list`` and
 ``list_ui``, ``create_list_ui_info``), lex/api/serializers/base_serializers.py
 (``get_list_ui_options``), lex/api/utils/filterable_fields.py (``value_list_field``).
-Run: python -m lex pytest lex/test_project/tests/api_layer/test_10p_fields_value_list_flag.py -v
+Run: python -m lex pytest lex/test_project/tests/api_layer/test_10r_fields_value_list_flag.py -v
 """
 
 from __future__ import annotations
@@ -78,13 +78,13 @@ def _value_list_flags(model, serializer_name: str = "default") -> list:
     return [(info["name"], info["value_list"]) for info in response.data["fields"]]
 
 
-class TestCluster10p_FieldsValueListFlag(SimpleTestCase):
-    """Cluster 10p: the fields endpoint's value_list flag, and no filter bar in list_ui."""
+class TestCluster10r_FieldsValueListFlag(SimpleTestCase):
+    """Cluster 10r: the fields endpoint's value_list flag, and no filter bar in list_ui."""
 
-    # -- 10.91 ---------------------------------------------------------
-    def test_10_91_the_fields_endpoint_says_which_columns_have_a_value_list(self):
+    # -- 10.100 ---------------------------------------------------------
+    def test_10_100_the_fields_endpoint_says_which_columns_have_a_value_list(self):
         """
-        Scenario 10.91: value_list on every field descriptor
+        Scenario 10.100: value_list on every field descriptor
         Given: a model with a char, integer, boolean, date, foreign-key and choice column, a
                TextField, a decimal, a JSON column and a credential-shaped name; a serializer that
                publishes the credential-shaped name, makes a column write-only and shows a column
@@ -145,10 +145,10 @@ class TestCluster10p_FieldsValueListFlag(SimpleTestCase):
                     f"{name} is not a UserModelSerializer column and must not offer a value list",
                 )
 
-    # -- 10.92 ---------------------------------------------------------
-    def test_10_92_list_ui_has_no_filter_bar(self):
+    # -- 10.101 ---------------------------------------------------------
+    def test_10_101_list_ui_has_no_filter_bar(self):
         """
-        Scenario 10.92: the grid's own column filters are the only filter UI (Amendment 18).
+        Scenario 10.101: the grid's own column filters are the only filter UI (Amendment 18).
         Given: a model and serializer that still declare filter_bar
         When: the fields endpoint is read
         Then: list_ui carries no filter_bar key, and every field still carries value_list

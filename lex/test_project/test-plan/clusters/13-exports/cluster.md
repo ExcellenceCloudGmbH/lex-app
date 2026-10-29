@@ -109,13 +109,13 @@ and response, so each is asserted on its own.
 | 13.50 | AG-Grid pandas fallback | ``export_path='pandas'`` and the ``filter_model`` that decided which rows left the system |
 | 13.51 | Hand-picked selection | ``mode='filtered'`` with ``selected_row_count``; the id list itself never enters the payload, so a ten-thousand-row selection stays one bounded entry |
 
-### 13i. Value-list filters in the export
+### 13j. Value-list filters in the export
 
 | # | Scenario | What We Assert |
 |---|----------|----------------|
-| 13.46 | Set filter with blank, and an empty selection | On the pandas and the streaming export path the sheet holds exactly the rows the list POST returns for the same filter; nothing ticked exports no rows (404 "No data available for export") |
+| 13.52 | Set filter with blank, and an empty selection | On the pandas and the streaming export path the sheet holds exactly the rows the list POST returns for the same filter; nothing ticked exports no rows (404 "No data available for export") |
 
-**Scenario range:** 13.46. **Test file:** `lex/test_project/tests/exports/test_13i_value_list_filters.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Batch: [13i](batches.md).
+**Scenario range:** 13.52. **Test file:** `lex/test_project/tests/exports/test_13j_value_list_filters.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Batch: [13j](batches.md).
 
 **What is explicitly NOT tested here:**
 

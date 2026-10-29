@@ -66,7 +66,7 @@ def _apply_embed_csp(response):
     Reads ``django.conf.settings`` (not the ``lex.lex_app.settings`` module
     ``settings.repo_name`` above uses) specifically so ``override_settings``
     reaches it in tests -- the two are independently-imported objects in this
-    codebase, confirmed empirically; see ``test_1ax_embed_allowed_origins.py``.
+    codebase, confirmed empirically; see ``test_1az_embed_allowed_origins.py``.
 
     Unset *and* not configured leaves the response untouched, exactly as
     before this setting existed. Configured but with nothing valid in it

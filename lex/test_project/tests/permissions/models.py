@@ -227,7 +227,7 @@ class OwnedItem(LexModel):
 
 
 class RowFieldItem(LexModel):
-    """Cluster 4q fixture: a field hidden on some rows, and some rows hidden entirely."""
+    """Cluster 4s fixture: a field hidden on some rows, and some rows hidden entirely."""
 
     title = models.CharField(max_length=200)
     region = models.CharField(max_length=64, blank=True, default="")
@@ -241,15 +241,15 @@ class RowFieldItem(LexModel):
 
     def permission_read(self, uc):
         if self.title.startswith("hidden"):
-            return PermissionResult.deny("cluster 4q: hidden row")
+            return PermissionResult.deny("cluster 4s: hidden row")
         if self.is_private:
             return PermissionResult.allow_all_except(
-                {"region"}, "cluster 4q: a private row hides its region",
+                {"region"}, "cluster 4s: a private row hides its region",
             )
-        return PermissionResult.allow_all("cluster 4q: open row")
+        return PermissionResult.allow_all("cluster 4s: open row")
 
     def permission_edit(self, uc):
-        return PermissionResult.allow_all("cluster 4q: edit-open")
+        return PermissionResult.allow_all("cluster 4s: edit-open")
 
     def permission_create(self, uc):
         return True
@@ -262,7 +262,7 @@ class RowFieldItem(LexModel):
 
 
 class ReadCheckRaisesItem(LexModel):
-    """Cluster 4r fixture: ``can_read`` raises for the row named "boom".
+    """Cluster 4t fixture: ``can_read`` raises for the row named "boom".
 
     ``permission_read`` admits every row, so the read filter -- which asks
     ``permission_read`` -- keeps "boom"; only the serializer's own read
@@ -279,14 +279,14 @@ class ReadCheckRaisesItem(LexModel):
 
     def can_read(self, request):
         if self.name == "boom":
-            raise RuntimeError("cluster 4r: can_read failed on purpose")
+            raise RuntimeError("cluster 4t: can_read failed on purpose")
         return True
 
     def permission_read(self, uc):
-        return PermissionResult.allow_all("cluster 4r: every row admitted")
+        return PermissionResult.allow_all("cluster 4t: every row admitted")
 
     def permission_edit(self, uc):
-        return PermissionResult.allow_all("cluster 4r")
+        return PermissionResult.allow_all("cluster 4t")
 
     def permission_create(self, uc):
         return True

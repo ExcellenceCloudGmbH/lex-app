@@ -130,7 +130,7 @@ letters:
       value at 0; 14.54 search (database for text, labels for foreign keys); 14.55 limit and
       truncated, with ticked values kept past the cut; 14.56 order; 14.57 refusals; 14.58 as_of;
       14.59 bad keys in other filters; 14.60 the database and per-row counts agree. Field-level
-      permissions are cluster 4q.
+      permissions are cluster 4s.
       Fix round 1 (14.61-14.72), after a review found the first pass could show a value the grid
       withholds: a shared value_list_field resolver in filterable_fields.py now allowlists column
       types per the design's §1 table and refuses a credential-shaped name whatever the serializer

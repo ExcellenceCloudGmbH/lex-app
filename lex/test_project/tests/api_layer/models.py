@@ -85,7 +85,7 @@ class SchemaItem(LexModel):
 
 @_permissive
 class ValueListItem(LexModel):
-    """One column per value-list decision the fields endpoint reports (10.91, 10.92)."""
+    """One column per value-list decision the fields endpoint reports (10.100, 10.101)."""
 
     name = models.CharField(max_length=200)                     # char
     count = models.IntegerField(default=0)                      # integer
@@ -117,7 +117,7 @@ class ValueListItem(LexModel):
 
 @_permissive
 class ValueListOptOutItem(LexModel):
-    """Opts out of value lists: no column of it gets one (10.91)."""
+    """Opts out of value lists: no column of it gets one (10.100)."""
 
     lex_value_lists = False
 

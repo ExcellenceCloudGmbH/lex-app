@@ -21,8 +21,8 @@ therefore resolved `field__exact=none` to `IS NULL` and lost the key to `None` i
 (`_set_filter_values`), via a conversion helper (`_typed_value_converter`/`_coerce_typed_value`)
 factored out of that method and shared rather than duplicated. The same change deduplicates
 `_resolve_filter_bar`'s "dropped" warning per process per `(serializer class, name)`
-(`lex/api/serializers/base_serializers.py`, cluster 10p's file) so a misconfigured `filter_bar`
-stops re-logging on every fields-info request; cluster 10p's existing suite (98 pass, full
+(`lex/api/serializers/base_serializers.py`, cluster 10r's file) so a misconfigured `filter_bar`
+stops re-logging on every fields-info request; cluster 10r's existing suite (98 pass, full
 `api_layer` dir) already covers this path and stayed green.
 
 **Round 2, fail-closed follow-up (still 14.82, sub-cases g/h):** an unconvertible `__exact`/`__in`

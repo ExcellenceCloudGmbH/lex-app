@@ -194,9 +194,9 @@ returning "no filter" there would fail open (an unconvertible `?category__in=abc
 match the whole table, and a "Select All" bulk action would then run over everything; 14.82(g)/(h)
 pin this). Bare keys and every other lookup suffix are untouched, so `?field=null` still means
 `IS NULL` for existing callers. The same change also gave `_resolve_filter_bar`'s "dropped" warning
-(cluster 10p, `lex/api/serializers/base_serializers.py`) a per-process per-(serializer class, name)
+(cluster 10r, `lex/api/serializers/base_serializers.py`) a per-process per-(serializer class, name)
 dedup, so a misconfigured `filter_bar` no longer re-logs on every fields-info request.
-`_resolve_filter_bar` was later withdrawn with the bar it served (Amendment 18; see cluster 10p).
+`_resolve_filter_bar` was later withdrawn with the bar it served (Amendment 18; see cluster 10r).
 
 **Fix round 3 (residual, same re-review):** a `JSONField` is the one exception to fix round 2's
 "every other field type stays typed" -- it keeps the legacy `_coerce_value` on `__exact`/`__in`

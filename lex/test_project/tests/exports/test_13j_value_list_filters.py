@@ -8,11 +8,11 @@ misses the blank ones -- while the grid on screen looks right. The export has
 two ways to build a sheet (the pandas path for a model with its own export
 permission, the streaming path for the default one); both must agree with the
 list.
-Cluster 13i — scenario 13.46. Type: E.
+Cluster 13j — scenario 13.52. Type: E.
 Covers: lex/api/views/file_operations/ModelExport.py (the AG export paths, which filter through
 ListModelEntries._apply_filter_model), lex/api/views/model_entries/List.py (``_build_filter_q``'s
 Set branch).
-Run: python -m lex pytest lex/test_project/tests/exports/test_13i_value_list_filters.py -v
+Run: python -m lex pytest lex/test_project/tests/exports/test_13j_value_list_filters.py -v
 """
 
 from __future__ import annotations
@@ -61,8 +61,8 @@ def _ag_export_payload(filter_model: dict) -> dict:
     }
 
 
-class TestCluster13i_ValueListFilters(E2ETestCase):
-    """Cluster 13i: the AG export honours Set filters like the list POST."""
+class TestCluster13j_ValueListFilters(E2ETestCase):
+    """Cluster 13j: the AG export honours Set filters like the list POST."""
 
     e2e_models = ALL_MODELS
 
@@ -100,10 +100,10 @@ class TestCluster13i_ValueListFilters(E2ETestCase):
     def _export(self, model: str, filter_model: dict):
         return self.client.post(self.url_export(model), data=_ag_export_payload(filter_model), format="json")
 
-    # -- 13.46 ---------------------------------------------------------
-    def test_13_46_an_export_holds_the_rows_the_list_shows_under_a_value_list_filter(self):
+    # -- 13.52 ---------------------------------------------------------
+    def test_13_52_an_export_holds_the_rows_the_list_shows_under_a_value_list_filter(self):
         """
-        Scenario 13.46: export and grid agree on value-list filters
+        Scenario 13.52: export and grid agree on value-list filters
         Given: items in two categories and one with no category, exported through the pandas path
                (ExportItem) and the streaming path (FastExportItem)
         When: each is listed and exported under a Set filter ticking one category and blank, and
