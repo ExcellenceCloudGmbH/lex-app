@@ -104,3 +104,13 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 
 ---
 
+
+### 6u. Fleet-metrics audit contract — the backfill's columns ✅
+
+**What it tests:** the fleet-metrics backfill (an out-of-repo job on the Instance Controller) reads `audit_logging_auditlog` and `audit_logging_auditlogstatus` directly by column name and type to reconstruct `calculation_finished` history for runs that completed before an instance started sending the live event. This batch pins that contract at the `Model._meta` level: `AuditLog.id/date/author/resource/payload/calculation_id` and `AuditLogStatus.audit_log_id/status/created_at/updated_at`, plus the two `db_table` names and the `auto_now_add`/`auto_now` flags `emit_calculation_finished`'s `duration_seconds` depends on.
+
+**Why a regression matters:** the backfill has no way to notice a framework refactor that quietly renames, retypes, or drops one of these columns — the failure would surface only as silently wrong or missing fleet data, in a different repo, much later.
+
+**Scenario range:** 6.168. **Test file:** `lex/test_project/tests/audit_logging/test_6u_fleet_metrics_audit_contract.py`. **Type:** U. **Status:** ✅ Complete. 3 pass / 0 fail — model-metadata only, no DB access needed. Covers `lex/audit_logging/models/AuditLog.py`, `lex/audit_logging/models/AuditLogStatus.py`.
+
+---

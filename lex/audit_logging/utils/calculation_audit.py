@@ -1,4 +1,6 @@
 import logging
+import threading
+import time
 from typing import Any, Optional
 
 from django.db import transaction
@@ -8,9 +10,37 @@ from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.audit_logging.serializers.AuditLogMixinSerializer import generic_instance_payload
 from lex.audit_logging.utils.content_types import safe_get_content_type
+from lex.core.services.usage_config import usage_metrics_enabled
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
 
 logger = logging.getLogger(__name__)
+
+#: Throttle for _warn_emit_hook_unavailable -- at most one WARNING per hour,
+#: so a persistent failure (a broken import, every call) logs loudly once
+#: instead of flooding at every terminal calculation. Mirrors emitter.py's
+#: note_failure, duplicated here (not imported) because this is exactly the
+#: path that runs when importing the emitter package itself has failed.
+_EMIT_HOOK_WARNING_INTERVAL_SECONDS = 3600.0
+_emit_hook_warning_lock = threading.Lock()
+_emit_hook_last_warning_at: Optional[float] = None
+
+
+def _warn_emit_hook_unavailable(exc: BaseException) -> None:
+    global _emit_hook_last_warning_at
+    now = time.monotonic()
+    with _emit_hook_warning_lock:
+        last = _emit_hook_last_warning_at
+        if last is not None and now - last < _EMIT_HOOK_WARNING_INTERVAL_SECONDS:
+            return
+        _emit_hook_last_warning_at = now
+    logger.warning("Fleet-metrics emit hook unavailable: %s", exc, exc_info=True)
+
+
+def _reset_emit_hook_warning_throttle_for_tests() -> None:
+    """Test-only: clear the once-per-hour warning throttle."""
+    global _emit_hook_last_warning_at
+    with _emit_hook_warning_lock:
+        _emit_hook_last_warning_at = None
 
 
 def _same_model_instance(left: Any, right: Any) -> bool:
@@ -252,11 +282,44 @@ def ensure_terminal_calculation_audit(
             updated_at=timezone.now(),
         )
         if updated_rows == 0:
-            AuditLogStatus.objects.create(
+            status_row = AuditLogStatus.objects.create(
                 audit_log=audit_log,
                 status=audit_status,
                 error_traceback=stack_trace if audit_status == "failure" else None,
             )
+            # No earlier 'pending' row existed to time this run from -- the
+            # finaliser created the whole audit trail for it just now, so its
+            # start time is unknown, not zero.
+            status_row._freshly_created = True
+        elif usage_metrics_enabled():
+            # This re-fetch only exists to hand a status row to the emit hook
+            # below, so skip it entirely when there is no hook to feed.
+            status_row = (
+                AuditLogStatus.objects.filter(audit_log=audit_log).order_by("-id").first()
+            )
+            if status_row is not None:
+                status_row._freshly_created = False
+        else:
+            status_row = None
+
+    # Local import: lex.lex_app's package __init__ pulls in Celery app setup
+    # and worker-recovery wiring, which this function must not force onto
+    # every caller's import graph just to send one event (the same defensive
+    # pattern heartbeat.py uses for apps.py). The import sits inside the
+    # try/except too, so a broken optional dependency there can't propagate
+    # out of the finaliser after the audit write above has already committed.
+    try:
+        from lex.lex_app.fleet_metrics.calculations import emit_calculation_finished
+        from lex.lex_app.fleet_metrics.emitter import guard
+
+        with guard("calculation_audit.emit"):
+            emit_calculation_finished(audit_log, status_row, audit_status)
+    except Exception as exc:
+        # guard() already logs (throttled) any failure inside the `with`
+        # block, so this only ever fires for the import above -- but a
+        # persistent failure there would otherwise silently stop every
+        # future calculation_finished event with no operator-visible trace.
+        _warn_emit_hook_unavailable(exc)
 
     _update_operation_context_audit_log(audit_log)
     return audit_log
