@@ -1338,6 +1338,7 @@ letters:
       os.register_at_fork, so it never inherits a lock some other,
       now-nonexistent thread was holding, a Thread object that falsely
       reports is_alive(), or events the parent already queued (1.475-1.476).
+      1ay and 1az (1.410-1.454) are reserved by open PRs, hence ba.
   bb:
     title: The hourly fleet-metrics heartbeat -- web-process-only, immediate first beat
     scenarios: 1.467-1.474
