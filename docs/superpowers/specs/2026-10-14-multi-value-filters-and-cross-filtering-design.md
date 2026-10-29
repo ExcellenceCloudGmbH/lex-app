@@ -96,8 +96,8 @@ Found while the implementation plans were written against the source:
     filter component (the slot the foreign-key, Yes/No and date-time filters use), not AG's Set filter.
     - **What it shows:** an antd `Select` in multiple mode under the app's antd theme (light and dark).
       - Picks show as tags, each with ×.
-      - The dropdown lists each value with its count, narrowed by the other filters.
-      - The search box asks `filter_values` with `search`, so a value past the first 1,000 can be found.
+      - The dropdown lists up to 200 values with their counts, narrowed by the other filters.
+      - The search box asks `filter_values` with `search`, so any value the other filters leave can be found.
     - **Where it lives:** in the column menu and the Filters side panel. On text, number and date
       columns it is the value half of AG's Multi filter, under the condition.
     - **How picks apply:** a pick or a removed tag applies at once; clearing all picks removes the
