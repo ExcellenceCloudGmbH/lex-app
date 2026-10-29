@@ -1,3 +1,8 @@
+## [2.4.2] - 2026-10-29
+
+### Changed
+- **backend** Accept an API key from the ?api_key= query parameter ([f8c45a9a](https://github.com/ExcellenceCloudGmbH/lex-app/commit/f8c45a9a)) (#855)
+
 ## [2.4.1] - 2026-10-25
 
 ### Changed
