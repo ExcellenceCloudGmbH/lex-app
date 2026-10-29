@@ -83,3 +83,24 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 **Scenario range:** 6.119 – 6.120. **Test file:** `lex/test_project/tests/audit_logging/test_6r_create_triggered_run_audit.py`. **Type:** E. **Status:** ✅ Complete. 6.119 two entries, both 'success'; 6.120 the run's entry is 'failure' with a traceback, the create's stays 'success'.
 
 ---
+
+### 6s. Export & download audit mechanism ✅
+
+**What it tests:** the half of the trail that records data leaving the system. ``AuditLog`` admits ``export`` and ``download`` as actions, and ``FileOperationAuditMixin`` opens one entry per request before the work starts — ``pending`` — finalising it from the response. Asserted through the ``file-download`` endpoint as the representative surface; the per-endpoint coverage is 10p, 13i and 15l.
+
+**Why a regression matters:** an export or a download is the moment data leaves the system. Without these entries the trail answers "who changed this" but not "who took this", which is the question a compliance review actually asks.
+
+**Scenario range:** 6.121 – 6.124. **Test file:** `lex/test_project/tests/audit_logging/test_6s_file_operation_audit.py`. **Type:** I. **Status:** ✅ Complete (2026-10-22). Batch: [6s](batches.md). 6.121 both actions recordable and round-tripping through `to_dict`; 6.122 an API-key caller is `Technical User`, not `AnonymousUser`; 6.123 the entry reads `pending` from inside the view and `success` afterwards; 6.124 an unhandled failure still leaves a `failure` entry with its traceback.
+
+---
+
+### 6t. Who reads export & download entries ✅
+
+**What it tests:** the read side of 6s. An export or download payload names no field of the record, so the entry is judged by the record it names (download) or by the right to export the model (export), not by a record rebuilt from the payload. The payload is returned whole; status rows and the detail endpoint follow the same rule; tracebacks are superuser-only.
+
+**Why a regression matters:** judged by the payload, these entries were hidden from everyone (a blank record is readable by nobody) or shown to everyone (a model lenient on a blank record), and `auditlogstatus/list` showed every status row on the platform. Either way the trail answers "who took this" to the wrong people.
+
+**Scenario range:** 6.160 – 6.167. **Test file:** `lex/test_project/tests/audit_logging/test_6t_file_operation_audit_visibility.py`. **Type:** E. **Status:** ✅ Complete (2026-10-22). Batch: [6t](batches.md).
+
+---
+

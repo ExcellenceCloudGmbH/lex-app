@@ -37,6 +37,7 @@ def _plain_request(auth_header: str = "") -> object:
     """Return a minimal fake request with a ``META`` dict."""
     req = MagicMock()
     req.META = {"HTTP_AUTHORIZATION": auth_header} if auth_header else {}
+    req.GET = {}  # a real request always has a (here empty) query string
     # Simulate a plain request (no ``_request`` wrapper attribute).
     del req._request  # make getattr(..., "_request") fall back to req itself
     return req
@@ -76,6 +77,7 @@ class TestCluster02j_GetRawApiKey(SimpleTestCase):
         """
         request = MagicMock()
         request.META = {"HTTP_AUTHORIZATION": "Api-Key my-secret"}
+        request.GET = {}
         del request._request
 
         with patch(
@@ -100,6 +102,7 @@ class TestCluster02j_GetRawApiKey(SimpleTestCase):
         """
         request = MagicMock()
         request.META = {"HTTP_AUTHORIZATION": "Api-Key   padded-token  "}
+        request.GET = {}
         del request._request
 
         with patch(
@@ -125,6 +128,7 @@ class TestCluster02j_GetRawApiKey(SimpleTestCase):
         """
         request = MagicMock()
         request.META = {"HTTP_AUTHORIZATION": "Api-Key "}
+        request.GET = {}
         del request._request
 
         with patch(
@@ -148,6 +152,7 @@ class TestCluster02j_GetRawApiKey(SimpleTestCase):
         """
         request = MagicMock()
         request.META = {}
+        request.GET = {}
         del request._request
 
         with patch(
@@ -208,6 +213,7 @@ class TestCluster02j_GetRawApiKey(SimpleTestCase):
         """
         request = MagicMock()
         request.META = {"HTTP_AUTHORIZATION": "******"}
+        request.GET = {}
         del request._request
 
         with patch(
@@ -235,6 +241,7 @@ class TestCluster02j_IsInstanceApiKeyRequest(SimpleTestCase):
         """
         request = MagicMock()
         request.META = {}
+        request.GET = {}
         del request._request
 
         with patch(
@@ -258,6 +265,7 @@ class TestCluster02j_IsInstanceApiKeyRequest(SimpleTestCase):
         """
         request = MagicMock()
         request.META = {}
+        request.GET = {}
         del request._request
 
         with patch(
@@ -281,6 +289,7 @@ class TestCluster02j_IsInstanceApiKeyRequest(SimpleTestCase):
         """
         request = MagicMock()
         request.META = {}
+        request.GET = {}
         del request._request
 
         env_without_key = {k: v for k, v in os.environ.items() if k != "LEX_API_KEY"}
@@ -305,6 +314,7 @@ class TestCluster02j_IsInstanceApiKeyRequest(SimpleTestCase):
         """
         request = MagicMock()
         request.META = {}
+        request.GET = {}
         del request._request
 
         with patch(

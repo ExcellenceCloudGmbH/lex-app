@@ -5,11 +5,13 @@ from dataclasses import dataclass
 from typing import FrozenSet, Optional
 
 from rest_framework_api_key.models import APIKey
+from rest_framework_api_key.permissions import HasAPIKey as _HasAPIKey
 from rest_framework_api_key.permissions import KeyParser
 
 DEFAULT_API_KEY_SCOPES: FrozenSet[str] = frozenset(
     {"create", "read", "edit", "delete", "list", "export"}
 )
+API_KEY_QUERY_PARAM = "api_key"
 _UNSET = object()
 
 
@@ -46,6 +48,12 @@ def _get_request_holder(request):
 
 
 def get_raw_api_key(request) -> Optional[str]:
+    """Return the raw API key a request carries, or ``None``.
+
+    Looked up in order: the ``Api-Key`` header (``API_KEY_CUSTOM_HEADER``),
+    ``Authorization: Api-Key <key>``, then the ``api_key`` query parameter for
+    callers that can only be configured with a URL. A header always wins.
+    """
     holder = _get_request_holder(request)
     raw_key = KeyParser().get(holder)
     if raw_key:
@@ -56,7 +64,22 @@ def get_raw_api_key(request) -> Optional[str]:
     if auth_header.startswith(prefix):
         candidate = auth_header[len(prefix) :].strip()
         return candidate or None
-    return None
+
+    query_key = (holder.GET.get(API_KEY_QUERY_PARAM) or "").strip()
+    return query_key or None
+
+
+class LexKeyParser(KeyParser):
+    """``KeyParser`` that finds the key wherever :func:`get_raw_api_key` does."""
+
+    def get(self, request) -> Optional[str]:
+        return get_raw_api_key(request)
+
+
+class HasAPIKey(_HasAPIKey):
+    """``HasAPIKey`` that also accepts the key from ``Authorization`` or ``?api_key=``."""
+
+    key_parser = LexKeyParser()
 
 
 def get_api_key_request_identity(request) -> Optional[APIKeyRequestIdentity]:

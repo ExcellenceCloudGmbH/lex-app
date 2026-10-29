@@ -637,7 +637,11 @@ class LexSerializer(serializers.ModelSerializer):
         allowed = True
         try:
             related_obj = related_model.objects.get(pk=related_id)
-
+        except Exception:
+            # The related record is gone (or the id is malformed): nothing to judge.
+            cache[cache_key] = True
+            return True
+        try:
             if hasattr(related_obj, "permission_read"):
                 if base_user_context is not None:
                     user_context = base_user_context.with_instance(request, related_obj)
@@ -652,7 +656,14 @@ class LexSerializer(serializers.ModelSerializer):
                 else:
                     allowed = bool(readable_fields)
         except Exception:
-            allowed = True
+            if _fail_closed():
+                logger.exception(
+                    "permission_read of %s raised on an audit-log payload reference; reference withheld",
+                    related_model.__name__,
+                )
+                allowed = False
+            else:
+                allowed = True
 
         cache[cache_key] = allowed
         return allowed
@@ -953,7 +964,12 @@ class LexSerializer(serializers.ModelSerializer):
         try:
             if instance.__class__._meta.model_name.lower() == 'auditlog':
                 payload = representation.get('payload') or getattr(instance, 'payload', None)
-                if isinstance(payload, dict):
+                if self._is_readable_file_operation_payload(instance):
+                    # An export or download payload describes the request (file
+                    # name, size, rows, filter), not field values of the record:
+                    # whoever may read the entry reads it whole.
+                    pass
+                elif isinstance(payload, dict):
                     model_class = self._resolve_target_model(instance)
                     if model_class is not None:
                         base_user_context = self._get_base_user_context(request) if request else None
@@ -983,7 +999,10 @@ class LexSerializer(serializers.ModelSerializer):
                         else:
                             representation['payload'] = filtered_payload
         except Exception:
-            pass
+            if _fail_closed():
+                # The payload could not be judged: withhold it rather than show it unfiltered.
+                logger.exception("Filtering the audit-log payload raised; payload withheld")
+                representation['payload'] = {}
 
         # Add FK display-name companions (<fk>__short_description) for the
         # detail / single-object path. During list serialization this is
@@ -993,6 +1012,14 @@ class LexSerializer(serializers.ModelSerializer):
             self._add_fk_display_names_single(representation)
 
         return representation
+
+    @staticmethod
+    def _is_readable_file_operation_payload(instance) -> bool:
+        """An export/download entry whose payload is not pruned (LEX_SEC_READ_SURFACES)."""
+        from lex.core.security_flags import strict
+
+        file_operation_actions = getattr(type(instance), "FILE_OPERATION_ACTIONS", ())
+        return getattr(instance, "action", None) in file_operation_actions and strict("READ_SURFACES")
 
     def _add_fk_display_names_single(self, representation: dict) -> None:
         """Per-instance twin of ``FilteredListSerializer._batch_add_fk_display_names``.

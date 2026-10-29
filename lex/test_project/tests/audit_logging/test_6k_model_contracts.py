@@ -80,18 +80,19 @@ class TestCluster06k_AuditLogModel(SimpleTestCase):
     """
 
     # -- 6.96 ----------------------------------------------------------
-    def test_6_96_action_choices_are_exactly_create_update_delete(self) -> None:
+    def test_6_96_action_choices_are_exactly_the_documented_operations(self) -> None:
         """
-        Scenario 6.96: ``AuditLog.ACTION_CHOICES`` must enumerate
-        exactly the three documented operations (``create`` / ``update``
-        / ``delete``). Adding or removing one is a contract change for
-        every consumer that branches on action — the frontend's
-        per-action icon/colour, the audit-log filter dropdown, and the
-        compliance-team's CSV export.
+        Scenario 6.96: ``AuditLog.ACTION_CHOICES`` must enumerate exactly
+        the documented operations — the three that change data
+        (``create`` / ``update`` / ``delete``) and the two that hand it
+        out (``export`` / ``download``). Adding or removing one is a
+        contract change for every consumer that branches on action — the
+        frontend's per-action icon/colour, the audit-log filter dropdown,
+        and the compliance-team's CSV export.
 
         A regression that silently introduced (e.g.) ``"bulk_delete"``
-        as a 4th choice would let unknown actions pass the model-level
-        ``CharField(choices=...)`` validation but break every
+        as a further choice would let unknown actions pass the
+        model-level ``CharField(choices=...)`` validation but break every
         downstream switch statement.
         """
         choices = AuditLog.ACTION_CHOICES
@@ -101,6 +102,8 @@ class TestCluster06k_AuditLogModel(SimpleTestCase):
                 ("create", "Create"),
                 ("update", "Update"),
                 ("delete", "Delete"),
+                ("export", "Export"),
+                ("download", "Download"),
             ),
             "ACTION_CHOICES drift — frontend / scraper consumers branch "
             "on this exact tuple shape. Got: %r" % (choices,),

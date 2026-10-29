@@ -346,6 +346,131 @@ class SecretDocument(LexModel):
         return True
 
 
+class RaisingParent(LexModel):
+    """Cluster 4r: permission_read raises for the name "boom"; permission_edit always raises."""
+
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        if self.name == "boom":
+            raise RuntimeError("cluster 4r: permission_read failed on purpose")
+        return PermissionResult.allow_all("cluster 4r")
+
+    def permission_edit(self, uc):
+        raise RuntimeError("cluster 4r: permission_edit failed on purpose")
+
+    def permission_list(self, uc):
+        return True
+
+
+class RaisingChild(LexModel):
+    """Cluster 4r: a readable record whose audit payload names a RaisingParent."""
+
+    name = models.CharField(max_length=200)
+    parent = models.ForeignKey(RaisingParent, on_delete=models.CASCADE, null=True, blank=True)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 4r")
+
+    def permission_list(self, uc):
+        return True
+
+
+class RaisingExportItem(LexModel):
+    """Cluster 4r: permission_export raises for the name "boom"."""
+
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 4r")
+
+    def permission_export(self, uc):
+        if self.name == "boom":
+            raise RuntimeError("cluster 4r: permission_export failed on purpose")
+        return PermissionResult.allow_all("cluster 4r")
+
+    def permission_list(self, uc):
+        return True
+
+
+class CreateParent(LexModel):
+    """Cluster 4q: a parent that is open or closed for new children."""
+
+    name = models.CharField(max_length=200)
+    is_open = models.BooleanField(default=True)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 4q")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
+class ScopedCreateItem(LexModel):
+    """Cluster 4q: whether a child may be created depends on its parent and its values.
+
+    The blank record (no parent) is allowed, as a UI asks "may I create one at all";
+    a filled record is refused under a closed parent or with the name "forbidden",
+    and the check raises for the name "boom". Every record the hook sees is noted
+    in ``SEEN`` so a scenario can tell what it was asked on.
+    """
+
+    SEEN: list = []
+
+    name = models.CharField(max_length=200)
+    parent = models.ForeignKey(CreateParent, on_delete=models.CASCADE, null=True, blank=True)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 4q")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 4q")
+
+    def permission_create(self, uc):
+        ScopedCreateItem.SEEN.append((self.pk, self.name, self.parent_id))
+        if self.name == "boom":
+            raise RuntimeError("cluster 4q: permission_create failed on purpose")
+        if self.name == "forbidden":
+            return False
+        return self.parent_id is None or self.parent.is_open
+
+    def permission_list(self, uc):
+        return True
+
+
 ALL_MODELS = [ProtectedItem, FieldLevelItem, KeycloakItem, FilterBackendItem, ExportDeniedItem, OwnedItem]
 SECURE_DEFAULT_MODELS = [ProtectedItem, FieldLevelItem, KeycloakItem, FilterBackendItem, RaisingReadItem,
                          SecretDocument]
@@ -360,3 +485,9 @@ OWNED = "owneditem"
 RAISING_READ = "raisingreaditem"
 SECRET_DOCUMENT = "secretdocument"
 READ_CHECK_RAISES = "readcheckraisesitem"
+RAISING_SURFACE_MODELS = [RaisingParent, RaisingChild, RaisingExportItem, RaisingReadItem]
+RAISING_PARENT = "raisingparent"
+RAISING_CHILD = "raisingchild"
+RAISING_EXPORT = "raisingexportitem"
+CREATE_MODELS = [CreateParent, ScopedCreateItem]
+SCOPED_CREATE = "scopedcreateitem"

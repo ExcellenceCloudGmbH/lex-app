@@ -1788,6 +1788,30 @@ fails 1.393's third half; the old `pytest_cmd` / `collect_groups` fail both halv
 dropping `-m <group>`, leaving VS Code without the test entries, or writing them without a test
 config each fail 1.404.
 
+---
+
+### Batch 1ax — the Process model feature removed from the public surface ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.406 – 1.409 |
+| Type | I |
+| Files covered | `lex/core/models/Process.py` (deleted), `lex/core/models/__init__.py` (`__all__`), `lex/process_admin/sites/process_admin_site.py` (process registry), `lex/process_admin/utils/model_registration.py` (Process branch, `_register_process_model`, `_RESERVED_CLASS_NAMES`), `lex/process_admin/models/utils.py` (structure node types) |
+| Test file | `lex/test_project/tests/init/test_1ax_process_feature_removed.py` |
+| Test classes | `TestCluster01ax_ProcessFeatureRemoved` (1.406–1.409) |
+| Fixtures | a customer-shaped `Process(LexModel)` declared in the test module (`app_label="lex_app"`) — the name the framework gave back; `StructureProbeModel(LexModel)` and `StructureProbeReport(HTMLReport)` fed to a real `ModelCollection` with `auto_include_missing_models=False` |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.406 | not importable | `lex.core.models.Process` raises `ModuleNotFoundError`, `Process` left `__all__`, the five kept names are still advertised |
+| 1.407 | no registry left | `processes`, `registerProcess`, `get_process_structure_func` and `_register_process_model` are all absent; `html_reports`, `registerHTMLReport`, `get_html_report_func` survive |
+| 1.408 | the name is the project's again | `_validate_model_definition` accepts `class Process(LexModel)`; `LexModel` / `CalculationModel` / `HTMLReport` and the `Historical` prefix still raise `ValueError` |
+| 1.409 | no `Process` node type | the `api/model-structure` payload types the model `Model`, the report `HTMLReport`, the branch `Folder`; no node anywhere carries `Process` |
+
+**Why a regression matters:** a half-removed feature is worse than either state — a `registerProcess` that still collects classes looks like a working feature while `api/process/<name>` 404s, and a stale `Process` entry in the reserved-name set keeps rejecting a project's own model for a framework class that no longer exists.
+
 ### Batch 1ax — `LEX_EMBED_ALLOWED_ORIGINS`: named sites only may embed lex-app and use its filter bridge ✅
 
 | Property | Value |

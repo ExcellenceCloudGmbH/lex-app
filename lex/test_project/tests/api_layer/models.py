@@ -195,9 +195,29 @@ class ExplodingItem(LexModel):
         return super().save(*args, **kwargs)
 
 
+# ---------------------------------------------------------------------------
+# File-download models (Cluster 10p)
+# ---------------------------------------------------------------------------
+
+@_permissive
+class DownloadableDocument(LexModel):
+    """A record carrying a file the download endpoints serve."""
+
+    name = models.CharField(max_length=200)
+    attachment = models.FileField(upload_to="cluster10p/", blank=True, null=True)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+
 ALL_MODELS = [ApiSimpleItem, SchemaFKTarget, SchemaItem, SchemaHiddenItem, ApiLayerCalc]
 HARDENING_MODELS = [ApiSimpleItem, ExplodingItem]
+DOWNLOAD_MODELS = [DownloadableDocument]
 
 API_SIMPLE = "apisimpleitem"
 API_LAYER_CALC = "apilayercalc"
 EXPLODING = "explodingitem"
+DOWNLOADABLE = "downloadabledocument"

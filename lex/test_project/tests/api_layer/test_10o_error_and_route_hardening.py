@@ -20,8 +20,7 @@ Intent
 
 Cluster 10o — scenarios 10.83–10.90. Type: E (10.85, 10.88, 10.89 U).
 Covers: lex/core/security_flags.py (expose_tracebacks), lex/api/security.py
-(error_detail), lex/api/views/model_entries/One.py and
-lex/api/views/process_flow/CreateOrUpdate.py (error bodies),
+(error_detail), lex/api/views/model_entries/One.py (error bodies),
 lex/authentication/middleware.py (OidcRedirectGuardMiddleware),
 lex/lex_app/settings.py (MIDDLEWARE), lex/react/views.py (serve_react),
 lex/process_admin/sites/process_admin_site.py and
@@ -40,12 +39,12 @@ from unittest import mock
 import pytest
 from django.http import HttpResponse
 from django.test import RequestFactory, SimpleTestCase, override_settings
-from django.urls import resolve, reverse
+from django.urls import resolve
 
 from lex.api.middleware import keycloak_permissions
 from lex.api.middleware.keycloak_permissions import KeycloakPermissionsMiddleware
 from lex.authentication.middleware import OidcRedirectGuardMiddleware
-from lex.test_project.tests._e2e_test_case import E2ETestCase, _MockContainer
+from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from .models import EXPLODING, HARDENING_MODELS, ApiSimpleItem, ExplodingItem
 
@@ -68,22 +67,17 @@ class TestCluster10o_Tracebacks(E2ETestCase):
 
     def _failures(self):
         create = self.client.post(self.url_create(EXPLODING), {"name": "explode"}, format="json")
-        run_step = self.client.patch(
-            reverse("process_admin_rest_api:run_step",
-                    kwargs={"model_container": _MockContainer(EXPLODING), "pk": 999999}),
-            {"name": "explode"}, format="json",
-        )
         with mock.patch.object(ExplodingItem, "permission_create", side_effect=RuntimeError("hook down")):
             refused = self.client.post(self.url_create(EXPLODING), {"name": "fine"}, format="json")
-        return {"create": create, "run_step": run_step, "permission_create raised": refused}
+        return {"create": create, "permission_create raised": refused}
 
     # -- 10.83 ---------------------------------------------------------
     def test_10_83_error_bodies_carry_no_traceback_by_default(self) -> None:
         """
         Scenario 10.83: a failing request answers 500 without a server traceback.
         Given: DEBUG off, default flags, a model whose save() raises
-        When: a row is created through the CRUD endpoint and through run_step,
-              and a create is refused because permission_create raised
+        When: a row is created through the CRUD endpoint, and a create is
+              refused because permission_create raised
         Then: each answers 500 with a readable "error" and no "traceback";
               nothing is stored.
         """

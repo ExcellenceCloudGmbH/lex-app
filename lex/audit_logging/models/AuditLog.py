@@ -9,7 +9,13 @@ class AuditLog(LexModel):
         ('create', 'Create'),
         ('update', 'Update'),
         ('delete', 'Delete'),
+        ('export', 'Export'),
+        ('download', 'Download'),
     )
+    #: Actions that hand data out of the system. Their payload describes the
+    #: request (file name, size, rows), not field values of the record, so who
+    #: may read them is decided by the record or the model, not by the payload.
+    FILE_OPERATION_ACTIONS = ('export', 'download')
 
     # Remove inherited audit fields from LexModel – AuditLog has its own
     # 'date' and 'author' fields that serve the same purpose.

@@ -491,6 +491,23 @@ does not remove user launch configurations.
 
 ---
 
+### 1ax. The Process model feature removed from the public surface ✅
+
+**What it tests:** `Process` — the abstract model a project subclassed to describe a workflow — is gone, and every door into it is shut: the import, the admin site's registry, the registration branch, the reserved class name, and the `Process` node type in the model-structure payload. `HTMLReport`, the sibling feature that shares the same machinery, was deliberately kept, so each scenario checks it still works.
+
+**Why a regression matters:** a feature that is only half removed is worse than either state. A surviving `registerProcess` collects classes nothing reads; a stale `Process` in `_RESERVED_CLASS_NAMES` keeps rejecting a project's own model for a framework class that no longer exists; a `Process` node type sends the frontend to an endpoint that is gone.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.406 | not importable | `lex.core.models.Process` raises `ModuleNotFoundError`, `Process` left `__all__` |
+| 1.407 | no registry left | no `processes` / `registerProcess` / `get_process_structure_func` / `_register_process_model`; the HTMLReport equivalents survive |
+| 1.408 | the name is the project's again | `class Process(LexModel)` validates; `LexModel`, `CalculationModel`, `HTMLReport` and `Historical*` still raise |
+| 1.409 | no `Process` node type | the structure payload types nodes `Model` / `HTMLReport` / `Folder` only |
+
+**Scenario range:** 1.406 – 1.409. **Test file:** `lex/test_project/tests/init/test_1ax_process_feature_removed.py`. **Type:** I. **Status:** ✅ Complete (2026-10-22). Batch: [1ax](batches.md).
+
+---
+
 ### 1ax. `LEX_EMBED_ALLOWED_ORIGINS` — named sites only may embed lex-app and use its filter bridge ✅
 
 **What it tests:** that embedding lex-app in a frame/iframe, and reading its filter bridge events, can be restricted to an operator-named list of sites. Amendment 14 of the multi-value-filters design adds `LEX_EMBED_ALLOWED_ORIGINS`, a comma-separated list of origins that becomes a validated Django setting (`parse_embed_allowed_origins` in `lex/runtime_config.py`), a `Content-Security-Policy: frame-ancestors` directive, and a `window.REACT_APP_EMBED_ALLOWED_ORIGINS` value the frontend reads from `config.js`. The directive is applied in two places: `EmbedXFrameOptionsMiddleware` (for a deployment that registers it) and, since `serve_react` is `@xframe_options_exempt` and therefore never covered by Django's own `XFrameOptionsMiddleware` at all, `serve_react` itself — on its SPA-fallback and other real `.html` document responses, which is what actually restricts who may frame lex-app as this repo ships today.

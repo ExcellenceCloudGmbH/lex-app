@@ -23,7 +23,14 @@ from lex.audit_logging.utils.CacheManager import CacheManager
 from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.audit_logging.utils.WebSocketNotifier import WebSocketNotifier
 from lex.core.calculation_closing import calculation_closed_reason
-from lex.api.security import edit_denial, error_detail, is_readable, write_denial
+from lex.api.security import (
+    ask_create,
+    edit_denial,
+    error_detail,
+    filled_record,
+    is_readable,
+    write_denial,
+)
 from lex.core.security_flags import strict
 from lex.core.exceptions import resolve_exception_detail, resolve_exception_traceback
 from lex.core.models.CalculationModel import (
@@ -40,9 +47,17 @@ from rest_framework.generics import RetrieveUpdateDestroyAPIView, CreateAPIView
 from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework_api_key.permissions import HasAPIKey
+from lex.api.utils.api_key_requests import HasAPIKey
 
 logger = logging.getLogger(__name__)
+
+
+class _CreateRefused(Exception):
+    """``permission_create`` refused the filled record; ``create`` answers 401/403."""
+
+
+class _CreateCheckRaised(Exception):
+    """``permission_create`` raised on the filled record (LEX_SEC_FAIL_CLOSED); the cause is chained."""
 
 
 class OneModelEntry(
@@ -245,6 +260,7 @@ class OneModelEntry(
             )
 
     def perform_create(self, serializer):
+        self._check_create_on_filled_record(serializer)
         instance = super().perform_create(serializer)
         # ``create`` starts a ``calculate_on_create`` model's run from this
         # object once the create has committed.
@@ -535,6 +551,76 @@ class OneModelEntry(
         """
         return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
 
+    def _check_create_on_filled_record(self, serializer):
+        """Ask ``permission_create`` again, on the record as this request fills it.
+
+        The check in :meth:`create` sees a blank record: it answers "may this
+        caller create one at all" (and is what a UI asks before it shows a form).
+        Whether this caller may create *this* record -- under that parent, with
+        these values -- is only decidable once the request's values are on it,
+        foreign keys included. Runs before the audit entry is written and before
+        ``pre_validation``; nothing is stored when it refuses (LEX_SEC_CREATE).
+        """
+        request = getattr(self, "request", None)
+        if request is None or not strict("CREATE"):
+            return
+        model_class = serializer.Meta.model
+        try:
+            allowed = ask_create(request, filled_record(model_class, serializer.validated_data))
+        except Exception as exc:
+            if strict("FAIL_CLOSED"):
+                raise _CreateCheckRaised() from exc
+            logger.warning(
+                "permission_create of %s raised on the filled record; create allowed "
+                "(LEX_SEC_FAIL_CLOSED is off).",
+                model_class.__name__,
+                exc_info=True,
+            )
+            return
+        if not allowed:
+            raise _CreateRefused()
+
+    @staticmethod
+    def _create_refused(request, model_class):
+        # BUG-008 fix: authorization failures must surface as
+        # 401 (anonymous) or 403 (authenticated-but-denied),
+        # not 400 — 400 is for client-side validation errors.
+        # Frontends and API clients route on this status code
+        # (auto-redirect to login on 401, "permission denied"
+        # banner on 403); collapsing both into 400 breaks
+        # both code paths.
+        is_anonymous = not bool(
+            getattr(getattr(request, "user", None), "is_authenticated", False)
+        )
+        deny_status = (
+            status.HTTP_401_UNAUTHORIZED
+            if is_anonymous
+            else status.HTTP_403_FORBIDDEN
+        )
+        return Response(
+            {
+                "message": f"You are not authorized to create a record in {model_class.__name__}"
+            },
+            status=deny_status,
+        )
+
+    @staticmethod
+    def _create_check_failed(model_class, exc):
+        # A permission check that raises is a server fault, not a grant.
+        logger.error(
+            "permission_create of %s raised; create refused (LEX_SEC_FAIL_CLOSED)",
+            model_class.__name__,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+        raise APIException(
+            error_detail({
+                "error": f"The permission check for creating a {model_class.__name__} failed.",
+                "traceback": "".join(
+                    traceback.format_exception(type(exc), exc, exc.__traceback__)
+                ),
+            })
+        ) from exc
+
     def create(self, request, *args, **kwargs):
         self.reset_failed_audit_log_state()
         model_container = self.kwargs["model_container"]
@@ -555,40 +641,10 @@ class OneModelEntry(
                 can_create = instance.can_create(request)
 
             if not can_create:
-                # BUG-008 fix: authorization failures must surface as
-                # 401 (anonymous) or 403 (authenticated-but-denied),
-                # not 400 — 400 is for client-side validation errors.
-                # Frontends and API clients route on this status code
-                # (auto-redirect to login on 401, "permission denied"
-                # banner on 403); collapsing both into 400 breaks
-                # both code paths.
-                is_anonymous = not bool(
-                    getattr(getattr(request, "user", None), "is_authenticated", False)
-                )
-                deny_status = (
-                    status.HTTP_401_UNAUTHORIZED
-                    if is_anonymous
-                    else status.HTTP_403_FORBIDDEN
-                )
-                return Response(
-                    {
-                        "message": f"You are not authorized to create a record in {model_container.model_class.__name__}"
-                    },
-                    status=deny_status,
-                )
+                return self._create_refused(request, model_container.model_class)
         except Exception as exc:
             if strict("FAIL_CLOSED"):
-                # A permission check that raises is a server fault, not a grant.
-                logger.exception(
-                    "permission_create of %s raised; create refused (LEX_SEC_FAIL_CLOSED)",
-                    model_container.model_class.__name__,
-                )
-                raise APIException(
-                    error_detail({
-                        "error": f"The permission check for creating a {model_container.model_class.__name__} failed.",
-                        "traceback": traceback.format_exc(),
-                    })
-                ) from exc
+                self._create_check_failed(model_container.model_class, exc)
             # Legacy (LEX_SEC_FAIL_CLOSED=false): allow by default on permission check error
 
         calculationId = self.kwargs["calculationId"]
@@ -604,6 +660,11 @@ class OneModelEntry(
                 with atomic_context:
                     response = CreateModelMixin.create(self, request, *args, **kwargs)
 
+            except _CreateRefused:
+                # permission_create said no on the filled record (LEX_SEC_CREATE).
+                return self._create_refused(request, model_container.model_class)
+            except _CreateCheckRaised as e:
+                self._create_check_failed(model_container.model_class, e.__cause__ or e)
             except ValidationError as e:
                 self._log_failed_request_audit_if_needed(
                     action="create",

@@ -4,7 +4,7 @@ from lex.api.views.permissions.UserPermission import UserPermission
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
-from rest_framework_api_key.permissions import HasAPIKey
+from lex.api.utils.api_key_requests import HasAPIKey
 
 
 # LEX-702. What the UI legitimately needs to DISPLAY a user: a name to put

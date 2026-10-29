@@ -123,12 +123,14 @@ def is_readable(request, instance) -> bool:
 
     Judged by ``permission_read`` for this record — the decision the
     serializer made before, when a refused record came back as ``{}``.
-    Models without ``permission_read`` (audit log, plain Django models) use
-    the list endpoint's rule.
+    Models without ``permission_read`` (plain Django models) and the audit
+    trail, whose own ``permission_read`` allows everyone while its list
+    judges each entry by the record it names, use the list endpoint's rule.
     """
     from lex.api.views.model_entries.filter_backends import apply_read_restriction
 
-    if not hasattr(instance, "permission_read"):
+    audit_trail = strict("READ_SURFACES") and type(instance).__name__ in ("AuditLog", "AuditLogStatus")
+    if audit_trail or not hasattr(instance, "permission_read"):
         queryset = type(instance)._default_manager.filter(pk=instance.pk)
         return apply_read_restriction(queryset, request).exists()
     return bool(read_result(request, instance).allowed)
@@ -328,6 +330,28 @@ def delete_allowed(request, instance) -> bool:
         )
     if hasattr(instance, "can_delete"):
         return bool(guarded(instance.can_delete, request, deny=False, allow=True, what="can_delete"))
+    return True
+
+
+def filled_record(model_class, validated_data):
+    """An unsaved ``model_class`` carrying the request's validated values.
+
+    Only concrete fields are set (a foreign key as its related object); many-to-many
+    values and serializer-only fields are left out, as ``save()`` would set them later.
+    """
+    concrete = {field.name for field in model_class._meta.concrete_fields}
+    values = {name: value for name, value in (validated_data or {}).items() if name in concrete}
+    return model_class(**values)
+
+
+def ask_create(request, instance) -> bool:
+    """``permission_create`` (or legacy ``can_create``) on ``instance``, raising as the hook raises."""
+    from lex.core.models.LexModel import UserContext
+
+    if hasattr(instance, "permission_create"):
+        return bool(instance.permission_create(UserContext.from_request(request, instance)))
+    if hasattr(instance, "can_create"):
+        return bool(instance.can_create(request))
     return True
 
 

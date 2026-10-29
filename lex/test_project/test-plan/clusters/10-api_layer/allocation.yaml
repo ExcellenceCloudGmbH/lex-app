@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 92
+max_scenario: 99
 letters:
   a:
     title: ''
@@ -158,6 +158,42 @@ letters:
       or the CORS allow-list, else 400 REDIRECT_NOT_ALLOWED before the OIDC view. Unknown api/ path is
       a JSON 404, SPA routes keep index.html (10.87-10.88). api/global-search/?q= routed (10.89). One
       KeycloakManager per process (10.90). Ported from #815, #821 (manager only), #830.
+  p:
+    title: File-download endpoints write an audit entry
+    scenarios: 10.91-10.96
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      Four endpoints serve a file and each has its own machine. `file-download` on local storage
+      records the record, field, filename, byte size and `delivery: stream` (10.91); a refused
+      download is a `failure` entry with its status code and no record attached (10.92); on GCS the
+      caller gets a URL, recorded as `delivery: url` so "bytes streamed" and "access handed out"
+      stay distinguishable (10.93). The SharePoint download (10.94), share link (10.95) and preview
+      link (10.96) are audited as downloads too, told apart by `delivery`. SharePoint's SDK is mocked
+      at the project boundary; `DownloadableDocument` is the cluster's own FileField model.
+  q:
+    title: The Process and ProcessFlow endpoints are gone from the route table
+    scenarios: 10.97-10.99
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      Removing the Process feature took out two public routes and must have taken out nothing else.
+      api/run_step/<model>/<pk> no longer reverses, no route is named run_step or served under
+      api/run_step/, and lex.api.views.process_flow no longer imports (10.97). The same for
+      api/process/<name>, plus ProcessStructure gone from lex.process_admin.views and
+      lex.api.views.ModelStructureObtainView (10.98). The endpoints the bundled frontend loads a
+      project with -- model-structure, project-info, calculationlog-tree, init-calculation-logs,
+      clean-calculations, widget-structure, global-search-query, user-permissions, log and
+      htmlreports -- all still reverse (10.99). This resolves pending decision 4 in clusters/README
+      for CreateOrUpdate. The model-side removal is pinned by 1ax. Originally allocated as
+      10p/10.91-10.94; #840 landed that letter and range on lex-app-v2 first, so this batch re-took
+      the next free pair on merge.
   p:
     title: The fields endpoint's value_list flag, and no filter bar
     scenarios: 10.91-10.92

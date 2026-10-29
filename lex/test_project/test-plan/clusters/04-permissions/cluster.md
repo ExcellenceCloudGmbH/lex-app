@@ -72,7 +72,7 @@
 | 4.87 | no edit right | every PATCH refused; legacy applies it |
 | 4.88 | bulk PATCH | 400, nothing changed |
 | 4.89 | bulk DELETE | `permission_delete` per row, 400 `DELETE_NOT_ALLOWED` with ids |
-| 4.90 | run_step | 400 `EDIT_NOT_ALLOWED` / `CREATE_NOT_ALLOWED` |
+| 4.90 | ~~run_step~~ | **Retired 2026-10-22** — it pinned the ProcessFlow endpoint, removed with the Process feature; its absence is pinned by [10.97](../10-api_layer/cluster.md). The id is not reused. |
 | 4.91 | history | 404 for an unreadable record |
 | 4.92 | global search | only readable rows; legacy all |
 | 4.93 | export | only readable rows |
@@ -98,14 +98,46 @@
 | 4.102 | POST api/logs | plain user 404 with `error`, nothing logged; superuser and legacy 201 |
 | 4.103 | calculation-log tree | readable record's calculation 1, hidden 0, record-less 0, unfiltered 0; superuser and legacy all |
 | 4.104 | calculation-log PDF | readable 200; hidden, record-less and unknown 404; superuser 200 for the record-less log |
-| 4.105 | `auth.User` writes | PATCH, run_step create, bulk delete → 400 `EDIT_NOT_ALLOWED`, nothing changes; superuser PATCH 200 |
+| 4.105 | `auth.User` writes | PATCH, create, bulk delete → 400 `EDIT_NOT_ALLOWED`, nothing changes; superuser PATCH 200 |
 | 4.106 | `permission_list` false | list 404; legacy 200; allowing 200 |
 | 4.107 | PATCH/PUT history row | 400 `EDIT_NOT_ALLOWED` with `error`, history unchanged; superuser 200 |
-| 4.108 | other history writes | DELETE, POST, bulk PATCH/DELETE, run_step, meta-history PATCH → 400 `EDIT_NOT_ALLOWED`, never 403 |
+| 4.108 | other history writes | DELETE, POST, bulk PATCH/DELETE, meta-history PATCH → 400 `EDIT_NOT_ALLOWED`, never 403 |
 | 4.109 | opt-out | `LEX_SEC_HISTORY_WRITE=false` applies the correction (200) |
 | 4.110 | main record | PATCH of the record itself still 200 |
 
 **Scenario range:** 4.101 – 4.110. **Test file:** `lex/test_project/tests/permissions/test_4p_internal_tools_and_history.py`. **Type:** E. **Status:** ✅ Complete (2026-10-18). Batch: [4p](batches.md).
+
+---
+
+### 4r. A raising permission hook denies on the remaining surfaces ✅
+
+**Gap:** 4o made a raising permission hook deny on the record endpoints, but four places still caught the exception and allowed: the audit-log list (`can_read_from_payload`), the audit-log payload's foreign-key references and its field filtering, the export's per-row field selection, and `PermissionAwareSerializerMixin`. Under `LEX_SEC_FAIL_CLOSED` (on by default) each denies; `LEX_SEC_FAIL_CLOSED=false` restores the allow.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.116 | audit entry, record's read raises | entry hidden; opt-out lists it |
+| 4.117 | payload reference, referenced record's read raises | reference dropped from the payload; opt-out keeps it |
+| 4.118 | payload filtering raises | payload `{}`; opt-out returns it unfiltered |
+| 4.119 | export, row's export check raises | row left out; opt-out exports it |
+| 4.120 | serializer mixin, edit/create check raises | `PermissionDenied`; opt-out validates |
+
+**Scenario range:** 4.116 – 4.120. **Test file:** `lex/test_project/tests/permissions/test_4r_fail_closed_remaining_surfaces.py`. **Type:** E (4.118, 4.120 I). **Status:** ✅ Complete (2026-10-23). Batch: [4r](batches.md).
+
+---
+
+### 4q. permission_create on the record the request fills ✅
+
+**Gap:** `POST …/create` asked `permission_create` only on a blank `model_class()`, before any request value was set. A rule that depends on the parent or a value ("may add an investor only to her own fund") could not be decided there, so projects re-checked creation in `pre_validation`. With `LEX_SEC_CREATE` (on by default) the hook is asked again on the record filled with the validated values, foreign keys set, before the audit entry and `pre_validation`. The blank check stays first (it is what a UI asks before offering a form). Refusal shape unchanged: 401/403 `{message}`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.111 | refused under a closed parent | 403 `{message}`, nothing stored, no audit entry; open parent 201 |
+| 4.112 | what the hook sees | blank record, then the filled unsaved record with values and FK |
+| 4.113 | refused on a plain value | 403, nothing stored |
+| 4.114 | hook raises on the filled record | 500 with the create check's error, nothing stored; `LEX_SEC_FAIL_CLOSED=false` stores |
+| 4.115 | opt-out | `LEX_SEC_CREATE=false` and `LEX_LEGACY_SECURITY=true` store; blank check only |
+
+**Scenario range:** 4.111 – 4.115. **Test file:** `lex/test_project/tests/permissions/test_4q_create_on_filled_record.py`. **Type:** E. **Status:** ✅ Complete (2026-10-23). Batch: [4q](batches.md).
 
 ### 4q. filter_values and read permissions
 

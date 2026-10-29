@@ -1,7 +1,7 @@
 cluster: 13
 slug: exports
 title: Export Endpoint
-max_scenario: 46
+max_scenario: 51
 letters:
   a:
     title: Legacy (non-AG) export path
@@ -95,6 +95,22 @@ letters:
       Django's storage silently truncates and suffixes the filename. Both fields now setdefault their
       advertised width. Downstream apps get one AlterField per report column on their next
       makemigrations.
+  i:
+    title: The export endpoint writes an audit entry
+    scenarios: 13.46-13.51
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      `post` reaches the file through four machines that share no code between request and response,
+      so each is asserted on its own: universal streaming (13.46), flat DB-only streaming (13.47),
+      the AG-Grid pandas fallback (13.50) and the legacy non-AG path (13.49). Every entry carries the
+      rows and columns that actually left the system, the file size and the request's shape; the
+      model fixes the entry's content type while `object_id` stays unset, because a model-wide export
+      touches no single record. An export that returns no file is a `failure` entry with its status
+      code (13.48), and a hand-picked selection is recorded as a count, never as the id list (13.51).
   i:
     title: An export under a value-list filter holds the rows the list shows
     scenarios: '13.46'

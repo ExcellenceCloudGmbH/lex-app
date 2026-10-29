@@ -89,3 +89,11 @@
 **Scenario range:** 2.110 – 2.116. **Test file:** `lex/test_project/tests/crud_api/test_2l_calculate_closed_record.py`. **Type:** E. **Status:** ✅ Complete. 2.110 409 with the reason, status unchanged, no run marked in progress; 2.111 an open record still gets 202; 2.112 `True` gets the default message; 2.113 a closed record's other fields stay editable and keep its status; 2.114 closing through an edit keeps the status; 2.115 reopening resets like any edit; 2.116 an open record's edit still resets. Covers `lex/api/views/model_entries/One.py`.
 
 ---
+
+### 2m. An API key in the `?api_key=` query parameter ✅
+
+**Gap:** an external system that can only be configured with a callback URL (no headers, no Basic auth — the Postident DataConnect backend callback) cannot send an API key. When a request carries no API-key header, Lex reads the key from the `api_key` query parameter, along the whole path: the OIDC login middleware, the view's `HasAPIKey` (now Lex's own subclass in `lex/api/utils/api_key_requests.py`), and the API-key identity. A header always wins: with a header present the query parameter is not consulted.
+
+**Scenario range:** 2.117 – 2.121. **Test file:** `lex/test_project/tests/crud_api/test_2m_api_key_query_param.py`. **Type:** E. **Status:** ✅ Complete. 2.117 a query key alone creates an entry as the API-key caller; 2.118 a wrong header key is refused despite a valid query key; 2.119 a valid header key wins over a wrong query key; 2.120 a wrong query key is refused; 2.121 an empty or blank one is refused. Covers `lex/api/utils/api_key_requests.py`, `lex/api/views/model_entries/One.py`.
+
+---

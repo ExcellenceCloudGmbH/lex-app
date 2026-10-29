@@ -24,10 +24,12 @@ from lex.core.security_flags import strict
 from lex.api.utils.temporal import parse_as_of_datetime
 from lex.api.views.model_entries.List import ListModelEntries
 from lex.api.views.model_entries.filter_backends import PrimaryKeyListFilterBackend
+from lex.audit_logging.mixins.FileOperationAuditMixin import FileOperationAuditMixin
+from lex.audit_logging.utils.file_operation_audit import ACTION_EXPORT
 from lex.process_admin.models.utils import get_relation_fields
 from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
-from rest_framework_api_key.permissions import HasAPIKey
+from lex.api.utils.api_key_requests import HasAPIKey
 
 MAX_AG_EXPORT_ROWS = 1_000_000
 AG_GROUP_HIERARCHY_COLUMN = "__ag_group_hierarchy_label"
@@ -95,11 +97,46 @@ def _safe_bool(value: Any, default: bool = False) -> bool:
     return default
 
 
-class ModelExportView(GenericAPIView):
+class ModelExportView(FileOperationAuditMixin, GenericAPIView):
     filter_backends = [UserReadRestrictionFilterBackend, PrimaryKeyListFilterBackend, ForeignKeyFilterBackend]
     model_collection = None
     http_method_names = ['post']
     permission_classes = [HasAPIKey | IsAuthenticated]
+    audit_action = ACTION_EXPORT
+
+    def audit_request_payload(self, request, *args, **kwargs):
+        """Describe the requested export: what shaped it, not the rows themselves.
+
+        Selections are recorded as counts — an export of ten thousand hand-picked
+        rows must stay one audit row, not ten thousand identifiers.
+        """
+        json_data = request.data if isinstance(request.data, dict) else {}
+        ag_export = json_data.get("ag_export")
+        ag_request = ag_export.get("request") if isinstance(ag_export, dict) else None
+
+        if isinstance(ag_request, dict):
+            mode = "ag_grid"
+        elif json_data.get("filtered_export") is not None:
+            mode = "filtered"
+        else:
+            mode = "legacy"
+
+        payload = {
+            "format": "xlsx",
+            "delivery": "stream",
+            "mode": mode,
+            "as_of": request.query_params.get("as_of"),
+            "timezone": request.query_params.get("timezone") or json_data.get("timezone"),
+            "selected_row_count": len(self._extract_selected_ids_for_export(json_data)),
+        }
+        if isinstance(ag_request, dict):
+            payload["filter_model"] = ag_request.get("filterModel") or {}
+            payload["row_group_cols"] = [
+                col.get("id") for col in (ag_request.get("rowGroupCols") or []) if isinstance(col, dict)
+            ]
+            payload["pivot_mode"] = bool(ag_request.get("pivotMode"))
+            payload["selected_group_count"] = len(self._extract_selected_group_key_paths(ag_export))
+        return payload
 
     def get_exportable_fields_for_object(self, obj, request):
         """Get the set of exportable fields for a single object"""
@@ -125,7 +162,16 @@ class ModelExportView(GenericAPIView):
                 # Default to all fields if no permission method
                 exportable_fields = {f.name for f in obj._meta.fields}
         except Exception:
-            # Default to all fields on error
+            from lex.core.security_flags import strict
+
+            if strict("FAIL_CLOSED"):
+                # A raising export check withholds the row (no identifying fields either).
+                logger.exception(
+                    "permission_export of %s raised; row withheld from the export (LEX_SEC_FAIL_CLOSED)",
+                    type(obj).__name__,
+                )
+                return set()
+            # Legacy (LEX_SEC_FAIL_CLOSED=false): all fields on error
             exportable_fields = {f.name for f in obj._meta.fields}
         
         # Always include basic identifying fields
@@ -1344,6 +1390,13 @@ class ModelExportView(GenericAPIView):
             t_rows_end - t_rows_start, rows_per_s,
         )
 
+        self.record_audit(
+            export_path="universal-stream",
+            rows=written,
+            columns=cols_written,
+            size_bytes=file_size,
+        )
+
         file_handle = open(tmp_path, "rb")
         response = FileResponse(
             file_handle,
@@ -1570,6 +1623,13 @@ class ModelExportView(GenericAPIView):
             ttfr,
             t_rows_end - t_rows_start,
             rows_per_s,
+        )
+
+        self.record_audit(
+            export_path="flat-stream",
+            rows=written,
+            columns=len(data_keys),
+            size_bytes=file_size,
         )
 
         # Hand the file off to Django; FileResponse will close it and we
@@ -1809,6 +1869,7 @@ class ModelExportView(GenericAPIView):
                 "[export:%s] streaming paths unavailable; entering pandas fallback",
                 getattr(model, "__name__", "?"),
             )
+            self.record_audit(export_path="pandas")
             df = self._build_ag_grid_dataframe(queryset, request, model, ag_export_payload)
             logger.info(
                 "[export:%s] pandas dataframe built in %.3fs rows=%d cols=%d",
@@ -1819,11 +1880,14 @@ class ModelExportView(GenericAPIView):
             )
         else:
             # Apply field-level export permission filtering and masking
+            self.record_audit(export_path="legacy")
             df = self.filter_and_mask_data_for_export(queryset, request)
             # FK readable names for the legacy / non-AG path. The AG path
             # already applies them inside `_build_ag_grid_dataframe`, so we
             # avoid running the (still relatively expensive) conversion twice.
             df = self._apply_foreign_key_display_names(df, model)
+
+        self.record_audit(rows=int(len(df)), columns=int(len(df.columns)))
 
         # Check if there's any data to export
         if df.empty:
@@ -1849,6 +1913,7 @@ class ModelExportView(GenericAPIView):
 
         # Excel limits worksheet names to 31 chars and disallows []:*?/\
         sheet_name = re.sub(r'[\[\]:*?/\\]', '_', model.__name__)[:31]
+        self.record_audit(sheet_name=sheet_name)
 
         # Excel has no timezone type; strip tz from aware (USE_TZ=True) datetimes.
         df = _to_excel_naive(df, export_timezone)

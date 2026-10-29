@@ -5,7 +5,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework_api_key.permissions import HasAPIKey
+from lex.api.utils.api_key_requests import HasAPIKey
 
 
 class ModelStructureObtainView(APIView):
@@ -203,14 +203,3 @@ class Overview(APIView):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         html = html_report_class().get_html(user)
         return Response(html)
-
-
-class ProcessStructure(APIView):
-    http_method_names = ["get"]
-    processes = None
-
-    def get(self, request, *args, **kwargs):
-        class_name = kwargs["process_name"]
-        process_class = self.processes[class_name]
-        process_structure = process_class().get_structure()
-        return Response(process_structure)
