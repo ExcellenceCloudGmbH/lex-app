@@ -1,9 +1,14 @@
+import logging
+
 import requests
+from lex.core.services.usage_config import usage_payload
 from lex.lex_app import settings
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+logger = logging.getLogger(__name__)
 
 
 class CurrentUser(APIView):
@@ -33,5 +38,14 @@ class CurrentUser(APIView):
                 data = {"detail": user_response.text}
             return Response(data, status=user_response.status_code)
 
-        # otherwise, return the successful payload
-        return Response(user_response.json(), status=status.HTTP_200_OK)
+        # otherwise, return the successful payload, plus the fleet-metrics usage
+        # key -- which must never fail sign-in: on any error, usage is off
+        data = user_response.json()
+        try:
+            data["usage"] = usage_payload(request.user)
+        except Exception:
+            logger.warning(
+                "Building the usage payload failed; usage metrics are off.", exc_info=True
+            )
+            data["usage"] = {"enabled": False}
+        return Response(data, status=status.HTTP_200_OK)

@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 99
+max_scenario: 116
 letters:
   a:
     title: ''
@@ -194,3 +194,32 @@ letters:
       for CreateOrUpdate. The model-side removal is pinned by 1ax. Originally allocated as
       10p/10.91-10.94; #840 landed that letter and range on lex-app-v2 first, so this batch re-took
       the next free pair on merge.
+  s:
+    title: The usage payload -- api/user/'s "usage" key, the per-instance hash, the switch
+    scenarios: 10.102-10.116
+    status: complete
+    tests:
+      pass: 15
+      skip: 0
+      xfail: 0
+    note: >-
+      usage_metrics_enabled(): unset/empty and the true-like spellings are
+      on, the false-like spellings are off, anything else fails closed with
+      one warning per process (10.102-10.105). user_hash() is a deterministic,
+      per-instance-salted 32-hex-char HMAC of the username -- same user and
+      salt always match, a different salt never does (10.106-10.107), and a
+      known-answer case pins the formula against a hash computed
+      independently in the test, with the salt's literal UTF-8 bytes as the
+      HMAC key (10.114; LEX_USAGE_SALT is an opaque string like LEX_API_KEY,
+      never hex-decoded). usage_payload() returns the full enabled dict
+      (posthog_key, posthog_host with its EU default or an explicit
+      override, instance_rid, user_hash) only when the switch is on and
+      LEX_USAGE_SALT, POSTHOG_PROJECT_KEY and INSTANCE_RESOURCE_IDENTIFIER
+      are all set; any one of them missing collapses it to exactly
+      {"enabled": false} (10.108-10.112, 10.115). 10.113 drives the real
+      api/user/ view (CurrentUser) with APIRequestFactory +
+      force_authenticate, mocking only the external OIDC userinfo call, and
+      asserts the "usage" key matches usage_payload() for the same user;
+      10.116 shows that a failure building it still answers 200 with
+      {"enabled": false} and a WARNING, so sign-in never depends on it.
+      10r (10.100-10.101) is reserved by an open PR, hence s.
