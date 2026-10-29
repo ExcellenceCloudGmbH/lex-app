@@ -1811,3 +1811,65 @@ config each fail 1.404.
 | 1.409 | no `Process` node type | the `api/model-structure` payload types the model `Model`, the report `HTMLReport`, the branch `Folder`; no node anywhere carries `Process` |
 
 **Why a regression matters:** a half-removed feature is worse than either state — a `registerProcess` that still collects classes looks like a working feature while `api/process/<name>` 404s, and a stale `Process` entry in the reserved-name set keeps rejecting a project's own model for a framework class that no longer exists.
+
+---
+
+### Batch 1ba — The fleet-metrics event emitter: gating, bounded queue, batched delivery ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.455 – 1.466, 1.475 – 1.480 |
+| Type | U |
+| Files covered | `lex/lex_app/fleet_metrics/emitter.py` (new) |
+| Test file | `lex/test_project/tests/init/test_1ba_fleet_metrics_emitter.py` |
+| Test classes | `TestCluster01ba_EmitterGating` (1.455–1.459), `TestCluster01ba_BoundedQueue` (1.460), `TestCluster01ba_BatchingAndDelivery` (1.461–1.465, 1.479–1.480), `TestCluster01ba_DrainTick` (1.477–1.478), `TestCluster01ba_Flush` (1.466), `TestCluster01ba_ForkSafety` (1.475–1.476) |
+| Fixtures | none (module-level `_reset_for_tests()` clears the queue, the drain-thread singleton and the warning throttle between tests) |
+| Tests landed | **18 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | `note_failure()`'s throttle uses `None`, never `0.0`, as its "never warned" sentinel, because `time.monotonic()`'s reference point is unspecified and can legitimately be small early in a process's life, which would otherwise let the very first warning for any label be mistaken for one that just fired. Each 30 s tick posts batches until the queue is empty and stops at the first dropped batch, so a down controller costs one attempt and one retry per tick; only a 2xx answer is a delivery, and redirects are not followed. `flush(timeout)` checks its deadline before dequeuing the next batch, not after, so an unsent batch is never pulled off the queue and then abandoned. A forked child process (calculation events are emitted from Celery worker processes) gets a fresh queue, fresh locks and a cleared drain-thread singleton via `os.register_at_fork`, so it never inherits a lock some other, now-nonexistent thread was holding, a `Thread` object that falsely reports `is_alive()`, or events the parent already queued. |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.455 | disabled without any variable | `enabled()` is False with none of DEPLOYMENT_ENVIRONMENT/DOMAIN_BASE/LEX_API_KEY set |
+| 1.456 | disabled with only some set | each of the three variables missing on its own still leaves `enabled()` False (`subTest` over all three) |
+| 1.457 | enabled with all three set | `enabled()` is True |
+| 1.458 | emit() no-op when disabled | nothing queued, no Thread constructed |
+| 1.459 | emit() never raises | an internal failure inside the drain-thread machinery is swallowed |
+| 1.460 | bounded queue drops the oldest | 1,005 emitted onto a 1,000-cap queue keeps the newest 1,000 (oldest 5 dropped) |
+| 1.461 | batches capped at 100 | `_collect_batch()` never returns more than `BATCH_SIZE` |
+| 1.462 | network failure retried once | `requests.post` raising is retried after 5s, then dropped and logged at WARNING |
+| 1.463 | non-2xx treated as failure | a 500 response gets the same one retry as a network error |
+| 1.464 | WARNING throttled per label | `note_failure()` logs at most once per hour per label, not once per call |
+| 1.465 | one daemon drain thread | repeated `emit()` calls construct exactly one daemon Thread targeting `_drain_loop` |
+| 1.466 | flush() respects its timeout budget | `flush(timeout)` stops once the budget is spent rather than draining every queued batch, and never abandons a dequeued-but-unsent batch |
+| 1.475 | at-fork handler registered | the module registers `_after_fork_in_child` as `os.register_at_fork`'s `after_in_child` hook |
+| 1.476 | at-fork handler resets state | `_after_fork_in_child()` replaces the queue, clears the drain-thread singleton and replaces both locks |
+| 1.477 | one tick drains the whole queue | 250 queued and a 202 endpoint: one tick of the real `_drain_loop` posts 100, 100 and 50, leaving the queue empty |
+| 1.478 | a tick stops at the first dropped batch | 250 queued and a failing endpoint: one tick tries only the first batch (attempt + retry), 150 stay queued |
+| 1.479 | a redirect is not a delivery | a 302 (which `requests` reports as `ok`) gets the one retry and is dropped with a WARNING |
+| 1.480 | posts never follow a redirect | `requests.post` gets `allow_redirects=False` and the events URL; a 202 is delivered |
+
+### Batch 1bb — The hourly fleet-metrics heartbeat: web-process-only, immediate first beat ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.467 – 1.474 |
+| Type | U |
+| Files covered | `lex/lex_app/fleet_metrics/heartbeat.py` (new) |
+| Test file | `lex/test_project/tests/init/test_1bb_fleet_metrics_heartbeat.py` |
+| Test classes | `TestCluster01bb_HeartbeatScheduling` (1.467–1.470), `TestCluster01bb_HeartbeatPayload` (1.471–1.474) |
+| Fixtures | none (`_reset_for_tests()` on both `emitter` and `heartbeat`) |
+| Tests landed | **8 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | `start()`'s web-process gate reuses `lex.lex_app.apps.running_in_uvicorn()`; its once-per-process guard mirrors the latch the removed version reporter used (commit 0db88ad9). `_run()` emits once before its first `time.sleep`, which is what gives the "first beat immediate" guarantee — proved directly by letting `time.sleep` raise `StopIteration` after one iteration rather than waiting a real hour. |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.467 | no-op outside the web process | `running_in_uvicorn()` False means `start()` returns False, no Thread |
+| 1.468 | no-op when the emitter is disabled | web process but `emitter.enabled()` False means `start()` returns False |
+| 1.469 | web process schedules a daemon thread, beats immediately | `start()` returns True, constructs a daemon Thread targeting `_run`; `_run()`'s first action is `emit()`, before any sleep |
+| 1.470 | second start() in the same process is guarded | a repeat call returns False, no second Thread |
+| 1.471 | payload fields | `type`, `lex_app_version`, `commit_sha`, `process="web"` |
+| 1.472 | occurred_at is aware UTC | parses back to a UTC-offset-zero aware datetime, ends in `+00:00` or `Z` |
+| 1.473 | usage_enabled true | follows `LEX_USAGE_METRICS` unset/on |
+| 1.474 | usage_enabled false | follows `LEX_USAGE_METRICS=off` |

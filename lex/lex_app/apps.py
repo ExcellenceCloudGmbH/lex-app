@@ -160,6 +160,13 @@ class LexAppConfig(GenericAppConfig):
                 target=_run_async_ready, name="lex-async-ready", daemon=True
             ).start()
 
+            try:
+                from lex.lex_app.fleet_metrics import heartbeat
+
+                heartbeat.start()
+            except Exception:
+                logger.exception("fleet-metrics heartbeat failed to start")
+
     def register_models(self):
         """
         Override parent's register_models to filter out lex core models

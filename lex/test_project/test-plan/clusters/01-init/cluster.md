@@ -505,3 +505,55 @@ does not remove user launch configurations.
 | 1.409 | no `Process` node type | the structure payload types nodes `Model` / `HTMLReport` / `Folder` only |
 
 **Scenario range:** 1.406 – 1.409. **Test file:** `lex/test_project/tests/init/test_1ax_process_feature_removed.py`. **Type:** I. **Status:** ✅ Complete (2026-10-22). Batch: [1ax](batches.md).
+
+---
+
+### 1ba. The fleet-metrics event emitter -- gating, bounded queue, batched delivery ✅
+
+**What it tests:** `lex/lex_app/fleet_metrics/emitter.py` -- the one piece every fleet-metrics event (a heartbeat, a `calculation_finished`) flows through before it reaches the Instance Controller. `enabled()` gates on the same three variables the removed version reporter used; `emit()` queues an event onto a bounded `queue.Queue(1000)` that drops the oldest once full and never raises; one daemon thread wakes every 30s and posts everything queued in batches of at most 100, each with a 10s timeout and one retry after 5s; a batch that fails both is dropped with a WARNING throttled to once per hour per label and the rest waits for the next tick; only a 2xx counts as delivered and redirects are not followed; `flush(timeout)` is a synchronous, time-bounded drain for a Celery worker about to receive SIGTERM; a forked child process (a Celery worker) resets its queue, locks and drain-thread state via `os.register_at_fork`.
+
+**Why a regression matters:** every one of these guarantees exists because an event producer (a request handler, a calculation finaliser, Django startup) must never notice whether the controller is up, slow, or unreachable. A regression here is not "a metric is missing" -- it is "a customer request hangs" or "a calculation crashes because POSTing a usage event raised". A forked worker that inherits a held lock or a falsely-alive drain thread would deadlock or silently stop sending events.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.455 | disabled without any variable | `enabled()` False with none of the three set |
+| 1.456 | disabled with only some set | each of the three variables missing on its own still disables |
+| 1.457 | enabled with all three set | `enabled()` True |
+| 1.458 | emit() no-op when disabled | nothing queued, no Thread constructed |
+| 1.459 | emit() never raises | an internal failure is swallowed |
+| 1.460 | bounded queue drops the oldest | 1,005 emitted onto a 1,000-cap queue keeps the newest 1,000 |
+| 1.461 | batches capped at 100 | `_collect_batch()` never exceeds `BATCH_SIZE` |
+| 1.462 | network failure retried once | retried after 5s, then dropped and logged |
+| 1.463 | non-2xx treated as failure | a 500 response gets the same one retry |
+| 1.464 | WARNING throttled per label | at most once per hour per label |
+| 1.465 | one daemon drain thread | repeated `emit()` shares a single Thread |
+| 1.466 | flush() respects its timeout budget | stops once the budget is spent; never abandons a dequeued batch |
+| 1.475 | at-fork handler registered | `os.register_at_fork(after_in_child=_after_fork_in_child)` |
+| 1.476 | at-fork handler resets state | fresh queue, cleared drain-thread singleton, fresh locks |
+| 1.477 | one tick drains the whole queue | 250 queued post as 100, 100, 50 in one tick |
+| 1.478 | a tick stops at the first dropped batch | a down endpoint: one batch tried, the rest stays queued |
+| 1.479 | a redirect is not a delivery | a 302 is retried once and dropped |
+| 1.480 | posts never follow a redirect | `allow_redirects=False`; a 202 is delivered |
+
+**Scenario range:** 1.455 – 1.466, 1.475 – 1.480. **Test file:** `lex/test_project/tests/init/test_1ba_fleet_metrics_emitter.py`. **Type:** U. **Status:** ✅ Complete (2026-10-22). Batch: [1ba](batches.md).
+
+---
+
+### 1bb. The hourly fleet-metrics heartbeat -- web-process-only, immediate first beat ✅
+
+**What it tests:** `lex/lex_app/fleet_metrics/heartbeat.py` -- `start()` schedules one heartbeat now and one every 3600s from a daemon thread, only in the web process (`running_in_uvicorn()`) and only when the emitter is `enabled()`. Celery workers never send one.
+
+**Why a regression matters:** the controller's Collection dashboard tells a silent instance (nothing listening) apart from one that opted out of usage metrics purely from whether heartbeats arrive at all and what `usage_enabled` says inside them -- a worker that also sent heartbeats, or a web process that missed its first beat, would make that signal wrong.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.467 | no-op outside the web process | `running_in_uvicorn()` False means no thread |
+| 1.468 | no-op when the emitter is disabled | web process but emitter disabled means no thread |
+| 1.469 | web process schedules a daemon thread, beats immediately | first beat happens before any sleep |
+| 1.470 | second start() is guarded | a repeat call in the same process is a no-op |
+| 1.471 | payload fields | type, lex_app_version, commit_sha, process="web" |
+| 1.472 | occurred_at is aware UTC | ends in +00:00 or Z, zero UTC offset |
+| 1.473 | usage_enabled true | follows the switch when on |
+| 1.474 | usage_enabled false | follows the switch when off |
+
+**Scenario range:** 1.467 – 1.474. **Test file:** `lex/test_project/tests/init/test_1bb_fleet_metrics_heartbeat.py`. **Type:** U. **Status:** ✅ Complete (2026-10-22). Batch: [1bb](batches.md).
