@@ -603,6 +603,13 @@ class E2ETestCase(TransactionTestCase):
             model_container=_MockContainer(model_name),
         )
 
+    def url_filter_values(self, model_name):
+        """POST endpoint for ``FilterValues`` — a column's values with counts."""
+        return self._url(
+            "model-entries-filter-values",
+            model_container=_MockContainer(model_name),
+        )
+
     def url_export(self, model_name):
         """POST endpoint for ``ModelExportView`` — ``api/<model>/export``."""
         return self._url(

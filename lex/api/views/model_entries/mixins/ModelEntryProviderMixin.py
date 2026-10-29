@@ -45,6 +45,31 @@ class UserModelSerializer(serializers.ModelSerializer):
     def get_short_description(self, obj):
         return f"{obj.first_name} {obj.last_name} - {obj.email}"
 
+
+def resolve_serializer_class(model_class, mapping, choice):
+    """The serializer class ``choice`` selects for ``model_class``, from ``mapping``.
+
+    The one place the ``User`` swap (LEX-702) is decided: ``model_class`` and its
+    subclasses always render through :class:`UserModelSerializer`, regardless of
+    ``choice`` or what ``mapping`` holds. Shared by
+    :meth:`ModelEntryProviderMixin.get_serializer_class` (list / detail /
+    filter_values) and the fields endpoint's ``value_list`` flag, so neither can
+    compute it against a different serializer than the other and disagree about
+    which columns actually offer a value list.
+
+    ``None`` when ``choice`` is not a key of ``mapping`` and ``model_class`` is
+    not a ``User`` subclass -- callers raise their own flavour of "unknown
+    serializer" error in that case. ``model_class`` is checked with
+    ``isinstance(..., type)`` before ``issubclass`` so a test double that
+    stands in for a model (e.g. a bare ``SimpleNamespace`` mimicking
+    ``model._meta``, never a real class) falls through to the mapping lookup
+    instead of raising ``TypeError`` -- every real model class is a ``type``.
+    """
+    if isinstance(model_class, type) and issubclass(model_class, User):
+        return UserModelSerializer
+    return mapping.get(choice)
+
+
 class ModelEntryProviderMixin:
     permission_classes = [HasAPIKey | IsAuthenticated, UserPermission]
 
@@ -104,11 +129,9 @@ class ModelEntryProviderMixin:
             if hasattr(container, "get_serializers_map")
             else container.serializers_map
         )
-        
-        if issubclass(container.model_class, User):
-            return UserModelSerializer
 
-        if choice not in mapping:
+        serializer_class = resolve_serializer_class(container.model_class, mapping, choice)
+        if serializer_class is None:
             raise ValidationError(
                 {
                     "error": f"Unknown serializer '{choice}' for model '{container.model_class._meta.model_name}'",
@@ -116,4 +139,4 @@ class ModelEntryProviderMixin:
                 }
             )
 
-        return mapping[choice]
+        return serializer_class

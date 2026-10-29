@@ -505,3 +505,37 @@ does not remove user launch configurations.
 | 1.409 | no `Process` node type | the structure payload types nodes `Model` / `HTMLReport` / `Folder` only |
 
 **Scenario range:** 1.406 – 1.409. **Test file:** `lex/test_project/tests/init/test_1ax_process_feature_removed.py`. **Type:** I. **Status:** ✅ Complete (2026-10-22). Batch: [1ax](batches.md).
+
+---
+
+### 1ay. lex_view filters
+
+| # | Scenario | What We Assert | Status |
+|---|----------|----------------|--------|
+| 1.411 | Filters reach the component | Not in the URL; normalised dict and matching token as arguments | ✅ |
+| 1.412 | Filters select the component | No plain iframe when `filters` is given | ✅ |
+| 1.413 | No filter_bar (spec Amendment 18) | Passing `filter_bar` is a TypeError, as for any unknown keyword; nothing renders | ✅ |
+| 1.414 | on_filter | `emit_filter=true` | ✅ |
+| 1.415 | Malformed arguments | TypeError at the call | ✅ |
+| 1.416 | A filter change is not a new frame | Same URL, different token | ✅ |
+| 1.417 | When the shim posts | Loaded, named and changed only; index.html uses the function | ✅ |
+| 1.418 | A long filters token | Over 2,000 characters it stays out of the URL and is posted after load; at 2,000 it rides the URL | ✅ |
+| 1.419 | Every load resets the frame | After a new load, host filters that differ from the URL's are posted again; equal ones are not | ✅ |
+
+---
+
+### 1az. `LEX_EMBED_ALLOWED_ORIGINS` — named sites only may embed lex-app and use its filter bridge ✅
+
+**What it tests:** that embedding lex-app in a frame/iframe, and reading its filter bridge events, can be restricted to an operator-named list of sites. Amendment 14 of the multi-value-filters design adds `LEX_EMBED_ALLOWED_ORIGINS`, a comma-separated list of origins that becomes a validated Django setting (`parse_embed_allowed_origins` in `lex/runtime_config.py`), a `Content-Security-Policy: frame-ancestors` directive, and a `window.REACT_APP_EMBED_ALLOWED_ORIGINS` value the frontend reads from `config.js`. The directive is applied in two places: `EmbedXFrameOptionsMiddleware` (for a deployment that registers it) and, since `serve_react` is `@xframe_options_exempt` and therefore never covered by Django's own `XFrameOptionsMiddleware` at all, `serve_react` itself — on its SPA-fallback and other real `.html` document responses, which is what actually restricts who may frame lex-app as this repo ships today.
+
+**Why a regression matters:** the branch this lands on adds a `filter` bridge event that reports a row count with no user action. `serve_react`'s `@xframe_options_exempt` means any site can frame the SPA document and pick up that event unless the CSP directive lands there specifically — a passive data leak, not just clickjacking, and one a middleware-only fix would miss entirely while registered nowhere. Getting the CSP merge wrong is just as bad in the other direction: clobbering an existing `Content-Security-Policy` header would be a worse regression than the one being fixed. A security review of the first cut found two further ways the fix itself could fail open rather than closed: `urlsplit` alone does not make a host safe to put in a header (a crafted bracketed host can inject an extra CSP source token; a non-ASCII host breaks the header or silently drops the directive), and `LEX_EMBED_ALLOWED_ORIGINS` set to only invalid entries parsed to `[]` — indistinguishable from unset, so a typo'd wildcard silently reopened unrestricted framing.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.420 | CSP added on every exempt path (middleware) | An `embed=true`, an OIDC-path and a cookie-marked response each carry `frame-ancestors 'self' <origins>`; a non-exempt response gets no CSP; an existing CSP header keeps its other directives, and a stale `frame-ancestors` directive is replaced rather than duplicated; configured but nothing valid still gets exactly `frame-ancestors 'self'` (fail closed, not wide open) |
+| 1.421 | Unset/empty is a no-op (middleware) | With `LEX_EMBED_ALLOWED_ORIGINS == []` and `LEX_EMBED_ORIGINS_CONFIGURED == False`, no CSP is ever added, and the pre-existing behaviour holds: `X-Frame-Options` is stripped and the session/CSRF cookies are still patched to `SameSite=None; Secure` |
+| 1.422 | `config.js` exposes the list | `window.REACT_APP_EMBED_ALLOWED_ORIGINS` is the comma-joined, `json.dumps`-escaped list, or `""` when empty; a build whose `config.js` predates the placeholder is served unchanged |
+| 1.423 | Validation, normalisation, the real setting, and the fail-closed boundary | A path, a wildcard, a non-http scheme, credentials, a query string, a fragment and garbage are all dropped with one WARNING naming them; so are a bracketed/IPv6-shaped host, the `[v1.x https:]` CSP-injection shape, and hosts carrying `;`, a space, a quote, a backslash or `%`; an internationalised domain is accepted as IDNA punycode; `:443`/`:80` normalise away and a lone trailing `/` is accepted; valid origins are case-normalised and de-duplicated (including duplicates port-normalisation reveals); a stray/trailing comma is skipped quietly; a wildcard-only value fails closed with its own WARNING; `lex.lex_app.settings.LEX_EMBED_ALLOWED_ORIGINS`/`LEX_EMBED_ORIGINS_CONFIGURED` are exactly what `parse_embed_allowed_origins`/`embed_origins_configured` compute, verified through a real settings-module reload |
+| 1.424 | The SPA document itself carries `frame-ancestors` | `serve_react`'s SPA fallback (`index.html`) and a literal non-fallback `.html`/`.htm` file (`embed.html`, case-insensitively) both carry `frame-ancestors 'self' <origins>`; merging keeps an existing CSP header's other directives; a hashed asset and `config.js` get none; unset leaves the SPA fallback unchanged; configured but nothing valid still gets exactly `frame-ancestors 'self'` |
+
+**Scenario range:** 1.420 – 1.424. **Test file:** `lex/test_project/tests/init/test_1az_embed_allowed_origins.py`. **Type:** U. **Status:** ✅ Complete (2026-10-17). Batch: [1az](batches.md).

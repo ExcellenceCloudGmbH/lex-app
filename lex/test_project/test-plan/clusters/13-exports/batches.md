@@ -81,3 +81,18 @@ writing-plan batch blocks were recorded for this cluster.
 | Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-22-export-download-audit.md) |
 
 ---
+
+### Batch 13j — An export under a value-list filter holds the rows the list shows ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 13.52 |
+| Type | E |
+| Files covered | `lex/api/views/file_operations/ModelExport.py` (the AG export paths), `lex/api/views/model_entries/List.py` (`_build_filter_q`'s Set branch, which the export shares) |
+| Test file | `lex/test_project/tests/exports/test_13j_value_list_filters.py` |
+| Test classes | `TestCluster13j_ValueListFilters` (13.52 a Set with one category and blank, and an empty selection, listed and exported on the pandas path and the universal streaming path) |
+| Fixtures | `ExportCategory`, `ExportItem`, `FastExportItem` (13b / 13e setup); the Keycloak `export` scope granted by patching `UserContext._resolve_keycloak_scopes`, as 13e does |
+| Tests landed | **1 pass / 0 fail** (2 subtests) |
+| Status | ✅ Complete — the design's §8 promise that a blank filters as blank and an empty selection as "no rows" consistently in the grid and the export. Mutations: the pre-14k Set translation fails it, and so does an export that drops the filter model while the list keeps it. |
+
+---

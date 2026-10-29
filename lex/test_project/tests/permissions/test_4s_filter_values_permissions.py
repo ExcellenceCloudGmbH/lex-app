@@ -1,0 +1,419 @@
+"""A value list never shows what the user could not read in the grid.
+
+Intent: value lists come from a new endpoint, outside the serializer that hides
+fields per row in the grid. A model's permission_read can hide a row, or one
+field on some rows; a value list must count neither, and a field the user can
+read on no row must give an empty list rather than an error. A field the
+serializer does not expose must be refused even though the model has it, and so
+must a field the grid never shows as stored: a write-only field, a field whose
+class reads or renders something other than the stored value, and every field
+of a serializer that rewrites its rows. On the database path (a LexModel with the default read permission) the
+read filter alone decides which rows count, so a record-level grant must limit
+the list to that record. A regression leaks values of hidden fields or rows to
+anyone who opens a filter.
+Cluster 4s — scenarios 4.121–4.128. Type: E.
+Covers: lex/api/views/model_entries/FilterValues.py (``_filterable_field``, ``_count_per_row``),
+lex/api/utils/filterable_fields.py (``value_list_field``),
+lex/api/views/model_entries/filter_backends.py (the read filter 4.122 and 4.128 rely on).
+Run: python -m lex pytest lex/test_project/tests/permissions/test_4s_filter_values_permissions.py -v
+"""
+
+from __future__ import annotations
+
+from collections import Counter
+from unittest.mock import patch
+
+import pytest
+from django.contrib.auth.models import User
+from rest_framework import serializers as drf_serializers
+from rest_framework import status
+
+from lex.api.middleware.keycloak_permissions import KeycloakPermissionsMiddleware
+from lex.api.views.model_entries.FilterValues import uses_default_read_permission
+from lex.test_project.tests._e2e_test_case import E2ETestCase
+
+from .models import KeycloakItem, OwnedItem, RowFieldItem
+
+pytestmark = pytest.mark.permissions
+
+ROWS = "rowfielditem"
+KEYCLOAK = "keycloakitem"
+OWNED = "owneditem"
+REGIONS = ("north", "south", "west")
+TITLES = ("open-1", "open-2", "private-1", "private-2", "hidden-1")
+
+
+class _WriteOnlyRegion(drf_serializers.ModelSerializer):
+    """Accepts region on write and never renders it."""
+
+    class Meta:
+        model = RowFieldItem
+        fields = ["id", "title", "region"]
+        extra_kwargs = {"region": {"write_only": True}}
+
+
+class _HiddenTitle(drf_serializers.ModelSerializer):
+    """title is a HiddenField: set from its default on write, never rendered."""
+
+    title = drf_serializers.HiddenField(default="(set on save)")
+
+    class Meta:
+        model = RowFieldItem
+        fields = ["id", "title", "region"]
+
+
+class _RedactedText(drf_serializers.CharField):
+    """A field class that renders every value as the same placeholder."""
+
+    def to_representation(self, value):
+        return "(redacted)"
+
+
+class _MaskedAttributeText(drf_serializers.CharField):
+    """A field class that reads a placeholder instead of the row's stored value."""
+
+    def get_attribute(self, instance):
+        return "(masked)"
+
+
+class _PlainText(drf_serializers.CharField):
+    """A field subclass that keeps DRF's own reading and rendering."""
+
+
+class _RedactedRegion(drf_serializers.ModelSerializer):
+    region = _RedactedText()
+    title = _PlainText()
+
+    class Meta:
+        model = RowFieldItem
+        fields = ["id", "title", "region"]
+
+
+class _MaskedAttributeRegion(drf_serializers.ModelSerializer):
+    region = _MaskedAttributeText()
+    title = _PlainText()
+
+    class Meta:
+        model = RowFieldItem
+        fields = ["id", "title", "region"]
+
+
+class _OwnerIdOnly(drf_serializers.ModelSerializer):
+    """Exposes only the related user's id -- the grid never sees the username."""
+
+    class Meta:
+        model = User
+        fields = ["id"]
+
+
+class _NestedOwner(drf_serializers.ModelSerializer):
+    """owner is served through a nested serializer: the grid shows {'id': ...}, not str(user)."""
+
+    owner = _OwnerIdOnly(read_only=True)
+
+    class Meta:
+        model = OwnedItem
+        fields = ["id", "name", "owner"]
+
+
+class _BlanksPrivateTitles(drf_serializers.ModelSerializer):
+    """Rewrites its rows: a private row's title is rendered empty."""
+
+    class Meta:
+        model = RowFieldItem
+        fields = ["id", "title", "region", "is_private"]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.is_private:
+            data["title"] = None
+        return data
+
+
+class TestCluster04s_FilterValuesPermissions(E2ETestCase):
+    """Cluster 4s: filter_values honours row and field read permissions."""
+
+    e2e_models = [RowFieldItem, KeycloakItem, OwnedItem]
+
+    def setUp(self):
+        super().setUp()
+        RowFieldItem.objects.create(title="open-1", region="north")
+        RowFieldItem.objects.create(title="open-2", region="north")
+        RowFieldItem.objects.create(title="private-1", region="north", is_private=True)
+        RowFieldItem.objects.create(title="private-2", region="south", is_private=True)
+        RowFieldItem.objects.create(title="hidden-1", region="west")
+
+    def _post(self, model: str, body: dict, query: str = ""):
+        return self.client.post(self.url_filter_values(model) + query, data=body, format="json")
+
+    def _counts(self, model: str, field: str, query: str = "") -> dict:
+        resp = self._post(model, {"field": field, "filterModel": {}}, query)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        return {item["key"]: item["count"] for item in resp.data["values"]}
+
+    def _list_rows(self, model: str, query: str = "") -> list:
+        """What the grid itself renders: the list POST's rows."""
+        resp = self.client.post(
+            self.url_list(model) + query,
+            data={"filterModel": {}, "startRow": 0, "endRow": 100},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        return resp.data["rowData"]
+
+    def _use_serializers(self, serializers: dict) -> None:
+        """Register named serializers on RowFieldItem for this test only.
+
+        The restore is registered before the attribute changes. The model
+        container rebuilds its serializer map when the registration changes.
+        """
+        had = hasattr(RowFieldItem, "api_serializers")
+        original = getattr(RowFieldItem, "api_serializers", None)
+
+        def _restore():
+            if had:
+                RowFieldItem.api_serializers = original
+            elif hasattr(RowFieldItem, "api_serializers"):
+                delattr(RowFieldItem, "api_serializers")
+
+        self.addCleanup(_restore)
+        RowFieldItem.api_serializers = serializers
+
+    def _assert_refused(self, model: str, field: str, query: str, stored_values=()) -> None:
+        resp = self._post(model, {"field": field, "filterModel": {}}, query)
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, f"{field!r} {query}: {resp.data}")
+        self.assertIn("not filterable", str(resp.data), f"{field!r} {query}")
+        body = resp.content.decode()
+        for value in stored_values:
+            self.assertNotIn(value, body, f"{field!r} {query}: a stored value must never appear")
+
+    def _grant_record_read(self, model_class, pk) -> None:
+        """A Keycloak-UMA read grant on ONE record of ``model_class``.
+
+        ``KeycloakPermissionsMiddleware.__call__`` is replaced for this test
+        only: the request carries the grant a real Keycloak would answer for a
+        user allowed to read that single record (``resource_set_id`` set), and
+        nothing else. No call reaches Keycloak.
+        """
+        grant = [{
+            "rsname": f"{model_class._meta.app_label}.{model_class.__name__}",
+            "scopes": ["read"],
+            "resource_set_id": str(pk),
+        }]
+
+        def _fake_call(mw_self, request):
+            request.user_permissions = grant
+            request.userinfo = {}
+            request.client_roles = []
+            return mw_self.get_response(request)
+
+        patcher = patch.object(KeycloakPermissionsMiddleware, "__call__", _fake_call)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    # -- 4.121 ----------------------------------------------------------
+    def test_04_121_a_field_hidden_on_some_rows_is_counted_only_where_readable(self):
+        """
+        Scenario 4.121: per-row field hiding
+        Given: two open rows in north, two private rows (north, south) that hide region
+        When: region values are asked for
+        Then: only the open rows count: north 2; south never appears
+        """
+        self.assertEqual(self._counts(ROWS, "region"), {"north": 2})
+
+    # -- 4.122 ----------------------------------------------------------
+    def test_04_122_rows_the_user_cannot_see_are_never_counted(self):
+        """
+        Scenario 4.122: hidden rows stay hidden
+        Given: a row whose permission_read denies it
+        When: title and is_private values are asked for
+        Then: the hidden row is in neither list
+        """
+        self.assertNotIn("hidden-1", self._counts(ROWS, "title"))
+        self.assertEqual(self._counts(ROWS, "is_private"), {"false": 2, "true": 2})
+
+    # -- 4.123 ----------------------------------------------------------
+    def test_04_123_a_field_readable_on_no_row_gives_an_empty_list(self):
+        """
+        Scenario 4.123: nothing to show is not an error
+        Given: the other filters keep only the private rows, each of which hides region; region
+               is still a column the caller may filter by, since the open rows show it
+        When: region values are asked for under that filter
+        Then: 200 with no values. (A field withheld on every record -- one the caller may not
+              filter by at all -- is refused like a field that does not exist: 4.132.)
+        """
+        private_only = {"is_private": {"filterType": "set", "values": ["true"]}}
+        resp = self._post(ROWS, {"field": "region", "filterModel": private_only})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        self.assertEqual(resp.data["values"], [], "no private row's region may leak")
+
+    # -- 4.124 ----------------------------------------------------------
+    def test_04_124_a_field_the_serializer_does_not_expose_is_refused(self):
+        """
+        Scenario 4.124: the serializer decides which columns exist
+        Given: a named serializer exposing only title
+        When: region values are asked for through it
+        Then: 400 "is not filterable", although the model has region
+        """
+
+        class TitleOnly(drf_serializers.ModelSerializer):
+            class Meta:
+                model = RowFieldItem
+                fields = ["id", "title"]
+
+        had = hasattr(RowFieldItem, "api_serializers")
+        original = getattr(RowFieldItem, "api_serializers", None)
+
+        def _restore():
+            if had:
+                RowFieldItem.api_serializers = original
+            elif hasattr(RowFieldItem, "api_serializers"):
+                delattr(RowFieldItem, "api_serializers")
+
+        self.addCleanup(_restore)
+        RowFieldItem.api_serializers = {"title_only": TitleOnly}
+
+        resp = self._post(ROWS, {"field": "region", "filterModel": {}}, "?serializer=title_only")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, resp.data)
+        self.assertIn("not filterable", str(resp.data))
+
+    # -- 4.125 ----------------------------------------------------------
+    def test_04_125_a_write_only_field_is_refused(self):
+        """
+        Scenario 4.125: a field the grid never renders has no value list
+        Given: a serializer that makes region write-only (extra_kwargs), and one whose title is a
+               HiddenField -- the list rows carry neither column
+        When: their values are asked for through those serializers
+        Then: each is the standard 400 "is not filterable", and none of the stored values appears
+              in the response; an ordinary field of the same serializer is still listed
+        """
+        self._use_serializers({"write_only": _WriteOnlyRegion, "hidden_title": _HiddenTitle})
+        self.assertTrue(
+            all("region" not in row for row in self._list_rows(ROWS, "?serializer=write_only")),
+            "premise: the grid never renders a write-only field",
+        )
+        self.assertTrue(
+            all("title" not in row for row in self._list_rows(ROWS, "?serializer=hidden_title")),
+            "premise: the grid never renders a HiddenField",
+        )
+
+        self._assert_refused(ROWS, "region", "?serializer=write_only", REGIONS)
+        self._assert_refused(ROWS, "title", "?serializer=hidden_title", TITLES)
+        self.assertEqual(
+            self._counts(ROWS, "title", "?serializer=write_only"),
+            {"open-1": 1, "open-2": 1, "private-1": 1, "private-2": 1},
+            "a readable field of the same serializer keeps its value list",
+        )
+
+    # -- 4.126 ----------------------------------------------------------
+    def test_04_126_a_field_class_that_rewrites_its_value_is_refused(self):
+        """
+        Scenario 4.126: the grid shows what the field class reads and renders, not the column
+        Given: a serializer whose region field class renders every value as "(redacted)" (its own
+               to_representation), one whose region field class reads "(masked)" instead of the
+               stored value (its own get_attribute), and in both a title field class that only
+               inherits DRF's methods; separately, an FK column served through a nested serializer
+               (fields = ["id"]) -- the grid sees only the related row's id, never its str()
+        When: region and title values are asked for through each, and the FK column through the
+              nested serializer
+        Then: region is the standard 400 and no stored region appears; title is listed; the FK
+              column is the standard 400 and the related row's str() appears nowhere in the response
+        """
+        self._use_serializers({"redacted": _RedactedRegion, "masked": _MaskedAttributeRegion})
+        for override, query, placeholder in (
+            ("to_representation", "?serializer=redacted", "(redacted)"),
+            ("get_attribute", "?serializer=masked", "(masked)"),
+        ):
+            with self.subTest(override=override):
+                rows = self._list_rows(ROWS, query)
+                rendered = {row["region"] for row in rows if "region" in row}
+                self.assertEqual(rendered, {placeholder}, "premise: the grid shows only the placeholder")
+
+                self._assert_refused(ROWS, "region", query, REGIONS)
+                self.assertIn(
+                    "open-1", self._counts(ROWS, "title", query),
+                    "a field class that only inherits DRF's methods keeps its value list",
+                )
+
+        with self.subTest(override="nested_serializer"):
+            had = hasattr(OwnedItem, "api_serializers")
+            original = getattr(OwnedItem, "api_serializers", None)
+
+            def _restore():
+                if had:
+                    OwnedItem.api_serializers = original
+                elif hasattr(OwnedItem, "api_serializers"):
+                    delattr(OwnedItem, "api_serializers")
+
+            self.addCleanup(_restore)
+            OwnedItem.api_serializers = {"nested": _NestedOwner}
+
+            # The framework gives User a custom __str__ -- "{first_name} {last_name}"
+            # (model_registration.py) -- so the leak check below must look for what
+            # str(owner) actually renders, not the username.
+            owner = User.objects.create(username="nested-fk-owner", first_name="Secret", last_name="Owner")
+            created = OwnedItem.objects.create(name="owned-1", owner=owner)
+            # OwnedItem keeps both default permission_read and can_read (cluster 4i's
+            # helper is exercised directly, not through this path -- see its model
+            # docstring), so -- exactly like 4.128's KeycloakItem -- the database path
+            # denies everything without an explicit per-record grant.
+            self._grant_record_read(OwnedItem, created.pk)
+
+            rows = self._list_rows(OWNED, "?serializer=nested")
+            row = next(r for r in rows if r.get("name") == "owned-1")
+            self.assertEqual(
+                row.get("owner"), {"id": owner.pk},
+                "premise: the grid shows only the nested serializer's id, never str(owner)",
+            )
+
+            self._assert_refused(OWNED, "owner", "?serializer=nested", (str(owner),))
+
+    # -- 4.127 ----------------------------------------------------------
+    def test_04_127_a_serializer_that_rewrites_its_rows_lists_no_column(self):
+        """
+        Scenario 4.127: a serializer's own to_representation can mask any column on any row
+        Given: a serializer that blanks a private row's title in its to_representation
+        When: title -- a normally filterable column -- and is_private are asked for through it,
+              and title through the default serializer
+        Then: both are the standard 400 through the rewriting serializer, and no private title
+              appears; the default serializer still lists title
+        """
+        self._use_serializers({"blanking": _BlanksPrivateTitles})
+        rendered = {row["title"] for row in self._list_rows(ROWS, "?serializer=blanking")}
+        self.assertNotIn("private-1", rendered, "premise: the grid shows no private title")
+
+        self._assert_refused(ROWS, "title", "?serializer=blanking", ("private-1", "private-2"))
+        self._assert_refused(ROWS, "is_private", "?serializer=blanking")
+        self.assertEqual(
+            self._counts(ROWS, "title"),
+            {"open-1": 1, "open-2": 1, "private-1": 1, "private-2": 1},
+            "the default serializer renders title as stored, so it keeps its value list",
+        )
+
+    # -- 4.128 ----------------------------------------------------------
+    def test_04_128_a_record_level_grant_limits_the_database_count(self):
+        """
+        Scenario 4.128: on the database path the read filter alone decides which rows count
+        Given: a LexModel keeping both default permission_read and can_read (the database path,
+               unpatched), three rows, and a Keycloak read grant on ONE of them
+        When: label values are asked for
+        Then: only the granted row's label is counted, exactly as the list shows it; the other
+              rows' labels appear nowhere in the response
+        """
+        granted = KeycloakItem.objects.create(label="granted-row")
+        KeycloakItem.objects.create(label="withheld-row-1")
+        KeycloakItem.objects.create(label="withheld-row-2")
+        self._grant_record_read(KeycloakItem, granted.pk)
+        self.assertTrue(
+            uses_default_read_permission(KeycloakItem),
+            "premise: both read methods are the LexModel default, so the database path is taken",
+        )
+
+        grid = dict(Counter(row["label"] for row in self._list_rows(KEYCLOAK)))
+        self.assertEqual(grid, {"granted-row": 1}, "premise: the grid shows only the granted row")
+
+        resp = self._post(KEYCLOAK, {"field": "label", "filterModel": {}})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        counts = {item["key"]: item["count"] for item in resp.data["values"]}
+        self.assertEqual(counts, grid, "the value list must count exactly the rows the grid shows")
+        self.assertNotIn("withheld-row", resp.content.decode(), "an ungranted row's value must never appear")

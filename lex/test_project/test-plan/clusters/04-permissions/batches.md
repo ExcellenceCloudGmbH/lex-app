@@ -141,3 +141,44 @@ must not open a check on the whole model.
 | Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-23-create-on-filled-record.md) |
 
 ---
+
+## Batch 4s — filter_values honours row and field read permissions (4.121-4.128)
+
+- **Type:** E
+- **Files covered:** `lex/api/views/model_entries/FilterValues.py`, `lex/api/utils/filterable_fields.py`
+  (`value_list_field`, `renders_rows_as_stored`, `_renders_value_as_stored`),
+  `lex/api/serializers/base_serializers.py` (`_wrap_custom_serializer`'s `_KEEPS_FIELD_VALUES` mark),
+  `lex/api/views/model_entries/filter_backends.py` (the read filter 4.122 and 4.128 rely on)
+- **Test file:** `lex/test_project/tests/permissions/test_4s_filter_values_permissions.py`
+- **Test classes:** `TestCluster04s_FilterValuesPermissions`
+- **Fixtures:** new `RowFieldItem`; `FieldLevelItem`; `KeycloakItem` (4.128); `OwnedItem` (4.126's nested-
+  serializer subtest, with a per-record Keycloak grant like 4.128's); serializers registered on
+  `RowFieldItem.api_serializers` for one test each (4.125-4.127), and on `OwnedItem.api_serializers` for
+  the 4.126 nested-serializer subtest
+- **Status:** complete — 8 pass
+- **Merged with lex-app-v2:** 4.123 now asks for region under a filter that leaves only
+  the private rows, which all hide it (200, empty); a field withheld on every record is refused
+  instead (4.132, spec Amendment 17).
+- **Final review (4.125-4.128):** a write-only field, a field class with its own `get_attribute` or
+  `to_representation`, a nested serializer on an FK column, and every field of a serializer that
+  rewrites its rows are refused with the standard 400; on the database path a record-level grant
+  limits the count to that record. Mutation: the read filter replaced by the identity fails 4.128 alone.
+
+---
+
+### Batch 4t — filter_values follows the list under lex-app-v2's secure defaults ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.129 – 4.134 |
+| Type | E |
+| Files covered | `lex/api/views/model_entries/FilterValues.py` (`_filterable_field`, `_count_per_row`, `_count_in_database`), `lex/api/utils/filterable_fields.py` (`value_list_field`'s `request`), `lex/api/views/model_info/Fields.py` (`value_list` per caller), `lex/api/serializers/base_serializers.py` (`readable_field_names`), `lex/api/views/model_entries/filter_backends.py`, `lex/api/filter_policy.py` |
+| Test file | `lex/test_project/tests/permissions/test_4t_filter_values_secure_defaults.py` |
+| Test classes | `TestCluster04t_FilterValuesSecureDefaults` |
+| Fixtures | new `ReadCheckRaisesItem` (`can_read` raises for "boom"); `RaisingReadItem` (4o), `FieldLevelItem`, `RowFieldItem`; a serializer that is not a LexSerializer resolved for `RaisingReadItem` (4.131); `LEX_SEC_*`/`LEX_LEGACY_SECURITY` cleared per test |
+| Tests landed | **6 pass / 0 fail** |
+| Also changed | 4.123 (per-row empty list), 10.100's helper (then 10.94; the allow-list reads the container the test builds), spec Amendment 17 |
+| Native column filters | 4.133 no longer checks `list_ui.filter_bar`: the filter bar is withdrawn (spec Amendment 18) — see [session note](../../progress/sessions/2026-10-20-native-column-filters.md) |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-19-merge-lex-app-v2-secure-defaults.md) |
+
+---
