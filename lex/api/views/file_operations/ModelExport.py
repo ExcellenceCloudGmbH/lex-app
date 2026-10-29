@@ -29,7 +29,7 @@ from lex.audit_logging.utils.file_operation_audit import ACTION_EXPORT
 from lex.process_admin.models.utils import get_relation_fields
 from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
-from rest_framework_api_key.permissions import HasAPIKey
+from lex.api.utils.api_key_requests import HasAPIKey
 
 MAX_AG_EXPORT_ROWS = 1_000_000
 AG_GROUP_HIERARCHY_COLUMN = "__ag_group_hierarchy_label"

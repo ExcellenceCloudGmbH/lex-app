@@ -11,7 +11,7 @@
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
 | 1. Init — Project Bootstrap | 50 | 409 | 457 | 0 | 0 |
-| 2. CRUD via REST API | 12 | 116 | 24 | 0 | 0 |
+| 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 18 | 120 | 63 | 2 | 0 |
 | 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
@@ -110,6 +110,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 2j | Instance API-key extraction and matching | 2.97-2.107 | complete | 11 | 0 | 0 | scenarios 2.97–2.107; `get_raw_api_key` (KeyParser hit + header fallback + prefix strip + edge cases) + `is_instance_api_key_request` (match/mismatch/no-env-var/no-key |
 | 2k | A create that starts a calculation answers straight away | 2.108-2.109 | complete | 2 | 0 | 0 | 2.108 a POST to a calculate_on_create model answers 201 with is_calculated IN_PROGRESS while the run is still held open, and the run finishes in SUCCESS afterwards; 2.109 a calculation model without the flag answers NOT_CALCULATED, as before. |
 | 2l | A closed record - Calculate is refused with its reason, the rest stays editable | 2.110-2.116 | complete | 7 | 0 | 0 | 2.110 the Calculate PATCH on a record whose calculation_closed_reason() answers a reason gets 409 with that reason in detail, the key the frontend shows; the record keeps its status and no run is marked in progress. 2.111 an open record still gets 202; 2.112 a method answering True gets the framework's default message. 2.113 a closed record's other fields stay editable and the edit keeps its status; 2.114 closing a record through an edit keeps its status; 2.115 reopening it resets it like any edit of an open record; 2.116 an open record's edit still resets it to NOT_CALCULATED. |
+| 2m | An API key in the ?api_key= query parameter | 2.117-2.121 | complete | 5 | 0 | 0 | 2.117 a valid key in ?api_key= alone creates a model entry through the real middleware, the view's HasAPIKey and the API-key identity (created_by = API-key audit actor); 2.118 a wrong key in the Api-Key header is refused even with a valid query key (the header wins); 2.119 a valid header key is not spoiled by a wrong query key; 2.120 a wrong query key and 2.121 an empty or blank one are refused and create nothing. |
 
 ## 3. Validation Hooks (`validation_hooks`)
 
