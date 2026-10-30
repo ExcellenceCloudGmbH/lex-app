@@ -124,7 +124,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: 3.12.0
+          # 3.12, not 3.12.0: an exact patch pin only resolves while
+          # actions/python-versions still publishes that exact build for the
+          # runner image. `ubuntu-latest` became Ubuntu 26.04 on 2026-10-19,
+          # which carries no such build, so every job here died at "Set up
+          # Python" -- including the release gate, which took the v2.1.12
+          # prerelease down with it. The minor pin tracks the newest 3.12.x
+          # the image offers and is what the other nine workflows already use.
+          python-version: "3.12"
       - name: Compute matrix
         id: plan
         env:
@@ -195,10 +202,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-      - name: Set up Python 3.12.0
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: 3.12.0
+          python-version: "3.12"
       - name: Cache pip
         uses: actions/cache@v4
         with:
@@ -307,7 +314,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: 3.12.0
+          python-version: "3.12"
       # weasyprint/cairosvg need cairo + pango at the C level to render
       # the PDF — same system deps the previous single job installed.
       - name: Install system dependencies
