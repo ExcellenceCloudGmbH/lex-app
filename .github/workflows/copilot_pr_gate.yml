@@ -85,8 +85,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           # Match showcase_tests.yml so the gate runs against the same
-          # interpreter the project itself targets.
-          python-version: "3.12.0"
+          # interpreter the project itself targets -- including its minor-only
+          # pin: an exact patch has no build on Ubuntu 26.04, which is what
+          # `ubuntu-latest` resolves to since 2026-10-19.
+          python-version: "3.12"
 
       - name: Install system dependencies
         # pycairo + weasyprint dependencies build from source without
