@@ -340,3 +340,22 @@ does not remove user launch configurations.
 | 1.302 | a real stop flag is still obeyed | the guard swallows control exceptions, not the answer |
 
 **Scenarios 1.300 – 1.302** close the last live cause of the original report: the token refresher died on a script rerun, and a dead one is only replaced on the *next* run — so a rerun followed by idleness left nothing renewing the token. Found in a production log, which was only readable because 1.296–1.299 added the access log.
+
+### 1az — a machine endpoint on the dashboard origin cannot take over the user's tab
+
+**What it tests:** the Streamlit proxy serves pages a person looks at and endpoints that exist only for code, on one host. Its re-auth machinery — whose purpose is to move the *top* window and then return the browser to whatever 401'd — may now only be reached by the first kind.
+
+**Why a regression matters:** LEX-1477. A hidden, zero-sized `/_lex/theme-relay` frame 401'd on a proxy that did not serve that route yet, got the frame-breakout page, and sent the whole tab to `/auth/login?next=/_lex/theme-relay`; the OIDC round trip then parked it on a blank storage document. Intermittent, silent, and unconnectable to a theme shim by anyone looking at it.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.415 | a utility path is never a return target | `_safe_next_path` rejects `/_lex/*`, `/_stcore/*`, `/auth/token`, `/auth/adopt`; pages with query and fragment survive |
+| 1.416 | a stashed utility path lands on `/` | `auth_callback` re-validates and falls back rather than honouring it |
+| 1.417 | no return target for a top-level utility visit | the login redirect carries no `next` |
+| 1.418 | a hidden utility frame gets a 401, not a breakout | JSON 401, no `window.top.location` anywhere in it |
+| 1.419 | a framed dashboard still breaks out | the 401 HTML breakout, still carrying the view as `next` |
+| 1.420 | a top-level visit is sent back to the frontend | 303 to the configured frontend origin |
+| 1.421 | an unconfigured deployment does not bounce to localhost | the relay is served instead |
+| 1.422 | the framed relay is untouched | 200, the shared key, `frame-ancestors <frontend>` |
+
+**Scenario range:** 1.415 – 1.422. **Test file:** `lex/test_project/tests/init/test_1az_proxy_tab_takeover.py`. **Type:** U. **Status:** ✅ Complete (2026-10-26). Batch: [1az](batches.md). Frontend twin: `process-admin-general-client` batch F12u.

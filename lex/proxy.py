@@ -10,7 +10,7 @@ import time
 from contextlib import asynccontextmanager, suppress
 from inspect import signature
 from typing import Any, Dict, Optional, Tuple, List
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 import jwt  # PyJWT
@@ -745,8 +745,37 @@ _NEXT_SESSION_KEY = "lex_post_login_next"
 STRIP_AUTH_TOKEN_FROM_URL = _env_bool("STRIP_AUTH_TOKEN_FROM_URL", True)
 
 
+#: Paths that exist for machinery, never for a person to look at.
+#:
+#: Every one of them is fetched by script or loaded into a hidden frame: the
+#: theme relay is framed invisibly and zero-sized, ``/auth/token`` and
+#: ``/auth/adopt`` are ``fetch`` targets, ``/_stcore/*`` is Streamlit's own
+#: bootstrap. None renders anything a user could act on.
+#:
+#: They are listed because returning a *browser* to one of them is how a
+#: utility request turns into a dead end. That is LEX-1477: the frontend's
+#: hidden ``/_lex/theme-relay`` frame reached a proxy that did not serve that
+#: route, fell into the authenticated catch-all, and got the frame breakout --
+#: whose job is to send the TOP window to a login. The OIDC round trip then
+#: honoured ``next=/_lex/theme-relay``, so the whole tab finished on a blank
+#: storage shim with no way back to the app.
+#:
+#: The commit above this one adds the route, so that particular 401 is gone.
+#: This is the guard that makes the *consequence* impossible regardless:
+#: whatever 401s, a browser is never sent somewhere it has nothing to do.
+_NON_LANDING_PREFIXES = ("/_lex/", "/_stcore/")
+_NON_LANDING_PATHS = frozenset({"/auth/token", "/auth/adopt"})
+
+
+def _is_landing_path(path: str) -> bool:
+    """Whether *path* is somewhere a browser can usefully be returned to."""
+    if path in _NON_LANDING_PATHS:
+        return False
+    return not path.startswith(_NON_LANDING_PREFIXES)
+
+
 def _safe_next_path(raw: Optional[str]) -> Optional[str]:
-    """A same-origin, path-only redirect target, or ``None``.
+    """A same-origin, path-only, *human-visitable* redirect target, or ``None``.
 
     Deliberately strict: only a single-leading-slash path (plus query and
     fragment) survives. Anything carrying a scheme, an authority, or a
@@ -754,6 +783,13 @@ def _safe_next_path(raw: Optional[str]) -> Optional[str]:
     up in a ``Location`` header after an OIDC round trip -- exactly the shape
     of an open redirect, and a login flow is the most valuable place to have
     one.
+
+    Same-origin is not sufficient on its own, though. ``/_lex/theme-relay`` is
+    as same-origin as it gets and still the wrong place to leave a browser --
+    see :data:`_NON_LANDING_PREFIXES`. Rejecting here covers ``login``'s
+    ``?next=`` on the way in *and* ``auth_callback``'s re-validation on the way
+    out, so a value that was stashed by an older build, or by a frame that had
+    no business asking, cannot strand the tab either.
     """
     if not raw:
         return None
@@ -763,6 +799,8 @@ def _safe_next_path(raw: Optional[str]) -> Optional[str]:
     # Backslashes are treated as slashes by some browsers, so "/\evil.com" and
     # "/\\evil.com" would escape the origin.
     if candidate[1:2] == "\\" or "\\" in candidate[:2]:
+        return None
+    if not _is_landing_path(urlparse(candidate).path):
         return None
     return candidate
 
@@ -873,12 +911,22 @@ def _frame_breakout_response(request: Request) -> Response:
 def _unauthenticated_response(request: Request) -> Response:
     """Response to send when no valid identity is present.
 
-    - iframe/frame document load -> break out to a top-level login (never frame the IdP)
+    - iframe/frame document load of a *page* -> break out to a top-level login
+      (never frame the IdP)
+    - iframe/frame document load of a utility path -> 401 JSON, no breakout
     - other top-level HTML navigation -> normal redirect to login
     - XHR / fetch / API call -> 401 JSON
     """
     accepts_html = "text/html" in request.headers.get("accept", "")
     if accepts_html and _is_iframe_document_request(request):
+        # A framed *page* is a dashboard the user is looking at, so recovering
+        # it is worth taking over the tab for. A framed utility path is not:
+        # it is a hidden shim nobody can see, and the breakout would move the
+        # whole window on behalf of a frame the user does not know exists.
+        # That is the mechanism behind LEX-1477 -- see _NON_LANDING_PREFIXES.
+        # 401 instead, which the shim's own code can deal with or ignore.
+        if not _is_landing_path(request.url.path):
+            return JSONResponse({"error": "Authentication required"}, status_code=401)
         return _frame_breakout_response(request)
     if accepts_html:
         return RedirectResponse(url=_login_path(request, _current_relative_path(request)))
@@ -2123,6 +2171,120 @@ def _warn_if_upstream_is_not_colocated() -> None:
 
 
 # -----------------------------------------------------------------------------
+# Theme relay
+# -----------------------------------------------------------------------------
+#: Storage key both origins agree on. Changing it breaks the handshake, so it is
+#: named once here and mirrored in the frontend's themeRelay.ts.
+THEME_STORAGE_KEY = "lex.theme.mode"
+
+#: Frontend origins this deployment was actually told about. Empty when nobody
+#: configured one, which is a different situation from "configured as
+#: localhost" and has to stay distinguishable -- see :func:`theme_relay`.
+_THEME_RELAY_CONFIGURED = [
+    o.rstrip("/")
+    for o in (os.getenv("REACT_APP_URL"), os.getenv("LEX_FRONTEND_URL"))
+    if o
+]
+
+#: Origins allowed to drive this relay. The lex-app frontend, wherever it lives.
+_THEME_RELAY_ALLOWED = _THEME_RELAY_CONFIGURED or ["http://localhost:8000"]
+
+_THEME_RELAY_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><title>lex theme relay</title></head>
+<body>
+<!--
+  Cross-origin theme relay.
+
+  localStorage is origin-scoped, so the lex-app frontend cannot write the
+  Streamlit origin's storage directly -- and without that, a STANDALONE
+  Streamlit window never learns the theme changed. postMessage only reaches
+  frames you hold a handle to, which a separate window is not.
+
+  This page is served from the Streamlit origin and embedded, hidden, by the
+  frontend. The frontend posts a mode to it; this writes it to storage HERE.
+  Because a storage write raises a `storage` event in every OTHER tab of the
+  same origin, every Streamlit tab -- embedded or standalone -- is notified,
+  with no server involved and no polling.
+-->
+<script>
+  var KEY = "__KEY__";
+  var ALLOWED = __ALLOWED__;
+
+  window.addEventListener("message", function (ev) {
+    if (ALLOWED.indexOf(ev.origin) === -1) return;           // only our frontend
+    var d = ev.data;
+    if (!d || d.type !== "lex-theme-set") return;
+    var mode = d.mode === "dark" ? "dark" : "light";
+    try {
+      // Writing the same value raises no storage event, so a repeat is a
+      // genuine no-op rather than a needless wake-up for every tab.
+      if (window.localStorage.getItem(KEY) !== mode) {
+        window.localStorage.setItem(KEY, mode);
+      }
+      // Answer so the caller knows the relay is alive and which value stuck.
+      ev.source.postMessage({ type: "lex-theme-ack", mode: mode }, ev.origin);
+    } catch (e) {
+      /* storage disabled (private mode, blocked cookies) -- degrade quietly */
+    }
+  });
+
+  // Announce readiness so the frontend can flush a mode queued before load.
+  try {
+    parent.postMessage({ type: "lex-theme-relay-ready" }, "*");
+  } catch (e) {}
+</script>
+</body></html>
+"""
+
+
+def _is_top_level_document_request(request: Request) -> bool:
+    """True only for a navigation of the top-level window.
+
+    ``Sec-Fetch-Dest: document`` is sent for the top-level document and never
+    for a framed one (that is ``iframe``/``frame``). A client that sends no
+    ``Sec-Fetch-*`` at all reads as False, so an older browser keeps whatever
+    the caller's default branch does rather than being guessed about.
+    """
+    return request.headers.get("sec-fetch-dest", "").strip().lower() == "document"
+
+
+async def theme_relay(request: Request) -> Response:
+    """Serve the cross-origin theme relay.
+
+    Framed by the lex-app frontend so it can write THIS origin's storage. See
+    the comment inside the document for why that indirection is necessary.
+
+    A top-level navigation here is always a mistake -- the document has no UI,
+    so the tab shows a blank page with no way back to the app. It is also a
+    mistake that has reached a customer (LEX-1477, by the route described on
+    :data:`_NON_LANDING_PREFIXES`), and the guards upstream of here only stop
+    this proxy from causing it; a bookmark, a history entry, or an older proxy
+    still in the chain can land a browser here anyway. So when the deployment
+    has told us where the frontend lives, send them back to it instead of
+    leaving them stranded.
+
+    Only when it was actually configured: the framing allow-list falls back to
+    ``http://localhost:8000``, and bouncing a production tab to localhost is
+    worse than the blank page it replaces.
+    """
+    if _is_top_level_document_request(request) and _THEME_RELAY_CONFIGURED:
+        return RedirectResponse(url=_THEME_RELAY_CONFIGURED[0], status_code=303)
+
+    body = _THEME_RELAY_HTML.replace("__KEY__", THEME_STORAGE_KEY).replace(
+        "__ALLOWED__", json.dumps(_THEME_RELAY_ALLOWED)
+    )
+    return HTMLResponse(
+        body,
+        headers={
+            # Must be framable by the frontend; that is its entire purpose.
+            "Content-Security-Policy": "frame-ancestors " + " ".join(_THEME_RELAY_ALLOWED),
+            # Static and tiny, but never stale: the allow-list is baked in.
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+# -----------------------------------------------------------------------------
 # Access logging: make a failed asset request visible
 # -----------------------------------------------------------------------------
 # There were no access-log lines at all in the production log that this was
@@ -2221,6 +2383,8 @@ if SERVE_STATIC_LOCALLY:
     _warn_if_upstream_is_not_colocated()
 
 routes = [
+    # Before the catch-all proxy, or it would be forwarded upstream to Streamlit.
+    Route("/_lex/theme-relay", theme_relay, methods=["GET"]),
     Route("/auth/login", login, methods=["GET"]),
     Route("/auth/callback", auth_callback, methods=["GET"]),
     Route("/oauth2/logout", oauth2_logout, methods=["GET"]),
