@@ -423,3 +423,33 @@ Also fixed here: a **duplicated block in this test file** that shadowed scenario
 **Backport note:** this is mainline batch 1az carried onto the 2.1.x release line. The scenario IDs and the letter are kept identical so they mean one thing on both lines and a merge is a no-op; letters `ae`-`ay` and scenarios 1.303-1.414 are allocated on `lex-app-v2`, not here. The branch is `v2.1.11` + `8780a119` (the relay route) + this change, so a 2.1.x release built from it both stops the tab takeover and makes theme sync work at all.
 
 **Frontend twin:** `process-admin-general-client` batch F12u (F12.104–F12.108) closes the same hole from the other side — the relay frame is sandboxed so nothing served there can navigate the tab at all, and the shell attributes a `lex-auth-required` message to the dashboard frame rather than to its origin, which is what let an invisible frame on that origin drive a full-page navigation.
+
+---
+
+### Batch 1ba — a frame another application put on screen does not get to move that tab ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.423 – 1.429 |
+| Type | U |
+| Files covered | `lex/proxy.py` (`_frame_may_move_the_tab`, `_frame_breakout_response`, `proxy`), `lex/lex_app/streamlit/Streamlit.py` (`get_html`) at the join |
+| Test file | `lex/test_project/tests/init/test_1ba_frame_does_not_take_the_tab.py` |
+| Test classes | `TestCluster01ba_FrameDoesNotTakeTheTab` (1.423–1.427), `TestCluster01ba_TheReportedJourney` (1.428–1.429) |
+| Fixtures | a hand-built Starlette `Request` parameterised by `Sec-Fetch-Site`; for the join, the real `Streamlit` report's own output driven against `proxy.app` through `TestClient`, with `validate_jwt_token` and `_upstream_send` stubbed (the Keycloak and Streamlit boundaries) |
+| Tests landed | **7 pass / 0 fail** |
+| Also run | clusters 1z (1.211–1.216) and 1az (1.415–1.422), unchanged and still passing — the breakout itself is not narrowed, only who may script the navigation |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.423 | the shell's frame leaves the shell's tab alone | `Sec-Fetch-Site: same-site` → no `window.top.location`, but still 401, still `lex-auth-required`, still `target="_top"` at this proxy's login |
+| 1.424 | an unrelated embedder has no more claim | `Sec-Fetch-Site: cross-site` → the same |
+| 1.425 | this origin's own frame still recovers | `Sec-Fetch-Site: same-origin` → the automatic navigation is kept |
+| 1.426 | a client that names no embedder is unchanged | no `Sec-Fetch-Site` → pre-existing behaviour, as scenario 1.214 has it for the rest of this routing |
+| 1.427 | the embedder check is a header read | `SAME-SITE` / `Cross-Site` refused, `same-origin` and absent allowed |
+| 1.428 | the frame the report builds is let in | the URL the real `Streamlit` report produces, loaded as a framed document against the real proxy app, banks the token, is redirected without it and ends on the dashboard's own bytes |
+| 1.429 | the fault and the amplifier, observed together | the URL the report produces with no session token still 401s, and that 401 moves no window |
+
+**Why a regression matters:** this is the amplifier, not the fault. Batch 10o stops the Streamlit report framing its dashboard without a credential, so the 401 that started the reported tab takeover no longer happens — but any frame that cannot authenticate, for any reason, could still move a window belonging to the page the user was reading. 1az fixed this one path at a time (`/_lex/*`, `/_stcore/*`, `/auth/token`, `/auth/adopt`); naming the embedder fixes the class, including the dashboard's own landing page, which is the path this report took. The counterweight is 1.425 and 1.426: withhold the navigation from everything and the dashboard's own recovery goes with it.
+
+**Allocation note:** letter `ba`, not `ay`. This release line already spent `az` on the 1477 backport, and mainline holds `ay` for the same batch there; letters are never renumbered, so the backport takes the next free pair on its own branch.

@@ -1,4 +1,5 @@
 import copy
+from inspect import signature
 
 from lex.process_admin.models.ModelCollection import ModelCollection
 from rest_framework.permissions import IsAuthenticated
@@ -184,6 +185,26 @@ class ModelStylingObtainView(APIView):
         return Response(user_dependent_model_styling)
 
 
+def render_html_report(report, user, request):
+    """A report's HTML, giving it the request only if it asks for one.
+
+    ``HTMLReport`` has only ever promised ``get_html(self, user)``, and projects
+    subclass it, so the request cannot simply be passed to everyone. A report
+    that needs more than the user -- the built-in ``Streamlit`` one needs the
+    session's access token, or the dashboard it frames cannot authenticate --
+    declares a second parameter, and gets it. Everything else is called exactly
+    as before.
+
+    The signature is inspected rather than guessed from a ``TypeError``, which
+    would also swallow a genuine argument error raised *inside* ``get_html``.
+    """
+    try:
+        accepts_request = len(signature(report.get_html).parameters) > 1
+    except (TypeError, ValueError):  # pragma: no cover - builtins/C callables
+        accepts_request = False
+    return report.get_html(user, request) if accepts_request else report.get_html(user)
+
+
 class Overview(APIView):
     http_method_names = ["get"]
     HTML_reports = None
@@ -192,8 +213,15 @@ class Overview(APIView):
         user = request.user
         class_name = kwargs["report_name"]
         html_report_class = self.HTML_reports[class_name]
-        html = html_report_class().get_html(user)
-        return Response(html)
+        html = render_html_report(html_report_class(), user, request)
+        response = Response(html)
+        # A report's HTML is per-user by construction, and the built-in
+        # Streamlit one now carries the caller's own access token so the frame
+        # it builds can authenticate. Neither belongs in a shared cache, and a
+        # response with no Cache-Control at all is one a browser may store
+        # heuristically.
+        response["Cache-Control"] = "no-store"
+        return response
 
 
 class ProcessStructure(APIView):
