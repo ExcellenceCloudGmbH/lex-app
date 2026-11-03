@@ -841,12 +841,46 @@ def _is_document_request(request: Request) -> bool:
     return "text/html" in request.headers.get("accept", "")
 
 
+def _frame_may_move_the_tab(request: Request) -> bool:
+    """Whether a framed request may navigate the top window by itself.
+
+    Not when another application put the frame on screen. ``Sec-Fetch-Site``
+    describes the relation between the document that *started* the navigation
+    and its target, so on a framed document load it names the embedder:
+    ``same-site`` is lex-app's shell on the instance hostname framing the
+    dashboard host beside it, ``cross-site`` is anyone else. In both cases the
+    top window is showing someone else's page -- the one the user was actually
+    reading -- and a frame does not get to decide that page is over.
+
+    That is the whole of the reported fault. A sidebar entry framed the
+    dashboard with no credential, the frame 401'd, and this page moved the tab
+    to the dashboard host's login; the user clicked something inside their
+    instance and ended up on ``https://<instance>-streamlit.<domain>/``.
+
+    Withheld here, the response is still the breakout page: it still posts
+    ``lex-auth-required``, which is the channel the React shell listens on and
+    recovers the dashboard through, and still offers the ``target="_top"``
+    link, which is a user gesture and always permitted. The frame is never
+    redirected to Keycloak, so the "refused to connect" wall the breakout was
+    written for cannot come back either way.
+
+    ``same-origin`` -- the proxy framing its own page -- keeps the automatic
+    navigation: the window it would move is one this response already owns. So
+    does a request with no ``Sec-Fetch-Site`` at all, which is the convention
+    the rest of this routing follows (see scenario 1.214): an absent
+    ``Sec-Fetch-*`` means a client too old or too synthetic to be the browser
+    tab this guard is about, and gets the pre-existing behaviour.
+    """
+    site = request.headers.get("sec-fetch-site", "").strip().lower()
+    return site not in {"same-site", "cross-site"}
+
+
 def _frame_breakout_response(request: Request) -> Response:
     """A 401 that escapes the iframe to a full-page login instead of framing the IdP.
 
     Three layered mechanisms, most-reliable last:
-      1. best-effort automatic top-level navigation (works when the browser allows
-         the frame to navigate the top window);
+      1. an automatic top-level navigation, withheld when another application is
+         the one framing this -- see :func:`_frame_may_move_the_tab`;
       2. a ``postMessage`` so a cooperating parent shell can drive re-auth;
       3. a user-clickable ``target="_top"`` link, which is always permitted because
          it is a user gesture.
@@ -854,12 +888,17 @@ def _frame_breakout_response(request: Request) -> Response:
     login = _login_url(request, _current_relative_path(request))
     login_js = json.dumps(login)  # safe JS string literal
     login_attr = html.escape(login, quote=True)
+    takeover = (
+        "try{if(window.top!==window.self){window.top.location.href=u;}"
+        "else{window.location.href=u;}}catch(e){}"
+        if _frame_may_move_the_tab(request)
+        else ""
+    )
     body = (
         "<!doctype html><html><head><meta charset=\"utf-8\">"
         "<title>Session expired</title></head><body>"
         "<script>(function(){var u=" + login_js + ";"
-        "try{if(window.top!==window.self){window.top.location.href=u;}"
-        "else{window.location.href=u;}}catch(e){}"
+        + takeover +
         "try{window.parent.postMessage({type:'lex-auth-required',login:u},'*');}catch(e){}"
         "})();</script>"
         "<div style=\"font:16px system-ui,Arial,sans-serif;padding:24px;text-align:center\">"

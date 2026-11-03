@@ -505,3 +505,23 @@ does not remove user launch configurations.
 | 1.409 | no `Process` node type | the structure payload types nodes `Model` / `HTMLReport` / `Folder` only |
 
 **Scenario range:** 1.406 – 1.409. **Test file:** `lex/test_project/tests/init/test_1ax_process_feature_removed.py`. **Type:** I. **Status:** ✅ Complete (2026-10-22). Batch: [1ax](batches.md).
+
+---
+
+### 1ay. A frame another application put on screen does not get to move that tab ✅
+
+**What it tests:** who the proxy's framed-401 page is allowed to navigate. The breakout exists because Keycloak refuses to be framed, so an unauthenticated frame must not be redirected to the IdP; it answers with a 401 page carrying three layers — an automatic top-level navigation, a `lex-auth-required` `postMessage`, and a `target="_top"` link. The automatic layer now runs only when `Sec-Fetch-Site` says this origin is also the one framing it (or when a client names no embedder, the pre-existing behaviour 1.214 pins). A frame on someone else's page keeps the 401, the message and the link, and takes nothing.
+
+**Why a regression matters:** the top window belongs to the page the user is reading. A frame that cannot authenticate has learned something about itself, not about that page — and moving the window anyway is how a sidebar click inside an instance ended up parked on the dashboard host with an SSO round trip already completed. Narrowing it too far is the opposite failure: 1.412 and 1.413 are the counterweight, because withholding the navigation from everything strands the dashboard's own recovery.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.410 | the shell's frame leaves the shell's tab alone | `same-site` → no `window.top.location`; still 401, `lex-auth-required`, `target="_top"` |
+| 1.411 | an unrelated embedder has no more claim | `cross-site` → the same |
+| 1.412 | this origin's own frame still recovers | `same-origin` → the automatic navigation is kept |
+| 1.413 | a client that names no embedder is unchanged | absent `Sec-Fetch-Site` → pre-existing behaviour |
+| 1.414 | the embedder check is a header read | casing cannot defeat it |
+| 1.415 | the frame the report builds is let in | the URL the real `Streamlit` report produces, loaded as a framed document against the real proxy app, banks the token, is redirected without it and ends on the dashboard's own bytes |
+| 1.416 | the fault and the amplifier, observed together | the URL the report produces with no session token still 401s, and that 401 moves no window |
+
+**Scenario range:** 1.410 – 1.416. **Test file:** `lex/test_project/tests/init/test_1ay_frame_does_not_take_the_tab.py`. **Type:** U. **Status:** ✅ Complete (2026-11-03). Batch: [1ay](batches.md).

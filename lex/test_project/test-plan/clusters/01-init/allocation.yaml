@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 409
+max_scenario: 416
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1303,3 +1303,30 @@ letters:
       model-structure payload types nodes Model / HTMLReport / Folder only, never Process (1.409).
       Each scenario checks the kept HTMLReport sibling too, so a broken registration cannot pass as
       a clean removal. The routes that served the feature are pinned by 10q.
+  ay:
+    title: A frame another application put on screen does not get to move that tab
+    scenarios: 1.410-1.416
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      The amplifier behind the Streamlit sidebar report sending the whole browser tab to the
+      dashboard host. The proxy answers a framed 401 with the breakout page, whose first act was
+      an unconditional window.top navigation to its own login; with a live SSO session the round
+      trip completes instantly and the tab is parked on the dashboard origin. The automatic layer
+      now runs only when Sec-Fetch-Site says this origin is also the embedder (1.412), or when a
+      client names no embedder at all, which is the pre-existing behaviour scenario 1.214 already
+      pins (1.413). A sibling origin (1.410, the React shell) and an unrelated site (1.411) get the
+      same 401, the same lex-auth-required postMessage -- the channel the shell recovers through --
+      and the same target="_top" link, but no scripted navigation. 1.414 pins the header read.
+      The frame is never redirected to the IdP in any branch, so the "refused to connect" wall the
+      breakout exists for cannot return. Cluster 1z's six scenarios are unchanged and still pass.
+      1.415 and 1.416 are the join: the URL the real Streamlit report builds, loaded as a framed
+      document against the real proxy app. With a token the proxy banks it, redirects the frame
+      to the same place without it and serves the dashboard upstream -- the expected behaviour
+      in the ticket. Without one the frame still 401s, but the 401 moves no window, so the tab
+      stays on the instance.
+      Mutation: against the pre-fix source 1.415 and 1.416 both fail, reproducing the report;
+      restoring the unconditional navigation fails 1.410, 1.411 and 1.414.
