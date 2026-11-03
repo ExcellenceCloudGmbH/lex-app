@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 71
+max_scenario: 74
 letters:
   a:
     title: ''
@@ -127,3 +127,23 @@ letters:
       xfail: 0
     note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
       recorded
+  o:
+    title: api/htmlreport/<name> hands a report the request, and the Streamlit frame a credential
+    scenarios: 10.72-10.74
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      Reported against 2.1.12: the Streamlit sidebar entry framed its dashboard host with no
+      credential at all. A cross-origin frame cannot authenticate itself -- the proxy would have to
+      redirect it to Keycloak, which forbids being framed -- so the frame 401'd and the framed-401
+      page took the browser tab to the dashboard host. The report now carries the session's own
+      OIDC access token as the bootstrap auth_token (10.72), the same handshake the React shell's
+      embed has always used, and carries none at all when the session has none (10.73) rather than
+      a placeholder the proxy must reject. The route answers Cache-Control: no-store now that its
+      body can hold a credential (10.72). HTMLReport's published get_html(self, user) is
+      untouched: the request reaches only a report that declares a second parameter, decided by
+      reading the signature rather than catching a TypeError that could have come from inside the
+      report (10.74). Mutation: the pre-fix report fails 10.72.

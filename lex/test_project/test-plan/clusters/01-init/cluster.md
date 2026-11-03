@@ -359,3 +359,21 @@ does not remove user launch configurations.
 | 1.422 | the framed relay is untouched | 200, the shared key, `frame-ancestors <frontend>` |
 
 **Scenario range:** 1.415 – 1.422. **Test file:** `lex/test_project/tests/init/test_1az_proxy_tab_takeover.py`. **Type:** U. **Status:** ✅ Complete (2026-10-26). Batch: [1az](batches.md). Frontend twin: `process-admin-general-client` batch F12u.
+
+---
+
+### 1ba. A frame another application put on screen does not get to move that tab ✅
+
+**What it tests:** who the proxy's framed-401 page is allowed to navigate. The breakout exists because Keycloak refuses to be framed, so an unauthenticated frame must not be redirected to the IdP; it answers with a 401 page carrying three layers — an automatic top-level navigation, a `lex-auth-required` `postMessage`, and a `target="_top"` link. The automatic layer now runs only when `Sec-Fetch-Site` says this origin is also the one framing it (or when a client names no embedder, the pre-existing behaviour 1.214 pins). A frame on someone else's page keeps the 401, the message and the link, and takes nothing.
+
+**Why a regression matters:** the top window belongs to the page the user is reading. A frame that cannot authenticate has learned something about itself, not about that page — and moving the window anyway is how a sidebar click inside an instance ended up parked on the dashboard host with an SSO round trip already completed. 1az named the utility paths one at a time; naming the embedder covers the class, the dashboard's own landing page included. Narrowing it too far is the opposite failure: 1.425 and 1.426 are the counterweight, because withholding the navigation from everything strands the dashboard's own recovery.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.423 | the shell's frame leaves the shell's tab alone | `same-site` → no `window.top.location`; still 401, `lex-auth-required`, `target="_top"` |
+| 1.424 | an unrelated embedder has no more claim | `cross-site` → the same |
+| 1.425 | this origin's own frame still recovers | `same-origin` → the automatic navigation is kept |
+| 1.426 | a client that names no embedder is unchanged | absent `Sec-Fetch-Site` → pre-existing behaviour |
+| 1.427 | the embedder check is a header read | casing cannot defeat it |
+
+**Scenario range:** 1.423 – 1.427. **Test file:** `lex/test_project/tests/init/test_1ba_frame_does_not_take_the_tab.py`. **Type:** U. **Status:** ✅ Complete (2026-11-03). Batch: [1ba](batches.md).

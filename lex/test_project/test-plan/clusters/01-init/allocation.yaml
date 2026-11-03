@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 422
+max_scenario: 427
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -383,3 +383,27 @@ letters:
       the letter are kept identical to mainline so they mean one thing on both lines and a
       merge is a no-op; letters ae-ay and scenarios 1.303-1.414 are allocated on lex-app-v2,
       not here. Frontend twin is process-admin-general-client batch F12u.
+  ba:
+    title: A frame another application put on screen does not get to move that tab
+    scenarios: 1.423-1.427
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      The amplifier behind the Streamlit sidebar report sending the whole browser tab to the
+      dashboard host, reported against 2.1.12. The proxy answers a framed 401 with the breakout
+      page, whose first act was an unconditional window.top navigation to its own login; with a
+      live SSO session the round trip completes instantly and the tab is parked on the dashboard
+      origin. 1az named the utility paths a frame may not return a tab to; this names the embedder,
+      so it covers the dashboard's own landing page too. The automatic layer now runs only when
+      Sec-Fetch-Site says this origin is also the embedder (1.425), or when a client names no
+      embedder at all, which is the pre-existing behaviour scenario 1.214 already pins (1.426). A
+      sibling origin (1.423, the React shell) and an unrelated site (1.424) get the same 401, the
+      same lex-auth-required postMessage -- the channel the shell recovers through -- and the same
+      target="_top" link, but no scripted navigation. 1.427 pins the header read. The frame is
+      never redirected to the IdP in any branch, so the "refused to connect" wall the breakout
+      exists for cannot return; 1z and 1az are unchanged and still pass. Letter ba, not ay: this
+      release line took az for the 1477 backport and mainline holds ay for the same batch there.
+      Mutation: restoring the unconditional navigation fails 1.423, 1.424 and 1.427.
