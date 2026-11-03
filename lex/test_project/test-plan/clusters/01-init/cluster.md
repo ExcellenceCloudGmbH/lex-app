@@ -521,5 +521,7 @@ does not remove user launch configurations.
 | 1.412 | this origin's own frame still recovers | `same-origin` → the automatic navigation is kept |
 | 1.413 | a client that names no embedder is unchanged | absent `Sec-Fetch-Site` → pre-existing behaviour |
 | 1.414 | the embedder check is a header read | casing cannot defeat it |
+| 1.415 | the frame the report builds is let in | the URL the real `Streamlit` report produces, loaded as a framed document against the real proxy app, banks the token, is redirected without it and ends on the dashboard's own bytes |
+| 1.416 | the fault and the amplifier, observed together | the URL the report produces with no session token still 401s, and that 401 moves no window |
 
-**Scenario range:** 1.410 – 1.414. **Test file:** `lex/test_project/tests/init/test_1ay_frame_does_not_take_the_tab.py`. **Type:** U. **Status:** ✅ Complete (2026-11-03). Batch: [1ay](batches.md).
+**Scenario range:** 1.410 – 1.416. **Test file:** `lex/test_project/tests/init/test_1ay_frame_does_not_take_the_tab.py`. **Type:** U. **Status:** ✅ Complete (2026-11-03). Batch: [1ay](batches.md).

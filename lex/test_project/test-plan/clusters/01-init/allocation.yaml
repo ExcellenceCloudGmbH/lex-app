@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 414
+max_scenario: 416
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1305,10 +1305,10 @@ letters:
       a clean removal. The routes that served the feature are pinned by 10q.
   ay:
     title: A frame another application put on screen does not get to move that tab
-    scenarios: 1.410-1.414
+    scenarios: 1.410-1.416
     status: complete
     tests:
-      pass: 5
+      pass: 7
       skip: 0
       xfail: 0
     note: >-
@@ -1323,4 +1323,10 @@ letters:
       and the same target="_top" link, but no scripted navigation. 1.414 pins the header read.
       The frame is never redirected to the IdP in any branch, so the "refused to connect" wall the
       breakout exists for cannot return. Cluster 1z's six scenarios are unchanged and still pass.
-      Mutation: restoring the unconditional navigation fails 1.410, 1.411 and 1.414.
+      1.415 and 1.416 are the join: the URL the real Streamlit report builds, loaded as a framed
+      document against the real proxy app. With a token the proxy banks it, redirects the frame
+      to the same place without it and serves the dashboard upstream -- the expected behaviour
+      in the ticket. Without one the frame still 401s, but the 401 moves no window, so the tab
+      stays on the instance.
+      Mutation: against the pre-fix source 1.415 and 1.416 both fail, reproducing the report;
+      restoring the unconditional navigation fails 1.410, 1.411 and 1.414.
