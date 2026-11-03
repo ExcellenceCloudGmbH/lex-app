@@ -29,21 +29,29 @@ gesture and always permitted. The frame is never redirected to the IdP, so the
 A client that sends no ``Sec-Fetch-Site`` keeps the pre-existing behaviour, the
 same safe default scenario 1.214 pins for the rest of this routing.
 
-Cluster 1ba — scenarios 1.423–1.427. Type: U.
-Covers: lex/proxy.py (_frame_may_move_the_tab, _frame_breakout_response).
+Cluster 1ba — scenarios 1.423–1.429. Type: U.
+Covers: lex/proxy.py (_frame_may_move_the_tab, _frame_breakout_response, proxy),
+lex/lex_app/streamlit/Streamlit.py (get_html) at the join.
 Run: python -m lex pytest lex/test_project/tests/init/test_1ba_frame_does_not_take_the_tab.py -v
 """
 
 from __future__ import annotations
 
+import os
+import re
+from types import SimpleNamespace
 from unittest.mock import patch
+from urllib.parse import urlparse
 
+import httpx
 import pytest
 from django.test import SimpleTestCase
 from starlette.requests import Request
 from starlette.responses import HTMLResponse
+from starlette.testclient import TestClient
 
 import lex.proxy as proxy
+from lex.lex_app.streamlit.Streamlit import Streamlit
 
 pytestmark = pytest.mark.init
 
@@ -188,3 +196,135 @@ class TestCluster01ba_FrameDoesNotTakeTheTab(SimpleTestCase):
         self.assertFalse(proxy._frame_may_move_the_tab(_framed_request("Cross-Site")))
         self.assertTrue(proxy._frame_may_move_the_tab(_framed_request("same-origin")))
         self.assertTrue(proxy._frame_may_move_the_tab(_framed_request(None)))
+
+
+class _Upstream:
+    """Stands in for Streamlit at the one seam every proxied request leaves through."""
+
+    calls: list = []
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.calls = []
+
+    @classmethod
+    async def send(cls, method, url, *, content=None, headers=None):
+        cls.calls.append(str(url))
+        return httpx.Response(200, content=b"<html>the dashboard</html>")
+
+
+class TestCluster01ba_TheReportedJourney(SimpleTestCase):
+    """Cluster 1ba: the URL the sidebar report builds, loaded against the real proxy.
+
+    The two halves of this fix live in different processes -- the report is
+    Django, the frame's destination is the Starlette proxy -- so each cluster
+    pins its own. This class is the join: the URL the real ``Streamlit`` report
+    produces is what the browser actually asks the real proxy for, and what the
+    customer saw is the answer to that one request.
+    """
+
+    def setUp(self) -> None:
+        patcher = patch.object(proxy, "PUBLIC_URL", "")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        _Upstream.reset()
+
+    #: An iframe document load from the shell, which lives on the instance
+    #: hostname beside the dashboard host.
+    FRAMED = {
+        "Accept": "text/html",
+        "Sec-Fetch-Dest": "iframe",
+        "Sec-Fetch-Site": "same-site",
+    }
+
+    @classmethod
+    def _framed_fetch_of(cls, report_html: str, client) -> "httpx.Response":
+        """Load the report's frame the way a browser embedded in the shell would."""
+        src = urlparse(re.findall(r'src="([^"]+)"', report_html)[0])
+        return client.get(
+            f"{src.path}?{src.query}" if src.query else src.path,
+            headers=cls.FRAMED,
+            follow_redirects=False,
+        )
+
+    # -- 1.428 ---------------------------------------------------------
+    def test_1_428_the_frame_the_report_builds_is_let_in(self) -> None:
+        """
+        Scenario 1.428: the dashboard the sidebar entry frames actually loads.
+        Given: the URL the real Streamlit report builds for a session holding an
+               access token, and a proxy that accepts that token
+        When:  a browser loads it as an iframe document, from the shell's origin
+        Then:  the proxy banks the token, strips it from the address and serves the
+               dashboard from upstream. No 401, so nothing that could move the tab:
+               this is the expected behaviour in the report -- Streamlit embedded
+               inside the instance, at the instance's own address.
+        """
+        claims = {"sub": "u1", "email": "u@example.com", "exp": 4_000_000_000}
+        session = SimpleNamespace(session={"oidc_access_token": "bootstrap-jwt"})
+
+        with patch.dict(os.environ, {"STREAMLIT_URL": "https://dash.example.com"}):
+            html = Streamlit().get_html(None, session)
+
+        with patch.object(proxy, "validate_jwt_token", lambda _t: claims), \
+             patch.object(proxy, "_upstream_send", _Upstream.send):
+            with TestClient(proxy.app) as client:
+                resp = self._framed_fetch_of(html, client)
+                self.assertNotEqual(
+                    resp.status_code, 401,
+                    msg="the frame the sidebar entry builds must authenticate, not 401 -- a "
+                        "framed 401 is what started the reported tab takeover",
+                )
+                self.assertNotIn(
+                    "lex-auth-required", resp.text,
+                    msg="and so must never be answered with the breakout page at all",
+                )
+                # The handshake: the proxy exchanges the bootstrap token for its
+                # own session and sends the frame back to the same place without
+                # it, so the credential never stays in the address.
+                while resp.status_code in (301, 302, 303, 307, 308):
+                    self.assertNotIn(
+                        "auth_token", resp.headers["location"],
+                        msg="the banked token must be gone from where the frame is sent next",
+                    )
+                    resp = client.get(
+                        resp.headers["location"], headers=self.FRAMED, follow_redirects=False
+                    )
+
+        self.assertEqual(
+            resp.status_code, 200,
+            msg=f"the frame must end on the dashboard, not on {resp.status_code}",
+        )
+        self.assertIn(
+            "the dashboard", resp.text,
+            msg="and the bytes it renders must be the ones the dashboard served",
+        )
+        self.assertTrue(_Upstream.calls, msg="which means the request reached upstream at all")
+
+    # -- 1.429 ---------------------------------------------------------
+    def test_1_429_without_a_token_the_tab_is_still_not_taken(self) -> None:
+        """
+        Scenario 1.429: the fault and the amplifier, observed together.
+        Given: the URL the report builds when the session has no access token --
+               what every deployment before this fix sent to the browser
+        When:  a browser loads it as an iframe document, from the shell's origin
+        Then:  the proxy still cannot authenticate it, so the frame shows the
+               "sign in again" page -- but nothing in that page moves the top
+               window, so the tab stays on the instance's own /streamlit page
+               instead of ending up on the dashboard host.
+        """
+        with patch.dict(os.environ, {"STREAMLIT_URL": "https://dash.example.com"}):
+            html = Streamlit().get_html(None, None)
+
+        self.assertNotIn("auth_token", html, msg="no session token means nothing to frame it with")
+
+        with patch.object(proxy, "_upstream_send", _Upstream.send):
+            with TestClient(proxy.app) as client:
+                resp = self._framed_fetch_of(html, client)
+
+        self.assertEqual(resp.status_code, 401, msg="an unauthenticated frame is still a 401")
+        self.assertNotIn(
+            TAKEOVER, resp.text,
+            msg="this is the reported fault: the 401 page moved the whole browser tab to the "
+                "dashboard host's login, and a live SSO session completed the round trip",
+        )
+        self.assertIn('target="_top"', resp.text, msg="the user keeps a way out they choose")

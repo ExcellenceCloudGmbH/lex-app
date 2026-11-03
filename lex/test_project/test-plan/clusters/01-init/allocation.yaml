@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 427
+max_scenario: 429
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -385,10 +385,10 @@ letters:
       not here. Frontend twin is process-admin-general-client batch F12u.
   ba:
     title: A frame another application put on screen does not get to move that tab
-    scenarios: 1.423-1.427
+    scenarios: 1.423-1.429
     status: complete
     tests:
-      pass: 5
+      pass: 7
       skip: 0
       xfail: 0
     note: >-
@@ -406,4 +406,10 @@ letters:
       never redirected to the IdP in any branch, so the "refused to connect" wall the breakout
       exists for cannot return; 1z and 1az are unchanged and still pass. Letter ba, not ay: this
       release line took az for the 1477 backport and mainline holds ay for the same batch there.
-      Mutation: restoring the unconditional navigation fails 1.423, 1.424 and 1.427.
+      1.428 and 1.429 are the join: the URL the real Streamlit report builds, loaded as a framed
+      document against the real proxy app. With a token the proxy banks it, redirects the frame
+      to the same place without it and serves the dashboard upstream -- the expected behaviour
+      in the ticket. Without one the frame still 401s, but the 401 moves no window, so the tab
+      stays on the instance.
+      Mutation: against the pre-fix source 1.428 and 1.429 both fail, reproducing the report;
+      restoring the unconditional navigation fails 1.423, 1.424 and 1.427.
