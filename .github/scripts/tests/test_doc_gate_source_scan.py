@@ -62,6 +62,26 @@ def test_command_scan_skips_everything_that_is_not_the_package(tmp_path):
     assert found == {"real_command"}, f"scanned outside the package: {sorted(found)}"
 
 
+def test_command_scan_skips_the_modules_django_itself_skips(tmp_path):
+    """A `_`-prefixed module in a commands package is a helper, not a command.
+
+    Django's own loader is `if not is_pkg and not name.startswith("_")`, so
+    there is no `lex _keycloak_env` for a reader to run. Collecting one made
+    the gate demand documentation for something nobody can type -- and the
+    only page that documentation could go on is mirror-owned, so the repo that
+    reported the error had no way to clear it.
+    """
+    _tree(tmp_path)
+    commands = tmp_path / "core" / "management" / "commands"
+    (commands / "_keycloak_env.py").write_text("")
+    (commands / "__init__.py").write_text("")
+
+    found = {p.stem for p in _load("check_doc_commands").management_commands(tmp_path)}
+    assert found == {"real_command"}, (
+        f"a helper module must not be reported as a command: {sorted(found)}"
+    )
+
+
 def test_a_venv_inside_the_package_does_not_change_the_answer(tmp_path):
     """The property that matters, stated directly.
 

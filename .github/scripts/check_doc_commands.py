@@ -46,8 +46,24 @@ _NOT_THE_PACKAGE = {
 
 
 def management_commands(root: Path):
-    """Management-command modules that this package actually ships."""
+    """Management-command modules that this package actually ships.
+
+    Underscore-prefixed modules are skipped because Django skips them. Its own
+    loader is::
+
+        # django/core/management/__init__.py -- find_commands()
+        if not is_pkg and not name.startswith("_")
+
+    so a module like ``_keycloak_env.py`` living in a ``commands/`` package is
+    a shared helper, not a command: there is no ``lex _keycloak_env`` for a
+    reader to run. Collecting it made this gate demand documentation for
+    something nobody can type, and the only place that documentation could go
+    is a mirror-owned page this repo cannot edit -- a red check with no fix
+    available in the repository that reported it.
+    """
     for path in root.rglob("management/commands/*.py"):
+        if path.name.startswith("_"):
+            continue
         if _NOT_THE_PACKAGE.isdisjoint(path.parts):
             yield path
 
