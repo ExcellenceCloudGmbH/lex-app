@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 409
+max_scenario: 411
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1132,8 +1132,9 @@ letters:
       because Django's close() inside a transaction marks it rather than nulling it. It now pins
       closed_in_transaction, needs_rollback and a query in the same transaction. 1.366 compiles the
       real lex.reflex_app once per process in setUpClass -- the auth plugin binds itself to the process
-      and refuses a second compile -- and 1.368 runs in a subprocess because nest_asyncio patches
-      asyncio process-wide. Verified end to end outside the suite against a mock OIDC provider in a
+      and refuses a second compile -- and 1.368 runs in a subprocess because it checks process-wide
+      asyncio state (rewritten for BUG-046 with 1ay: ready() no longer applies nest_asyncio, so
+      1.368 now asserts that setup on uvloop patches nothing). Verified end to end outside the suite against a mock OIDC provider in a
       browser: login redirect and return, record/table/structure dashboards, embed mode, sign-out, and a
       cross-site frame signing in through the popup.
 
@@ -1303,3 +1304,20 @@ letters:
       model-structure payload types nodes Model / HTMLReport / Folder only, never Process (1.409).
       Each scenario checks the kept HTMLReport sibling too, so a broken registration cannot pass as
       a clean removal. The routes that served the feature are pinned by 10q.
+  ay:
+    title: A project's startup leaves asyncio unpatched and async_to_sync usable (BUG-046)
+    scenarios: 1.410-1.411
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      LexAppConfig.ready() no longer calls nest_asyncio.apply(), which replaced asyncio.run with one
+      that never closes its loop and so made the second async_to_sync in any thread of a downstream
+      process wait forever. A real downstream project (a temporary folder holding lex_config.py) is
+      set up in a fresh interpreter with no running loop (1.410), and by importing lex_app.asgi
+      inside a running asyncio loop as uvicorn does (1.411). asyncio.run stays the standard
+      library's, and two async_to_sync calls with thread-sensitive work both return. A watchdog in
+      the child turns a hang into a failure with every thread's stack. 1aq's 1.368 was rewritten to
+      the same contract on granian's uvloop. All three fail on v2.4.2.
