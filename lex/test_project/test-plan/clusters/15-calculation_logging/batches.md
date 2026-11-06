@@ -112,3 +112,53 @@ purged. It does nothing when the run's rows survived, and it never raises. 15.47
 | Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-22-export-download-audit.md) |
 
 ---
+
+### Batch 15m — A generated row's log is filed under that row: synchronous routes ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 15.56 – 15.62 |
+| Type | I |
+| Files covered | `lex/core/mixins/CalculatedModelMixin.py` (`calc_and_save_streaming`, `calc_and_save_sync`), `lex/core/models/CalculationModel.py` (`child_calculation_context`), `lex/audit_logging/models/CalculationLog.py` (rows resolved from the frame stack, rows of unsaved models kept on the instance, a parent's first row created under its own parent), `lex/audit_logging/utils/ModelContext.py` (rows linked when a block ends) |
+| Test file | `lex/test_project/tests/calculation_logging/test_15m_generated_row_log.py` |
+| Test classes | `TestCluster15m_GeneratedRowLog` — 15.56 materialising route (`LEX_SYNC_STREAMING_EXPANSION=false`); 15.57 / 15.58 a non-atomic root on the streaming / materialising route, where lines are written before a new row has a pk; 15.59 a second run filed under the stored rows; 15.60 / 15.61 a middle that logs only after its grandchild, atomic / non-atomic root; 15.62 a failing row keeps its lines in its own node and leaves no frame on the stack |
+| Fixtures | `_CalcLogTestCase`; new `LogFailingChild`, `LogQuietMiddle` (`GENERATED_ROW_MODELS`, kept out of `ALL_MODELS`); `LogRootCalc` modes `fail_child_then_log` and `quiet_three_level`; a non-atomic root through `patch.object(LogRootCalc, "is_atomic", False)`; each route confirmed by watching its consumer with `wraps=` |
+| Tests landed | **7 pass / 0 fail** |
+| Status | ✅ Complete — fixes [BUG-052](../../known-bugs.md) and [BUG-053](../../known-bugs.md); see [session note](../../progress/sessions/2026-11-06-fix-calc-expansion-child-logs.md) |
+
+**Why 15b–15e failed for six months without anyone acting on it.** `eec74b6d` (2026-05-14) replaced
+`model_logging_context(model)` with `calculation_execution_context()` in `calc_and_save_sync` and in
+Celery's `calc_and_save`, when the two were meant to be nested. `calc_and_save_streaming` (2026-06-10)
+copied the result. The nine scenarios that pinned the nesting failed from that day: they pass on
+`eec74b6d~1` (18 pass / 3 xfail) and fail on `eec74b6d`. No CI job ran the cluster, and one session
+note filed the failures as cross-test interference. All three consumers now go through one helper,
+`child_calculation_context`, so they cannot drift apart again, and the cluster is in the release gate.
+
+**Each scenario was checked to fail with its part of the fix undone.** All nine of 15m and 15n fail on
+v2.4.2's consumers. Pushing the row without keeping a node on an unsaved instance fails 15.57, 15.58,
+15.61, 15.63 and 15.64. Pushing the generated copy instead of the stored row fails 15.59. Creating a
+parent's first row detached, as before, fails 15.60.
+
+---
+
+### Batch 15n — A generated row's log is filed under that row: Celery route ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 15.63 – 15.64 |
+| Type | I |
+| Files covered | `lex/lex_app/celery_tasks.py` (`calc_and_save`), `lex/core/tasks/CeleryTaskDispatcher.py` (stack copy per group), `lex/core/models/CalculationModel.py` (`child_calculation_context`, `dispatch_calculation_task`), `lex/audit_logging/models/CalculationLog.py` (`prepare_for_dispatch`), `lex/audit_logging/utils/ModelContext.py` (`copy_for_dispatch`, `ModelContext.has_on_top`) |
+| Test file | `lex/test_project/tests/calculation_logging/test_15n_celery_route_log.py` |
+| Test classes | `TestCluster15n_CeleryRouteLog` — 15.63 a root running in the generic `calc_and_save` task is one node, not nested under the copy of itself it was shipped with, and each dispatched row gets its own node; 15.64 a middle row that dispatches its grandchildren before logging is one node for every worker |
+| Fixtures | `_celery_eager()` from cluster 8h (real `.delay()`, wrapper and dispatcher; Celery's own eager mode instead of a broker); new `LogCeleryLoudChild`, `LogCeleryGrandchild`, `LogCeleryQuietMiddle` with `@lex_shared_task` `calculate()` under explicit task names (`CELERY_ROUTE_MODELS`); both dispatch points watched with `side_effect=` to confirm the Celery route |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-06-fix-calc-expansion-child-logs.md) |
+
+**What a worker changes.** It writes every line immediately (no transaction defers it until the row is
+saved) and gets a copy of the stack. The generic task's root finds a copy of itself on top, which is why
+`child_calculation_context` skips an instance that already is the top frame. A middle row that
+dispatches before logging is unsaved when the copy is made; `copy_for_dispatch` creates its node first,
+so the id travels with the copy. Removing the guard fails 15.63 and 15.64; removing the node created
+before the copy fails 15.64.
+
+---

@@ -103,6 +103,25 @@ class LogRootCalc(CalculationModel):
             # transaction, so the rollback takes both log rows with it.
             LexLogger().add_text("step one done").log()
             raise ValueError("step two failed")
+        if self.child_mode == "fail_child_then_log":
+            # The batch stops at the failing child (fail-fast); the root
+            # handles that and carries on logging (cluster 15m, 15.62).
+            from lex.core.exceptions import CalculatedModelError
+
+            try:
+                LogFailingChild.create(unit=units)
+            except CalculatedModelError:
+                LexLogger().add_text("root recovered").log()
+            return
+        if self.child_mode == "quiet_three_level":
+            LogQuietMiddle.create(unit=units)
+            return
+        if self.child_mode == "celery_loud":
+            LogCeleryLoudChild.create(unit=units)
+            return
+        if self.child_mode == "celery_quiet_three_level":
+            LogCeleryQuietMiddle.create(unit=units)
+            return
 
 
 @_permissive
@@ -346,3 +365,162 @@ class LogOnCreateCalc(CalculationModel):
         from lex.audit_logging.handlers.LexLogger import LexLogger
 
         LexLogger().add_text(f"created {self.name}").log()
+
+
+# ── Cluster 15m / 15n: a generated row's log is filed under that row ──
+# Kept out of ALL_MODELS: only 15m and 15n create them.
+
+
+@_permissive
+class LogFailingChild(CalculatedModelMixin):
+    """Combinatorial child that logs, then fails when ``unit == "bad"``.
+
+    The failure stops the batch; the lines it wrote before failing must
+    still be filed under it (15.62).
+    """
+
+    unit = models.CharField(max_length=50)
+
+    defining_fields = ["unit"]
+    parallelizable_fields: list[str] = []
+
+    class Meta:
+        app_label = "lex_app"
+
+    def get_selected_key_list(self, key):
+        # Fallback only — the root passes the units as overrides.
+        if key == "unit":
+            return ["ok"]
+        return []
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LexLogger().add_text(f"before failure {self.unit}").log()
+        if self.unit == "bad":
+            raise ValueError(f"LogFailingChild({self.unit}) failing on purpose")
+
+
+@_permissive
+class LogQuietMiddle(CalculatedModelMixin):
+    """Middle layer that creates its grandchildren first and logs only
+    after them, so the grandchild is the first to need the middle's row
+    (15.60, 15.61)."""
+
+    unit = models.CharField(max_length=50)
+
+    defining_fields = ["unit"]
+    parallelizable_fields: list[str] = []
+
+    class Meta:
+        app_label = "lex_app"
+
+    def get_selected_key_list(self, key):
+        # Fallback only — the root passes the units as overrides.
+        if key == "unit":
+            return ["u1"]
+        return []
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LogGrandchildCalc.create(unit=[self.unit])
+        LexLogger().add_text(f"middle after {self.unit}").log()
+
+
+GENERATED_ROW_MODELS = [LogFailingChild, LogQuietMiddle]
+
+
+@_permissive
+class LogCeleryLoudChild(CalculatedModelMixin):
+    """Like LogLoudChild, but ``calculate()`` is a ``@lex_shared_task``, so
+    ``create()`` takes the Celery route when Celery is active (15.63)."""
+
+    unit = models.CharField(max_length=50)
+
+    defining_fields = ["unit"]
+    parallelizable_fields: list[str] = []
+
+    class Meta:
+        app_label = "lex_app"
+
+    def get_selected_key_list(self, key):
+        # Fallback only — the root passes the units as overrides.
+        if key == "unit":
+            return ["u1"]
+        return []
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LexLogger().add_text(f"celery loud {self.unit}").log()
+
+
+@_permissive
+class LogCeleryGrandchild(CalculatedModelMixin):
+    """Deepest layer of the Celery three-level chain — always logs (15.64)."""
+
+    unit = models.CharField(max_length=50)
+
+    defining_fields = ["unit"]
+    parallelizable_fields: list[str] = []
+
+    class Meta:
+        app_label = "lex_app"
+
+    def get_selected_key_list(self, key):
+        # Fallback only — the middle passes the unit as an override.
+        if key == "unit":
+            return ["u1"]
+        return []
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LexLogger().add_text(f"celery grandchild {self.unit}").log()
+
+
+@_permissive
+class LogCeleryQuietMiddle(CalculatedModelMixin):
+    """Celery middle layer: dispatches its grandchildren before it has
+    logged anything, and logs only after them (15.64). It is unsaved while
+    its calculate() runs, so the stack shipped to the grandchildren's tasks
+    carries a model with no primary key."""
+
+    unit = models.CharField(max_length=50)
+
+    defining_fields = ["unit"]
+    parallelizable_fields: list[str] = []
+
+    class Meta:
+        app_label = "lex_app"
+
+    def get_selected_key_list(self, key):
+        # Fallback only — the root passes the units as overrides.
+        if key == "unit":
+            return ["u1"]
+        return []
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LogCeleryGrandchild.create(unit=[self.unit])
+        LexLogger().add_text(f"celery middle after {self.unit}").log()
+
+
+from lex.lex_app.celery_tasks import lex_shared_task  # noqa: E402
+
+# Explicit task names: Celery names a task after ``module.function`` and all
+# three ``calculate`` methods live in this module, so without them the last
+# registration would run every model's calculate() (see celery_async/models.py).
+LogCeleryLoudChild.calculate = lex_shared_task(
+    name="test_15n.celery_loud_child.calculate"
+)(LogCeleryLoudChild.calculate)
+LogCeleryGrandchild.calculate = lex_shared_task(
+    name="test_15n.celery_grandchild.calculate"
+)(LogCeleryGrandchild.calculate)
+LogCeleryQuietMiddle.calculate = lex_shared_task(
+    name="test_15n.celery_quiet_middle.calculate"
+)(LogCeleryQuietMiddle.calculate)
+
+CELERY_ROUTE_MODELS = [LogCeleryLoudChild, LogCeleryGrandchild, LogCeleryQuietMiddle]
