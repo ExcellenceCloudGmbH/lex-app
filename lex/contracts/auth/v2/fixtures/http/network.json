@@ -1,0 +1,25 @@
+{
+  "contract": 2,
+  "cases": [
+    {
+      "id": "network-error",
+      "server": "any",
+      "server_case": null,
+      "description": "No response at all (offline, DNS, CORS): safe methods retry once online.",
+      "request": {
+        "method": "GET",
+        "path": "api/model_entries/fund/list"
+      },
+      "response": {
+        "network_error": true
+      },
+      "expect": {
+        "kind": "network",
+        "retry": {
+          "GET": true,
+          "POST": false
+        }
+      }
+    }
+  ]
+}

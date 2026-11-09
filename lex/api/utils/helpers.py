@@ -434,9 +434,12 @@ def can_read_from_payload(request, audit_log, base_user_context=None) -> bool:
         # No permission method found - allow by default
         return True
 
-    except Exception:
+    except Exception as exc:
+        from lex.api.security import is_auth_outage
         from lex.core.security_flags import strict
 
+        if is_auth_outage(exc):
+            raise  # Keycloak could not answer, or the sign-in is gone: 503/401, not "hidden"
         if strict("FAIL_CLOSED"):
             logger.exception(
                 "permission_read of %s raised on an audit-log entry; entry hidden (LEX_SEC_FAIL_CLOSED).",

@@ -65,10 +65,20 @@ class KeycloakCallError(Exception):
     not be reached); ``error`` is the OAuth ``error`` code when the body had one.
     """
 
-    def __init__(self, message: str, *, status: Optional[int] = None, error: Optional[str] = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: Optional[int] = None,
+        error: Optional[str] = None,
+        category: str = "transient",
+    ):
         super().__init__(message)
         self.status = status
         self.error = error
+        #: ``"config"`` when Keycloak is reachable but misconfigured for this call (the
+        #: token's issuer is not the one it serves), else ``"transient"``.
+        self.category = category
 
 
 class KeycloakDenied(KeycloakCallError):
@@ -101,9 +111,12 @@ class KeycloakEndpoints:
 
         ``KEYCLOAK_URL`` + ``KEYCLOAK_REALM`` (or ``KEYCLOAK_REALM_NAME``) locate
         the realm; ``OIDC_RP_CLIENT_ID`` is the audience of the UMA request.
-        Returns ``None`` when the realm cannot be located.
+        ``KEYCLOAK_INTERNAL_URL``, when set, is used instead of ``KEYCLOAK_URL``: these
+        are server-to-server calls, which stay inside the cluster like the OIDC
+        library's own (discovery, refresh). Returns ``None`` when the realm cannot be
+        located.
         """
-        server = (os.getenv("KEYCLOAK_URL") or "").strip().rstrip("/")
+        server = (os.getenv("KEYCLOAK_INTERNAL_URL") or os.getenv("KEYCLOAK_URL") or "").strip().rstrip("/")
         realm = (os.getenv("KEYCLOAK_REALM") or os.getenv("KEYCLOAK_REALM_NAME") or "").strip()
         if not server or not realm:
             return None
@@ -169,6 +182,14 @@ def _json(response: requests.Response) -> Any:
         return None
 
 
+def _issuer_mismatch(body: Any) -> bool:
+    """Keycloak's "Invalid token issuer" answer (the description, never the token)."""
+    if not isinstance(body, Mapping):
+        return False
+    description = body.get("error_description")
+    return isinstance(description, str) and "issuer" in description.lower()
+
+
 def _oauth_error(body: Any) -> Optional[str]:
     if isinstance(body, Mapping):
         error = body.get("error")
@@ -226,6 +247,16 @@ def fetch_uma_permissions(
     if status == 403 and error == "access_denied":
         raise KeycloakDenied("Keycloak grants no permission for this token.", status=status, error=error)
     if status == 401 or error in _UNAUTHORIZED_ERRORS:
+        if _issuer_mismatch(body):
+            # Keycloak reached through KEYCLOAK_INTERNAL_URL without its hostname settings
+            # names another issuer than the token's: a configuration problem, not a lost
+            # sign-in (django-oauth2-codeflow treats its refresh the same way).
+            raise KeycloakUnavailable(
+                "Keycloak rejected the token's issuer; check KEYCLOAK_INTERNAL_URL and Keycloak's hostname settings.",
+                status=status,
+                error=error,
+                category="config",
+            )
         raise KeycloakUnauthorized("Keycloak rejected the access token.", status=status, error=error)
     raise KeycloakUnavailable(
         f"Keycloak answered the UMA request with HTTP {status}.", status=status, error=error

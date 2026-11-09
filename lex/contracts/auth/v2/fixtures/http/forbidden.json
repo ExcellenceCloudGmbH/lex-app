@@ -1,0 +1,203 @@
+{
+  "contract": 2,
+  "cases": [
+    {
+      "id": "v2-403-permission-denied",
+      "server": "v2",
+      "server_case": "permission_denied",
+      "description": "An authorization decision: show it, never sign out.",
+      "request": {
+        "method": "POST",
+        "path": "api/model_entries/fund/1/one"
+      },
+      "response": {
+        "status": 403,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "detail": "You do not have permission to perform this action.",
+          "code": "permission_denied"
+        }
+      },
+      "expect": {
+        "kind": "forbidden",
+        "detail": "You do not have permission to perform this action.",
+        "code": "permission_denied",
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    },
+    {
+      "id": "drf-403-permission-denied-no-code",
+      "server": "legacy",
+      "server_case": null,
+      "description": "DRF PermissionDenied without a code is still an authorization decision.",
+      "request": {
+        "method": "DELETE",
+        "path": "api/model_entries/fund/1/one"
+      },
+      "response": {
+        "status": 403,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "detail": "You do not have permission to perform this action."
+        }
+      },
+      "expect": {
+        "kind": "forbidden",
+        "detail": "You do not have permission to perform this action.",
+        "code": null,
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    },
+    {
+      "id": "v2-403-csrf-failed",
+      "server": "v2",
+      "server_case": "csrf_failed",
+      "description": "CSRF failure coded by the server: re-read the cookie and retry once.",
+      "request": {
+        "method": "POST",
+        "path": "api/model_entries/fund/1/one"
+      },
+      "response": {
+        "status": 403,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "detail": "CSRF Failed: CSRF token missing.",
+          "code": "csrf_failed"
+        }
+      },
+      "expect": {
+        "kind": "csrf",
+        "detail": "CSRF Failed: CSRF token missing.",
+        "retry": {
+          "GET": true,
+          "POST": true
+        }
+      }
+    },
+    {
+      "id": "drf-403-csrf-failed",
+      "server": "legacy",
+      "server_case": null,
+      "description": "DRF SessionAuthentication CSRF failure without a code.",
+      "request": {
+        "method": "PATCH",
+        "path": "api/model_entries/fund/1/one"
+      },
+      "response": {
+        "status": 403,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "detail": "CSRF Failed: CSRF token from the 'X-Csrftoken' HTTP header incorrect."
+        }
+      },
+      "expect": {
+        "kind": "csrf",
+        "detail": "CSRF Failed: CSRF token from the 'X-Csrftoken' HTTP header incorrect.",
+        "retry": {
+          "GET": true,
+          "POST": true
+        }
+      }
+    },
+    {
+      "id": "django-403-csrf-html",
+      "server": "legacy",
+      "server_case": null,
+      "description": "Django CsrfViewMiddleware's HTML page.",
+      "request": {
+        "method": "POST",
+        "path": "oidc/logout"
+      },
+      "response": {
+        "status": 403,
+        "type": "basic",
+        "headers": {
+          "content-type": "text/html"
+        },
+        "body": "<html><body><h1>Forbidden <span>(403)</span></h1><p>CSRF verification failed. Request aborted.</p></body></html>"
+      },
+      "expect": {
+        "kind": "csrf",
+        "detail": "<html><body><h1>Forbidden <span>(403)</span></h1><p>CSRF verification failed. Request aborted.</p></body></html>",
+        "retry": {
+          "GET": true,
+          "POST": true
+        }
+      }
+    },
+    {
+      "id": "lex-400-refusal",
+      "server": "v2",
+      "server_case": null,
+      "description": "lex's structured refusal (400 {code, detail, error}) is an ordinary error, never an auth event.",
+      "request": {
+        "method": "PATCH",
+        "path": "api/model_entries/fund/1/one"
+      },
+      "response": {
+        "status": 400,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "code": "EDIT_NOT_ALLOWED",
+          "detail": "You may not edit nav.",
+          "error": "You may not edit nav."
+        }
+      },
+      "expect": {
+        "kind": "error",
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    },
+    {
+      "id": "lex-404-unreadable",
+      "server": "v2",
+      "server_case": null,
+      "description": "A record the caller may not read answers 404: ordinary error.",
+      "request": {
+        "method": "GET",
+        "path": "api/model_entries/fund/9/one"
+      },
+      "response": {
+        "status": 404,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "detail": "Not found."
+        }
+      },
+      "expect": {
+        "kind": "error",
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    }
+  ]
+}

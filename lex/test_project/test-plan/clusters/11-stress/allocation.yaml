@@ -58,11 +58,13 @@ letters:
     scenarios: 11.12-11.15
     status: complete
     tests:
-      pass: 0
-      skip: 0
-      xfail: 0
-    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
-      recorded
+      pass: 1
+      skip: 2
+      xfail: 1
+    note: >-
+      Measured 2026-11-06 (lex-app 2.5 line): 1 pass, 2 skip, 1 xfail. 11.14 is BUG-011's open half
+      (permission_read once per row on list) and carries @unittest.expectedFailure again; the marker
+      had been commented out, so the cluster ran red.
   g:
     title: ''
     scenarios: 11.16-11.20

@@ -6,11 +6,15 @@ import json
 import logging
 import os
 import secrets
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass, field
+from functools import partial
 from inspect import signature
 from typing import Any, Dict, Optional, Tuple, List
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import httpx
 import jwt  # PyJWT
@@ -29,6 +33,11 @@ from starlette.responses import (
 )
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
+
+# Standard library only (no Django): read before anything else, and all that legacy mode needs.
+from lex.authentication.dashboards import cookies as dash_cookies
+from lex.authentication.dashboards import modes as dash_modes
+from lex.authentication.dashboards import sites as dash_sites
 
 # Respect X-Forwarded-* when behind ingress/LB
 try:
@@ -190,6 +199,23 @@ if SESSION_SAMESITE == "strict":
     )
 
 OIDC_VERIFY_SSL = _env_bool("OIDC_VERIFY_SSL", True)
+
+# -----------------------------------------------------------------------------
+# How dashboards sign in: LEX_STREAMLIT_AUTH = legacy | dual | handoff
+# -----------------------------------------------------------------------------
+# legacy  -- everything in this file outside the hand-off section, exactly as before 2.5:
+#            `auth_token`, the proxy's own Keycloak sign-in, its token store, `/auth/adopt`.
+# dual    -- the Django-anchored hand-off (`__Host-lex_dash`) first; every legacy credential is
+#            still accepted, so frontends that predate the hand-off keep working.
+# handoff -- only the hand-off. The proxy holds no Keycloak token of its own.
+# See lex/authentication/dashboards/modes.py. An unknown value refuses to start, like the cookie
+# rules above: silently picking a mode is worse than a readable error.
+try:
+    STREAMLIT_AUTH_MODE = dash_modes.parse_streamlit_auth(os.getenv(dash_modes.ENV_VAR))
+except dash_modes.InvalidStreamlitAuthMode as _mode_error:
+    raise RuntimeError(str(_mode_error)) from None
+HANDOFF_ENABLED = dash_modes.handoff_enabled(STREAMLIT_AUTH_MODE)
+LEGACY_ENABLED = dash_modes.legacy_enabled(STREAMLIT_AUTH_MODE)
 
 TOKEN_REDIS_URL = os.getenv("TOKEN_REDIS_URL") or os.getenv("REDIS_URL") or ""
 TOKEN_IDLE_TTL_SECONDS = int(os.getenv("TOKEN_IDLE_TTL_SECONDS", str(60 * 60 * 8)))  # 8 hours idle
@@ -400,7 +426,13 @@ def _build_token_store() -> TokenStore:
     is process-local, so a restart drops every one, and with more than one
     replica a request routed elsewhere finds no ``sid`` and 401s. Both surface
     to the user as a session that expired for no reason.
+
+    ``LEX_STREAMLIT_AUTH=handoff`` needs no store at all: dashboards rest on
+    Django sign-ins (``DashboardBinding`` rows in the shared database), so any
+    replica serves any dashboard and nothing here needs Redis.
     """
+    if not LEGACY_ENABLED:
+        return MemoryTokenStore()
     if TOKEN_REDIS_URL:
         try:
             return RedisTokenStore(TOKEN_REDIS_URL)
@@ -772,9 +804,13 @@ def _safe_next_path(raw: Optional[str]) -> Optional[str]:
 
 
 def _current_relative_path(request: Request) -> str:
-    """This request's path and query, with any ``auth_token`` removed."""
+    """This request's path and query, with any ``auth_token`` removed.
+
+    Always a path on this origin: a request for ``/%2Fevil.example/`` has the path
+    ``//evil.example/``, which as a ``Location`` is scheme-relative -- another host.
+    """
     query = _query_without_auth_token(request)
-    return request.url.path + (f"?{query}" if query else "")
+    return dash_sites.local_path(request.url.path) + (f"?{query}" if query else "")
 
 
 def _query_without_auth_token(request: Request) -> str:
@@ -946,9 +982,650 @@ async def _persist_jwt_to_session_if_needed(request: Request, jwt_token: str, pa
 
 
 # -----------------------------------------------------------------------------
+# Django-anchored hand-off (LEX_STREAMLIT_AUTH = dual | handoff)
+# -----------------------------------------------------------------------------
+# A dashboard never holds Keycloak tokens of its own here. Its standing is an
+# opaque handle in the `__Host-lex_dash` cookie that names a DashboardBinding row
+# (stored hashed) on the user's Django sign-in (django-oauth2-codeflow's
+# OIDCSession). Every request and every WebSocket asks the broker for a fresh
+# access token of that sign-in, and only that token plus identity headers go
+# upstream -- never a refresh or id token. Getting a handle:
+#
+#   1. no usable handle -> a nonce cookie, and the frame goes to
+#      <app host>/oidc/handoff?aud=streamlit&return=<this URL>&state=<nonce>;
+#   2. Django answers with a single-use code (or, in a frame without a sign-in,
+#      error=login_required -- Keycloak is never shown in a frame);
+#   3. /auth/handoff checks `state` against the nonce cookie, redeems the code
+#      in-process (lex.authentication.dashboards.redeem: same image, same
+#      database) and sets the handle cookie.
+#
+# The handle never changes, so the Cookie header Streamlit froze at WebSocket
+# connect keeps working for /auth/token for as long as the sign-in lasts.
+#
+# Django ORM work never runs on this event loop: a small dedicated thread pool
+# (`_run_orm`) runs it with Django's per-request connection handling around it.
+
+#: Worker threads for database work; each holds at most one connection at a time.
+DB_THREADS = _env_int("LEX_PROXY_DB_THREADS", 8)
+_ORM_EXECUTOR: Optional[ThreadPoolExecutor] = None
+_ORM_EXECUTOR_LOCK = threading.Lock()
+
+#: Hand-offs in a row, with no handle cookie coming back, after which the browser is taken to be
+#: blocking the cookies. One is not enough: the first may only have outlived its nonce (a sign-in
+#: that took longer than the nonce cookie lives).
+HANDOFF_ATTEMPTS_BEFORE_BLOCKED = 2
+
+#: Reasons a dashboard reports to the frontend around it (`{"type": "lex-auth", "event": "required"}`).
+_REQUIRED_REASONS = frozenset({"login_required", "session_ended", "handoff_failed"})
+
+
+def _orm_executor() -> ThreadPoolExecutor:
+    global _ORM_EXECUTOR
+    with _ORM_EXECUTOR_LOCK:
+        if _ORM_EXECUTOR is None:
+            _ORM_EXECUTOR = ThreadPoolExecutor(
+                max_workers=max(1, DB_THREADS), thread_name_prefix="lex-proxy-db"
+            )
+        return _ORM_EXECUTOR
+
+
+def _shutdown_orm_executor() -> None:
+    global _ORM_EXECUTOR
+    with _ORM_EXECUTOR_LOCK:
+        executor, _ORM_EXECUTOR = _ORM_EXECUTOR, None
+    if executor is not None:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _orm_job(fn, *args, **kwargs):
+    """Run ``fn`` the way Django runs a request: set up, a usable connection, closed per CONN_MAX_AGE."""
+    from django.apps import apps
+
+    if not apps.ready:  # a proxy started without `lex streamlit` (which sets Django up first)
+        from lex.tools.django_bootstrap import setup_django
+
+        setup_django()
+    from django.db import close_old_connections
+
+    close_old_connections()
+    try:
+        return fn(*args, **kwargs)
+    finally:
+        close_old_connections()
+
+
+async def _run_orm(fn, *args, **kwargs):
+    """Run synchronous Django ORM code off the event loop."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_orm_executor(), partial(_orm_job, fn, *args, **kwargs))
+
+
+@dataclass
+class _HandoffAuth:
+    """What a handle cookie amounts to right now.
+
+    ``kind``: ``ok`` (a token valid for at least a minute -- or, with Keycloak unreachable, the
+    stored one for as long as it is still valid: the library serves it), ``unavailable``
+    (Keycloak unreachable and no valid token left: identity only, marked degraded), ``ended``
+    (the sign-in is over), ``none`` (no such binding, or it was revoked), ``error`` (the
+    database could not be asked).
+    """
+
+    kind: str
+    binding_id: Optional[int] = None
+    token: Optional[str] = None
+    expires_at: int = 0
+    identity: Dict[str, str] = field(default_factory=dict)
+    reset_cookie: bool = False
+    retry_after: int = 5
+    reason: str = ""
+
+
+def _resolve_handle_blocking(handle: str, can_set_cookie: bool = True) -> _HandoffAuth:
+    """Handle -> binding -> a fresh access token of its sign-in (in a worker thread).
+
+    ``can_set_cookie``: whether the answer goes out on a response that can carry a ``Set-Cookie``
+    to the browser. Only then is a due daily re-set of the handle cookie claimed (and recorded):
+    the loopback ``/auth/token`` pull and a WebSocket handshake cannot set a cookie, so they must
+    not use the re-set up -- or the 30-day cookie would never slide.
+    """
+    from oauth2_authcodeflow.exceptions import OIDCAuthUnavailable, OIDCSessionEnded
+
+    from lex.authentication.dashboards import broker, handoff
+
+    binding = handoff.resolve(handle, aud=handoff.AUD_STREAMLIT)
+    if binding is None:
+        return _HandoffAuth("none", reason="unknown_handle")
+    identity = handoff.identity(binding)
+    try:
+        token = broker.access_token(binding)
+    except OIDCSessionEnded as exc:
+        return _HandoffAuth("ended", binding.pk, identity=identity, reason=exc.reason)
+    except OIDCAuthUnavailable as exc:
+        return _HandoffAuth(
+            "unavailable", binding.pk, identity=identity,
+            retry_after=int(exc.retry_after or 5), reason="auth_unavailable",
+        )
+    reset = can_set_cookie and handoff.cookie_due(binding)
+    if reset:
+        handoff.mark_cookie_set(binding)
+    return _HandoffAuth(
+        "ok", binding.pk, token=token, expires_at=_decode_exp_no_verify(token),
+        identity=identity, reset_cookie=reset,
+    )
+
+
+def _redeem_blocking(code: str, origin: str, state: str) -> Tuple[Optional[str], str]:
+    """(handle, "") for a redeemed code, else (None, reason) -- in a worker thread."""
+    from lex.authentication.dashboards import handoff
+
+    try:
+        return handoff.redeem(code, aud=handoff.AUD_STREAMLIT, origin=origin, state=state).handle, ""
+    except handoff.HandoffError as exc:
+        return None, exc.reason
+
+
+def _handle_standing_blocking(handle: str) -> str:
+    """``ok``, ``ended`` (its sign-in is over or its user deactivated: revoked now) or ``none``
+    (no such binding, or revoked already) -- from the database alone, no Keycloak call."""
+    from lex.authentication.dashboards import broker, handoff
+
+    binding = handoff.resolve(handle, aud=handoff.AUD_STREAMLIT)
+    if binding is None:
+        return "none"
+    problem = broker.standing_problem(binding)
+    if problem is not None:
+        handoff.revoke(binding, problem)
+        return "ended"
+    return "ok"
+
+
+def _revoke_handle_blocking(handle: str, reason: str) -> bool:
+    from lex.authentication.dashboards import handoff
+
+    binding = handoff.resolve(handle, aud=handoff.AUD_STREAMLIT)
+    return bool(binding is not None and handoff.revoke(binding, reason))
+
+
+def _dash_secure(conn) -> bool:
+    """Whether the browser reached us over https, so the `__Host-` cookies apply."""
+    return PUBLIC_IS_HTTPS or SESSION_HTTPS_ONLY or conn.url.scheme in ("https", "wss")
+
+
+def _read_dash_cookie(conn, name: str) -> str:
+    return conn.cookies.get(dash_cookies.cookie_name(name, _dash_secure(conn)), "")
+
+
+def _read_handle_any(conn) -> str:
+    """The handle for /auth/token, a loopback call from Streamlit that carries the browser's frozen
+    Cookie header but no X-Forwarded-Proto to tell which name applies.
+
+    The configuration decides, never the request: a proxy configured for https (``STREAMLIT_URL``
+    https, or ``SESSION_HTTPS_ONLY``) reads only ``__Host-lex_dash`` -- the unprefixed name is one
+    any sibling host can plant (``Domain=``), so honouring it there would let another site choose
+    which sign-in a dashboard renews. Only a plain-http proxy, which sets the unprefixed name
+    itself, reads it.
+    """
+    handle = conn.cookies.get(dash_cookies.HANDLE_COOKIE, "")
+    if handle or PUBLIC_IS_HTTPS or SESSION_HTTPS_ONLY:
+        return handle
+    return conn.cookies.get(dash_cookies.cookie_name(dash_cookies.HANDLE_COOKIE, False), "")
+
+
+def _set_dash_cookie(response: Response, conn, name: str, value: str, max_age: int) -> None:
+    secure = _dash_secure(conn)
+    response.headers.append(
+        "set-cookie",
+        dash_cookies.set_cookie_header(dash_cookies.cookie_name(name, secure), value, max_age=max_age, secure=secure),
+    )
+
+
+def _clear_dash_cookie(response: Response, conn, name: str) -> None:
+    secure = _dash_secure(conn)
+    response.headers.append(
+        "set-cookie", dash_cookies.delete_cookie_header(dash_cookies.cookie_name(name, secure), secure=secure)
+    )
+
+
+def _store_nonces(response: Response, conn, nonces: List[str]) -> None:
+    value = dash_cookies.nonce_cookie_value(nonces)
+    if value:
+        _set_dash_cookie(response, conn, dash_cookies.NONCE_COOKIE, value, dash_cookies.NONCE_MAX_AGE)
+    else:
+        _clear_dash_cookie(response, conn, dash_cookies.NONCE_COOKIE)
+
+
+def _no_store(response: Response) -> Response:
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+async def _handoff_auth(conn, *, handle: Optional[str] = None, can_set_cookie: bool = True) -> Optional[_HandoffAuth]:
+    """The hand-off standing of a request or WebSocket; ``None`` when it carries no handle.
+
+    ``can_set_cookie=False`` for answers that cannot carry a ``Set-Cookie`` (the loopback token
+    pull, a WebSocket handshake): they never claim the handle cookie's daily re-set.
+    """
+    handle = _read_dash_cookie(conn, dash_cookies.HANDLE_COOKIE) if handle is None else handle
+    if not handle:
+        return None
+    try:
+        auth = await _run_orm(_resolve_handle_blocking, handle, can_set_cookie)
+    except Exception as exc:  # the database itself could not be asked
+        logger.warning("Dashboard sign-in could not be checked (%s); answering 503", type(exc).__name__)
+        return _HandoffAuth("error", reason="database_unavailable")
+    if auth.kind == "unavailable":
+        logger.warning("Keycloak is unavailable and the dashboard's token has run out; forwarding identity only")
+    elif auth.kind == "ended":
+        logger.info("Dashboard sign-in ended (%s); its binding is revoked", auth.reason)
+    return auth
+
+
+def _browser_origin(conn) -> Optional[str]:
+    """The origin the browser used, if the instance lists it as a dashboard host.
+
+    The handle cookie is set on exactly this host, so the hand-off has to come back to it --
+    and Django only sends a code to a host it knows. The ``Host`` header is the client's, so
+    it is only trusted once it matches the list.
+    """
+    host = (conn.headers.get("host") or "").strip()
+    if not host:
+        return None
+    origin = dash_sites.normalize_origin(f"{'https' if _dash_secure(conn) else 'http'}://{host}")
+    if origin is None:
+        return None
+    if dash_sites.is_dashboard_origin(origin) or origin == dash_sites.normalize_origin(PUBLIC_URL):
+        return origin
+    return None
+
+
+def _ws_origin_allowed(websocket) -> bool:
+    """Whether a WebSocket handshake comes from the dashboard's own pages.
+
+    A browser sends the dashboard's cookies with a socket that *any* page opens -- they are
+    ``SameSite=None``, the dashboard lives in a cross-site frame -- and the relay turns them into
+    the user's identity and access token upstream (cross-site WebSocket hijacking). So a present
+    ``Origin`` must be the dashboard's own: the origin of the host the browser connected to, or a
+    dashboard origin of this instance (``LEX_INSTANCE_HOSTS``, ``STREAMLIT_URL``). ``null`` (a
+    sandboxed or opaque page) is not. A handshake without ``Origin`` is not a browser's and so
+    carries no browser's cookies: it passes, and is authenticated like any other.
+    """
+    raw = websocket.headers.get("origin")
+    if raw is None:
+        return True
+    origin = dash_sites.normalize_origin(raw)
+    if origin is None:
+        return False
+    if origin == _browser_origin(websocket) or dash_sites.is_dashboard_origin(origin):
+        return True
+    if PUBLIC_URL and origin == dash_sites.normalize_origin(PUBLIC_URL):
+        return True
+    host = (websocket.headers.get("host") or "").strip()
+    schemes = ("https",) if _dash_secure(websocket) else ("https", "http")
+    return bool(host) and any(origin == dash_sites.normalize_origin(f"{scheme}://{host}") for scheme in schemes)
+
+
+def _handoff_app_origin(conn, query_items: Optional[List[Tuple[str, str]]] = None) -> Optional[str]:
+    """The app host a hand-off from this dashboard goes to.
+
+    Django's session cookie is host-only, so the right host is the one the user is signed in on:
+    the frontend that framed the dashboard names its own origin (`lex_app_origin`), and that is
+    taken when the instance lists it as an app host (a loopback dev server is not Django, so it
+    does not count). Otherwise -- a dashboard opened on its own -- the listed app host that is
+    same-site with the dashboard.
+    """
+    items = list(conn.query_params.multi_items()) if query_items is None else query_items
+    claimed = dash_sites.normalize_origin(dict(items).get("lex_app_origin"))
+    if claimed and claimed in dash_sites.app_origins():
+        return claimed
+    return dash_sites.pick_app_origin(conn.headers.get("host", ""))
+
+
+def _query_items_without(conn, *names: str) -> List[Tuple[str, str]]:
+    return [(key, value) for key, value in conn.query_params.multi_items() if key not in names]
+
+
+def _relative(path: str, items: List[Tuple[str, str]]) -> str:
+    """``path?query`` -- the path made one that can only mean this origin (never ``//host``)."""
+    return dash_sites.local_path(path) + (f"?{urlencode(items)}" if items else "")
+
+
+def _clean_relative_path(conn) -> str:
+    """This URL without the hand-off marker and any `auth_token` (never a credential in a URL)."""
+    return _relative(conn.url.path, _query_items_without(conn, dash_cookies.LOOP_MARKER, "auth_token"))
+
+
+def _strip_params(relative_url: str, names: Tuple[str, ...]) -> str:
+    parts = urlsplit(relative_url)
+    items = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k not in names]
+    return _relative(parts.path or "/", items)
+
+
+def _handoff_attempts(conn) -> int:
+    raw = conn.query_params.get(dash_cookies.LOOP_MARKER)
+    if raw is None:
+        return 0
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 1
+
+
+def _frontend_extra_origins() -> List[str]:
+    """The configured frontend, which may have its own host (REACT_APP_URL / LEX_FRONTEND_URL)."""
+    return [o for o in (os.getenv("REACT_APP_URL"), os.getenv("LEX_FRONTEND_URL")) if o]
+
+
+def _message_targets(next_path: str) -> List[str]:
+    """Origins this dashboard's auth messages may go to: the frontend that framed it (the
+    `lex_app_origin` the frontend put on the URL, when the instance lists it), else every app
+    origin of the instance. A message posted to an origin the parent does not have is dropped
+    by the browser, so no message can reach a page the instance does not list."""
+    query = dict(parse_qsl(urlsplit(next_path).query))
+    claimed = dash_sites.normalize_origin(query.get("lex_app_origin"))
+    if claimed and dash_sites.is_app_origin(claimed, extra=_frontend_extra_origins()):
+        return [claimed]
+    return list(dash_sites.app_origins())
+
+
+def _script_json(value: Any) -> str:
+    """JSON safe inside a <script> element (no "</" can end it early)."""
+    return json.dumps(value, sort_keys=True).replace("<", "\\u003c")
+
+
+_PAGE_STYLE = "font:16px system-ui,Arial,sans-serif;padding:24px;text-align:center"
+
+
+def _sign_in_required_page(conn, *, reason: str, next_path: str) -> Response:
+    """The page a dashboard frame shows when its sign-in is gone (401).
+
+    It tells the frontend around it -- ``{"type": "lex-auth", "v": 2, "event": "required",
+    "surface": "streamlit", "reason": ...}`` posted from the dashboard frame itself, to pinned
+    origins, with no secret -- and the frontend renews its own sign-in and reloads the
+    dashboard in place. Nothing here navigates the top window. Shown on its own (no frame), it
+    offers the sign-in, which comes back to this dashboard.
+    """
+    reason = reason if reason in _REQUIRED_REASONS else "handoff_failed"
+    clean = _strip_params(next_path, (dash_cookies.LOOP_MARKER, "auth_token"))
+    origin = _browser_origin(conn)
+    app_origin = _handoff_app_origin(conn, parse_qsl(urlsplit(next_path).query)) if origin else None
+    sign_in = (
+        f"{app_origin}/oidc/authenticate?{urlencode({'next': origin + clean})}" if app_origin and origin else clean
+    )
+    message = {"type": "lex-auth", "v": 2, "event": "required", "surface": "streamlit", "reason": reason}
+    body = (
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Sign-in required</title></head>"
+        f"<body><div style=\"{_PAGE_STYLE}\">"
+        "<p>Your sign-in for this dashboard has ended.</p>"
+        f"<p id=\"framed\" hidden><a href=\"{html.escape(clean, quote=True)}\">Reload the dashboard</a></p>"
+        f"<p id=\"standalone\"><a href=\"{html.escape(sign_in, quote=True)}\" target=\"_top\" rel=\"noopener\">Sign in again</a></p>"
+        "</div><script>(function(){"
+        f"var m={_script_json(message)};var targets={_script_json(_message_targets(next_path))};"
+        "try{m.id=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now())+Math.random().toString(36).slice(2);}catch(e){}"
+        "if(window.parent&&window.parent!==window){"
+        "document.getElementById('framed').hidden=false;document.getElementById('standalone').hidden=true;"
+        "for(var i=0;i<targets.length;i++){try{window.parent.postMessage(m,targets[i]);}catch(e){}}}"
+        "})();</script></body></html>"
+    )
+    return _no_store(HTMLResponse(body, status_code=401))
+
+
+def _cookies_blocked_page(conn) -> Response:
+    """The page shown when the browser keeps no dashboard cookie in this frame (no redirect loop).
+
+    Offers storage access (a user gesture, where the browser supports it) and opening the
+    dashboard in a tab of its own, where its cookies are first-party.
+    """
+    clean = _clean_relative_path(conn)
+    body = (
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Cookies blocked</title></head>"
+        f"<body><div style=\"{_PAGE_STYLE}\">"
+        "<p>This dashboard needs a cookie that your browser does not keep in this frame.</p>"
+        "<p><button id=\"allow\" hidden>Allow access</button></p>"
+        f"<p><a href=\"{html.escape(clean, quote=True)}\" target=\"_blank\" rel=\"noopener\">Open the dashboard in a new tab</a></p>"
+        "</div><script>(function(){"
+        f"var url={_script_json(clean)};var b=document.getElementById('allow');"
+        "if(document.requestStorageAccess){b.hidden=false;b.onclick=function(){"
+        "document.requestStorageAccess().then(function(){window.location.replace(url);},"
+        "function(){b.disabled=true;b.textContent='Access was not granted';});};}"
+        "})();</script></body></html>"
+    )
+    return _no_store(HTMLResponse(body, status_code=401))
+
+
+def _handoff_misconfigured_page(conn, detail: str) -> Response:
+    logger.warning("Dashboard hand-off impossible: %s (Host %r)", detail, conn.headers.get("host"))
+    body = (
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Dashboard not configured</title></head>"
+        f"<body><div style=\"{_PAGE_STYLE}\"><p>This dashboard cannot sign you in: {html.escape(detail)}.</p>"
+        "<p>Check LEX_INSTANCE_HOSTS (or STREAMLIT_URL and DOMAIN_HOSTED) for this instance.</p></div></body></html>"
+    )
+    return _no_store(HTMLResponse(body, status_code=400))
+
+
+def _signed_out_page(conn) -> Response:
+    body = (
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Signed out</title></head>"
+        f"<body><div style=\"{_PAGE_STYLE}\"><p>You are signed out of this dashboard.</p>"
+        "<p><a href=\"/\">Open the dashboard again</a></p></div></body></html>"
+    )
+    return _no_store(HTMLResponse(body, status_code=200))
+
+
+def _handoff_unauthenticated(conn, reason: str = "not_authenticated") -> Response:
+    """The contract's background answer (fetch/XHR, assets): 401 JSON, never a redirect."""
+    reason = reason if reason in ("not_authenticated", "session_expired") else "not_authenticated"
+    response = JSONResponse({"error": reason, "login_url": "/"}, status_code=401)
+    response.headers["WWW-Authenticate"] = 'Session realm="lex-dashboard"'
+    return _no_store(response)
+
+
+def _handoff_unavailable(conn, retry_after: int = 5) -> Response:
+    """Auth (or the database) briefly unavailable: 503, retried, never a sign-out."""
+    retry_after = max(1, int(retry_after or 5))
+    if getattr(conn, "method", "GET") in ("GET", "HEAD") and _is_document_request(conn):
+        target = html.escape(_clean_relative_path(conn), quote=True)
+        body = (
+            "<!doctype html><html><head><meta charset=\"utf-8\">"
+            f"<meta http-equiv=\"refresh\" content=\"{retry_after};url={target}\">"
+            "<title>Temporarily unavailable</title></head>"
+            f"<body><div style=\"{_PAGE_STYLE}\"><p>Sign-in is temporarily unavailable. "
+            "This page retries automatically.</p></div></body></html>"
+        )
+        response: Response = HTMLResponse(body, status_code=503)
+    else:
+        response = JSONResponse({"error": "auth_unavailable", "retry_after": retry_after}, status_code=503)
+    response.headers["Retry-After"] = str(retry_after)
+    return _no_store(response)
+
+
+def _start_handoff(request: Request, *, reason: str = "not_authenticated", stale_handle: bool = False) -> Response:
+    """No usable handle: begin the hand-off (documents), or answer 401 (everything else)."""
+    if request.method not in ("GET", "HEAD") or not _is_document_request(request):
+        response = _handoff_unauthenticated(request, reason)
+        if stale_handle:
+            _clear_dash_cookie(response, request, dash_cookies.HANDLE_COOKIE)
+        return response
+    attempts = 0 if stale_handle else _handoff_attempts(request)
+    if attempts >= HANDOFF_ATTEMPTS_BEFORE_BLOCKED and not _read_dash_cookie(request, dash_cookies.HANDLE_COOKIE):
+        return _cookies_blocked_page(request)
+    origin = _browser_origin(request)
+    if origin is None:
+        return _handoff_misconfigured_page(request, "this host is not one of the instance's dashboard hosts")
+    app_origin = _handoff_app_origin(request)
+    if app_origin is None:
+        return _handoff_misconfigured_page(request, "the instance names no app host")
+    items = _query_items_without(request, dash_cookies.LOOP_MARKER, "auth_token")
+    items.append((dash_cookies.LOOP_MARKER, str(attempts + 1)))
+    nonce = secrets.token_urlsafe(24)
+    target = f"{app_origin}/oidc/handoff?" + urlencode(
+        {"aud": "streamlit", "return": origin + _relative(request.url.path, items), "state": nonce}
+    )
+    response = _no_store(RedirectResponse(url=target, status_code=303))
+    pending = [nonce] + dash_cookies.pending_nonces(_read_dash_cookie(request, dash_cookies.NONCE_COOKIE))
+    _store_nonces(response, request, pending)
+    if stale_handle:
+        _clear_dash_cookie(response, request, dash_cookies.HANDLE_COOKIE)
+    return response
+
+
+def _handoff_identity_headers(auth: _HandoffAuth) -> List[Tuple[str, str]]:
+    """Identity, and the access token when there is one -- nothing else goes upstream."""
+    identity = auth.identity
+    headers = [
+        ("X-Streamlit-User-ID", identity.get("sub", "")),
+        ("X-Streamlit-User-Email", identity.get("email", "")),
+        ("X-Streamlit-User-Username", identity.get("preferred_username", "")),
+        ("X-Streamlit-Auth-Method", "handoff"),
+        ("X-Forwarded-User", identity.get("email", "")),
+    ]
+    if auth.token:
+        headers.append(("Authorization", f"Bearer {auth.token}"))
+    else:
+        headers.append(("X-Lex-Auth-Degraded", auth.reason or "auth_unavailable"))
+    return headers
+
+
+async def _proxy_with_handoff(request: Request, auth: _HandoffAuth, handle: str) -> Response:
+    """Forward a request the hand-off authenticated (``ok``, or ``unavailable`` = degraded)."""
+    marker_or_token = any(
+        request.query_params.get(name) is not None for name in (dash_cookies.LOOP_MARKER, "auth_token")
+    )
+    if marker_or_token and request.method in ("GET", "HEAD") and _is_document_request(request):
+        # Signed in: the hand-off marker (and any auth_token an old frontend put on the URL) has
+        # done its job; a clean URL keeps a later reload from reading it as a failed hand-off.
+        response: Response = _no_store(RedirectResponse(url=_clean_relative_path(request), status_code=303))
+    else:
+        headers = _forwardable_request_headers(request)
+        for name, value in _handoff_identity_headers(auth):
+            headers[name] = value
+        response, _ = await _send_upstream(request, headers)
+    if auth.reset_cookie:
+        _set_dash_cookie(response, request, dash_cookies.HANDLE_COOKIE, handle, dash_cookies.HANDLE_MAX_AGE)
+    return response
+
+
+async def auth_handoff(request: Request):
+    """``/auth/handoff``: where Django sends the frame back with a code (or ``error``)."""
+    if not HANDOFF_ENABLED:
+        return Response(status_code=404)
+    next_path = _safe_next_path(request.query_params.get("next")) or "/"
+    state = request.query_params.get("state", "")
+    nonces = dash_cookies.pending_nonces(_read_dash_cookie(request, dash_cookies.NONCE_COOKIE))
+    matched = bool(state) and any(
+        secrets.compare_digest(nonce.encode("utf-8"), state.encode("utf-8", "ignore")) for nonce in nonces
+    )
+    remaining = [nonce for nonce in nonces if nonce != state]
+
+    error = request.query_params.get("error")
+    if error:
+        response = _sign_in_required_page(
+            request, reason="login_required" if error == "login_required" else "handoff_failed", next_path=next_path
+        )
+        if matched:
+            _store_nonces(response, request, remaining)
+        return response
+
+    code = request.query_params.get("code", "")
+    if not matched or not code:
+        # No nonce (blocked, or outlived by a slow sign-in) or a code meant for another browser:
+        # it is never redeemed here. Back to the dashboard URL, whose hand-off count decides
+        # between one more hand-off and the blocked-cookie page.
+        return _no_store(RedirectResponse(url=next_path, status_code=303))
+
+    origin = _browser_origin(request)
+    if origin is None:
+        return _handoff_misconfigured_page(request, "this host is not one of the instance's dashboard hosts")
+    try:
+        handle, failure = await _run_orm(_redeem_blocking, code, origin, state)
+    except Exception as exc:
+        logger.warning("Dashboard hand-off could not be redeemed (%s); retrying", type(exc).__name__)
+        retry = _no_store(HTMLResponse(
+            "<!doctype html><html><head><meta charset=\"utf-8\">"
+            f"<meta http-equiv=\"refresh\" content=\"5;url={html.escape(_strip_params(next_path, (dash_cookies.LOOP_MARKER,)), quote=True)}\">"
+            f"<title>Temporarily unavailable</title></head><body><div style=\"{_PAGE_STYLE}\">"
+            "<p>Sign-in is temporarily unavailable. This page retries automatically.</p></div></body></html>",
+            status_code=503,
+        ))
+        retry.headers["Retry-After"] = "5"
+        return retry
+    if not handle:
+        logger.info("Dashboard hand-off refused: %s", failure)
+        response = _sign_in_required_page(
+            request, reason="session_ended" if failure == "session_ended" else "handoff_failed", next_path=next_path
+        )
+        _store_nonces(response, request, remaining)
+        return response
+
+    response = _no_store(RedirectResponse(url=next_path, status_code=303))
+    _set_dash_cookie(response, request, dash_cookies.HANDLE_COOKIE, handle, dash_cookies.HANDLE_MAX_AGE)
+    _store_nonces(response, request, remaining)
+    return response
+
+
+async def auth_required(request: Request):
+    """``/auth/required``: the sign-in-required page, for a Streamlit page whose sign-in ended.
+
+    The Streamlit app navigates its own document here when ``/auth/token`` says the sign-in is
+    over, so the message to the frontend comes from the dashboard frame itself (the frontend
+    only listens to that frame, not to the component frames inside it).
+    """
+    if not HANDOFF_ENABLED:
+        return Response(status_code=404)
+    next_path = _safe_next_path(request.query_params.get("next")) or "/"
+    reason = request.query_params.get("reason") or "session_ended"
+    return _sign_in_required_page(request, reason=reason, next_path=next_path)
+
+
+async def auth_status(request: Request):
+    """``/auth/status``: whether this browser's dashboard sign-in still stands.
+
+    Asked by the watcher every hand-off page carries (``lex/streamlit_app.py``): every minute while
+    the page is visible, and when it becomes visible again. A page whose socket dropped cannot
+    learn any other way that its sign-in ended -- Streamlit retries a reconnect refused with 4401
+    forever -- so on 401 the watcher sends the page to ``/auth/required``, which tells the
+    frontend around it.
+
+    From the database alone (one read; no Keycloak call, no refresh): 200 ``{"status": "ok"}``
+    while the binding is live -- or, in dual mode, while a legacy session stands in for a dead
+    handle; 401 ``session_expired`` once the binding is revoked, its sign-in ended or its user was
+    deactivated; 401 ``not_authenticated`` without a handle; 503 when the database cannot be
+    asked. It sets no cookie. 404 in legacy mode.
+    """
+    if not HANDOFF_ENABLED:
+        return Response(status_code=404)
+    handle = _read_dash_cookie(request, dash_cookies.HANDLE_COOKIE)
+    standing = "none"
+    if handle:
+        try:
+            standing = await _run_orm(_handle_standing_blocking, handle)
+        except Exception as exc:  # the database itself could not be asked
+            logger.warning("Dashboard sign-in could not be checked (%s); answering 503", type(exc).__name__)
+            return _handoff_unavailable(request)
+    if standing == "ok" or (LEGACY_ENABLED and "user" in request.session):
+        return _no_store(JSONResponse({"status": "ok"}))
+    return _handoff_unauthenticated(request, "session_expired" if handle else "not_authenticated")
+
+
+async def _ws_refuse(websocket: WebSocket, code: int) -> None:
+    """Accept, then close with ``code`` -- closing during the handshake reaches the browser as 1006."""
+    raw = websocket.headers.get("sec-websocket-protocol")
+    offered = [p.strip() for p in raw.split(",") if p.strip()] if raw else []
+    with suppress(Exception):
+        if websocket.client_state == WebSocketState.CONNECTING:
+            await websocket.accept(subprotocol=offered[0] if offered else None)
+        await websocket.close(code=code)
+
+
+# -----------------------------------------------------------------------------
 # Auth routes
 # -----------------------------------------------------------------------------
 async def login(request: Request):
+    if not LEGACY_ENABLED:
+        # handoff: the proxy runs no Keycloak sign-in of its own; the dashboard URL starts the
+        # hand-off through the app, which signs in at top level when it has to.
+        return _no_store(RedirectResponse(url=_safe_next_path(request.query_params.get("next")) or "/", status_code=303))
     # Stashed in the session rather than round-tripped through Keycloak: the
     # session is already the store authlib keeps the OIDC state in, so it
     # survives the redirect, and a value that never leaves the server cannot be
@@ -963,6 +1640,8 @@ async def login(request: Request):
 
 
 async def auth_callback(request: Request):
+    if not LEGACY_ENABLED:
+        return Response(status_code=404)  # handoff: no Keycloak sign-in of the proxy's own
     token = await oauth.oidc.authorize_access_token(request)
     userinfo = token.get("userinfo") or await oauth.oidc.userinfo(token=token)
 
@@ -991,7 +1670,33 @@ async def auth_callback(request: Request):
     return resp
 
 
+async def _revoke_dashboard_handle(request: Request, reason: str) -> bool:
+    """Revoke the binding behind this browser's handle cookie (if any). True when there was one."""
+    handle = _read_dash_cookie(request, dash_cookies.HANDLE_COOKIE)
+    if not handle:
+        return False
+    try:
+        await _run_orm(_revoke_handle_blocking, handle, reason)
+    except Exception as exc:  # the cookie is still removed from the browser below
+        logger.warning("Dashboard binding could not be revoked (%s)", type(exc).__name__)
+    return True
+
+
 async def oauth2_logout(request: Request):
+    """Sign out of this dashboard only. With the hand-off: the binding is revoked and its cookie
+    removed, and a signed-out page is shown -- not "/", which would just hand off again."""
+    had_handle = await _revoke_dashboard_handle(request, "logout") if HANDOFF_ENABLED else False
+    if HANDOFF_ENABLED and (had_handle or not LEGACY_ENABLED):
+        if LEGACY_ENABLED:
+            sid = (request.session.get("user") or {}).get("sid")
+            if sid:
+                await _drop_tokens(sid)
+            request.session.clear()
+        resp = _signed_out_page(request)
+        _clear_dash_cookie(resp, request, dash_cookies.HANDLE_COOKIE)
+        resp.delete_cookie("st_access", path="/")
+        return resp
+
     sid = (request.session.get("user") or {}).get("sid")
     if sid:
         await _drop_tokens(sid)
@@ -1002,7 +1707,43 @@ async def oauth2_logout(request: Request):
     return resp
 
 
+def _sign_out_target(request: Request) -> Optional[str]:
+    """Where the app's total logout returns to: ``rd`` when it is on a dashboard host, else this
+    dashboard's root. ``None`` when this host is not a dashboard host or no app host is known."""
+    origin = _browser_origin(request)
+    if origin is None:
+        return None
+    rd = request.query_params.get("rd") or ""
+    rd_origin = dash_sites.origin_of(rd)
+    if rd_origin and (rd_origin == origin or dash_sites.is_dashboard_origin(rd_origin)):
+        return rd
+    relative = _safe_next_path(rd)
+    return origin + (relative or "/")
+
+
 async def oauth2_sign_out(request: Request):
+    if HANDOFF_ENABLED:
+        had_handle = await _revoke_dashboard_handle(request, "sign_out")
+        if had_handle or not LEGACY_ENABLED:
+            # Signing out is the app's job: its total logout ends the Django sign-in (with
+            # id_token_hint) and Keycloak's, which ends every binding on it.
+            if LEGACY_ENABLED:
+                sid = (request.session.get("user") or {}).get("sid")
+                if sid:
+                    await _drop_tokens(sid)
+                request.session.clear()
+            back = _sign_out_target(request)
+            app_origin = _handoff_app_origin(request) if back else None
+            if not back or not app_origin:
+                resp = _signed_out_page(request)
+            else:
+                resp = _no_store(RedirectResponse(
+                    url=f"{app_origin}/oidc/total_logout?{urlencode({'next': back})}", status_code=303
+                ))
+            _clear_dash_cookie(resp, request, dash_cookies.HANDLE_COOKIE)
+            resp.delete_cookie("st_access", path="/")
+            return resp
+
     rd = _external_base_url(request)
 
     sid = (request.session.get("user") or {}).get("sid")
@@ -1058,6 +1799,29 @@ async def internal_token(request: Request):
         supplied.encode("utf-8", "ignore"), INTERNAL_AUTH_SECRET.encode("utf-8")
     ):
         return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    if HANDOFF_ENABLED:
+        # The hand-off's answers: 401 only when the sign-in is over (or there is none); 503
+        # while Keycloak or the database cannot be asked -- the dashboard keeps going and
+        # retries, and must not ask anyone to sign in again over a blip.
+        handle = _read_handle_any(request)
+        if handle:
+            # A loopback answer cannot set a cookie: it never claims the daily re-set.
+            auth = await _handoff_auth(request, handle=handle, can_set_cookie=False)
+            if auth is not None and auth.token and auth.kind in ("ok", "unavailable"):
+                return _no_store(JSONResponse({
+                    "access_token": auth.token,
+                    "expires_at": int(auth.expires_at or 0),
+                    "email": auth.identity.get("email", ""),
+                }))
+            if auth is not None and auth.kind in ("unavailable", "error"):
+                return _handoff_unavailable(request, auth.retry_after)
+            if not LEGACY_ENABLED or "user" not in request.session:
+                return _no_store(JSONResponse({"error": "session_expired"}, status_code=401))
+            # dual: the handle names nothing live, but the legacy session the page was opened
+            # with (Streamlit's frozen Cookie header still holds the dead handle) renews below.
+        if not LEGACY_ENABLED:
+            return _no_store(JSONResponse({"error": "not_authenticated"}, status_code=401))
 
     if "user" not in request.session:
         return JSONResponse({"error": "no_session"}, status_code=401)
@@ -1127,6 +1891,34 @@ def _upstream_ws_url_and_origin(client_ws_url: str) -> Tuple[str, str]:
 
 
 async def ws_proxy(websocket: WebSocket):
+    if not _ws_origin_allowed(websocket):
+        # Cross-site WebSocket hijacking: another site's page would get a socket signed in as
+        # the user. Refused before any credential is looked at -- 4403, after accept() with the
+        # hand-off (the contract), during the handshake in legacy mode (as legacy closes 4401).
+        logger.warning("WebSocket from a foreign origin refused (%r)", websocket.headers.get("origin"))
+        if HANDOFF_ENABLED:
+            await _ws_refuse(websocket, 4403)
+            return
+        with suppress(Exception):
+            if websocket.client_state != WebSocketState.DISCONNECTED:
+                await websocket.close(code=4403)
+        return
+    if HANDOFF_ENABLED:
+        # The hand-off's handle, checked at connect: a fresh token of the sign-in (or, with
+        # Keycloak unreachable, a cached one / identity only). An ended sign-in or a dead handle
+        # is 4401 and a database outage 4503 -- both after accept(), so the browser sees them.
+        # A handshake cannot set a cookie, so it never claims the handle's daily re-set.
+        auth = await _handoff_auth(websocket, can_set_cookie=False)
+        if auth is not None and auth.kind in ("ok", "unavailable"):
+            await _ws_relay(websocket, _handoff_identity_headers(auth))
+            return
+        if auth is not None and auth.kind == "error":
+            await _ws_refuse(websocket, 4503)
+            return
+        if not LEGACY_ENABLED:
+            await _ws_refuse(websocket, 4401)
+            return
+
     # Off-loop JWKS warmup: a blocking fetch here would stall every other
     # in-flight request and the existing WebSocket pumps.
     await _ensure_jwks_ready()
@@ -1159,11 +1951,35 @@ async def ws_proxy(websocket: WebSocket):
             auth_method = "jwt"
 
     if not user_payload:
+        if HANDOFF_ENABLED:  # dual: neither credential -> the contract's accept-then-close
+            await _ws_refuse(websocket, 4401)
+            return
         with suppress(Exception):
             if websocket.client_state != WebSocketState.DISCONNECTED:
                 await websocket.close(code=4401)
         return
 
+    identity: List[Tuple[str, str]] = [
+        ("X-Streamlit-User-ID", str(user_payload.get("sub") or "")),
+        ("X-Streamlit-User-Email", user_payload.get("email") or ""),
+        ("X-Streamlit-User-Username", user_payload.get("preferred_username") or ""),
+        ("X-Streamlit-Auth-Method", auth_method),
+        ("X-Forwarded-User", user_payload.get("email") or ""),
+    ]
+    if user_payload.get("access_token"):
+        identity.append(("Authorization", f"Bearer {user_payload['access_token']}"))
+        identity.append(("X-Forwarded-Access-Token", user_payload["access_token"]))
+        identity.append(("X-Streamlit-Access-Token", user_payload["access_token"]))
+    if user_payload.get("id_token"):
+        identity.append(("X-Forwarded-Id-Token", user_payload["id_token"]))
+    if user_payload.get("refresh_token"):
+        identity.append(("X-Streamlit-Refresh-Token", user_payload["refresh_token"]))
+
+    await _ws_relay(websocket, identity)
+
+
+async def _ws_relay(websocket: WebSocket, identity: List[Tuple[str, str]]) -> None:
+    """Open the upstream socket with the client's headers plus ``identity``, then pump both ways."""
     target_url, upstream_origin = _upstream_ws_url_and_origin(str(websocket.url))
 
     excluded = {
@@ -1179,23 +1995,9 @@ async def ws_proxy(websocket: WebSocket):
         "host",
         "origin",
         "authorization",
-    }
+    } | _PROXY_OWNED_HEADERS
     fwd: List[Tuple[str, str]] = [(k, v) for k, v in websocket.headers.items() if k.lower() not in excluded]
-
-    fwd.append(("X-Streamlit-User-ID", str(user_payload.get("sub") or "")))
-    fwd.append(("X-Streamlit-User-Email", user_payload.get("email") or ""))
-    fwd.append(("X-Streamlit-User-Username", user_payload.get("preferred_username") or ""))
-    fwd.append(("X-Streamlit-Auth-Method", auth_method))
-    fwd.append(("X-Forwarded-User", user_payload.get("email") or ""))
-
-    if user_payload.get("access_token"):
-        fwd.append(("Authorization", f"Bearer {user_payload['access_token']}"))
-        fwd.append(("X-Forwarded-Access-Token", user_payload["access_token"]))
-        fwd.append(("X-Streamlit-Access-Token", user_payload["access_token"]))
-    if user_payload.get("id_token"):
-        fwd.append(("X-Forwarded-Id-Token", user_payload["id_token"]))
-    if user_payload.get("refresh_token"):
-        fwd.append(("X-Streamlit-Refresh-Token", user_payload["refresh_token"]))
+    fwd.extend(identity)
 
     raw_subprotos = websocket.headers.get("sec-websocket-protocol")
     client_subprotocols = [p.strip() for p in raw_subprotos.split(",")] if raw_subprotos else []
@@ -1374,6 +2176,7 @@ async def lifespan(app: Starlette):
         if client is not None and not client.is_closed:
             with suppress(Exception):
                 await client.aclose()
+        _shutdown_orm_executor()
 
 
 async def _upstream_send(
@@ -1481,13 +2284,35 @@ _HOP_BY_HOP = frozenset({
 })
 
 
+#: Headers only this proxy may set on the way to Streamlit: identity and tokens. A client copy
+#: is dropped in every mode. Kept, it reached Streamlit *ahead* of the proxy's own value, and
+#: Streamlit's ``st.context.headers`` answers the first of a repeated header -- so any signed-in
+#: client could have named another user's identity, or a token of its choosing (BUG-037).
+_PROXY_OWNED_HEADERS = frozenset({
+    "x-streamlit-user-id",
+    "x-streamlit-user-email",
+    "x-streamlit-user-username",
+    "x-streamlit-auth-method",
+    "x-streamlit-access-token",
+    "x-streamlit-refresh-token",
+    "x-forwarded-user",
+    "x-forwarded-email",
+    "x-forwarded-preferred-username",
+    "x-forwarded-access-token",
+    "x-forwarded-id-token",
+    "x-auth-request-user",
+    "x-auth-request-email",
+    "x-auth-request-access-token",
+    "x-lex-auth-degraded",
+})
+
 #: Request-only. httpx recomputes Content-Length from the body we hand it, and a
 #: forwarded value beats httpx's own -- so a mismatch becomes a
 #: LocalProtocolError instead of a request. Deliberately NOT dropped from
 #: responses: the raw relay preserves the body exactly, so the upstream's length
 #: is still correct, and a sized response is what lets the browser draw a
 #: progress bar instead of sitting at 0 bytes.
-_REQUEST_DROP = _HOP_BY_HOP | {"content-length"}
+_REQUEST_DROP = _HOP_BY_HOP | {"content-length"} | _PROXY_OWNED_HEADERS
 
 
 def _forwardable_request_headers(request: Request) -> Dict[str, str]:
@@ -1594,7 +2419,60 @@ async def public_proxy(request: Request):
 # -----------------------------------------------------------------------------
 # HTTP proxy
 # -----------------------------------------------------------------------------
+async def _send_upstream(request: Request, fwd_headers: Dict[str, str]) -> Tuple[Response, bool]:
+    """Send this request upstream with ``fwd_headers``; (response, whether the upstream answered)."""
+    url = httpx.URL(UPSTREAM + request.url.path)
+    if request.url.query:
+        url = url.copy_with(query=request.url.query.encode("utf-8"))
+
+    body = await request.body()
+
+    try:
+        upstream_resp = await _upstream_send(request.method, url, content=body, headers=fwd_headers)
+    except httpx.ConnectError:
+        return JSONResponse(
+            {"error": f"Upstream unavailable: {UPSTREAM}. Streamlit may still be starting."},
+            status_code=503,
+        ), False
+    except httpx.TimeoutException:
+        return JSONResponse(
+            {"error": f"Upstream timeout: {UPSTREAM}"},
+            status_code=504,
+        ), False
+    except httpx.HTTPError as exc:
+        # Anything else httpx can raise before a response exists -- notably
+        # RemoteProtocolError from a connection the upstream closed. Left
+        # unhandled it escaped as an unhandled ASGI exception, which reaches
+        # the browser as a dropped request: a failed /media download, or an
+        # iframe document that never loads.
+        logger.warning("Upstream request to %s failed: %s: %s", UPSTREAM, type(exc).__name__, exc)
+        return JSONResponse(
+            {"error": f"Upstream request failed: {type(exc).__name__}"},
+            status_code=502,
+        ), False
+
+    return _build_proxied_response(request, upstream_resp), True
+
+
 async def proxy(request: Request):
+    stale_handle = False
+    if HANDOFF_ENABLED:
+        # The hand-off first: a live handle forwards the sign-in's fresh access token (or,
+        # with Keycloak unreachable, a cached one / identity only, marked degraded).
+        handle = _read_dash_cookie(request, dash_cookies.HANDLE_COOKIE)
+        auth = await _handoff_auth(request, handle=handle)
+        if auth is not None and auth.kind in ("ok", "unavailable"):
+            return await _proxy_with_handoff(request, auth, handle)
+        if auth is not None and auth.kind == "error":
+            return _handoff_unavailable(request, auth.retry_after)
+        stale_handle = auth is not None  # a handle that names nothing live
+        if not LEGACY_ENABLED:
+            # handoff: no handle, or a dead one -> hand off (documents) or 401.
+            return _start_handoff(request, reason="session_expired" if stale_handle else "not_authenticated",
+                                  stale_handle=stale_handle)
+        # dual: on to the legacy credentials -- a dead handle never stands in their way, and
+        # whatever the legacy path answers clears it; with none, the hand-off starts below.
+
     # Off-loop JWKS warmup before any synchronous validate_jwt_token below.
     await _ensure_jwks_ready()
 
@@ -1688,19 +2566,21 @@ async def proxy(request: Request):
                 max_age=ST_ACCESS_COOKIE_MAX_AGE,
                 path="/",
             )
+        if stale_handle:
+            _clear_dash_cookie(stripped, request, dash_cookies.HANDLE_COOKIE)
         return stripped
 
     # 4) Deny
     if not user_payload:
+        if HANDOFF_ENABLED:
+            # dual: no credential of either kind -> the hand-off, never the proxy's own
+            # Keycloak sign-in (which would have to frame Keycloak, or leave the frame).
+            return _start_handoff(request, reason="session_expired" if stale_handle else "not_authenticated",
+                                  stale_handle=stale_handle)
         # Never redirect an iframe document load to the IdP: Keycloak's login page
         # sets frame-ancestors 'self' and the browser shows "refused to connect".
         # Break out to a top-level login instead (see _unauthenticated_response).
         return _unauthenticated_response(request)
-
-    method = request.method
-    url = httpx.URL(UPSTREAM + request.url.path)
-    if request.url.query:
-        url = url.copy_with(query=request.url.query.encode("utf-8"))
 
     fwd_headers = _forwardable_request_headers(request)
 
@@ -1721,33 +2601,12 @@ async def proxy(request: Request):
     if user_payload.get("refresh_token"):
         fwd_headers["X-Streamlit-Refresh-Token"] = user_payload["refresh_token"]
 
-    body = await request.body()
-
-    try:
-        upstream_resp = await _upstream_send(method, url, content=body, headers=fwd_headers)
-    except httpx.ConnectError:
-        return JSONResponse(
-            {"error": f"Upstream unavailable: {UPSTREAM}. Streamlit may still be starting."},
-            status_code=503,
-        )
-    except httpx.TimeoutException:
-        return JSONResponse(
-            {"error": f"Upstream timeout: {UPSTREAM}"},
-            status_code=504,
-        )
-    except httpx.HTTPError as exc:
-        # Anything else httpx can raise before a response exists -- notably
-        # RemoteProtocolError from a connection the upstream closed. Left
-        # unhandled it escaped as an unhandled ASGI exception, which reaches
-        # the browser as a dropped request: a failed /media download, or an
-        # iframe document that never loads.
-        logger.warning("Upstream request to %s failed: %s: %s", UPSTREAM, type(exc).__name__, exc)
-        return JSONResponse(
-            {"error": f"Upstream request failed: {type(exc).__name__}"},
-            status_code=502,
-        )
-
-    response = _build_proxied_response(request, upstream_resp)
+    response, reached = await _send_upstream(request, fwd_headers)
+    if stale_handle:
+        # dual: the legacy session served this request; the dead handle must not shadow it again.
+        _clear_dash_cookie(response, request, dash_cookies.HANDLE_COOKIE)
+    if not reached:
+        return response
 
     # ✅ Also set a short-lived st_access cookie when token came from query/header
     # (helps WS + follow-up requests where query param isn't repeated)
@@ -1886,6 +2745,12 @@ async def adopt_token(request: Request):
         # No usable Origin means either a same-site call we cannot attribute or
         # a cross-origin one we do not trust. Refuse rather than guess.
         return JSONResponse({"error": "origin_not_allowed"}, status_code=403)
+
+    if not LEGACY_ENABLED:
+        # handoff: a no-op. Dashboards renew through their binding, and the body is never read,
+        # so a token posted here goes nowhere. Answered as "not adopted" -- a success to an old
+        # frontend, which must not retry in a loop.
+        return _cors(_no_store(JSONResponse({"adopted": False}, status_code=200)), origin)
 
     await _ensure_jwks_ready()
 
@@ -2350,6 +3215,12 @@ routes = [
     # Same reason. This is how a renewed credential reaches the proxy without
     # re-sourcing the iframe -- see the adopt_token docstring.
     Route("/auth/adopt", adopt_token, methods=["POST", "OPTIONS"]),
+    # The Django-anchored hand-off (LEX_STREAMLIT_AUTH dual/handoff; 404 in legacy): where the
+    # app sends the frame back with a code, and the page a dashboard whose sign-in ended shows.
+    Route("/auth/handoff", auth_handoff, methods=["GET"]),
+    Route("/auth/required", auth_required, methods=["GET"]),
+    # What the hand-off page's sign-in watcher asks (lex/streamlit_app.py): does the sign-in stand.
+    Route("/auth/status", auth_status, methods=["GET"]),
     # Same reason, and the ordering is load-bearing: these are the only paths
     # that must answer without a credential. See PUBLIC_PROXY_PATHS.
     *(

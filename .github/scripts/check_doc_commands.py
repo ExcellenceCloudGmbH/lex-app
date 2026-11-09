@@ -14,7 +14,10 @@ importing anything:
 
   * `@lex.command(name=...)` in lex/bin/lex.py            -- implemented by the CLI
   * module basenames under lex/**/management/commands/     -- Django passthrough
+    (not `_`-prefixed helpers, which Django does not load)
   * Django's own built-ins                                 -- also passthrough
+  * commands of installed apps lex depends on              -- also passthrough
+    (django-oauth2-codeflow's `oidc_*`, `clearsessions`)
   * anything matching `ai-*` / `ai_*`                       -- delegated at runtime
     to lex-mcp-local, which this repo cannot enumerate
 
@@ -46,8 +49,24 @@ _NOT_THE_PACKAGE = {
 
 
 def management_commands(root: Path):
-    """Management-command modules that this package actually ships."""
+    """Management-command modules that this package actually ships.
+
+    Underscore-prefixed modules are skipped because Django skips them. Its own
+    loader is::
+
+        # django/core/management/__init__.py -- find_commands()
+        if not is_pkg and not name.startswith("_")
+
+    so a module like ``_keycloak_env.py`` living in a ``commands/`` package is
+    a shared helper, not a command: there is no ``lex _keycloak_env`` for a
+    reader to run. Collecting it made this gate demand documentation for
+    something nobody can type, and the only place that documentation could go
+    is a mirror-owned page this repo cannot edit -- a red check with no fix
+    available in the repository that reported it.
+    """
     for path in root.rglob("management/commands/*.py"):
+        if path.name.startswith("_"):
+            continue
         if _NOT_THE_PACKAGE.isdisjoint(path.parts):
             yield path
 
@@ -60,6 +79,20 @@ DJANGO_BUILTINS = {
     "runserver", "sendtestemail", "shell", "showmigrations", "sqlflush", "sqlmigrate",
     "sqlsequencereset", "squashmigrations", "startapp", "startproject", "test",
     "testserver",
+}
+
+#: Commands of installed apps beyond Django's core, which the CLI forwards the same way
+#: (``lex <name>`` runs the Django command ``<name>``): they exist in every lex
+#: install because lex depends on these apps, yet their modules live in site-packages,
+#: where the scan of ``lex/`` cannot see them. The docs name them -- ``lex oidc_check``
+#: for the internal Keycloak URL, the daily ``lex oidc_cleanup`` / ``lex clearsessions``
+#: job -- so they must count as commands here. They are not lex's to document, so they
+#: stay out of the coverage check (``coverage()`` reads only the CLI and ``lex/``).
+FORWARDED_LIBRARY_COMMANDS = {
+    # django-oauth2-codeflow (a pinned dependency; its app is in INSTALLED_APPS)
+    "oidc_check", "oidc_cleanup", "oidc_rotate_keys", "oidc_urls",
+    # django.contrib.sessions
+    "clearsessions",
 }
 
 #: Words that follow "lex " in prose without being commands.
@@ -80,7 +113,7 @@ MENTION = re.compile(r"(?<![\w-])lex ([A-Za-z][A-Za-z0-9_-]*)")
 
 
 def known_commands() -> set[str]:
-    names = set(DJANGO_BUILTINS)
+    names = set(DJANGO_BUILTINS) | FORWARDED_LIBRARY_COMMANDS
     if CLI_SOURCE.is_file():
         names |= set(COMMAND_NAME.findall(CLI_SOURCE.read_text(encoding="utf-8")))
     for path in management_commands(REPO / "lex"):

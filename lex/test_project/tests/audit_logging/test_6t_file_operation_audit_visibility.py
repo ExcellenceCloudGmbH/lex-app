@@ -24,15 +24,13 @@ Scenarios 6.160 – 6.167.
 from __future__ import annotations
 
 import os
-from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
-from django.utils import timezone
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
-from lex.test_project.tests._e2e_test_case import _MockContainer, E2ETestCase
+from lex.test_project.tests._e2e_test_case import _MockContainer, E2ETestCase, sign_in
 
 from .models import AUDIT_GUARDED, GUARDED_FILE_MODELS, AuditGuardedFile
 
@@ -73,10 +71,7 @@ class TestCluster06t_FileOperationAuditVisibility(E2ETestCase):
     # -- helpers ---------------------------------------------------------
 
     def login(self, user):
-        self.client.force_login(user)
-        session = self.client.session
-        session["oidc_expires_at"] = (timezone.now() + timedelta(hours=1)).timestamp()
-        session.save()
+        sign_in(self.client, user)
 
     def download_as_owner(self):
         self.login(self.owner)

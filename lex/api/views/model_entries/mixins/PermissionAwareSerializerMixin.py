@@ -4,6 +4,7 @@ from functools import lru_cache
 
 from rest_framework import serializers
 
+from lex.api.security import is_auth_outage
 from lex.core.security_flags import strict
 
 logger = logging.getLogger(__name__)
@@ -94,7 +95,9 @@ class PermissionAwareSerializerMixin:
                 else:
                     # Default to allow all fields if no permission method
                     editable_backend_fields = {f.name for f in instance._meta.fields}
-            except Exception:
+            except Exception as exc:
+                if is_auth_outage(exc):
+                    raise  # 503/401 per the auth contract, never a refused edit
                 if strict("FAIL_CLOSED"):
                     logger.exception(
                         "permission_edit of %s raised; edit refused (LEX_SEC_FAIL_CLOSED)",
@@ -163,7 +166,9 @@ class PermissionAwareSerializerMixin:
                 else:
                     # Default to allow if no permission method
                     can_create = True
-            except Exception:
+            except Exception as exc:
+                if is_auth_outage(exc):
+                    raise  # 503/401 per the auth contract, never a refused create
                 if strict("FAIL_CLOSED"):
                     logger.exception(
                         "permission_create of %s raised; create refused (LEX_SEC_FAIL_CLOSED)",

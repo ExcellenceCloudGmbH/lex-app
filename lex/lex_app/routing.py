@@ -12,7 +12,11 @@ def public_websocket_urlpatterns():
 
 
 def authenticated_websocket_urlpatterns():
-    """WebSocket routes that require authentication via AuthMiddlewareStack."""
+    """WebSocket routes that require a sign-in (``AuthMiddlewareStack`` + ``OIDCSessionASGIMiddleware``).
+
+    Their consumers decide with ``LexSocketAuthMixin`` and ``LEX_WS_AUTH`` what happens to a
+    socket without one (``lex.api.consumers.auth``).
+    """
     from lex.api.consumers.CalculationLogConsumer import CalculationLogConsumer
     from lex.api.consumers.CalculationsConsumer import CalculationsConsumer
     from lex.api.consumers.LogConsumer import LogConsumer

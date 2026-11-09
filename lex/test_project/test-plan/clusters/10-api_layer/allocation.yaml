@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 99
+max_scenario: 174
 letters:
   a:
     title: ''
@@ -194,3 +194,48 @@ letters:
       for CreateOrUpdate. The model-side removal is pinned by 1ax. Originally allocated as
       10p/10.91-10.94; #840 landed that letter and range on lex-app-v2 first, so this batch re-took
       the next free pair on merge.
+  aa:
+    title: lex's REST surface speaks the HTTP auth contract v2 - 401/403/503 with codes, api/user/ from the sign-in, api/auth/session, oidc/auth-complete, the shared fixtures
+    scenarios: 10.152-10.166
+    status: complete
+    tests:
+      pass: 15
+      skip: 0
+      xfail: 0
+    note: >-
+      DRF answers "not authenticated" with 401, WWW-Authenticate and code not_authenticated - the
+      unauthenticated half of BUG-008 (10.152); a rejected bearer token gets Bearer
+      error="invalid_token" (10.153); a session request stays CSRF-checked whatever Authorization
+      header it adds (10.154); refusals are 403 permission_denied (keeping the documented message)
+      and CSRF failures 403 csrf_failed (10.155). api/user/ answers from the validated sign-in -
+      profile and client_roles, no Keycloak call, for browsers, bearer clients and Django-only
+      logins (10.156) - and 401 session_expired / 503 auth_unavailable when the sign-in cannot be
+      used (10.157). api/auth/session reports sign-in and capabilities from
+      lex.authentication.capabilities (10.158); oidc/auth-complete posts its result to its own origin
+      only, with no token and SAMEORIGIN framing (10.159); the silent prompt=none round trip works
+      end to end (10.160); api/auth/streamlit-token/ renews a token about to expire and answers 401
+      once the sign-in ended (10.161). 10.162-10.166 drive lex's real responses for every server
+      case of lex/contracts/auth/v2/fixtures/http (session_missing, session_expired,
+      auth_unavailable through refresh and UMA, permission_denied, csrf_failed). Also updated: 10o
+      10.90 (the middleware builds no KeycloakManager). Letter aa, from 10.152: r-z and scenarios up
+      to 10.151 are held by in-flight branches (feat/ext-*, integration/lex-3-extensions,
+      feat/fleet-metrics-*, feat/multi-value-filters, fix/streamlit-report-frames-unauthenticated).
+  ab:
+    title: The app's half of the Streamlit hand-off - GET oidc/handoff (a bound single-use code, login_required in a frame, never an unlisted origin), the dashboard_handoff capability per LEX_STREAMLIT_AUTH, the handoff-mode placeholder token
+    scenarios: 10.167-10.174
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      Plan P5 section 6.3: item 2, and the API surfaces of item 8. A signed-in browser gets a code
+      bound to its sign-in, `streamlit`, the dashboard origin and its state, valid 60 s (10.167);
+      without a sign-in a frame goes back with error=login_required, a page signs in first and a
+      background request gets the contract's 401 (10.168), also for an ended sign-in, which the
+      view answers itself (10.169). Only listed dashboard origins, a well-formed state and aud
+      streamlit are accepted; 404 in legacy mode; loopback only when not deployed (10.170); Keycloak
+      down is a 503 with no code (10.171). api/auth/session advertises dashboard_handoff exactly in
+      dual and handoff (10.172); handoff mode answers old frontends a placeholder token (10.173);
+      only the exact path is login- and session-exempt (10.174). Four mutations each fail their
+      scenario. Letter ab, from 10.167: r-z are held by in-flight branches (see aa).

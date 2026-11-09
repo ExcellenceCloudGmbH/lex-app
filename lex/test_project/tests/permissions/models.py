@@ -418,3 +418,53 @@ RAISING_CHILD = "raisingchild"
 RAISING_EXPORT = "raisingexportitem"
 CREATE_MODELS = [CreateParent, ScopedCreateItem]
 SCOPED_CREATE = "scopedcreateitem"
+
+
+class OutageItem(LexModel):
+    """Cluster 4y: permission hooks that need the auth backend while it is down.
+
+    While the class attribute ``outage`` holds an exception, every permission hook raises it
+    -- what a hook does when it needs the sign-in's token or Keycloak and cannot get them.
+    Otherwise everything is allowed.
+    """
+
+    name = models.CharField(max_length=200)
+
+    #: Raised by every permission hook while set.
+    outage = None
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def _check(self):
+        if type(self).outage is not None:
+            raise type(self).outage
+
+    def permission_read(self, uc):
+        self._check()
+        return PermissionResult.allow_all("cluster 4y")
+
+    def permission_list(self, uc):
+        return True
+
+    def permission_edit(self, uc):
+        self._check()
+        return PermissionResult.allow_all("cluster 4y")
+
+    def permission_export(self, uc):
+        self._check()
+        return PermissionResult.allow_all("cluster 4y")
+
+    def permission_create(self, uc):
+        self._check()
+        return True
+
+    def permission_delete(self, uc):
+        self._check()
+        return True
+
+
+OUTAGE = "outageitem"

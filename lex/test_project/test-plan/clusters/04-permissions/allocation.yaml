@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 147
+max_scenario: 158
 letters:
   a:
     title: ''
@@ -243,3 +243,33 @@ letters:
       patterns) fail too; 4.141, 4.143 and 4.145 pass. Letter x, not s-w: those are in flight on
       feat/multi-value-filters (s, t) and the feat/ext-* branches (s-w, scenarios up to 4.137). Same
       letter and IDs on lex-app-v2 and release/2.1.x.
+  y:
+    title: The permission lookup is lazy, cached per token, single-flight and never a silent deny
+    scenarios: 4.148-4.158
+    status: complete
+    tests:
+      pass: 11
+      skip: 0
+      xfail: 0
+    note: >-
+      request.user_permissions / userinfo / client_roles are lazy (4.148); UMA answers are cached per
+      SHA-256 of the access token, never shared across users and never mutated through a request
+      (4.149), for at most min(60 s, the token's lifetime) (4.150), one call per token at a time
+      with waiters sharing success and failure (4.151). Keycloak's answers: access_denied is []
+      and the user stays signed in (4.152), a rejected token is 401 session_expired (4.153), an
+      outage 503 auth_unavailable - before the view for writes, nothing stored, still signed in
+      afterwards (4.154). UMA has its own breaker (keycloak_uma): it opens after repeated failures,
+      a probe closes it, the token endpoint's breaker is untouched, and an issuer mismatch through
+      KEYCLOAK_INTERNAL_URL is a configuration outage, never a 401 sign-in loop (4.155). Roles come
+      from the access token's resource_access and the profile from the sign-in, with no userinfo
+      call and no stale session value (4.156). guarded() and every fail-closed site (list filter,
+      detail, create, update, delete, export) answer an auth outage with its 503/401 instead of a
+      denial or a grant, with LEX_SEC_FAIL_CLOSED on and off (4.157, 4.158). Also updated for 2.5,
+      intent unchanged unless noted: 4g 4.31-4.34 (the seam is a sign-in and the UMA call; 4.32b
+      now expects AuthUnavailable instead of a silent []; 4.33 checks role shapes from the token;
+      4.34 checks that session tokens are never used), 4x 4.138 (bearer contexts; one override for
+      all threads), 4.141/4.142 (401 session_expired / 503 instead of []), 4.144 (a FakeOP access
+      token as the control, the forgery carries iss/aud/typ), 4.145-4.147 (a view's own 401 now
+      carries login_url too; OIDC_LOGIN_REQUIRED_EXEMPT_URL_PATTERNS), 4o 4.98 (eleven flags), 4q
+      4.111 (the create refusal keeps message and adds detail and code permission_denied).
+      Letter y: s-w are held by in-flight branches (see x).

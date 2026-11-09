@@ -1,7 +1,7 @@
 from django.db.models.base import ModelBase
 from django.db.models.signals import post_save
 from django.http import HttpResponse
-from django.urls import path, register_converter
+from django.urls import path, re_path, register_converter
 from lex.api.utils import create_model_converter
 from lex.api.views.LexLoggerView.LexLoggerView import LexLoggerView
 from lex.api.views.calculations.CleanCalculations import CleanCalculations
@@ -24,6 +24,7 @@ from lex.api.views.sharepoint.SharePointFileDownload import SharePointFileDownlo
 from lex.api.views.sharepoint.SharePointPreview import SharePointPreview
 from lex.api.views.sharepoint.SharePointShareLink import SharePointShareLink
 from lex.authentication.views.permissions import UserPermissionsView
+from lex.authentication.views.session_views import AuthCompleteView, SessionStatusView
 from lex.authentication.views.token_views import StreamlitTokenView
 from lex.core.mixins.CalculatedModelMixin import CalculatedModelMixin
 from lex.core.signals import do_post_save
@@ -178,6 +179,9 @@ class ProcessAdminSite:
                 name="htmlreports",
             ),
             path('api/auth/streamlit-token/', StreamlitTokenView.as_view(), name='streamlit_token'),
+            # HTTP auth contract v2, also under DJANGO_BASE_PATH (lex_app/urls.py routes the root).
+            re_path(r'^api/auth/session/?$', SessionStatusView.as_view(), name='process-admin-auth-session'),
+            re_path(r'^oidc/auth-complete/?$', AuthCompleteView.as_view(), name='process-admin-oidc-auth-complete'),
 
         ]
 

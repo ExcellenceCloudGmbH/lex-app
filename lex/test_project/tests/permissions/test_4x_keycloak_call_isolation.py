@@ -25,10 +25,16 @@ A regression here hands one customer's data to another, or to nobody in
 particular, so these are end-to-end through the public entry points: the
 permissions middleware, ``KeycloakManager``, and Django's full middleware stack.
 
+lex-app 2.5 (django-oauth2-codeflow 3, batch 4y) kept every promise above and changed
+two answers on purpose: the middleware asks Keycloak only for UMA permissions (profile
+and roles come from the validated sign-in, ``request.oidc``), and a token Keycloak
+rejects or an outage is no longer a silent ``[]`` -- they answer 401 ``session_expired``
+and 503 ``auth_unavailable`` (4.141, 4.142).
+
 Cluster 4x -- scenarios 4.138-4.147. Type: U (4.138-4.143) and I (4.144-4.147).
 Covers: lex/api/keycloak/uma_client.py, lex/api/views/authentication/KeycloakManager.py,
 lex/api/middleware/keycloak_permissions.py, lex/lex_app/settings.py
-(OIDC_RP_SIGN_ALGOS_ALLOWED, OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS).
+(OIDC_RP_SIGN_ALGOS_ALLOWED, OIDC_LOGIN_REQUIRED_EXEMPT_URL_PATTERNS).
 Run: python -m lex pytest lex/test_project/tests/permissions/test_4x_keycloak_call_isolation.py -v
 """
 
@@ -55,10 +61,15 @@ from django.contrib.auth import get_user_model
 from django.http import HttpResponse
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 
+from oauth2_authcodeflow.breaker import reset_breakers
+from oauth2_authcodeflow.context import OIDCContext
+from oauth2_authcodeflow.testing import FakeOP
+
 from lex.api.keycloak import uma_client
 from lex.api.middleware import keycloak_permissions
 from lex.api.middleware.keycloak_permissions import KeycloakPermissionsMiddleware
 from lex.api.views.authentication.KeycloakManager import KeycloakManager
+from lex.authentication.drf_exceptions import AuthUnavailable, SessionRejected
 
 pytestmark = pytest.mark.permissions
 
@@ -166,11 +177,25 @@ class _StubKeycloak:
 
 
 def _fresh_keycloak_manager() -> None:
-    """Forget the process-wide manager so the next one is built against the stub."""
-    # The shared-manager cache exists on the v2 line only; 2.1.x builds one per request.
+    """Forget the process-wide manager and every cached UMA answer, so the next call reaches the stub."""
+    # The shared-manager cache existed on the v2 line until 2.5; 2.1.x builds one per request.
     getattr(keycloak_permissions, "_reset_shared_manager", lambda: None)()
+    getattr(keycloak_permissions, "reset_uma_cache", lambda: None)()
+    reset_breakers()
     KeycloakManager._singleton_instance = None
     KeycloakManager._singleton_initialized = False
+
+
+def _signed_in_context(token: str) -> OIDCContext:
+    """The sign-in a request carrying ``tok-<user>`` belongs to (as the bearer middleware sets it)."""
+    user = token[len("tok-"):] if token.startswith("tok-") else token
+    claims = {
+        "sub": user,
+        "email": f"{user}@example.com",
+        "exp": int(time.time()) + 300,
+        "resource_access": {CLIENT_ID: {"roles": [f"role-{user}"]}},
+    }
+    return OIDCContext.from_bearer(token, claims)
 
 
 class _StubKeycloakTestCase(SimpleTestCase):
@@ -190,13 +215,20 @@ class _StubKeycloakTestCase(SimpleTestCase):
         )
         env.start()
         self.addCleanup(env.stop)
+        # Once for the whole test: override_settings is not safe to enter from many threads.
+        overrides = override_settings(OIDC_RP_CLIENT_ID=CLIENT_ID)
+        overrides.enable()
+        self.addCleanup(overrides.disable)
         self.addCleanup(_fresh_keycloak_manager)
         _fresh_keycloak_manager()
 
-    def _middleware_request(self, token: str):
-        request = RequestFactory().get("/api/model_entries/x/list")
-        request.session = {"oidc_access_token": token}
-        KeycloakPermissionsMiddleware(lambda r: HttpResponse("ok"))(request)
+    def _middleware_request(self, token: str, method: str = "get"):
+        """A request of the user behind ``token`` through the middleware; returns (request, response)."""
+        request = getattr(RequestFactory(), method)("/api/model_entries/x/list")
+        request.session = {}
+        request.oidc = _signed_in_context(token)
+        response = KeycloakPermissionsMiddleware(lambda r: HttpResponse("ok"))(request)
+        request._lex_test_response = response
         return request
 
 
@@ -222,13 +254,15 @@ class TestCluster04x_ConcurrentUsersStayApart(_StubKeycloakTestCase):
         When: the permissions middleware handles every request
         Then: every request carries exactly its own user's permissions, profile and client
               roles -- never another user's -- and every Keycloak call carried a bearer token.
+              (Since 2.5 the answers are also cached per token and single-flight: the cache
+              must never answer one user with another's permissions either.)
         """
         users = [f"user{i}" for i in range(12)] * 20
         random.shuffle(users)
 
         def handle(user):
             request = self._middleware_request(f"tok-{user}")
-            return user, request.user_permissions, request.userinfo, request.client_roles
+            return user, list(request.user_permissions), dict(request.userinfo), list(request.client_roles)
 
         with ThreadPoolExecutor(max_workers=24) as pool:
             results = list(pool.map(handle, users))
@@ -294,14 +328,27 @@ class TestCluster04x_KeycloakAnswersAreClassified(_StubKeycloakTestCase):
     # -- 4.141 ---------------------------------------------------------
     def test_4_141_rejected_token_leaves_the_request_unprivileged(self) -> None:
         """
-        Scenario 4.141: a token Keycloak no longer accepts yields no permissions and no profile.
+        Scenario 4.141: a token Keycloak no longer accepts gets no permissions -- it is a lost sign-in.
         Given: Keycloak answers 401 invalid_grant / invalid_token for the token
-        When: the middleware handles the request and the manager is asked directly
-        Then: the request still reaches the view with [] permissions, {} profile and no
-              roles; get_uma_permissions returns None ("Keycloak could not say").
+        When: a request reads its permissions, a write request passes the middleware, and the
+              manager is asked directly
+        Then: reading the permissions raises SessionRejected (the contract's 401
+              session_expired) instead of granting or silently denying; a write is answered 401
+              session_expired with a WWW-Authenticate header before any view runs; the profile
+              and roles of the sign-in stay readable; get_uma_permissions still returns None
+              ("Keycloak could not say").
         """
         request = self._middleware_request("tok-expired")
-        self.assertEqual((request.user_permissions, request.userinfo, request.client_roles), ([], {}, []))
+        with self.assertRaises(SessionRejected):
+            list(request.user_permissions)
+        self.assertEqual(request.client_roles, ["role-expired"])
+
+        write = self._middleware_request("tok-expired", method="post")
+        response = write._lex_test_response
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(json.loads(response.content)["error"], "session_expired")
+        self.assertTrue(response.get("WWW-Authenticate", "").startswith("Session realm="))
+
         self.assertIsNone(KeycloakManager().get_uma_permissions("tok-expired"))
         with self.assertRaises(uma_client.KeycloakUnauthorized):
             uma_client.fetch_userinfo("tok-expired")
@@ -309,15 +356,17 @@ class TestCluster04x_KeycloakAnswersAreClassified(_StubKeycloakTestCase):
     # -- 4.142 ---------------------------------------------------------
     def test_4_142_keycloak_outage_never_breaks_the_request_or_logs_the_token(self) -> None:
         """
-        Scenario 4.142: a Keycloak outage keeps the request alive and keeps tokens out of logs.
+        Scenario 4.142: a Keycloak outage is a 503 -- never a crash, a denial, or a token in the log.
         Given: Keycloak answers 502 with an HTML page, and separately cannot be reached at all
-        When: the middleware handles requests in both cases
-        Then: both requests reach the view with the empty defaults, the client reports the
-              outage as KeycloakUnavailable, and no log line contains the access token.
+        When: requests read their permissions, and a write request passes the middleware
+        Then: reading the permissions raises AuthUnavailable (503 auth_unavailable, never []);
+              the write is answered 503 with Retry-After before any view runs; the client
+              reports the outage as KeycloakUnavailable; no log line contains the access token.
         """
         with self.assertLogs("lex", level=logging.WARNING) as logs:
             broken = self._middleware_request("tok-broken")
-        self.assertEqual((broken.user_permissions, broken.userinfo), ([], {}))
+            with self.assertRaises(AuthUnavailable):
+                list(broken.user_permissions)
         with self.assertRaises(uma_client.KeycloakUnavailable):
             uma_client.fetch_uma_permissions("tok-broken")
 
@@ -330,8 +379,11 @@ class TestCluster04x_KeycloakAnswersAreClassified(_StubKeycloakTestCase):
             uma_client.fetch_uma_permissions("tok-secret-value", endpoints=unreachable, timeout=(0.5, 0.5))
         with mock.patch.object(uma_client.KeycloakEndpoints, "from_environment", return_value=unreachable):
             with self.assertLogs("lex", level=logging.WARNING) as more_logs:
-                down = self._middleware_request("tok-secret-value")
-        self.assertEqual((down.user_permissions, down.userinfo), ([], {}))
+                down = self._middleware_request("tok-secret-value", method="post")
+        response = down._lex_test_response
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(json.loads(response.content)["error"], "auth_unavailable")
+        self.assertTrue(response.get("Retry-After"))
         joined = "\n".join(logs.output + more_logs.output)
         self.assertNotIn("tok-broken", joined, "an access token must never be written to the log")
         self.assertNotIn("tok-secret-value", joined, "an access token must never be written to the log")
@@ -368,35 +420,6 @@ class TestCluster04x_KeycloakAnswersAreClassified(_StubKeycloakTestCase):
                 self.assertEqual(kwargs["headers"]["Authorization"], "Bearer tok-a")
 
 
-def _rsa_keypair():
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    public_pem = key.public_key().public_bytes(
-        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-    return key, public_pem
-
-
-_PRIVATE_KEY, _PUBLIC_PEM = _rsa_keypair()
-
-#: Enough explicit OP configuration for the bearer backend to start without any network call.
-_OIDC_TEST_SETTINGS = dict(
-    OIDC_RP_CLIENT_ID=CLIENT_ID,
-    OIDC_RP_CLIENT_SECRET=CLIENT_SECRET,
-    OIDC_OP_DISCOVERY_DOCUMENT_URL="",
-    OIDC_OP_AUTHORIZATION_URL="https://keycloak.test/realms/lex/protocol/openid-connect/auth",
-    OIDC_OP_TOKEN_URL="https://keycloak.test/realms/lex/protocol/openid-connect/token",
-    OIDC_OP_USERINFO_URL="https://keycloak.test/realms/lex/protocol/openid-connect/userinfo",
-    OIDC_OP_JWKS_URL=None,
-    OIDC_OP_END_SESSION_URL=None,
-    OIDC_RP_IDP_SIGN_KEY=_PUBLIC_PEM,
-)
-
-
-def _claims(email: str) -> dict:
-    now = int(time.time())
-    return {"aud": CLIENT_ID, "email": email, "sub": email, "iat": now, "exp": now + 300}
-
-
 class TestCluster04x_ForgedBearerTokens(TestCase):
     """4.144: the bearer path accepts Keycloak's RS256 tokens and nothing signed with the client secret."""
 
@@ -406,22 +429,32 @@ class TestCluster04x_ForgedBearerTokens(TestCase):
         Scenario 4.144: a token "signed" with the instance's client secret does not sign anyone in.
         Given: lex-app's settings (OIDC_RP_SIGN_ALGOS_ALLOWED) and an attacker who knows the
                client secret, which sits in every instance's environment
-        When: they call an authenticated API with an HS256 token for a victim's e-mail, and
-              -- as a control -- a real RS256 token from the identity provider's key is used
+        When: they call an authenticated API with an HS256 token for a victim's e-mail -- with
+              the issuer, audience and type of a real access token -- and, as a control, a real
+              RS256 access token from the identity provider's key is used
         Then: the forged token gets no access and creates or signs in no user; the RS256
               token is accepted.
         """
         self.assertEqual(settings.OIDC_RP_SIGN_ALGOS_ALLOWED, ["RS256"], "lex-app must accept Keycloak's RS256 only")
         User = get_user_model()
         victim = "victim@customer.example"
-        forged = jwt.encode(_claims(victim), CLIENT_SECRET, algorithm="HS256")
+        op = FakeOP()
+        now = int(time.time())
+        forged = jwt.encode(
+            {"iss": op.issuer, "aud": [CLIENT_ID], "azp": CLIENT_ID, "typ": "Bearer", "email": victim,
+             "sub": victim, "iat": now, "exp": now + 300},
+            CLIENT_SECRET,
+            algorithm="HS256",
+        )
 
-        with override_settings(**_OIDC_TEST_SETTINGS):
+        with override_settings(OIDC_RP_CLIENT_ID=CLIENT_ID, OIDC_RP_CLIENT_SECRET=CLIENT_SECRET,
+                               **op.django_settings()), op, \
+                mock.patch.object(uma_client, "fetch_uma_permissions", return_value=[]):
             response = self.client.get("/api/user_permissions/", HTTP_AUTHORIZATION=f"Bearer {forged}")
             self.assertNotEqual(response.status_code, 200, "a forged HS256 token must not reach the view")
             self.assertFalse(User.objects.filter(email=victim).exists(), "a forged token must not create or sign in a user")
 
-            genuine = jwt.encode(_claims("real.user@customer.example"), _PRIVATE_KEY, algorithm="RS256")
+            genuine = op.issue_tokens("kc-real-user", email="real.user@customer.example")["access_token"]
             accepted = self.client.get("/api/user_permissions/", HTTP_AUTHORIZATION=f"Bearer {genuine}")
             self.assertEqual(accepted.status_code, 200, "Keycloak's RS256 token must still be accepted")
             self.assertTrue(User.objects.filter(email="real.user@customer.example").exists())
@@ -436,13 +469,14 @@ class TestCluster04x_AnchoredLoginExemptions(TestCase):
         A navigation is redirected to /oidc/authenticate; from django-oauth2-codeflow 2.1.0 a
         background request (any /api/ path) gets 401 JSON with a ``login_url`` instead (older
         releases answered such JSON with a ``token_type``). A view's own 401/403 -- DRF's
-        ``{"detail": ...}`` -- is not the login middleware and does not count.
+        ``{"detail": ...}``, which since 2.5 also carries the contract's ``login_url`` -- is
+        not the login middleware and does not count.
         """
         if response.status_code == 302:
             return "/oidc/authenticate" in response.get("Location", "")
         if response.status_code == 401 and response.get("Content-Type", "").startswith("application/json"):
             body = response.json()
-            return "login_url" in body or "token_type" in body
+            return ("login_url" in body or "token_type" in body) and "detail" not in body
         return False
 
     # -- 4.145 ---------------------------------------------------------
@@ -493,12 +527,12 @@ class TestCluster04x_AnchoredLoginExemptions(TestCase):
     def test_4_147_every_exemption_is_anchored(self) -> None:
         """
         Scenario 4.147: every login exemption matches whole paths only.
-        Given: the configured OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS
+        Given: the configured OIDC_LOGIN_REQUIRED_EXEMPT_URL_PATTERNS
         When: each pattern is inspected
         Then: each starts with ^ and ends with $ or a path-boundary group, so the library's
               re.search cannot match it in the middle of another path.
         """
-        for pattern in settings.OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS:
+        for pattern in settings.OIDC_LOGIN_REQUIRED_EXEMPT_URL_PATTERNS:
             with self.subTest(pattern=pattern):
                 self.assertTrue(pattern.startswith("^"), f"{pattern!r} must be anchored at the start")
                 self.assertTrue(

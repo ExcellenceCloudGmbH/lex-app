@@ -27,6 +27,10 @@ Flags (name → what "on" means):
 * ``CREATE``        – ``permission_create`` is asked a second time on the record filled with the
   request's validated values (foreign keys set) before it is saved; a refusal answers like the
   first check on the blank record (401/403 ``{message}``).
+* ``CORS``          – credentialed cross-origin requests are accepted only from the instance's own
+  origins: ``https://<DOMAIN_HOSTED>``, the hosts in ``LEX_INSTANCE_HOSTS`` and
+  ``LEX_CORS_ALLOWED_ORIGINS`` (plus localhost when not deployed). Off, any origin is accepted
+  again, as before 2.5. Read once, when the settings load.
 
 ``LEX_API_TRACEBACKS=true|false`` decides on its own whether error responses
 may carry a traceback (see :func:`expose_tracebacks`).
@@ -49,6 +53,7 @@ FLAGS = (
     "INTERNAL",
     "HISTORY_WRITE",
     "CREATE",
+    "CORS",
 )
 
 _TRUE = {"1", "true", "yes", "on"}

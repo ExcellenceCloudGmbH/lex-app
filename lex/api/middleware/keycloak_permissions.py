@@ -1,175 +1,342 @@
-# lex_app/rest_api/middleware.py
+"""The caller's Keycloak permissions, profile and roles, attached to every request -- lazily.
 
+``KeycloakPermissionsMiddleware`` gives each request three attributes that the permission
+layer (``UserContext``, filter backends, serializers, ``api/user_permissions/``) reads:
+
+* ``request.user_permissions`` -- the user's Keycloak UMA permissions
+  (``[{"rsname", "resource_set_id", "scopes"}, ...]``);
+* ``request.userinfo`` -- the profile of the sign-in (``sub``, ``email``, ``name``, ...);
+* ``request.client_roles`` -- the user's roles on this instance's Keycloak client.
+
+They are lazy (``SimpleLazyObject``): nothing is computed until something reads them, and a
+request that never checks a permission never reaches Keycloak. The profile and the roles come
+from the validated sign-in (``request.oidc``, the access token's ``resource_access``) and never
+cost a Keycloak call. The permissions are one UMA request through the stateless
+``lex.api.keycloak.uma_client`` (the token travels on that request only), and:
+
+* **cached** per access-token digest for at most 60 s and never past the token's expiry -- a
+  token belongs to one user, so the cache can never answer for anyone else;
+* **single-flight** per digest: concurrent requests with one token make one call and share its
+  outcome;
+* behind **their own circuit breaker** (``keycloak_uma``, configured by ``OIDC_CIRCUIT_BREAKER``):
+  while Keycloak keeps failing, nobody waits on it.
+
+What Keycloak's answer means:
+
+=================================  ==========================================================
+Keycloak answers                   the request
+=================================  ==========================================================
+the permissions                    ``user_permissions`` is that list
+403 ``access_denied``              ``[]`` -- a real "nothing granted"; views answer 403/404
+401 (token not accepted)           401 ``session_expired`` (``SessionRejected``): sign in again
+no usable answer (5xx, timeout,    503 ``auth_unavailable`` (``AuthUnavailable``). Never ``[]``:
+breaker open)                      an outage must not read as "no permission"
+=================================  ==========================================================
+
+For unsafe methods (POST, PUT, PATCH, DELETE) of a signed-in user the permissions are fetched
+here, before the view, so a 503 always comes before anything was written -- the contract that
+lets clients retry those requests. Code that turns exceptions into denials must let these
+outcomes through (``lex.api.security.is_auth_outage``).
+
+Requests without an OIDC sign-in (anonymous, API keys, non-OIDC logins) get ``[]``, ``{}`` and
+``[]``, as before.
+"""
+from __future__ import annotations
+
+import copy
+import hashlib
 import logging
+import re
 import threading
+import time
+from datetime import datetime, timezone
+from typing import Any, Callable, Optional
 
-from lex.api.views.authentication.KeycloakManager import KeycloakManager
+from django.utils.functional import SimpleLazyObject
 
-# It's good practice to have a dedicated logger for your middleware
+from oauth2_authcodeflow import sessions as oidc_sessions
+from oauth2_authcodeflow.breaker import get_breaker
+from oauth2_authcodeflow.exceptions import OIDCAuthUnavailable, OIDCSessionEnded
+from oauth2_authcodeflow.jwt_validation import unverified_claims
+from oauth2_authcodeflow.tokens import get_access_token
+
+from lex.api.keycloak import uma_client
+from lex.authentication import identity
+from lex.authentication.drf_exceptions import AuthUnavailable, SessionRejected, django_response
+
 logger = logging.getLogger(__name__)
 
-_manager = None
-_manager_factory = None
-_manager_lock = threading.Lock()
+#: A UMA answer is reused for at most this many seconds (and never past the token's expiry).
+UMA_CACHE_MAX_TTL = 60
+#: How long a request waits for the one already asking Keycloak with the same token.
+UMA_WAIT_SECONDS = 15
+#: Upper bound on cached answers per process (expired ones go first).
+UMA_CACHE_MAX_ENTRIES = 4096
+#: Name of the UMA circuit breaker (the library's breaker registry, separate from its own).
+UMA_BREAKER = "keycloak_uma"
+
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
 
 
-def _shared_manager():
-    """One KeycloakManager per process instead of one per request.
+# ---------------------------------------------------------------------------
+# Cache and single flight, keyed by the SHA-256 of the access token
+# ---------------------------------------------------------------------------
+class _UmaCache:
+    def __init__(self, max_entries: int, clock: Callable[[], float] = time.monotonic) -> None:
+        self.max_entries = max_entries
+        self.clock = clock
+        self._data: dict[str, tuple[float, list]] = {}
+        self._lock = threading.Lock()
 
-    Building a manager opens admin/UMA/OIDC clients and resolves the client's
-    uuid through the admin API — work that was repeated on every request. The
-    configuration comes from the environment and does not change at runtime.
-    A failed initialisation is not kept, so the next request retries.
+    def get(self, key: str) -> Optional[list]:
+        now = self.clock()
+        with self._lock:
+            entry = self._data.get(key)
+            if entry is None:
+                return None
+            if entry[0] <= now:
+                del self._data[key]
+                return None
+            return copy.deepcopy(entry[1])
+
+    def put(self, key: str, value: list, ttl: float) -> None:
+        now = self.clock()
+        with self._lock:
+            if key not in self._data and len(self._data) >= self.max_entries:
+                for stale in [k for k, (expires, _) in self._data.items() if expires <= now]:
+                    del self._data[stale]
+                while len(self._data) >= self.max_entries:
+                    del self._data[next(iter(self._data))]
+            self._data[key] = (now + ttl, copy.deepcopy(value))
+
+    def clear(self) -> None:
+        with self._lock:
+            self._data.clear()
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._data)
+
+
+class _Flight:
+    __slots__ = ("done", "result", "error")
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.result: Optional[list] = None
+        self.error: Optional[BaseException] = None
+
+
+_cache = _UmaCache(UMA_CACHE_MAX_ENTRIES)
+_flights: dict[str, _Flight] = {}
+_flights_lock = threading.Lock()
+
+
+def reset_uma_cache() -> None:
+    """Forget every cached answer (tests; a Keycloak policy change that must apply at once)."""
+    _cache.clear()
+
+
+def _digest(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _seconds_left(token: str, expires_at: Optional[datetime]) -> float:
+    if expires_at is None:
+        exp = unverified_claims(token).get("exp")
+        if not isinstance(exp, (int, float)):
+            return 0.0
+        return float(exp) - time.time()
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return (expires_at - datetime.now(timezone.utc)).total_seconds()
+
+
+def _again(error: BaseException) -> BaseException:
+    """A fresh exception for a request that shared a failed flight."""
+    if isinstance(error, AuthUnavailable):
+        return AuthUnavailable(error.retry_after, category=error.category)
+    if isinstance(error, SessionRejected):
+        return SessionRejected()
+    return error
+
+
+def _single_flight(key: str, fetch: Callable[[], list]) -> list:
+    with _flights_lock:
+        flight = _flights.get(key)
+        leader = flight is None
+        if leader:
+            flight = _Flight()
+            _flights[key] = flight
+    if not leader:
+        if not flight.done.wait(UMA_WAIT_SECONDS):
+            raise AuthUnavailable(category="uma_wait")
+        if flight.error is not None:
+            raise _again(flight.error)
+        return copy.deepcopy(flight.result or [])
+    try:
+        flight.result = fetch()
+        return copy.deepcopy(flight.result)
+    except BaseException as error:
+        flight.error = error
+        raise
+    finally:
+        with _flights_lock:
+            _flights.pop(key, None)
+        flight.done.set()
+
+
+def _ask_keycloak(token: str, endpoints: uma_client.KeycloakEndpoints) -> list:
+    breaker = get_breaker(UMA_BREAKER)
+    if not breaker.try_acquire():
+        raise AuthUnavailable(breaker.retry_after(), category="uma_breaker_open")
+    try:
+        permissions = uma_client.fetch_uma_permissions(token, endpoints=endpoints)
+    except uma_client.KeycloakDenied:
+        breaker.success()
+        return []
+    except uma_client.KeycloakUnauthorized:
+        breaker.success()  # Keycloak answered: it is up, it refused this token
+        logger.info("Keycloak did not accept an access token for UMA; answering 401 session_expired")
+        raise SessionRejected()
+    except uma_client.KeycloakUnavailable as exc:
+        category = getattr(exc, "category", "transient")
+        breaker.failure("config" if category == "config" else "transient")
+        logger.warning("Keycloak UMA permissions unavailable (%s): %s", category, exc)
+        raise AuthUnavailable(breaker.retry_after(), category="uma") from None
+    except BaseException:
+        breaker.release_probe()  # not an answer from Keycloak: never leave a half-open probe pending
+        raise
+    breaker.success()
+    return permissions
+
+
+def uma_permissions(token: str, *, expires_at: Optional[datetime] = None) -> list:
+    """The UMA permissions of ``token``: cached, single-flight and behind the UMA breaker.
+
+    Raises :class:`AuthUnavailable` (503) or :class:`SessionRejected` (401); returns ``[]``
+    when Keycloak grants nothing -- or when no Keycloak authorization server is configured at
+    all (no ``KEYCLOAK_URL``/``KEYCLOAK_REALM``/``OIDC_RP_CLIENT_ID``): there is nobody to ask.
     """
-    global _manager, _manager_factory
-    factory = KeycloakManager  # looked up per call, so a replaced class (tests) takes effect
-    if _manager is None or _manager_factory is not factory:
-        with _manager_lock:
-            if _manager is None or _manager_factory is not factory:
-                _manager = factory()
-                _manager_factory = factory
-    return _manager
+    endpoints = uma_client.KeycloakEndpoints.from_environment()
+    if endpoints is None or not endpoints.client_id:
+        return []
+    key = _digest(token)
+    cached = _cache.get(key)
+    if cached is not None:
+        return cached
+
+    def fetch() -> list:
+        again = _cache.get(key)  # a flight that finished while this one queued
+        if again is not None:
+            return again
+        permissions = _ask_keycloak(token, endpoints)
+        ttl = min(float(UMA_CACHE_MAX_TTL), _seconds_left(token, expires_at))
+        if ttl > 0:
+            _cache.put(key, permissions, ttl)
+        return permissions
+
+    return _single_flight(key, fetch)
 
 
-def _reset_shared_manager():
-    """Forget the shared manager (tests)."""
-    global _manager, _manager_factory
-    _manager = None
-    _manager_factory = None
+# ---------------------------------------------------------------------------
+# The middleware
+# ---------------------------------------------------------------------------
+#: What a permission lookup can raise instead of answering (all mapped to the contract).
+LOOKUP_OUTCOMES = (AuthUnavailable, SessionRejected, OIDCAuthUnavailable, OIDCSessionEnded)
+
+
+class _RequestIdentity:
+    """Computes the three attributes of one request, on first use."""
+
+    def __init__(self, request: Any) -> None:
+        self.request = request
+
+    @property
+    def context(self):
+        return getattr(self.request, "oidc", None)
+
+    def permissions(self) -> list:
+        context = self.context
+        if context is None:
+            return []
+        token = get_access_token(self.request)  # the library refreshes it if it must
+        if not token:
+            return []
+        return uma_permissions(token, expires_at=context.access_expires_at)
+
+    def userinfo(self) -> dict:
+        context = self.context
+        return identity.profile_claims(context) if context is not None else {}
+
+    def client_roles(self) -> list:
+        context = self.context
+        return list(context.client_roles()) if context is not None else []
 
 
 class KeycloakPermissionsMiddleware:
+    """Attach lazy ``user_permissions`` / ``userinfo`` / ``client_roles`` to every request.
+
+    Place it after ``oauth2_authcodeflow``'s ``BearerAuthMiddleware`` and
+    ``OIDCSessionMiddleware`` (which set ``request.oidc``) and after the login middleware.
     """
-    This middleware is responsible for fetching a user's complete set of UMA (User-Managed Access)
-    permissions from Keycloak once per authenticated request.
 
-    It attaches the list of permissions to the `request` object as `request.user_permissions`,
-    and user profile data as `request.userinfo`/`request.client_roles`.
-    This creates a single, consistent source of truth for permissions that can be used
-    by DRF Permission classes, filters, and serializers throughout the request lifecycle,
-    avoiding redundant API calls to Keycloak.
-
-    **Installation:**
-    Add this middleware to your `settings.py` file in the `MIDDLEWARE` list.
-    It should be placed *after* Django's `AuthenticationMiddleware` and `SessionMiddleware`
-    to ensure that `request.user` and `request.session` are available.
-
-    Example `settings.py`:
-    ```
-    MIDDLEWARE = [
-        # ... other middleware
-        'django.contrib.sessions.middleware.SessionMiddleware',
-        'django.contrib.auth.middleware.AuthenticationMiddleware',
-        # ... other middleware
-        'lex_app.rest_api.middleware.KeycloakPermissionsMiddleware', # Add this line
-    ]
-    ```
-    """
     def __init__(self, get_response):
-        """
-        Initializes the middleware. This is called once by the Django server at startup.
-        """
         self.get_response = get_response
 
     def __call__(self, request):
-        """
-        This method is called for each request. It processes the request before it
-        reaches the view and other middleware.
-        """
-        # First, clean up any None tokens to prevent JWT parsing errors
-        # self.cleanup_invalid_tokens(request)
-        
-        # Always provide defaults so downstream code can safely access these attributes.
-        request.user_permissions = []
-        request.userinfo = {}
-        request.client_roles = []
-
-        access_token = request.session.get("oidc_access_token")
-
-        # Fallback: extract token from Authorization header for Bearer token requests
-        if not access_token:
-            auth_header = request.META.get("HTTP_AUTHORIZATION", "")
-            if auth_header.startswith("Bearer "):
-                access_token = auth_header[7:].strip()
-
-        if access_token:
-            kc_manager = _shared_manager()
+        state = _RequestIdentity(request)
+        request.user_permissions = SimpleLazyObject(state.permissions)
+        request.userinfo = SimpleLazyObject(state.userinfo)
+        request.client_roles = SimpleLazyObject(state.client_roles)
+        if self._decide_before_view(request, state):
+            # Writes are decided before the view: a 503 never follows a half-done write.
             try:
-                # Fetch all permissions once and attach them to the request.
-                # This list will be the single source of truth for the rest of the request.
-                permissions = kc_manager.get_uma_permissions(access_token)
-                request.user_permissions = permissions if permissions is not None else []
-            except Exception as e:
-                # Log any unexpected errors during permission fetching but don't crash the request.
-                # Default to no permissions in case of an error.
-                logger.error(f"Failed to fetch Keycloak UMA permissions: {e}")
-
-            try:
-                # Through the manager's stateless path: the token rides on this
-                # one request, never on the process-wide python-keycloak connection
-                # (which let concurrent users receive each other's profile).
-                userinfo = kc_manager.get_userinfo(access_token)
-                if isinstance(userinfo, dict):
-                    request.userinfo = userinfo
-                    request.client_roles = self._extract_client_roles(userinfo)
-            except Exception as e:
-                logger.warning(f"Failed to fetch Keycloak userinfo: {e}")
-
-        # Pass control to the next middleware or the view.
-        response = self.get_response(request)
-
-        return response
+                bool(request.user_permissions)
+            except LOOKUP_OUTCOMES as exc:
+                return self._contract_answer(request, exc)
+        return self.get_response(request)
 
     @staticmethod
-    def _extract_client_roles(userinfo):
-        raw_roles = userinfo.get("client_roles")
-        if not raw_roles:
-            return []
-        if isinstance(raw_roles, str):
-            return [raw_roles]
-        if isinstance(raw_roles, (list, tuple, set, frozenset)):
-            return [role for role in raw_roles if isinstance(role, str)]
-        if isinstance(raw_roles, dict):
-            roles = []
-            for value in raw_roles.values():
-                if isinstance(value, str):
-                    roles.append(value)
-                elif isinstance(value, (list, tuple, set, frozenset)):
-                    roles.extend([role for role in value if isinstance(role, str)])
-            return roles
-        return []
+    def _decide_before_view(request, state) -> bool:
+        """A signed-in write to anything but the sign-in machinery itself.
 
-    def cleanup_invalid_tokens(self, request):
-        """Remove None or empty tokens from session to prevent JWT parsing errors."""
-        session_changed = False
-        
-        # List of token keys that should not be None
-        token_keys = [
-            'oidc_id_token',
-            'oidc_access_token', 
-            'oidc_refresh_token',
-        ]
-        
-        for key in token_keys:
-            if key in request.session:
-                token_value = request.session[key]
-                if token_value is None or token_value == '' or not isinstance(token_value, str):
-                    logger.warning(f"Removing invalid token from session: {key} = {repr(token_value)}")
-                    del request.session[key]
-                    session_changed = True
-        
-        # If we removed any tokens, also clean up related session data
-        if session_changed:
-            related_keys = [
-                'oidc_access_expires_at',
-                'oidc_expires_at',
-                'oidc_logout_state',
-            ]
-            
-            for key in related_keys:
-                if key in request.session:
-                    logger.debug(f"Removing related session data: {key}")
-                    del request.session[key]
-            
-            request.session.save()
-            logger.info("Cleaned up invalid tokens from session")
+        The OIDC endpoints (logout, back-channel logout, ...) and the paths the session
+        middleware leaves alone (health, admin) never read UMA permissions; signing out
+        must work while Keycloak is down.
+        """
+        if request.method in SAFE_METHODS or state.context is None:
+            return False
+        from oauth2_authcodeflow.conf import settings as oidc_settings
+        from oauth2_authcodeflow.middleware import oidc_endpoint_patterns
+
+        path = request.path_info
+        skipped = oidc_endpoint_patterns() + tuple(str(p) for p in oidc_settings.OIDC_SESSION_EXEMPT_URL_PATTERNS)
+        return not any(re.search(pattern, path) for pattern in skipped)
+
+    def process_exception(self, request, exception):
+        """Plain Django views: map a lookup outcome raised while the view ran to the contract."""
+        if isinstance(exception, LOOKUP_OUTCOMES):
+            return self._contract_answer(request, exception)
+        return None
+
+    @staticmethod
+    def _contract_answer(request, exc):
+        from oauth2_authcodeflow import responses as oidc_responses
+
+        if isinstance(exc, OIDCSessionEnded):
+            oidc_sessions.logout_request(request, exc.reason)
+            return oidc_responses.unauthenticated(request, "session_expired")
+        if isinstance(exc, OIDCAuthUnavailable):
+            return oidc_responses.auth_unavailable(request, exc)
+        return django_response(request, exc)
+
+
+__all__ = [
+    "KeycloakPermissionsMiddleware",
+    "LOOKUP_OUTCOMES",
+    "UMA_BREAKER",
+    "UMA_CACHE_MAX_TTL",
+    "reset_uma_cache",
+    "uma_permissions",
+]

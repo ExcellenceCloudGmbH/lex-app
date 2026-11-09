@@ -283,22 +283,24 @@ class TestCluster01av_CorsOrigins(SimpleTestCase):
     # -- 1.392 ---------------------------------------------------------
     def test_1_392_cors_origins_from_the_environment(self) -> None:
         """
-        Scenario 1.392: LEX_CORS_ALLOWED_ORIGINS replaces the permissive CORS defaults.
+        Scenario 1.392: LEX_CORS_ALLOWED_ORIGINS adds origins to the CORS allowlist.
         Given: a fresh interpreter with and without LEX_CORS_ALLOWED_ORIGINS
         When: lex's settings module is imported
-        Then: without it CORS allows all origins (unchanged); with it only the
-              listed origins (trimmed, no trailing slash) and "*" is gone.
+        Then: CORS never allows every origin and no "*" is listed (strict by default since
+              2.5, security flag CORS -- see 1.493); with the variable, the listed origins
+              (trimmed, no trailing slash) are allowed in addition to the instance's own.
         """
         code = (
             "import json\nfrom lex.lex_app import settings as s\n"
-            "print(json.dumps([s.CORS_ORIGIN_ALLOW_ALL, s.CORS_ALLOWED_ORIGINS, s.CORS_ORIGIN_WHITELIST]))"
+            "print(json.dumps([s.CORS_ALLOW_ALL_ORIGINS, s.CORS_ALLOWED_ORIGINS]))"
         )
-        allow_all, origins, _ = _fresh(code, _CHECKOUT)
-        self.assertTrue(allow_all)
-        self.assertIn("*", origins)
-        allow_all, origins, whitelist = _fresh(
+        allow_all, origins = _fresh(code, _CHECKOUT)
+        self.assertFalse(allow_all)
+        self.assertNotIn("*", origins)
+        allow_all, origins = _fresh(
             code, _CHECKOUT, LEX_CORS_ALLOWED_ORIGINS=" https://app.example.com/, https://admin.example.com"
         )
         self.assertFalse(allow_all)
-        self.assertEqual(origins, ["https://app.example.com", "https://admin.example.com"])
-        self.assertEqual(whitelist, origins)
+        self.assertIn("https://app.example.com", origins)
+        self.assertIn("https://admin.example.com", origins)
+        self.assertNotIn("*", origins)

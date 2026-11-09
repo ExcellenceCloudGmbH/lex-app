@@ -34,8 +34,10 @@ docs/lex_topics/15-authentication-and-keycloak.md):
 
 No Keycloak broker required for any scenario — the view pulls from
 ``request.user_permissions`` (attached by the middleware), the
-middleware itself is driven via a factory + a fake ``KeycloakManager``,
-and the helpers take plain dicts.
+middleware itself is driven via a factory with a test sign-in
+(``oauth2_authcodeflow.testing.create_oidc_session``) and the UMA call
+patched at ``lex.api.keycloak.uma_client``, and the helpers take plain
+dicts.
 
 Scenario numbering continues Cluster 4 (4.27 – 4.39).
 """
@@ -74,18 +76,57 @@ def _with_default_permission_read(model_cls):
 # TestCluster04g_KeycloakMiddleware
 #
 # Drives ``KeycloakPermissionsMiddleware.__call__`` with a real request
-# + a stubbed ``KeycloakManager``. Asserts on the attributes the
-# middleware stamps onto the request — everything downstream keys off
-# these.
+# and asserts on the attributes the middleware stamps onto the request --
+# everything downstream keys off these. Since lex-app 2.5 (batch 4y) the
+# attributes are lazy, the profile and roles come from the sign-in
+# (``request.oidc``) and only the UMA permissions are asked of Keycloak,
+# through ``lex.api.keycloak.uma_client`` (patched here: no Keycloak).
 # =====================================================================
-class TestCluster04g_KeycloakMiddleware(SimpleTestCase):
+_KEYCLOAK_ENV = {
+    "KEYCLOAK_URL": "https://keycloak.test",
+    "KEYCLOAK_REALM": "lex",
+    "OIDC_RP_CLIENT_ID": "lex-app",
+}
+
+
+class TestCluster04g_KeycloakMiddleware(TestCase):
     """Scenarios 4.31 – 4.34 — middleware surface."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        from django.test import override_settings
+
+        from lex.api.middleware.keycloak_permissions import reset_uma_cache
+
+        overrides = override_settings(
+            OIDC_RP_CLIENT_ID="lex-app",
+            AUTHENTICATION_BACKENDS=[
+                "oauth2_authcodeflow.auth.AuthenticationBackend",
+                "django.contrib.auth.backends.ModelBackend",
+            ],
+        )
+        overrides.enable()
+        self.addCleanup(overrides.disable)
+        env = patch.dict("os.environ", _KEYCLOAK_ENV)
+        env.start()
+        self.addCleanup(env.stop)
+        reset_uma_cache()
+        self.addCleanup(reset_uma_cache)
 
     def _mk_request(self, session=None):
         factory = RequestFactory()
         req = factory.get("/any/")
         req.session = session if session is not None else {}
         return req
+
+    def _signed_in_request(self, **kwargs):
+        from django.contrib.auth import get_user_model
+        from oauth2_authcodeflow.testing import create_oidc_session
+
+        user = get_user_model().objects.create_user(username="u", email="u@x")
+        req = RequestFactory().get("/any/")
+        row = create_oidc_session(req, user, **kwargs)
+        return req, row
 
     # -- 4.31 ----------------------------------------------------------
     def test_4_31_defaults_installed_when_no_access_token(self) -> None:
@@ -97,187 +138,140 @@ class TestCluster04g_KeycloakMiddleware(SimpleTestCase):
         ``getattr(request, "user_permissions", ())`` with the
         expectation that the attribute *always* exists. Removing
         the default assignment would turn every anonymous request
-        into an ``AttributeError`` 500.
+        into an ``AttributeError`` 500. Without a sign-in Keycloak is
+        never asked.
         """
         get_response = MagicMock(return_value="RESPONSE")
         mw = KeycloakPermissionsMiddleware(get_response)
 
-        req = self._mk_request(session={})  # no oidc_access_token
+        req = self._mk_request(session={})  # no sign-in
 
         with patch(
-            "lex.api.middleware.keycloak_permissions.KeycloakManager",
-        ) as km_cls:
+            "lex.api.middleware.keycloak_permissions.uma_client.fetch_uma_permissions",
+        ) as fetch:
             result = mw(req)
+            self.assertEqual(req.user_permissions, [])
+            self.assertEqual(req.userinfo, {})
+            self.assertEqual(req.client_roles, [])
 
         self.assertEqual(result, "RESPONSE")
-        self.assertEqual(req.user_permissions, [])
-        self.assertEqual(req.userinfo, {})
-        self.assertEqual(req.client_roles, [])
-        km_cls.assert_not_called()  # never instantiated without a token
+        fetch.assert_not_called()  # nobody to ask for without a sign-in
         get_response.assert_called_once_with(req)
 
     # -- 4.32 ----------------------------------------------------------
     def test_4_32_populates_identity_from_keycloak_when_token_present(self) -> None:
-        """Scenario 4.32: a session carrying ``oidc_access_token``
-        makes the middleware fetch UMA perms + userinfo and stamp
-        them on the request. The populated values flow through to
-        the serializer + filter-backend layers unchanged.
+        """Scenario 4.32: a signed-in request gets its UMA permissions from
+        Keycloak and its profile and client roles from the sign-in itself.
+        The populated values flow through to the serializer + filter-backend
+        layers unchanged.
         """
         get_response = MagicMock(return_value="RESPONSE")
         mw = KeycloakPermissionsMiddleware(get_response)
 
-        req = self._mk_request(session={"oidc_access_token": "tok-123"})
-
-        fake_km = MagicMock()
-        fake_km.get_uma_permissions.return_value = [
-            {"rsname": "lex_app.Invoice", "scopes": ["read"]},
-        ]
-        # The manager's per-call userinfo (batch 4x): the middleware no longer
-        # reaches into the shared python-keycloak connection (``km.oidc``).
-        fake_km.get_userinfo.return_value = {
-            "email": "u@x",
-            "client_roles": ["admin", "viewer"],
-        }
+        req, row = self._signed_in_request(client_roles=["admin", "viewer"], claims={"email": "u@x"})
 
         with patch(
-            "lex.api.middleware.keycloak_permissions.KeycloakManager",
-            return_value=fake_km,
-        ):
+            "lex.api.middleware.keycloak_permissions.uma_client.fetch_uma_permissions",
+            return_value=[{"rsname": "lex_app.Invoice", "scopes": ["read"]}],
+        ) as fetch:
             mw(req)
+            self.assertEqual(len(req.user_permissions), 1)
+            self.assertEqual(req.user_permissions[0]["rsname"], "lex_app.Invoice")
+            self.assertEqual(req.userinfo["email"], "u@x")
+            self.assertEqual(
+                sorted(req.client_roles), ["admin", "viewer"],
+                "client_roles must come from the access token (resource_access) -- "
+                "downstream code (UserContext.from_request) relies on this attribute.",
+            )
 
-        fake_km.get_uma_permissions.assert_called_once_with("tok-123")
-        self.assertEqual(len(req.user_permissions), 1)
-        self.assertEqual(req.user_permissions[0]["rsname"], "lex_app.Invoice")
-        self.assertEqual(req.userinfo["email"], "u@x")
-        self.assertEqual(
-            sorted(req.client_roles), ["admin", "viewer"],
-            "client_roles must be extracted from userinfo — downstream "
-            "code (UserContext.from_request) relies on this attribute.",
-        )
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(fetch.call_args.args[0], row.access_token, "UMA must be asked with the sign-in's own token")
 
     # -- 4.32b ---------------------------------------------------------
     def test_4_32b_uma_fetch_failure_keeps_defaults(self) -> None:
-        """Scenario 4.32b: if ``get_uma_permissions`` raises, the
-        request continues through to the view — the middleware MUST
-        NOT 500 on a Keycloak outage. The default ``[]`` survives.
+        """Scenario 4.32b: a Keycloak outage never reads as "no permissions".
+
+        The request still reaches the view (reading permissions is lazy), but
+        reading ``user_permissions`` raises ``AuthUnavailable`` -- the contract's
+        503 ``auth_unavailable`` -- instead of handing the permission layer an
+        empty list that would deny a signed-in user everything. The profile and
+        roles, which never needed Keycloak, stay available.
         """
+        from lex.api.keycloak.uma_client import KeycloakUnavailable
+        from lex.authentication.drf_exceptions import AuthUnavailable
+
         get_response = MagicMock(return_value="RESPONSE")
         mw = KeycloakPermissionsMiddleware(get_response)
-        req = self._mk_request(session={"oidc_access_token": "tok-xyz"})
-
-        fake_km = MagicMock()
-        fake_km.get_uma_permissions.side_effect = RuntimeError("kc down")
-        fake_km.get_userinfo.return_value = None  # Keycloak could not answer userinfo either
+        req, _ = self._signed_in_request(client_roles=["viewer"])
 
         with patch(
-            "lex.api.middleware.keycloak_permissions.KeycloakManager",
-            return_value=fake_km,
+            "lex.api.middleware.keycloak_permissions.uma_client.fetch_uma_permissions",
+            side_effect=KeycloakUnavailable("kc down"),
         ):
-            mw(req)
+            self.assertEqual(mw(req), "RESPONSE", "a GET must still reach the view")
+            with self.assertRaises(AuthUnavailable):
+                list(req.user_permissions)
 
-        self.assertEqual(req.user_permissions, [])
-        self.assertEqual(req.userinfo, {})
-        self.assertEqual(req.client_roles, [])
+        self.assertEqual(req.client_roles, ["viewer"])
+        self.assertTrue(req.userinfo.get("sub"))
 
     # -- 4.33 ----------------------------------------------------------
     def test_4_33_extract_client_roles_shapes(self) -> None:
-        """Scenario 4.33: ``_extract_client_roles`` accepts every
-        shape Keycloak can return — str, list, tuple, set, dict.
+        """Scenario 4.33: client roles are read from every shape a token can carry them in.
 
-        Keycloak's ``userinfo`` payload shape depends on the realm's
-        mappers. One realm returns a list, another returns a dict of
-        ``{client_id: [roles]}``. The helper normalises all of them
-        to a flat list so downstream code can treat roles uniformly.
+        Keycloak puts a client's roles in the access token's
+        ``resource_access[<client id>].roles``; realms with a ``client_roles``
+        mapper carry them as a string, a list or a dict of
+        ``{client_id: [roles]}``. Every shape is normalised to a flat list of
+        strings, and roles of *other* clients never leak in.
         """
-        extract = KeycloakPermissionsMiddleware._extract_client_roles
+        from oauth2_authcodeflow.context import OIDCContext
 
-        # None / missing → []
-        self.assertEqual(extract({}), [])
-        self.assertEqual(extract({"client_roles": None}), [])
+        def roles_for(claims):
+            req = self._mk_request()
+            req.oidc = OIDCContext.from_bearer("opaque", dict({"sub": "s", "exp": 4102444800}, **claims))
+            KeycloakPermissionsMiddleware(lambda r: "RESPONSE")(req)
+            return sorted(req.client_roles)
 
-        # bare string → wrapped in list
-        self.assertEqual(extract({"client_roles": "admin"}), ["admin"])
-
-        # list / tuple / set → filtered to strings
-        self.assertEqual(extract({"client_roles": ["a", "b"]}), ["a", "b"])
+        self.assertEqual(roles_for({"resource_access": {"lex-app": {"roles": ["admin", "viewer"]}}}),
+                         ["admin", "viewer"])
         self.assertEqual(
-            sorted(extract({"client_roles": ("a", "b", 42)})),
-            ["a", "b"],
-            "Non-string entries must be filtered — otherwise a role "
-            "that is accidentally an int propagates into the scope "
-            "comparisons and silently fails.",
+            roles_for({"resource_access": {"other-client": {"roles": ["root"]}, "lex-app": {"roles": ["viewer"]}}}),
+            ["viewer"],
+            "roles of another client must never count for this instance",
         )
-        self.assertEqual(
-            sorted(extract({"client_roles": frozenset(["x", "y"])})),
-            ["x", "y"],
-        )
-
-        # dict of client_id → roles
-        got = extract(
-            {
-                "client_roles": {
-                    "my-client": ["admin", "viewer"],
-                    "other-client": "editor",
-                    "junk": 42,
-                },
-            }
-        )
-        self.assertEqual(sorted(got), ["admin", "editor", "viewer"])
-
-        # completely unknown shape → []
-        self.assertEqual(extract({"client_roles": 42}), [])
+        self.assertEqual(roles_for({}), [])
+        self.assertEqual(roles_for({"client_roles": "admin"}), ["admin"])
+        self.assertEqual(roles_for({"client_roles": ["a", "b", 42]}), ["a", "b"],
+                         "non-string entries must be filtered")
+        self.assertEqual(roles_for({"client_roles": {"lex-app": ["admin", "viewer"], "other": ["root"]}}),
+                         ["admin", "viewer"])
+        self.assertEqual(roles_for({"client_roles": 42}), [])
 
     # -- 4.34 ----------------------------------------------------------
     def test_4_34_cleanup_invalid_tokens_scrubs_session(self) -> None:
-        """Scenario 4.34: the session-cleanup helper removes ``None``
-        / empty / non-string tokens and their associated expiry
-        metadata.
+        """Scenario 4.34: tokens left in a session by the 2.x library are never used.
 
-        A session row that stores ``None`` for ``oidc_id_token``
-        crashes the JWT parser on the next request; the cleanup
-        helper is what keeps sessions usable across framework
-        upgrades that changed how tokens are stored.
+        django-oauth2-codeflow 3 keeps tokens in encrypted ``OIDCSession`` rows
+        and migrates a 2.x session once; the middleware asks Keycloak only with
+        the sign-in's own token (``request.oidc``). A request whose session still
+        holds ``oidc_*`` keys -- valid, ``None`` or empty -- but has no sign-in
+        gets the defaults and causes no Keycloak call, so a stale or planted
+        session value can never be sent to Keycloak.
         """
-        mw = KeycloakPermissionsMiddleware(lambda r: r)
-
-        class _FakeSession(dict):
-            """Tiny ``Session``-like wrapper — session.save() is a no-op
-            but must exist because the helper calls it."""
-
-            def __init__(self, *a, **kw):
-                super().__init__(*a, **kw)
-                self.saved = False
-
-            def save(self):
-                self.saved = True
-
-        session = _FakeSession(
-            {
-                "oidc_id_token": None,
-                "oidc_access_token": "good-token",
-                "oidc_refresh_token": "",  # empty
-                "oidc_access_expires_at": 1234,
-                "oidc_logout_state": "abc",
-                "unrelated_key": "stays",
-            }
-        )
-        req = self._mk_request(session=session)
-        mw.cleanup_invalid_tokens(req)
-
-        self.assertNotIn("oidc_id_token", session, "None token must be deleted")
-        self.assertNotIn("oidc_refresh_token", session, "Empty token must be deleted")
-        self.assertIn(
-            "oidc_access_token", session,
-            "Valid string tokens must survive the cleanup",
-        )
-        self.assertNotIn(
-            "oidc_access_expires_at", session,
-            "When any token was cleaned, the related expiry metadata "
-            "must also be scrubbed so the session is consistent.",
-        )
-        self.assertNotIn("oidc_logout_state", session)
-        self.assertIn("unrelated_key", session)
-        self.assertTrue(session.saved, "Session must be .save()'d after scrubbing")
+        req = self._mk_request(session={
+            "oidc_id_token": None,
+            "oidc_access_token": "good-token",
+            "oidc_refresh_token": "",
+            "oidc_access_expires_at": 1234,
+            "oidc_logout_state": "abc",
+        })
+        with patch(
+            "lex.api.middleware.keycloak_permissions.uma_client.fetch_uma_permissions",
+        ) as fetch:
+            KeycloakPermissionsMiddleware(lambda r: "RESPONSE")(req)
+            self.assertEqual((req.user_permissions, req.userinfo, req.client_roles), ([], {}, []))
+        fetch.assert_not_called()
 
 
 # =====================================================================

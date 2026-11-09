@@ -100,6 +100,13 @@ def _fail_closed() -> bool:
     return strict("FAIL_CLOSED")
 
 
+def _auth_outage(exc: BaseException) -> bool:
+    """An auth outage (503/401) is re-raised, never turned into a withheld record."""
+    from lex.api.security import is_auth_outage
+
+    return is_auth_outage(exc)
+
+
 def _lex_model_can_read():
     """LexModel's own can_read wrapper (which delegates to permission_read)."""
     from lex.core.models.LexModel import LexModel
@@ -645,7 +652,9 @@ class LexSerializer(serializers.ModelSerializer):
                     allowed = len(readable_fields) > 0
                 else:
                     allowed = bool(readable_fields)
-        except Exception:
+        except Exception as exc:
+            if _auth_outage(exc):
+                raise
             if _fail_closed():
                 logger.exception(
                     "permission_read of %s raised on an audit-log payload reference; reference withheld",
@@ -839,7 +848,9 @@ class LexSerializer(serializers.ModelSerializer):
                     raw_visible_fields = result.get_fields(target_instance._get_all_field_names())
                 else:
                     raw_visible_fields = target_instance.can_read(request)
-            except Exception:
+            except Exception as exc:
+                if _auth_outage(exc):
+                    raise
                 if _fail_closed():
                     logger.exception("can_read raised for %s; record withheld", type(target_instance).__name__)
                     return {}
@@ -856,7 +867,9 @@ class LexSerializer(serializers.ModelSerializer):
             user_context = self._get_user_context(request, target_instance)
             try:
                 result = target_instance.permission_read(user_context)
-            except Exception:
+            except Exception as exc:
+                if _auth_outage(exc):
+                    raise
                 if _fail_closed():
                     logger.exception("permission_read raised for %s; record withheld", type(target_instance).__name__)
                     return {}
@@ -941,7 +954,9 @@ class LexSerializer(serializers.ModelSerializer):
                             representation['payload'] = pruned
                         else:
                             representation['payload'] = filtered_payload
-        except Exception:
+        except Exception as exc:
+            if _auth_outage(exc):
+                raise
             if _fail_closed():
                 # The payload could not be judged: withhold it rather than show it unfiltered.
                 logger.exception("Filtering the audit-log payload raised; payload withheld")

@@ -32,6 +32,8 @@ from lex.api.security import (
     write_denial,
 )
 from lex.core.security_flags import strict
+from lex.api.security import is_auth_outage
+from lex.authentication.drf_exceptions import refusal_response
 from lex.core.exceptions import resolve_exception_detail, resolve_exception_traceback
 from lex.core.models.CalculationModel import (
     CalculationModel,
@@ -568,6 +570,8 @@ class OneModelEntry(
         try:
             allowed = ask_create(request, filled_record(model_class, serializer.validated_data))
         except Exception as exc:
+            if is_auth_outage(exc):
+                raise  # 503/401 per the auth contract, never "the check failed"
             if strict("FAIL_CLOSED"):
                 raise _CreateCheckRaised() from exc
             logger.warning(
@@ -589,19 +593,10 @@ class OneModelEntry(
         # (auto-redirect to login on 401, "permission denied"
         # banner on 403); collapsing both into 400 breaks
         # both code paths.
-        is_anonymous = not bool(
-            getattr(getattr(request, "user", None), "is_authenticated", False)
-        )
-        deny_status = (
-            status.HTTP_401_UNAUTHORIZED
-            if is_anonymous
-            else status.HTTP_403_FORBIDDEN
-        )
-        return Response(
-            {
-                "message": f"You are not authorized to create a record in {model_class.__name__}"
-            },
-            status=deny_status,
+        # The body keeps the documented ``message`` and adds the auth contract's keys
+        # (403 ``code: permission_denied`` / 401 ``not_authenticated``).
+        return refusal_response(
+            request, f"You are not authorized to create a record in {model_class.__name__}"
         )
 
     @staticmethod
@@ -643,6 +638,8 @@ class OneModelEntry(
             if not can_create:
                 return self._create_refused(request, model_container.model_class)
         except Exception as exc:
+            if is_auth_outage(exc):
+                raise  # 503/401 per the auth contract, never a denial
             if strict("FAIL_CLOSED"):
                 self._create_check_failed(model_container.model_class, exc)
             # Legacy (LEX_SEC_FAIL_CLOSED=false): allow by default on permission check error

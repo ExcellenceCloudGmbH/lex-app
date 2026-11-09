@@ -265,7 +265,17 @@ def _forward_to_django(command_name, args):
         from django.core.management import execute_from_command_line
         execute_from_command_line(["manage.py", command_name, *args])
         return
-    call_command(command_name, *args)
+    from django.core.management.base import CommandError
+    try:
+        call_command(command_name, *args)
+    except CommandError as error:
+        # What manage.py does: the message and the command's exit code, not a traceback
+        # (`lex oidc_check` reporting a problem is an answer, not a crash). --traceback
+        # still shows it.
+        if "--traceback" in args:
+            raise
+        click.echo(f"CommandError: {error}", err=True)
+        sys.exit(getattr(error, "returncode", 1))
 
 def _install_dynamic_commands():
     # Only called for non-setup entry, so safe to initialize Django
@@ -475,6 +485,74 @@ def _safe_theme_flags(streamlit_args, tokens=None):
         )
         return []
 
+def _check_streamlit_auth_env() -> str:
+    """Validate ``LEX_STREAMLIT_AUTH`` and what the dashboard hand-off needs; return the mode.
+
+    Same reasoning as the durability check below: the proxy refuses an unknown mode at import,
+    inside the uvicorn thread, where nobody reads it -- so the CLI refuses first, readably.
+    ``dual`` and ``handoff`` send dashboards to ``<app host>/oidc/handoff`` and back, so a
+    deployed instance must name an app host and a dashboard host (``LEX_INSTANCE_HOSTS``, or
+    ``DOMAIN_HOSTED`` and ``STREAMLIT_URL``); in development the app defaults to
+    ``http://localhost:8000``. The dashboard cookies are ``Secure; SameSite=None; Partitioned``
+    over https; a deployed proxy that cannot tell it is behind https only warns, because
+    ``X-Forwarded-Proto`` from the ingress still makes it so per request.
+    """
+    import json as _json
+
+    from lex.authentication.dashboards import modes, sites
+    from lex.core.instance_hosts import ENV_VAR as _HOSTS_VAR, instance_hosts
+
+    try:
+        mode = modes.parse_streamlit_auth(os.getenv(modes.ENV_VAR))
+    except modes.InvalidStreamlitAuthMode as exc:
+        raise click.ClickException(str(exc)) from None
+    if not modes.handoff_enabled(mode):
+        return mode
+
+    raw_hosts = (os.getenv(_HOSTS_VAR) or "").strip()
+    if raw_hosts:
+        try:
+            parsed = _json.loads(raw_hosts)
+        except ValueError:
+            parsed = None
+        if not isinstance(parsed, dict):
+            click.echo(
+                f"Warning: {_HOSTS_VAR} is not a JSON object; the hand-off falls back to "
+                "DOMAIN_HOSTED and STREAMLIT_URL.",
+                err=True,
+            )
+
+    hosts = instance_hosts()
+    deployed = sites.is_deployed()
+    if not hosts.surface("app").endpoints:
+        if deployed:
+            raise click.ClickException(
+                f"LEX_STREAMLIT_AUTH={mode} hands dashboards off to the app, but no app host is "
+                f"known. Set {_HOSTS_VAR} (or DOMAIN_HOSTED)."
+            )
+        click.echo(
+            f"Note: no app host configured; dashboards hand off to {sites.DEV_APP_ORIGIN} "
+            "(development).",
+            err=True,
+        )
+    if deployed and not hosts.surface("streamlit").endpoints:
+        raise click.ClickException(
+            f"LEX_STREAMLIT_AUTH={mode}: no dashboard host is known, so the app would refuse to "
+            f"hand off to this one. Set {_HOSTS_VAR} (or STREAMLIT_URL)."
+        )
+
+    public_url = (os.getenv("STREAMLIT_URL") or os.getenv("BASE_URL") or "").strip().lower()
+    https_only = (os.getenv("SESSION_HTTPS_ONLY") or "").strip().lower() in ("1", "true", "yes", "y", "on")
+    if deployed and not public_url.startswith("https://") and not https_only:
+        click.echo(
+            "Warning: the dashboard cookies need https (Secure; SameSite=None; Partitioned). "
+            "Set STREAMLIT_URL to the https URL, or SESSION_HTTPS_ONLY=true behind a "
+            "TLS-terminating ingress.",
+            err=True,
+        )
+    return mode
+
+
 def _warn_if_sessions_are_not_durable() -> None:
     """Report session-durability problems on the main thread.
 
@@ -492,7 +570,14 @@ def _warn_if_sessions_are_not_durable() -> None:
     Those refuse. A per-process session key only means sessions do not survive
     a restart -- so it warns, because a guard that stops a dashboard starting
     is worse than the fragility it guards against.
+
+    ``LEX_STREAMLIT_AUTH=handoff`` keeps no token store (dashboards rest on the
+    app's sign-ins in the shared database), so neither the replica rule nor the
+    in-memory warning applies to it.
     """
+    streamlit_auth = _check_streamlit_auth_env()
+    token_store_used = streamlit_auth != "handoff"
+
     public_url = (os.getenv("STREAMLIT_URL") or os.getenv("BASE_URL") or "").rstrip("/")
     # Lowercased, because proxy.py derives the same fact through
     # ``httpx.URL(...).scheme``, which normalises case. Comparing
@@ -547,7 +632,7 @@ def _warn_if_sessions_are_not_durable() -> None:
         )
         replicated = False
 
-    if replicated and not has_redis:
+    if replicated and not has_redis and token_store_used:
         raise click.ClickException(
             f"LEX_PROXY_REPLICAS={replicas} but no TOKEN_REDIS_URL/REDIS_URL is set. "
             "The token store would be process-local, so a request routed to another "
@@ -561,7 +646,7 @@ def _warn_if_sessions_are_not_durable() -> None:
             "sessions will not survive a restart.",
             err=True,
         )
-    if not has_redis:
+    if not has_redis and token_store_used:
         click.echo(
             "Warning: no TOKEN_REDIS_URL/REDIS_URL set; the token store is in-memory "
             "and will not survive a restart.",

@@ -64,6 +64,20 @@ from lex.lex_app.reflex.auth import LexKeycloakAuthState, LexUser
 from lex.lex_app.reflex.dashboards import LexDashboardState
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
+
+def _child_env() -> dict:
+    """The environment for a child interpreter that must import the lex under test.
+
+    The child runs elsewhere (a temporary directory), so the checkout the parent imported
+    ``lex`` from is not on its path unless lex-app is installed (as in CI): put it there.
+    """
+    import lex
+
+    env = dict(os.environ)
+    checkout = str(Path(lex.__file__).resolve().parent.parent)
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (checkout, env.get("PYTHONPATH")) if p)
+    return env
+
 pytestmark = pytest.mark.init
 
 
@@ -214,6 +228,7 @@ class TestCluster01aq_Config(TestCase):
         result = subprocess.run(
             [sys.executable, "-c", code], capture_output=True, text=True, timeout=300,
             cwd=tempfile.gettempdir(),
+            env=_child_env(),
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr[-2000:])
         loaded = result.stdout.strip().splitlines()[-1]
@@ -819,6 +834,7 @@ class TestCluster01aq_EventLoops(TestCase):
         result = subprocess.run(
             [sys.executable, "-c", code], capture_output=True, text=True, timeout=300,
             cwd=tempfile.gettempdir(),
+            env=_child_env(),
         )
         self.assertEqual(result.returncode, 0, msg=f"setup must carry on on uvloop:\n{result.stderr[-2000:]}")
         lines = result.stdout.splitlines()

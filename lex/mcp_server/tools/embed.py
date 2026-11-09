@@ -10,14 +10,16 @@ Architecture
 1. A **UI resource** (``ui://lex/embed-view.html``) is registered with
    MIME type ``text/html;profile=mcp-app``.  Its HTML contains a thin
    widget that listens for ``ui/notifications/tool-result`` over the
-   MCP Apps bridge (``postMessage``), reads ``structuredContent.embed_url``
-   from the tool result, and sets that as the ``<iframe src>``.
+   MCP Apps bridge (``postMessage``), reads ``_meta.embed_url`` from the
+   tool result, and sets that as the ``<iframe src>``.
 
 2. The **tool** (``lex_embed_view``) returns a ``CallToolResult`` with:
-   - ``structuredContent``  — JSON with ``embed_url``, ``title``, etc.
-   - ``content``            — narration text for the model.
-   - ``_meta``              — widget-only data (empty for now) plus
-     ``ui.resourceUri`` linking the tool to the widget.
+   - ``structuredContent``  — JSON with ``view_url`` (no ticket), ``title``, etc.
+   - ``content``            — narration text for the model, and the same JSON.
+   - ``_meta``              — widget-only: ``embed_url``, the URL carrying the
+     single-use ``lex_embed_ticket``. Hosts hand ``_meta`` to the widget and
+     never to the model, so the ticket stays out of the conversation.
+   The tool *definition* carries ``_meta.ui.resourceUri`` linking it to the widget.
 
 3. ``_meta.ui.csp.frameDomains`` declares the React frontend origin so
    the sandbox allows the inner iframe.
@@ -34,6 +36,7 @@ import string
 import urllib.parse
 from typing import Any, Dict, List, Optional
 
+from lex.authentication.dashboards.embed import TICKET_PARAM as EMBED_TICKET_PARAM
 from lex.mcp_server.config import mcp_setting
 from lex.mcp_server.registry import container_is_writable, get_container
 
@@ -45,7 +48,7 @@ from lex.mcp_server.registry import container_is_writable, get_container
 # branch to maintain.
 from fastmcp import FastMCP
 from fastmcp.resources import FunctionResource
-from fastmcp.tools import Tool
+from fastmcp.tools import Tool, ToolResult
 from mcp.types import TextContent, ToolAnnotations
 
 logger = logging.getLogger(__name__)
@@ -343,6 +346,12 @@ _WIDGET_TEMPLATE = string.Template("""\
     reportSize(620);
   }
 
+  /* ---- The ticketed URL: widget-only, in the result's _meta ---- */
+  function metaUrl(params) {
+    var meta = params && (params._meta || (params.result && params.result._meta));
+    return (meta && typeof meta.embed_url === 'string') ? meta.embed_url : null;
+  }
+
   /* ---- Extract embed_url from any value (deep + regex) ---- */
   function extractUrl(val) {
     if (!val) return null;
@@ -383,10 +392,10 @@ _WIDGET_TEMPLATE = string.Template("""\
       return;
     }
     if (msg.method === 'ui/notifications/tool-result') {
-      var url = extractUrl(msg.params);
+      var url = metaUrl(msg.params) || extractUrl(msg.params);
       if (url) {
-        log('(buffered) Found embed_url: ' + url);
-        /* Always apply — tool-result has the full URL with auth_token */
+        log('(buffered) Found embed_url');
+        /* Always apply — tool-result has the full URL with the embed ticket */
         showIframe(url, '', true);
       }
       return;
@@ -452,11 +461,10 @@ _WIDGET_TEMPLATE = string.Template("""\
     /* Tool result */
     if (msg.method === 'ui/notifications/tool-result') {
       if (!handshakeDone) { pendingMessages.push(msg); return; }
-      var url = extractUrl(msg.params);
-      log('tool-result: ' + JSON.stringify(msg.params).substring(0, 300));
+      var url = metaUrl(msg.params) || extractUrl(msg.params);
       if (url) {
-        log('Found embed_url: ' + url);
-        /* Always apply — tool-result has the full URL with auth_token */
+        log('Found embed_url');
+        /* Always apply — tool-result has the full URL with the embed ticket */
         showIframe(url, '', true);
       } else if (!loaded) {
         log('embed_url NOT found in tool-result');
@@ -505,6 +513,32 @@ _WIDGET_TEMPLATE = string.Template("""\
 # --------------------------------------------------------------------------- #
 
 
+def _frontend_origin() -> str:
+    """``scheme://host[:port]`` of the frontend the embed points at."""
+    parsed = urllib.parse.urlparse(_resolve_frontend_url())
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+async def _issue_embed_ticket(access_token: str) -> Optional[str]:
+    """A single-use embed ticket for the caller's access token, or ``None``.
+
+    The token is validated and kept server-side by the app
+    (:func:`lex.authentication.dashboards.embed.issue_embed_ticket`); only the ticket
+    reaches the URL. Database work, so it runs off the event loop.
+    """
+    from asgiref.sync import sync_to_async
+
+    from lex.authentication.dashboards.embed import issue_embed_ticket
+
+    try:
+        return await sync_to_async(issue_embed_ticket, thread_sensitive=True)(
+            access_token, frontend_origin=_frontend_origin()
+        )
+    except Exception:
+        logger.exception("lex_embed_view: could not issue an embed ticket")
+        return None
+
+
 async def _embed_view(
     path: str = "",
     hide_toolbar: bool = False,
@@ -514,12 +548,13 @@ async def _embed_view(
     redirect_after_create: Optional[str] = None,
     redirect_after_update: Optional[str] = None,
     extra_params: Optional[Dict[str, str]] = None,
-) -> list:
+) -> ToolResult:
     """Generate an embeddable URL for a React frontend view.
 
-    Returns a list of ``TextContent`` blocks.  The embed widget (registered
-    via ``_meta.ui.resourceUri`` on the tool definition) receives the full
-    tool result via the MCP Apps bridge and extracts ``embed_url`` from it.
+    Returns a ``ToolResult``: narration and the ticket-less view for the model, and the
+    ticketed ``embed_url`` in ``_meta`` for the embed widget alone (registered via
+    ``_meta.ui.resourceUri`` on the tool definition), which receives the full tool result
+    via the MCP Apps bridge.
     """
     try:
         return await _embed_view_inner(
@@ -546,7 +581,7 @@ async def _embed_view_inner(
     redirect_after_create: Optional[str] = None,
     redirect_after_update: Optional[str] = None,
     extra_params: Optional[Dict[str, str]] = None,
-) -> list:
+) -> ToolResult:
     from lex.mcp_server.context import current_principal
 
     # Normalise path for analysis.
@@ -577,17 +612,22 @@ async def _embed_view_inner(
     else:
         view_type = _classify_path(segments)
 
-    # ── Inject access token for iframe auth ──
-    # The MCP principal carries the caller's OIDC access token.
-    # Pass it as auth_token so the iframe can bootstrap a session
-    # without requiring the user to log in again.
+    # ── A single-use embed ticket for iframe auth ──
+    # The MCP principal carries the caller's OIDC access token. It never goes in
+    # the URL (history, logs, every Referer): the app keeps it server-side and the
+    # URL carries a single-use, 60-second ``lex_embed_ticket``, which the app
+    # redeems on the frame's first request into a read-only cookie that lives no
+    # longer than the token (lex.authentication.dashboards.embed).
     _extra = dict(extra_params) if extra_params else {}
+    for _credential in ("auth_token", EMBED_TICKET_PARAM):
+        _extra.pop(_credential, None)  # never forward a credential a caller passed
     try:
         principal = current_principal()
-        if principal.access_token:
-            _extra["auth_token"] = principal.access_token
     except RuntimeError:
-        pass  # No principal bound (shouldn't happen in normal flow)
+        principal = None  # No principal bound (shouldn't happen in normal flow)
+    ticket = await _issue_embed_ticket(principal.access_token) if principal and principal.access_token else None
+    if ticket:
+        _extra[EMBED_TICKET_PARAM] = ticket
 
     # ── Build URL ──
     embed_url = _build_embed_url(
@@ -603,10 +643,8 @@ async def _embed_view_inner(
 
     title = _build_title(resource, view_type, container)
 
-    logger.debug("lex_embed_view → %s (token injected: %s)", embed_url.split("auth_token")[0], "auth_token" in embed_url)
-
-    # ── Build a clean URL for the model (strip auth_token) ──
-    # The model/LLM should NOT see the access token.
+    # ── Build a clean URL for the model (no ticket) ──
+    # The model/LLM sees neither a token nor the ticket.
     display_url = _build_embed_url(
         path,
         hide_toolbar=hide_toolbar,
@@ -615,37 +653,38 @@ async def _embed_view_inner(
         redirect_after=redirect_after,
         redirect_after_create=redirect_after_create,
         redirect_after_update=redirect_after_update,
-        extra_params=extra_params,
+        extra_params={k: v for k, v in _extra.items() if k != EMBED_TICKET_PARAM},
     )
 
-    # ── Build JSON payload for the widget + model ──
-    structured: Dict[str, Any] = {
-        "embed_url": embed_url,
+    logger.debug("lex_embed_view → %s (embed ticket issued: %s)", display_url, bool(ticket))
+
+    # ── What the model sees: no ticket anywhere ──
+    # The ticket is a credential for its 60 seconds. The narration, the content and the
+    # structured content are all model-visible, so they carry the clean URL only.
+    public: Dict[str, Any] = {
+        "view_url": display_url,
         "title": title,
         "view_type": view_type,
         "resource": resource,
     }
     if resource_metadata:
-        structured["resource_metadata"] = resource_metadata
+        public["resource_metadata"] = resource_metadata
 
-    # ── Narration for the model (uses clean URL, no token) ──
     narration = f"Showing **{title}**"
     if resource_metadata:
         narration += f" (model: {resource_metadata['verbose_name']})"
-
-    # The narration text block is shown to the model / user as context.
-    # The structured JSON block is consumed by the widget to extract
-    # embed_url (which includes the auth_token for iframe session
-    # bootstrap).  The model should not echo the auth_token.
     narration += f"\n\n[View: {display_url}]"
 
-    return [
-        TextContent(type="text", text=narration),
-        TextContent(
-            type="text",
-            text=json.dumps(structured, ensure_ascii=False),
-        ),
-    ]
+    # ── What only the widget gets: the ticketed URL, in _meta ──
+    # MCP Apps hosts hand a tool result's _meta to the widget and never to the model.
+    return ToolResult(
+        content=[
+            TextContent(type="text", text=narration),
+            TextContent(type="text", text=json.dumps(public, ensure_ascii=False)),
+        ],
+        structured_content=public,
+        meta={"embed_url": embed_url},
+    )
 
 
 # --------------------------------------------------------------------------- #
