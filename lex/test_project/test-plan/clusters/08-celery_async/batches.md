@@ -195,3 +195,20 @@
 | Note | Two assertions had to be strengthened before they could detect the defect, and both are worth remembering. (1) `edited_by`: a worker resolves the same fallback actor the fixture already carried, so an identical overwrite was invisible — 8.147 now seeds a distinct sentinel via `queryset.update()`. (2) The failing calc is deliberately `is_atomic = False`: under `is_atomic = True` the raise rolls the whole calculation back and would hide any stamp. Fixture note — the decorated tasks require explicit Celery task names; Celery derives a default name from `module.func_name` and all three `calculate` methods share one fixture module, so without them the last registration silently wins and one model runs another's body. |
 
 ---
+
+### Batch 8e — `create(*args)` reach `calculate()` on every route, Celery included (BUG-054) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.157 – 8.163 |
+| Type | I |
+| Files covered | `lex/lex_app/celery_tasks.py` (`calc_and_save` names the `group_index` slot of its message and calls `model.lex_func()(*args)`); `lex/core/tasks/CeleryTaskDispatcher.py` (`_dispatch_single_group` documents the message it sends, `(group, group_index, *args)`, unchanged); `lex/core/mixins/CalculatedModelMixin.py` (`create` and both sync consumers, unchanged); `lex/core/models/CalculationModel.py` (`dispatch_calculation_task`, the task's other sender, unchanged) |
+| Test file | `lex/test_project/tests/celery_async/test_8e_create_args_reach_calculate.py` |
+| Test classes | `TestCluster08e_CreateArgsReachCalculate`: 8.157 Celery route, three groups, `create("Q4", 7)`; 8.158 Celery route with a `calculate(self)` that takes no arguments; 8.159 a worker running a group message in the shape v2.4.2 queued; 8.160 the message `dispatch_calculation_task` sends; 8.161 sync streaming; 8.162 sync materialising; 8.163 Celery with the fallback after a failed task |
+| Fixtures | `CreateArgsBatch` (writes the arguments its `calculate()` received onto the row, logs every call, can fail once per region) and `NoArgBatch` (`calculate(self)`): both `@lex_shared_task` with explicit task names, one Celery group per region, listed in `CREATE_ARGS_MODELS` rather than `ALL_MODELS`; `CelerySyncCalc` (existing). The module runs each eager task with the empty dispatch scopes a worker process starts with (`task_prerun` / `task_postrun`) and records the executed tasks from `task_prerun` |
+| Tests landed | **7 pass / 0 fail** (8.157–8.163). On v2.4.2, 8.157, 8.159 and 8.163 fail: every `calculate()` a task called received no arguments. Mutation-checked: passing the index on as well fails 8.157–8.159 and 8.163; moving the index to a keyword on both sides fails 8.159. Regression: `celery_async` 156 pass / 7 skip (the opt-in Redis broker and recovery-beat tests) and `calculations` 218 pass, 0 fail, 31 subtests, 4 min 55 s |
+| Coverage gain | `calc_and_save` with arguments, run by a worker and reached through `create()`; the message contract on both sides; every route `create()` can take |
+| Status | ✅ Complete. BUG-054 resolved. |
+| Note | Without the per-task dispatch scopes, eager mode shows a task the dispatcher's own `WaitForTasks` scope, which is open in the same thread. The task then sends `calculate()` off as one more message, Celery pickles it even in eager mode, and the row is saved without the result: a decorated batch's results never persist under plain `_celery_eager()`. A worker process has no such scope. Letter `d` and 8.154–8.156 belong to PR #865, so 8e starts at 8.157. The per-group retry in `_handle_task_results` and the per-group fallback after a `CeleryDispatchError` are not covered separately (see cluster.md). |
+
+---

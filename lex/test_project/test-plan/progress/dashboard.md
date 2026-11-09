@@ -17,7 +17,7 @@
 | 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
 | 6. Audit Logging | 20 | 167 | 35 | 3 | 0 |
 | 7. Calculation State Machine | 21 | 237 | 94 | 0 | 0 |
-| 8. Celery & Async | 15 | 153 | 89 | 12 | 0 |
+| 8. Celery & Async | 16 | 163 | 96 | 12 | 0 |
 | 9. Signals & WebSocket | 7 | 43 | 15 | 0 | 0 |
 | 10. API Layer | 17 | 99 | 49 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
@@ -224,6 +224,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 8a | a — Post-task warm shutdown honours the idle-shutdown master switch (Session 85 — June 26) | 8.1-8.5 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 8b |  | 8.5-8.6 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 8c | Celery dispatch must not move edited_at / edited_by (BUG-028) | 8.145-8.153 | complete | 9 | 0 | 0 | The two Celery dispatch paths must be audit-indistinguishable. calc_and_save (undecorated) wraps calculation_execution_context(); the lex_shared_task wrapper does not, so a decorated calculate() stamps audit columns on every successful run -- BUG-028. 8.146/8.147/8.149/8.151 assert the correct behaviour; the lex_shared_task wrapper now enters calculation_execution_context(), so these pass as live regression gates (BUG-028 resolved). 8.148 passes because a failed calculation rolls its writes back (pinned so a future partial-commit change cannot silently reintroduce the leak). 8.153 pins the boundary - a decorated calculate() with Celery OFF is clean, so the trigger is decoration AND Celery dispatch, not decoration alone. Fixture note - the decorated tasks need explicit Celery task names; all three calculate methods share one module and would otherwise collide. |
+| 8e | create(*args) reach calculate() on every route, Celery included (BUG-054) | 8.157-8.163 | complete | 7 | 0 | 0 | The Celery task calc_and_save called model.lex_func()() with no arguments, so create(*args) reached calculate() on the sync routes and was dropped on the Celery route. Each group message is (group, group_index, *create_args); the task now names the group_index slot and passes the rest on. The message keeps its shape, so a message queued, redelivered or requeued by worker recovery before an upgrade is read the same way by an old and a new worker (8.159). Routes: Celery (8.157, and 8.158 with no arguments), a worker running a group message (8.159), the task's other sender dispatch_calculation_task (8.160), sync streaming (8.161), sync materialising (8.162), Celery with the fallback after a failed task (8.163). 8.157, 8.159 and 8.163 fail on v2.4.2. Mutation-checked: passing the index on fails 8.157-8.159 and 8.163; moving the index to a keyword fails 8.159. Letter d and 8.154-8.156 belong to PR #865, so 8e starts at 8.157. |
 | 8g | Task infrastructure — `lex/lex_app/celery_tasks.py` | 8.7-8.15 | complete | 9 | 0 | 0 | Redis-free (`celery_tasks.py` |
 | 8h | Dispatcher & local scheduler | 8.16-8.21 | complete | 6 | 0 | 0 | 8.16–8.21; broker-free eager (`celery_tasks.py` 46%→55%, `CeleryTaskDispatcher` 0%→45% |
 | 8i | `celery.py` app config | 8.22-8.30 | complete | 9 | 0 | 0 | 8.22–8.30 (priority/nesting/filters/no-op/propagation |

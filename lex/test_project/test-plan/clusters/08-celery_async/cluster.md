@@ -141,3 +141,23 @@
 **Scenario range:** 8.142 – 8.144. **Test file:** `lex/test_project/tests/celery_async/test_8ad_dispatched_task_cancel_marker.py`. **Type:** U. **Status:** ✅ Complete (Session 91 — July 2). Allocated `8ad` (next free letter after `8ac`); 8.142 picks up after cluster-8 scenario max 8.141. Source: `lex/lex_app/celery_tasks.py` (`lex_shared_task` wrapper). 8.142 dispatched run + marker set ⇒ raises `CalculationCancelled` before the wrapped function runs; 8.143 dispatched run + no marker ⇒ marker consulted, function runs normally; 8.144 synchronous run (no context) ⇒ cancel index never consulted, function runs. 3 pass / 0 fail.
 
 ---
+
+### Cluster 8e — `create(*args)` reach `calculate()` on every route, Celery included (BUG-054)
+
+**Gap:** `CalculatedModelMixin.create(*args)` passes its positional arguments to every generated row's `calculate()`. Both sync consumers did, and `CeleryTaskDispatcher` sent them in each group message, `(group, group_index, *args)`, but the generic Celery task `calc_and_save` called `model.lex_func()()`. Turning Celery on changed what a calculation computed. **Fix:** the task names the index slot, `calc_and_save(models, group_index=None, *args)`, and passes `args` on. The message keeps its shape, so a message queued, redelivered or requeued by worker recovery across an upgrade is read the same way by an old and a new worker.
+
+The eager harness runs each task with the empty dispatch scopes a worker process starts with. Otherwise a task would see the dispatcher's own `WaitForTasks` scope, which is open in the same thread, and send `calculate()` off as one more message. Celery pickles a message even in eager mode, so `calculate()` would run on a copy and the task would save the row without its result, which never happens on a worker.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.157 | Celery route, `create("Q4", 7)`, three region groups | three `calc_and_save` messages run, and every row's `calculate()` receives exactly `("Q4", 7)`: not nothing, and not the group index |
+| 8.158 | Celery route, `create()` with a `calculate(self)` that takes no arguments | every row is calculated and saved; the group index is never handed to `calculate()` |
+| 8.159 | A worker runs a group message `(group, 2, "Q4", 7)`, the shape v2.4.2 queued too | `calculate()` is called inside the task with `("Q4", 7)` only, the row is saved with it, and no further task starts |
+| 8.160 | The task's other sender: a `CalculationModel` saved `IN_PROGRESS` dispatches `calc_and_save([row])` | the task runs once, `calculate()` runs with no arguments, and `CallbackTask` finds the row in the first argument and flips it to SUCCESS |
+| 8.161 | Sync streaming route (default) | no task runs; every row receives `("Q4", 7)` |
+| 8.162 | Sync materialising route (`LEX_SYNC_STREAMING_EXPANSION=false`) | no task runs; every row receives `("Q4", 7)` |
+| 8.163 | Celery route where one row's `calculate()` fails once | the dispatcher's synchronous fallback calculates it again, every row ends with `("Q4", 7)`, and every call, in a task or in the fallback, received `("Q4", 7)` |
+
+**Scenario range:** 8.157 – 8.163. **Test file:** `lex/test_project/tests/celery_async/test_8e_create_args_reach_calculate.py`. **Type:** I (real rows; Celery in eager mode). **Status:** ✅ Complete (2026-11-09). Batch: [8e](batches.md). Not covered separately: the per-group retry in `CeleryTaskDispatcher._handle_task_results` and the per-group fallback after a `CeleryDispatchError` from `.delay`. Neither changed, both already passed `*args` to `calc_and_save_sync`, and with the dispatcher's own `WaitForTasks` scope a failed task reaches the whole-batch fallback of 8.163 first.
+
+---

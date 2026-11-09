@@ -835,10 +835,19 @@ def load_data(test, generic_app_models, audit_logging_enabled=None, initial_data
 
 
 @lex_shared_task
-def calc_and_save(models: List[Model], *args, **kwargs):
+def calc_and_save(models: List[Model], group_index: Optional[int] = None, *args, **kwargs):
     """
     Calculates and saves a list of models.
     Aborts the entire batch immediately if any error occurs.
+
+    A message is ``(models, group_index, *args)``. ``CeleryTaskDispatcher``
+    sends one per group of ``CalculatedModelMixin.create(*args)``:
+    ``group_index`` only numbers the group, and ``args`` are create()'s
+    positional arguments, which every model's ``calculate()`` receives, as
+    on the synchronous routes. ``CalculationModel.dispatch_calculation_task``
+    sends ``([model],)``: no index and no arguments. Keep this shape. A
+    message queued, redelivered or requeued by worker recovery before an
+    upgrade is read by whichever version the worker runs.
 
     Cooperative cancellation net (not the primary mechanism): if the
     calculation's cancelled marker is already set in the cluster cancel
@@ -877,7 +886,7 @@ def calc_and_save(models: List[Model], *args, **kwargs):
             from lex.audit_logging.utils.ModelContext import model_logging_context
             from lex.core.models.CalculationModel import calculation_execution_context
             with calculation_execution_context():
-                model.lex_func()()
+                model.lex_func()(*args)
                 logger.info(f"Finished calculating model {model}")
                 model.save()
             summary["processed_successfully"] += 1
