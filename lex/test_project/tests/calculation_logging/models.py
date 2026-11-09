@@ -41,6 +41,11 @@ class LogRootCalc(CalculationModel):
     child_mode = models.CharField(max_length=40, default="log_only")
     units_csv = models.CharField(max_length=200, default="u1")
     calculation_error_message = models.TextField(blank=True, default="")
+    # What the run's live log held when a mode below read it, as the log
+    # panel's backfill would (15.65, 15.76, 15.77). A field rather than an
+    # attribute: on the Celery route calculate() runs on the task's copy of
+    # the root, and only what is saved comes back.
+    live_log_after_inner = models.TextField(null=True, blank=True)
 
     is_atomic = True
 
@@ -49,6 +54,35 @@ class LogRootCalc(CalculationModel):
 
     def __str__(self) -> str:  # pragma: no cover
         return self.name
+
+    def _read_live_log(self):
+        """The run's live log, read the way the log panel's backfill does
+        (InitCalculationLogs), as someone opening the panel now would."""
+        from lex.api.utils import operation_context
+        from lex.audit_logging.utils.CacheManager import CacheManager
+
+        return CacheManager.get_message(
+            CacheManager.build_cache_key(
+                f"{self._meta.model_name}_{self.pk}",
+                operation_context.get()["calculation_id"],
+            )
+        )
+
+    def _save_failing_nested_then_read_live_log(self, failing_model):
+        """Save a nested CalculationModel that fails, handle the failure, read
+        the run's live log, and carry on logging (15.76, 15.77)."""
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+        from lex.core.models.CalculationModel import CalculationModelException
+
+        try:
+            failing_model(
+                name=self.units_csv,
+                is_calculated=failing_model.IN_PROGRESS,
+            ).save()
+        except CalculationModelException:
+            pass
+        self.live_log_after_inner = self._read_live_log()
+        LexLogger().add_text("root recovered").log()
 
     def calculate(self):
         # Local imports — these are only used inside calculate(), and
@@ -124,22 +158,34 @@ class LogRootCalc(CalculationModel):
             return
         if self.child_mode == "calcmodel_then_read_live_log":
             # Once the nested CalculationModel has finished, read this run's
-            # live log the way the log panel's backfill does
-            # (InitCalculationLogs), as someone opening the panel then would
-            # (15.65).
-            from lex.api.utils import operation_context
-            from lex.audit_logging.utils.CacheManager import CacheManager
-
+            # live log (15.65).
             LogInnerSavedCalc(
                 name=self.units_csv,
                 is_calculated=LogInnerSavedCalc.IN_PROGRESS,
             ).save()
-            self.live_log_after_inner = CacheManager.get_message(
-                CacheManager.build_cache_key(
-                    f"{self._meta.model_name}_{self.pk}",
-                    operation_context.get()["calculation_id"],
-                )
-            )
+            self.live_log_after_inner = self._read_live_log()
+            return
+        if self.child_mode == "celery_calcmodel_chain":
+            # A nested CalculationModel whose calculate() is a
+            # @lex_shared_task: dispatched as itself on the Celery route (15.72).
+            LogCeleryInnerSavedCalc(
+                name=self.units_csv,
+                is_calculated=LogCeleryInnerSavedCalc.IN_PROGRESS,
+            ).save()
+            return
+        if self.child_mode == "celery_calcmodel_chain_3":
+            # A @lex_shared_task middle that saves a nested CalculationModel
+            # of its own while it runs on the worker (15.73).
+            LogCeleryMiddleSavedCalc(
+                name=self.units_csv,
+                is_calculated=LogCeleryMiddleSavedCalc.IN_PROGRESS,
+            ).save()
+            return
+        if self.child_mode == "failing_caught_read_live_log":
+            self._save_failing_nested_then_read_live_log(LogFailingInnerSavedCalc)
+            return
+        if self.child_mode == "celery_failing_caught_read_live_log":
+            self._save_failing_nested_then_read_live_log(LogCeleryFailingInnerSavedCalc)
             return
         if self.child_mode == "failing_calcmodel":
             # The nested CalculationModel's failure fails the root (15.66).
@@ -591,3 +637,113 @@ LogCeleryQuietMiddle.calculate = lex_shared_task(
 )(LogCeleryQuietMiddle.calculate)
 
 CELERY_ROUTE_MODELS = [LogCeleryLoudChild, LogCeleryGrandchild, LogCeleryQuietMiddle]
+
+
+# ── Cluster 15p: a CalculationModel whose calculate() is a @lex_shared_task ──
+# Kept out of ALL_MODELS: only 15p creates them. With Celery active,
+# calculate_hook dispatches each of them as its own decorated task, not
+# through the generic calc_and_save.
+
+
+@_permissive
+class LogCeleryInnerSavedCalc(CalculationModel):
+    """Like LogInnerSavedCalc, with a @lex_shared_task calculate() (15.72)."""
+
+    name = models.CharField(max_length=100)
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self):  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LexLogger().add_text(f"celery inner {self.name}").log()
+
+
+@_permissive
+class LogCeleryFailingInnerSavedCalc(CalculationModel):
+    """Like LogFailingInnerSavedCalc, with a @lex_shared_task calculate()
+    that logs and then fails (15.77)."""
+
+    name = models.CharField(max_length=100)
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self):  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LexLogger().add_text(f"celery failing inner {self.name}").log()
+        raise ValueError(f"LogCeleryFailingInnerSavedCalc({self.name}) failing on purpose")
+
+
+@_permissive
+class LogCeleryMiddleSavedCalc(CalculationModel):
+    """Like LogMiddleSavedCalc, with a @lex_shared_task calculate(): logs and
+    saves a LogInnerSavedCalc while it runs on the worker (15.73)."""
+
+    name = models.CharField(max_length=100)
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self):  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LexLogger().add_text(f"celery middle {self.name}").log()
+        LogInnerSavedCalc(
+            name=f"inner-from-{self.name}",
+            is_calculated=LogInnerSavedCalc.IN_PROGRESS,
+        ).save()
+
+
+@_permissive
+class LogCeleryRootCalc(CalculationModel):
+    """A root with a @lex_shared_task calculate() that logs one line (15.74)."""
+
+    name = models.CharField(max_length=100)
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self):  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LexLogger().add_text(f"celery root {self.name}").log()
+
+
+LogCeleryInnerSavedCalc.calculate = lex_shared_task(
+    name="test_15p.celery_inner_saved_calc.calculate"
+)(LogCeleryInnerSavedCalc.calculate)
+LogCeleryFailingInnerSavedCalc.calculate = lex_shared_task(
+    name="test_15p.celery_failing_inner_saved_calc.calculate"
+)(LogCeleryFailingInnerSavedCalc.calculate)
+LogCeleryMiddleSavedCalc.calculate = lex_shared_task(
+    name="test_15p.celery_middle_saved_calc.calculate"
+)(LogCeleryMiddleSavedCalc.calculate)
+LogCeleryRootCalc.calculate = lex_shared_task(
+    name="test_15p.celery_root_calc.calculate"
+)(LogCeleryRootCalc.calculate)
+
+DECORATED_RUN_MODELS = [
+    LogCeleryInnerSavedCalc,
+    LogCeleryFailingInnerSavedCalc,
+    LogCeleryMiddleSavedCalc,
+    LogCeleryRootCalc,
+]

@@ -192,3 +192,38 @@ since the fix for BUG-052, the generic Celery task gives a nested model its own 
 the routes agree.
 
 ---
+
+### Batch 15p — A CalculationModel dispatched to Celery runs in a frame of its own ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 15.72 – 15.77 |
+| Type | I |
+| Files covered | `lex/core/models/CalculationModel.py` (`calculate_hook` opens `child_calculation_context` before it either dispatches the run or runs it, and closes it in its `finally`; `dispatch_calculation_task` ships the stack with the model on top), `lex/lex_app/celery_tasks.py` (the `lex_shared_task` wrapper runs a decorated `calculate()` on that stack, `calc_and_save` skips the model already on top, `CallbackTask` reads its root check from it) |
+| Test file | `lex/test_project/tests/calculation_logging/test_15p_decorated_celery_run.py` |
+| Test classes | `TestCluster15p_DecoratedCeleryRun`: 15.72 a nested model whose `calculate()` is a `@lex_shared_task` gets its own node under its caller's; 15.73 a `CalculationModel` that such a model saves on the worker nests under it; 15.74 a decorated root saved with nothing on the stack gets one row keyed to its record, and its audit entry names it and closes as a success; 15.75 the generic `calc_and_save` task gives such a root the same row; 15.76 / 15.77 a nested failure the root handles leaves the run's live log alone, on the generic task / on the decorated route, where the nested model's line also stays out of the root's node |
+| Fixtures | `_CalcLogTestCase` with the real live cache, as in 15o; `_celery_eager()` from cluster 8h; `_live_log_purged_like_redis()` from 15o; a `task_prerun` recorder that names the tasks Celery ran, to confirm each route; new `LogCeleryInnerSavedCalc`, `LogCeleryFailingInnerSavedCalc`, `LogCeleryMiddleSavedCalc`, `LogCeleryRootCalc` with `@lex_shared_task` `calculate()` under explicit task names (`DECORATED_RUN_MODELS`, kept out of `ALL_MODELS`); `LogRootCalc` modes `celery_calcmodel_chain`, `celery_calcmodel_chain_3`, `failing_caught_read_live_log`, `celery_failing_caught_read_live_log`; `LogRootCalc.live_log_after_inner` is now a field, because on Celery `calculate()` runs on the task's copy of the root and only what is saved comes back |
+| Tests landed | **6 pass / 0 fail** |
+| Status | ✅ Complete — fixes [BUG-056](../../known-bugs.md); see [session note](../../progress/sessions/2026-11-09-decorated-celery-route-frame.md) |
+
+**Why the frame has to be opened before the dispatch.** BUG-055's frame was opened only in the
+synchronous branch, so on Celery the task was shipped a copy of the caller's stack, with the caller on
+top. The generic `calc_and_save` task pushes the model it runs, which is why 15.71 passed, but the
+`lex_shared_task` wrapper runs a decorated `calculate()` on the stack it is shipped, and pushes nothing.
+The hook's failure handling runs in the caller's thread when the task failed, and asked the caller's
+stack whether the run was the root: on both routes it found the caller on top and at the bottom, and
+purged the run's live log while the root was still running. Opening the frame before the dispatch puts
+the model on top of the shipped stack, the stack the docs' manual `model_logging_context` wrap already
+produced, and keeps it there until the failure handling is done. `CallbackTask`'s root check reads the
+shipped stack too, and gives the same answers as before: the root's own frame is at the bottom.
+
+**The developer chose this over a push in the `lex_shared_task` wrapper.** That alternative fixes
+15.72 – 15.74 but not 15.76 and 15.77: the failure handling never sees a frame pushed on the worker.
+
+**Each scenario was checked to fail with its part of the fix undone.** With no frame on the Celery
+route (the 15o head), 15.72 – 15.74, 15.76 and 15.77 fail. With a frame that ends before the failure
+handling, 15.76 and 15.77 fail. With the wrapper alternative instead of the fix, 15.76 and 15.77 fail.
+With `calc_and_save` pushing a model already on top, 15.72, 15.73 and 15.75 – 15.77 fail, and so do
+15.63, 15.64 and 15.71. 15.75 passes without the fix: it guards that the routes agree.
+
+---
