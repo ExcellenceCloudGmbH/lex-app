@@ -1,7 +1,7 @@
 cluster: 15
 slug: calculation_logging
 title: Calculation Logging Surface
-max_scenario: 64
+max_scenario: 71
 letters:
   a:
     title: LexLogger builder API and content shape
@@ -53,14 +53,16 @@ letters:
     scenarios: 15.19-15.21
     status: complete
     tests:
-      pass: 0
+      pass: 3
       skip: 0
-      xfail: 3
+      xfail: 0
     note: >-
-      measured 2026-11-06 — 0 pass / 3 xfail. The three scenarios (15.19-15.21) stay
-      @unittest.expectedFailure pending the execute_calculation_sync fix, because a CalculationModel saved
-      inside another calculation still does not push itself. The fix for BUG-052 covers rows generated
-      by create() only, and 15.21's inner CalculationModel still lands on the mixin child's row
+      measured 2026-11-09 — 3 pass. BUG-055. The three scenarios were @unittest.expectedFailure from
+      2026-05-12, because a CalculationModel saved inside another calculation never had a frame of its
+      own on the synchronous route, and its lines were appended to its caller's row. The markers are
+      gone: calculate_hook now runs a synchronous calculation inside child_calculation_context, which
+      skips the root already on top (pushed by _save_root here, by the API in production). 15o pins what
+      else that frame decides
   g:
     title: Object-less heading frames (TOC nodes) in the log tree
     scenarios: 15.22-15.31
@@ -195,3 +197,26 @@ letters:
       stack is copied; copy_for_dispatch creates its node first, so every worker files under the same
       node. Checked to fail without the guard (15.63, 15.64) and without the node created before
       the copy (15.64).
+  o:
+    title: A nested CalculationModel's synchronous run is not taken for the root
+    scenarios: 15.65-15.71
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      BUG-055. calculate_hook gives a CalculationModel it runs synchronously a frame of its own
+      (child_calculation_context), from the run through the terminal bookkeeping in
+      execute_calculation_sync and the failure handling in calculate_hook. Both decide from the stack
+      whether the run is the root. Without the frame, a nested model was taken for the root. Covers a
+      nested model that finishes and leaves the run's live log alone (15.65), a run that fails in a
+      nested model and keeps its log (15.66), a nested failure the caller handles and that leaves one
+      root node (15.67), and a root saved with nothing on the stack, which gets a node of its own and
+      keeps its log when it fails (15.68, 15.69). It also covers the API route, a background thread in
+      a copy of the request context where the root is not pushed twice (15.70), and the Celery route,
+      which gives the same tree (15.71). 15.65 and 15.66 purge the live log as Redis does, which the
+      test cache cannot. Checked against the undone fix: no frame fails 15.65-15.70 and 15.19-15.21;
+      a frame around calculate() only fails 15.65, 15.66, 15.67 and 15.69; a frame that ends before
+      the failure handling fails 15.66 and 15.67; a frame pushed when the model is already on top fails
+      15.19-15.21, 15.67 and 15.70. 15.71 passes without the fix too: it guards the agreement of the routes.

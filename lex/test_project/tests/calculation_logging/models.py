@@ -122,6 +122,45 @@ class LogRootCalc(CalculationModel):
         if self.child_mode == "celery_quiet_three_level":
             LogCeleryQuietMiddle.create(unit=units)
             return
+        if self.child_mode == "calcmodel_then_read_live_log":
+            # Once the nested CalculationModel has finished, read this run's
+            # live log the way the log panel's backfill does
+            # (InitCalculationLogs), as someone opening the panel then would
+            # (15.65).
+            from lex.api.utils import operation_context
+            from lex.audit_logging.utils.CacheManager import CacheManager
+
+            LogInnerSavedCalc(
+                name=self.units_csv,
+                is_calculated=LogInnerSavedCalc.IN_PROGRESS,
+            ).save()
+            self.live_log_after_inner = CacheManager.get_message(
+                CacheManager.build_cache_key(
+                    f"{self._meta.model_name}_{self.pk}",
+                    operation_context.get()["calculation_id"],
+                )
+            )
+            return
+        if self.child_mode == "failing_calcmodel":
+            # The nested CalculationModel's failure fails the root (15.66).
+            LogFailingInnerSavedCalc(
+                name=self.units_csv,
+                is_calculated=LogFailingInnerSavedCalc.IN_PROGRESS,
+            ).save()
+            return
+        if self.child_mode == "failing_calcmodel_caught":
+            # The root handles the nested CalculationModel's failure and
+            # carries on (15.67).
+            from lex.core.models.CalculationModel import CalculationModelException
+
+            try:
+                LogFailingInnerSavedCalc(
+                    name=self.units_csv,
+                    is_calculated=LogFailingInnerSavedCalc.IN_PROGRESS,
+                ).save()
+            except CalculationModelException:
+                LexLogger().add_text("root recovered").log()
+            return
 
 
 @_permissive
@@ -429,6 +468,34 @@ class LogQuietMiddle(CalculatedModelMixin):
 
 
 GENERATED_ROW_MODELS = [LogFailingChild, LogQuietMiddle]
+
+
+# ── Cluster 15o: a nested CalculationModel's synchronous run ──
+# Kept out of ALL_MODELS: only 15o creates it.
+
+
+@_permissive
+class LogFailingInnerSavedCalc(CalculationModel):
+    """Like LogInnerSavedCalc, but its calculate() fails after logging, inside
+    its own transaction (15.66, 15.67)."""
+
+    name = models.CharField(max_length=100)
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self):  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LexLogger().add_text(f"failing inner {self.name}").log()
+        raise ValueError(f"LogFailingInnerSavedCalc({self.name}) failing on purpose")
+
+
+NESTED_RUN_MODELS = [LogFailingInnerSavedCalc]
 
 
 @_permissive
