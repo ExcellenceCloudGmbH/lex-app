@@ -176,9 +176,11 @@ if os.getenv("STORAGE_TYPE") == "GCS":
 # See https://docs.djangoproject.com/en/3.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv(
-    "DJANGO_SECRET_KEY", default="pjlulvaa77lteno-_y6!oxb%63xqiaw4%n%1or&77a!x9@nkd+"
-)
+#: The development fallback. It is published with this package, so it signs
+#: nothing a deployed instance can trust; deployed pods refuse to start on it
+#: (see the DEPLOYMENT_ENVIRONMENT checks below).
+PUBLISHED_DEFAULT_SECRET_KEY = "pjlulvaa77lteno-_y6!oxb%63xqiaw4%n%1or&77a!x9@nkd+"
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", default=PUBLISHED_DEFAULT_SECRET_KEY)
 QUACKBACK_WIDGET_SECRET = os.getenv("QUACKBACK_WIDGET_SECRET", "")
 
 # SECURITY WARNING: don't run with debug turned on in production!
@@ -216,6 +218,19 @@ if os.getenv("DEPLOYMENT_ENVIRONMENT") is not None:
             "DOMAIN_HOSTED must be set when DEPLOYMENT_ENVIRONMENT is set; without "
             "it ALLOWED_HOSTS only matches 'localhost' and all WebSocket/CSRF "
             "checks reject the real instance hostname."
+        )
+
+    # The secret key signs session data, password-reset and signing tokens and
+    # derives the dashboard proxy's cookie key. The fallback above is public, so
+    # a deployed pod running on it (or on nothing) hands every signature to
+    # anyone who has read this package. Every deployed instance gets its own
+    # key from Terraform; refuse to start without one.
+    _deployed_secret_key = (os.getenv("DJANGO_SECRET_KEY") or "").strip()
+    if not _deployed_secret_key or _deployed_secret_key == PUBLISHED_DEFAULT_SECRET_KEY:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY must be set to a private value when DEPLOYMENT_ENVIRONMENT "
+            "is set; the built-in development key is public and must not sign anything "
+            "on a deployed instance."
         )
 
     if _use_redis_channel_layer:
@@ -647,6 +662,11 @@ else:
     AUTHENTICATION_BACKENDS = ("django.contrib.auth.backends.ModelBackend",)
 
 OIDC_RP_SCOPES = ["openid", "email", "profile"]
+# Keycloak signs ID tokens with RS256. The library's default list also accepts
+# HS256/384/512 with the *client secret* as the key, and the secret sits in every
+# instance's environment: anyone holding it could mint a token for any e-mail and
+# be accepted as that user by the bearer path. Accept only Keycloak's algorithm.
+OIDC_RP_SIGN_ALGOS_ALLOWED = ["RS256"]
 _django_base_path = os.getenv("DJANGO_BASE_PATH", "").strip().strip("/")
 _admin_exempt_patterns = [
     r"^/admin(?:/|$)",
@@ -661,28 +681,62 @@ if _django_base_path:
         ]
     )
 
+# Paths that may be requested without a signed-in user. The library tests them
+# with re.search, so every pattern is anchored at both ends: an unanchored
+# "/health" or "api/user" also exempted any path *containing* it -- e.g.
+# /api/user_permissions/ or /api/model_entries/healthx/list -- from the login
+# requirement. The optional "api/" prefix keeps the /api/api/... form the
+# ingress produces for the frontend's apiHost.
 OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS = [
-    "/manifest.json",
-    "manifest.json",
-    "/health",
-    "/favicon.ico",
-    "api/user/",
-    "/api/user",
-    "api/health",
-    "api/active-calculations",
-    "/api/active-calculations",
-    "api/favicon.ico",
-    "api/api/user/",
-    "api/api/user",
-    "api/api/active-calculations",
-    "/api/api/active-calculations",
+    r"^/manifest\.json$",
+    r"^/favicon\.ico$",
+    r"^/api/favicon\.ico$",
+    r"^/health/?$",
+    r"^/(?:api/)?api/health/?$",
+    r"^/(?:api/)?api/user/?$",
+    r"^/(?:api/)?api/active-calculations/?$",
 ] + _admin_exempt_patterns
 
 OIDC_MIDDLEWARE_NO_REFRESH_URL_PATTERNS = [
     r"^/health$",
     r"^/favicon\.ico$",
 ] + _admin_exempt_patterns
-OIDC_RP_USE_PKCE = False
+# PKCE (S256) on the authorization-code flow. The client is confidential, so the
+# secret is still sent with the code exchange (FORCE_SECRET_WITH_PKCE); PKCE adds
+# a per-login verifier, which makes an intercepted code useless.
+OIDC_RP_USE_PKCE = True
+OIDC_RP_FORCE_SECRET_WITH_PKCE = True
+
+
+def _session_cookie_age_days() -> int:
+    """``LEX_SESSION_COOKIE_AGE_DAYS`` (default 31): how long an idle sign-in survives."""
+    raw = os.getenv("LEX_SESSION_COOKIE_AGE_DAYS", "31").strip()
+    try:
+        days = int(raw)
+    except ValueError:
+        from django.core.exceptions import ImproperlyConfigured
+
+        raise ImproperlyConfigured(
+            f"LEX_SESSION_COOKIE_AGE_DAYS must be a whole number of days, got {raw!r}."
+        ) from None
+    if days < 2:
+        from django.core.exceptions import ImproperlyConfigured
+
+        raise ImproperlyConfigured(
+            f"LEX_SESSION_COOKIE_AGE_DAYS must be at least 2 (got {days}); the OIDC session "
+            "timeout has to fit inside the cookie lifetime."
+        )
+    return days
+
+
+# Session lifetime. Keycloak decides how long a sign-in lasts (app realms: 30 days
+# idle / 90 days max). Django must not end it earlier: the session cookie lives
+# 31 days and is re-sent whenever the session is saved (each token refresh), and
+# the library's own session clock -- which slides on each refresh from
+# django-oauth2-codeflow 2.1.0 on -- is 30 days, one day inside the cookie as the
+# library requires.
+SESSION_COOKIE_AGE = _session_cookie_age_days() * 86400
+OIDC_MIDDLEWARE_SESSION_TIMEOUT_SECONDS = min(30 * 86400, SESSION_COOKIE_AGE - 86400)
 SESSION_COOKIE_SECURE = os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
 CSRF_COOKIE_SECURE = os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

@@ -9,6 +9,7 @@ from django.apps.registry import apps
 from django.conf import settings
 from keycloak import KeycloakAdmin, KeycloakOpenIDConnection, KeycloakUMA
 from keycloak.exceptions import KeycloakGetError, KeycloakPostError
+from lex.api.keycloak import uma_client
 from lex.utilities.decorators.singleton import LexSingleton
 
 # It's good practice to have a dedicated logger
@@ -646,24 +647,38 @@ class KeycloakManager:
     def get_uma_permissions(self, access_token: str, permissions: list = None):
         """
         Fetches UMA (User-Managed Access) permissions for a given access token.
-        This encapsulates the logic from your `helpers.py`.
+
+        The request carries ``access_token`` on itself only (``lex.api.keycloak.uma_client``),
+        never on the shared python-keycloak connection: that connection is one per
+        process, and setting the user's token on it let concurrent requests swap
+        users' permissions.
 
         Args:
             access_token (str): The user's current access token.
+            permissions: Optional ``"resource#scope"`` filter, as python-keycloak accepted.
 
         Returns:
-            A dict of UMA permissions or None if an error occurs.
+            The list of UMA permissions; ``[]`` when Keycloak grants none; ``None``
+            when Keycloak could not answer (unreachable, token rejected, misconfigured).
         """
-        if not self.oidc:
-            logger.error("OIDC client not initialized. Cannot fetch UMA permissions.")
+        try:
+            return uma_client.fetch_uma_permissions(access_token, permissions=permissions)
+        except uma_client.KeycloakDenied:
+            return []
+        except uma_client.KeycloakCallError as e:
+            logger.error("Failed to fetch UMA permissions: %s", e)
             return None
 
+    def get_userinfo(self, access_token: str):
+        """
+        The OIDC userinfo document for ``access_token``, or ``None`` if Keycloak could not answer.
+
+        Like :meth:`get_uma_permissions`, the token travels on this one request only.
+        """
         try:
-            return self.oidc.uma_permissions(
-                token=access_token, permissions=permissions
-            )
-        except Exception as e:
-            logger.error(f"Failed to fetch UMA permissions: {e}")
+            return uma_client.fetch_userinfo(access_token)
+        except uma_client.KeycloakCallError as e:
+            logger.warning("Failed to fetch Keycloak userinfo: %s", e)
             return None
 
     def refresh_user_token(self, refresh_token: str):
@@ -701,14 +716,15 @@ class KeycloakManager:
         Returns:
             A set of allowed scopes (e.g., {'view', 'edit'}).
         """
-        if not self.oidc:
-            logger.error("OIDC client not initialized.")
-            if not self.retry():
-                return set()
+        try:
+            uma_permissions = uma_client.fetch_uma_permissions(access_token)
+        except uma_client.KeycloakDenied:
+            return set()
+        except uma_client.KeycloakCallError as e:
+            logger.error("Failed to get UMA permissions: %s", e)
+            return set()
 
         try:
-            uma_permissions = self.oidc.uma_permissions(token=access_token)
-
             # Determine the resource name
             if hasattr(model_or_instance, "_meta"):  # It's an instance or a model class
                 app_label = model_or_instance._meta.app_label
