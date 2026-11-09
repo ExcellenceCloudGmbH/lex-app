@@ -52,6 +52,19 @@ The test now asserts that on both routes, with the dispatch kept to `LEX_SYNC_ST
 **CI.** `calculation_logging` is registered in `.github/scripts/showcase_clusters.py` and added to the
 release-gate selector in `showcase_tests.yml`, `pip_publish.yml` and `prerelease_gate.yml`.
 
+**Whole-suite runs (BUG-030's calculation_logging group).** A whole-suite run still failed 32 of the
+cluster's tests on both v2.4.2 and this branch. The cause was a leak, not product code:
+`test_6b_calculation_audit.py` calls `ensure_terminal_calculation_audit` directly, which leaves a
+reference to its AuditLog in the runner thread's context. Cluster 15's seed copied that reference after
+the flush had deleted the row, and every log write then failed. `audit_logging` followed by
+`calculation_logging` reproduces all 32 failures. Two fixes: 6b now isolates its context per test, and
+cluster 15 seeds a fresh context. Each one alone gives 216 pass / 4 xfail for the pair.
+
+Both whole-suite runs also hung on the same test, `test_1aq_reflex_dashboards.py::test_1_360`
+(`run_orm` across the event loop), after 1197 results on v2.4.2 and 1206 here (the 9 new tests). That
+file is part of the open nest_asyncio / async_to_sync deadlock fix (PR 865), so the hang is unrelated
+to this change.
+
 **Follow-up for `lex-app-docs`** (the `calculations` and `reference` docs are mirrored read-only
 here). Logging.md could say that rows a `create()` generates are nested automatically, on every
 route, including new rows whose log is linked once they are saved. The Internals page's "In both
