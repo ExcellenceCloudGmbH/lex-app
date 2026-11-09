@@ -138,3 +138,22 @@
 | 4.115 | opt-out | `LEX_SEC_CREATE=false` and `LEX_LEGACY_SECURITY=true` store; blank check only |
 
 **Scenario range:** 4.111 – 4.115. **Test file:** `lex/test_project/tests/permissions/test_4q_create_on_filled_record.py`. **Type:** E. **Status:** ✅ Complete (2026-10-23). Batch: [4q](batches.md).
+
+### 4x. Per-user Keycloak calls stay with their user; forged tokens and look-alike paths get no access ✅
+
+**Gap:** three ways the permission layer could hand access to the wrong party. (1) python-keycloak's `uma_permissions()`/`userinfo()` put the caller's token on the process-wide connection before sending, so concurrent requests could receive another user's permissions and profile (BUG-038). (2) The bearer path accepted HS256 signed with the OIDC client secret, which every instance holds (BUG-035). (3) Login exemptions were unanchored regular expressions, so `/api/user_permissions/` and any path containing `/health` skipped sign-in (BUG-036). Per-user calls now go through `lex/api/keycloak/uma_client.py` with the token on that one request; `OIDC_RP_SIGN_ALGOS_ALLOWED = ["RS256"]`; every exemption is anchored.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.138 | the middleware under concurrency | 240 concurrent requests for 12 users: each carries only its own permissions, profile and roles |
+| 4.139 | `KeycloakManager` under concurrency | 250 concurrent `get_uma_permissions` calls (the Reflex, Streamlit and token-view path): each its own answer |
+| 4.140 | `access_denied` | `[]` on the request and from `get_uma_permissions`; `set()` from `get_user_permissions` |
+| 4.141 | token rejected | the request continues with `[]`/`{}`; `get_uma_permissions` → `None`; userinfo → `KeycloakUnauthorized` |
+| 4.142 | Keycloak down | 502 HTML and unreachable: the request continues with the defaults; `KeycloakUnavailable`; no token in the logs |
+| 4.143 | TLS and timeouts | `KEYCLOAK_VERIFY_SSL` (True, False, a CA path) and `(3.05, 10)` reach every call, with the caller's token on it |
+| 4.144 | forged bearer token | HS256 signed with the client secret: no access and no user; RS256 from the IdP key: 200 |
+| 4.145 | public endpoints | health, current user, active calculations, manifest and favicon (incl. `/api/api/...`) are not refused |
+| 4.146 | look-alike paths | `/api/user_permissions/`, `/api/users/`, `.../healthx/...`, `.../health` are refused by the login middleware |
+| 4.147 | anchors | every `OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS` entry starts with `^` and ends with `$` or `(?:/\|$)` |
+
+**Scenario range:** 4.138 – 4.147. **Test file:** `lex/test_project/tests/permissions/test_4x_keycloak_call_isolation.py`. **Type:** U (4.138–4.143), I (4.144–4.147). **Status:** ✅ Complete (2026-11-06). Batch: [4x](batches.md).

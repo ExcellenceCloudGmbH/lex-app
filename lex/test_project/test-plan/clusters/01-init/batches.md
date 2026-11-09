@@ -1811,3 +1811,22 @@ config each fail 1.404.
 | 1.409 | no `Process` node type | the `api/model-structure` payload types the model `Model`, the report `HTMLReport`, the branch `Folder`; no node anywhere carries `Process` |
 
 **Why a regression matters:** a half-removed feature is worse than either state — a `registerProcess` that still collects classes looks like a working feature while `api/process/<name>` 404s, and a stale `Process` entry in the reserved-name set keeps rejecting a project's own model for a framework class that no longer exists.
+
+---
+
+### Batch 1bc — deployed secret key, session lifetime and PKCE ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.481 – 1.489 |
+| Type | U (1.481–1.486, 1.489), I (1.487–1.488) |
+| Files covered | `lex/lex_app/settings.py` (`PUBLISHED_DEFAULT_SECRET_KEY` + deployed check, `SESSION_COOKIE_AGE`, `OIDC_MIDDLEWARE_SESSION_TIMEOUT_SECONDS`, `OIDC_RP_USE_PKCE`, `OIDC_RP_FORCE_SECRET_WITH_PKCE`), `lex/proxy.py` (OIDC client registration: `code_challenge_method`) |
+| Test file | `lex/test_project/tests/init/test_1bc_auth_settings_hardening.py` |
+| Test classes | `TestCluster01bc_DeployedSecretKey` (1.481–1.483), `TestCluster01bc_SessionLifetime` (1.484–1.486), `TestCluster01bc_DjangoSignInUsesPkce` (1.487–1.488), `TestCluster01bc_ProxySignInUsesPkce` (1.489) |
+| Fixtures | fresh interpreters importing the settings; an RSA key pair per module; the token endpoint mocked at `oauth2_authcodeflow.auth.request_post`; authlib server metadata patched on the proxy's client |
+| Tests landed | **9 pass / 0 fail** against django-oauth2-codeflow 2.1.0 |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-06-auth-hotfixes.md) |
+
+**Allocation note:** Letter bc, not ay/az/ba/bb: those are held by in-flight branches (ay on fix/streamlit-report-frames-unauthenticated and others, az/ba on release/2.1.x, ba/bb on feat/fleet-metrics-calculation-events), which also claim scenarios up to 1.480. The same letter and scenario IDs are used on lex-app-v2 and release/2.1.x, so a merge between the lines is a no-op.
+
+---

@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 409
+max_scenario: 489
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1303,3 +1303,24 @@ letters:
       model-structure payload types nodes Model / HTMLReport / Folder only, never Process (1.409).
       Each scenario checks the kept HTMLReport sibling too, so a broken registration cannot pass as
       a clean removal. The routes that served the feature are pinned by 10q.
+  bc:
+    title: A deployed pod refuses the published secret key; sign-ins outlive Keycloak's idle window; PKCE on both relying parties
+    scenarios: 1.481-1.489
+    status: complete
+    tests:
+      pass: 9
+      skip: 0
+      xfail: 0
+    note: >-
+      Deployed pods (DEPLOYMENT_ENVIRONMENT set) refuse to start without their own DJANGO_SECRET_KEY
+      or on the key published in this package (1.481-1.483, fresh interpreters). The session cookie
+      lives LEX_SESSION_COOKIE_AGE_DAYS (default 31) days and the OIDC library's clock 30 days, inside
+      it as the library requires, so Django no longer ends a sign-in before Keycloak's 30-day idle
+      window; unusable values stop startup (1.484-1.486). Django's /oidc/authenticate and the
+      dashboard proxy's /auth/login both send a PKCE S256 challenge and keep the verifier server-side;
+      the code exchange proves it and still sends the confidential client's secret (1.487-1.489).
+      Letter bc, not ay/az/ba/bb: those are held by in-flight branches (ay on
+      fix/streamlit-report-frames-unauthenticated and others, az/ba on release/2.1.x, ba/bb on
+      feat/fleet-metrics-calculation-events), which also claim scenarios up to 1.480. The same letter
+      and scenario IDs are used on lex-app-v2 and release/2.1.x, so a merge between the lines is a
+      no-op.

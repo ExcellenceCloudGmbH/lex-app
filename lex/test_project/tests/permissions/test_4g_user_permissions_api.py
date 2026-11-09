@@ -132,7 +132,9 @@ class TestCluster04g_KeycloakMiddleware(SimpleTestCase):
         fake_km.get_uma_permissions.return_value = [
             {"rsname": "lex_app.Invoice", "scopes": ["read"]},
         ]
-        fake_km.oidc.userinfo.return_value = {
+        # The manager's per-call userinfo (batch 4x): the middleware no longer
+        # reaches into the shared python-keycloak connection (``km.oidc``).
+        fake_km.get_userinfo.return_value = {
             "email": "u@x",
             "client_roles": ["admin", "viewer"],
         }
@@ -165,7 +167,7 @@ class TestCluster04g_KeycloakMiddleware(SimpleTestCase):
 
         fake_km = MagicMock()
         fake_km.get_uma_permissions.side_effect = RuntimeError("kc down")
-        fake_km.oidc = None  # no userinfo path either
+        fake_km.get_userinfo.return_value = None  # Keycloak could not answer userinfo either
 
         with patch(
             "lex.api.middleware.keycloak_permissions.KeycloakManager",

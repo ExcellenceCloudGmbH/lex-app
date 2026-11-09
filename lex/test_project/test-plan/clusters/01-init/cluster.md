@@ -505,3 +505,23 @@ does not remove user launch configurations.
 | 1.409 | no `Process` node type | the structure payload types nodes `Model` / `HTMLReport` / `Folder` only |
 
 **Scenario range:** 1.406 – 1.409. **Test file:** `lex/test_project/tests/init/test_1ax_process_feature_removed.py`. **Type:** I. **Status:** ✅ Complete (2026-10-22). Batch: [1ax](batches.md).
+
+### 1bc. Deployed secret key, session lifetime and PKCE ✅
+
+**What it tests:** the sign-in settings a deployed instance runs with. A pod with `DEPLOYMENT_ENVIRONMENT` set refuses to start without its own `DJANGO_SECRET_KEY`, or on the key published in this package. The Django session cookie lives `LEX_SESSION_COOKIE_AGE_DAYS` (default 31) days and the OIDC library's session clock 30 days, so Django no longer ends a sign-in before Keycloak's 30-day idle window. Both relying parties on the shared Keycloak client -- Django's `/oidc/authenticate` and the dashboard proxy's `/auth/login` -- send a PKCE S256 challenge and keep the verifier server-side.
+
+**Why a regression matters:** a pod on the public key signs with a value anyone can read; a Django session shorter than Keycloak's logs people out early; one relying party without PKCE blocks requiring PKCE on the client.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.481 | deployed, no key | `ImproperlyConfigured` naming `DJANGO_SECRET_KEY` |
+| 1.482 | deployed, published key | `ImproperlyConfigured` |
+| 1.483 | private key, local run | the deployed pod signs with its key; a local run keeps the development key |
+| 1.484 | lifetime defaults | cookie 31 d, library clock 30 d (inside the cookie), RS256 only, PKCE with the client secret |
+| 1.485 | lifetime from the environment | 45 → 45 d / 30 d; 10 → 10 d / 9 d; `abc` and `1` refuse to start |
+| 1.486 | the library accepts the lifetimes | `RefreshSessionMiddleware` constructs with the defaults and the 2-day minimum |
+| 1.487 | sign-in redirect | `code_challenge_method=S256`, challenge = S256(session verifier), no verifier in the URL |
+| 1.488 | code exchange | the token request carries `code_verifier` and the client secret; the user is signed in and sent to `next` |
+| 1.489 | proxy sign-in | `/auth/login` redirects with an S256 challenge and no verifier |
+
+**Scenario range:** 1.481 – 1.489. **Test file:** `lex/test_project/tests/init/test_1bc_auth_settings_hardening.py`. **Type:** U (1.481–1.486, 1.489), I (1.487–1.488). **Status:** ✅ Complete (2026-11-06). Batch: [1bc](batches.md).
