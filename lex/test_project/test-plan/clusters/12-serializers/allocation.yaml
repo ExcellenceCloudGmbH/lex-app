@@ -1,7 +1,7 @@
 cluster: 12
 slug: serializers
 title: Serializer Contract
-max_scenario: 65
+max_scenario: 72
 letters:
   a:
     title: Read contract — field visibility & framework-managed fields
@@ -172,3 +172,29 @@ letters:
       LEX_SEC_HISTORY_WRITE (companion of 4.107-4.110): a serialized Historical* row says edit [] and
       delete false to non-superusers (single read and list), export as computed; superusers and the
       opt-out keep the computed scopes. Letter o, not l: 12l is reserved (see 12n).
+  p:
+    title: "A project declares how its columns look, once, on the serializer"
+    scenarios: "12.66-12.72"
+    tier: U
+    status: complete
+    tests: {pass: 7, skip: 0, xfail: 0}
+    note: >-
+      LEX-1556, the serializer side of cluster 10r. Letter p, not l: 12l is reserved for
+      the 12.54-12.57 batch that is not on this branch (see 12n / 12o). ``Meta.lex_column_options`` is validated
+      into ``list_ui.columns``; nothing in that path may raise, because it runs while answering
+      ``model_info``, which the whole frontend blocks on before drawing anything.
+      Most of the batch is therefore about the garbage, since the happy path (12.66) would be
+      noticed immediately and the refusal to explode would not. 12.68 one bad option must not
+      cost a project its good ones - the symptom otherwise is a grid that looks exactly as it
+      did before the change. 12.69 ``bool`` is an ``int`` subclass in Python, so a naive check
+      reads ``{"width": True}`` as a one-pixel column, which looks like the column vanished.
+      12.70 a minimum above a maximum has no correct reading, so both are dropped rather than
+      guessed. 12.71 ``get_list_ui_options`` answers BOTH keys for every serializer, so the
+      frontend reads one shape.
+      12.72 is the second execution path and the one a project that cares about column widths is
+      most likely to be on: a hand-written ``ModelSerializer`` registered as
+      ``api_serializers["default"]`` is WRAPPED in a generated subclass before use. The wrapper
+      inherits from the project's ``Meta``, so the declaration survives - but nothing said so,
+      and anything that path drops is lost for exactly the serializers that were customised on
+      purpose.
+

@@ -205,10 +205,21 @@ class TestCluster10i_CreateListUIInfo(SimpleTestCase):
         class SNoMeta:
             pass
 
-        self.assertEqual(create_list_ui_info(STrue), {"hide_actions_column": True})
-        self.assertEqual(create_list_ui_info(SFalse), {"hide_actions_column": False})
+        # `columns` joined this payload with cluster 10r (per-column display
+        # options declared on the serializer, LEX-1556). The flag assertions
+        # below are unchanged; what changed is that this scenario no longer
+        # also asserts that NOTHING ELSE is in `list_ui`, which was never its
+        # intent and which pins the payload against additive extension.
+        self.assertEqual(
+            create_list_ui_info(STrue), {"hide_actions_column": True, "columns": {}}
+        )
+        self.assertEqual(
+            create_list_ui_info(SFalse), {"hide_actions_column": False, "columns": {}}
+        )
         # Missing Meta entirely → False (default).
-        self.assertEqual(create_list_ui_info(SNoMeta), {"hide_actions_column": False})
+        self.assertEqual(
+            create_list_ui_info(SNoMeta), {"hide_actions_column": False, "columns": {}}
+        )
 
 
 # --------------------------------------------------------------------- #

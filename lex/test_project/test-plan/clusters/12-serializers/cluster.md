@@ -144,3 +144,22 @@ cluster-2 models are too shallow; we need a model with one of every
 | 12.65 | superusers and opt-out | delete true, edit includes `x` and `valid_from` |
 
 **Scenario range:** 12.64 – 12.65. **Test file:** `lex/test_project/tests/serializers/test_12o_history_row_scopes.py`. **Type:** E. **Status:** ✅ Complete (2026-10-18). Batch: [12o](batches.md).
+
+### 12p — A project declares how its columns look, once, on the serializer
+
+**What it tests:** `Meta.lex_column_options` → validated `list_ui.columns`. The validation
+is the point: this runs while answering `model_info`, which the whole frontend blocks on,
+so a project that mistypes an option must get that option ignored — never a grid that will
+not load.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 12.66 | declared options reach the frontend unchanged | `width` / `min_width` / `max_width` / `pinned` / `hidden` survive exactly as written |
+| 12.67 | a serializer that declares nothing adds nothing | `{}` for no declaration, for no `Meta`, and for a declaration of the wrong shape |
+| 12.68 | one bad option does not cost the good ones | the unusable keys are dropped, the valid neighbour stays |
+| 12.69 | a boolean is never read as a width | `{"width": True}` is a typo, not a one-pixel column (`bool` is an `int` subclass) |
+| 12.70 | a contradictory width pair is refused, not guessed | `min_width > max_width` drops both; a consistent pair is kept |
+| 12.71 | the contract carries both `list_ui` answers | `get_list_ui_options()` always reports `hide_actions_column` *and* `columns` |
+| 12.72 | options survive the wrapping of a custom serializer | a hand-written `ModelSerializer` registered as `api_serializers["default"]` is wrapped before use; the declaration must come through |
+
+**Scenario range:** 12.66 – 12.72. **Test file:** `lex/test_project/tests/serializers/test_12p_list_ui_column_options.py`. **Type:** U. **Status:** ✅ Complete (2026-11-10). Batch: [12p](batches.md). Paired with [10r](../10-api_layer/cluster.md).
