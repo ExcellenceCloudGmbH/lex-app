@@ -1,8 +1,8 @@
 ---
 date: 2026-11-10
 clusters: [1]
-tests_added: "17 new scenarios (1.410-1.426), new file test_1ay_custom_domain_hosts.py"
-suite_tally: "init: 671 pass / 14 skip / 4 fail (all four pre-existing and environmental: 1.357c and 1.368 subprocess imports, 1.381 x2 'No module named lex' from a temp cwd)"
+tests_added: "21 new scenarios (1.410-1.430), new file test_1ay_custom_domain_hosts.py"
+suite_tally: "init (.venv-lex-core): 662 pass / 14 skip / 4 fail; the same 4 fail on the base commit (641 pass there), all subprocess-environment failures in 1aq and 1at"
 ---
 
 # Batch 1ay — custom domains reach the pods, and dashboards stay first-party

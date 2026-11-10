@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 426
+max_scenario: 430
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1114,7 +1114,7 @@ letters:
     scenarios: 1.357-1.369
     status: complete
     tests:
-      pass: 17
+      pass: 21
       skip: 0
       xfail: 0
     note: >-
@@ -1305,10 +1305,10 @@ letters:
       a clean removal. The routes that served the feature are pinned by 10q.
   ay:
     title: Custom domains -- every attached hostname is accepted, and a dashboard is framed same-site
-    scenarios: 1.410-1.426
+    scenarios: 1.410-1.430
     status: complete
     tests:
-      pass: 17
+      pass: 21
       skip: 0
       xfail: 0
     note: >-
@@ -1328,4 +1328,7 @@ letters:
       a shell on app.customer.com frames streamlit.app.customer.com, not the platform host whose
       cookies Safari would block (1.416-1.417), and lex_view()'s frame -- the reverse direction --
       points back at the app host on that same domain instead of the localhost it used to fall
-      back to (1.426).
+      back to (1.426). 1.427-1.429 drive /auth/login and /auth/adopt through the whole proxy app
+      behind the ingress's X-Forwarded-* headers, which is where the hostname actually reaches
+      the application; 1.430 reads reflex's own SAME_DOMAIN_HOSTNAMES off disk, since the whole
+      multi-host Reflex design rests on its frontend rewriting a localhost backend URL.

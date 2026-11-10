@@ -531,5 +531,9 @@ does not remove user launch configurations.
 | 1.424 | a local Reflex run | no origins resolved, so Reflex keeps its own default |
 | 1.425 | a hardened instance | `LEX_CORS_ALLOWED_ORIGINS` keeps the operator's list AND the instance's own hostnames |
 | 1.426 | `lex_view()`'s frame | points at the app host on the dashboard's own domain; an explicit `REACT_APP_URL` still wins |
+| 1.427 | the sign-in round trip | `/auth/login` through the whole app: the IdP redirect's `redirect_uri` is on the hostname the browser used |
+| 1.428 | a forged `X-Forwarded-Host` | falls back to the canonical callback; the forged name appears nowhere in the IdP redirect |
+| 1.429 | the renewal preflight | allowed and named from an attached app origin, with credentials; a foreign origin gets 403 |
+| 1.430 | what Reflex resolves | `api_url` and the event URL stay on a host in Reflex's own `SAME_DOMAIN_HOSTNAMES`; CORS lists both hostnames |
 
-**Scenario range:** 1.410 – 1.426. **Test file:** `lex/test_project/tests/init/test_1ay_custom_domain_hosts.py`. **Type:** U / I. **Status:** ✅ Complete (2026-11-10). Batch: [1ay](batches.md).
+**Scenario range:** 1.410 – 1.430. **Test file:** `lex/test_project/tests/init/test_1ay_custom_domain_hosts.py`. **Type:** U / I. **Status:** ✅ Complete (2026-11-10). Batch: [1ay](batches.md).

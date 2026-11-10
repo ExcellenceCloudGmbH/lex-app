@@ -37,12 +37,13 @@ carries no host list, which is every instance without a custom domain and every
 local run. That fallback is itself a scenario below: it is what keeps this
 change invisible to the installations that do not use the feature.
 
-Cluster 1ay -- scenarios 1.410-1.426. Type: U / I.
+Cluster 1ay -- scenarios 1.410-1.430. Type: U / I.
 Covers: lex/hosts.py (public_hosts, canonical_url, registrable_domain,
         same_site_host, same_site_url, host_of, CurrentHostMiddleware),
         lex/lex_app/settings.py (ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS),
         lex/proxy.py (PUBLIC_HOSTS, _requested_host, _external_base_url,
-        _callback_url, _frontend_origins),
+        _callback_url, _frontend_origins, and the /auth/login and /auth/adopt
+        routes driven through the whole ASGI app),
         lex/lex_app/streamlit/Streamlit.py, lex/lex_app/reflex/Reflex.py,
         lex/lex_app/streamlit/embed.py (_resolve_base_url),
         lex/lex_app/reflex/config.py (public_origins).
@@ -56,11 +57,15 @@ import json
 import os
 import subprocess
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 import pytest
 from django.test import SimpleTestCase
 from starlette.requests import Request
+from starlette.testclient import TestClient
 
 from lex import hosts as lex_hosts
 
@@ -157,6 +162,77 @@ def _reimport_proxy_with(env: dict):
         finally:
             if saved is not None:
                 sys.modules["lex.proxy"] = saved
+
+
+class _FakeKeycloak:
+    """An OIDC discovery document on loopback, so authlib builds a real redirect.
+
+    The scenarios below drive `/auth/login` through the whole proxy app rather
+    than calling `_external_base_url` directly, because what has to be right is
+    the `redirect_uri` authlib puts in the query string of the URL a browser is
+    actually sent to -- and because the hostname only reaches the application
+    through ProxyHeadersMiddleware reading `X-Forwarded-Host`, which a direct
+    call does not exercise.
+    """
+
+    def __enter__(self):
+        issuer_holder = {}
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                issuer = issuer_holder["issuer"]
+                if self.path.endswith("/.well-known/openid-configuration"):
+                    body = json.dumps({
+                        "issuer": issuer,
+                        "authorization_endpoint": f"{issuer}/protocol/openid-connect/auth",
+                        "token_endpoint": f"{issuer}/protocol/openid-connect/token",
+                        "userinfo_endpoint": f"{issuer}/protocol/openid-connect/userinfo",
+                        "end_session_endpoint": f"{issuer}/protocol/openid-connect/logout",
+                        "jwks_uri": f"{issuer}/protocol/openid-connect/certs",
+                        "response_types_supported": ["code"],
+                        "subject_types_supported": ["public"],
+                        "id_token_signing_alg_values_supported": ["RS256"],
+                    }).encode()
+                elif self.path.endswith("/certs"):
+                    body = json.dumps({"keys": []}).encode()
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        self._server = HTTPServer(("127.0.0.1", 0), Handler)
+        self.base_url = f"http://127.0.0.1:{self._server.server_port}"
+        self.issuer = f"{self.base_url}/realms/lex"
+        issuer_holder["issuer"] = self.issuer
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(timeout=5)
+
+
+def _ingress_headers(host: str) -> dict:
+    """What the ingress puts in front of the proxy for a request on ``host``."""
+    return {
+        "host": host,
+        "x-forwarded-host": host,
+        "x-forwarded-proto": "https",
+    }
+
+
+def _redirect_uri_of(location: str) -> str:
+    return parse_qs(urlparse(location).query).get("redirect_uri", [""])[0]
 
 
 def _django_host_settings(env: dict) -> dict:
@@ -808,3 +884,221 @@ class TestCluster01ay_ReflexAcceptsEveryAttachedHost(SimpleTestCase):
                 public_origins(), [],
                 msg="a local run must not be given a deployed allow-list",
             )
+
+
+# ---------------------------------------------------------------------------
+# the whole proxy app, on two hostnames at once
+# ---------------------------------------------------------------------------
+class TestCluster01ay_TheSignInRoundTripFollowsItsHost(SimpleTestCase):
+    """Cluster 1ay: /auth/login and /auth/adopt, driven through the ASGI app."""
+
+    def _client_for(self, keycloak):
+        module = _reimport_proxy_with(_env(ATTACHED_ENV, {
+            "SESSION_SECRET": "fixed",
+            "KEYCLOAK_URL": keycloak.base_url,
+            "KEYCLOAK_REALM": "lex",
+            "OIDC_RP_CLIENT_ID": "lex-instance",
+            "OIDC_RP_CLIENT_SECRET": "secret",
+            # Nothing listens there: no scenario here reaches the dashboard.
+            "UPSTREAM": "http://127.0.0.1:1",
+            "REACT_APP_URL": None,
+            "LEX_FRONTEND_URL": None,
+        }))
+        return module
+
+    # -- 1.427 ---------------------------------------------------------
+    def test_1_427_the_sign_in_redirect_comes_back_to_the_host_the_browser_used(self) -> None:
+        """
+        Scenario 1.427: the IdP is told to return to the hostname the user is on.
+        Given: a dashboard served on its platform hostname and on an attached one
+        When: a browser on either opens /auth/login, through the ingress's headers
+        Then: the redirect to Keycloak carries a redirect_uri on that same hostname.
+
+        Driven through the whole app, not through `_external_base_url`: the
+        hostname reaches the application only because ProxyHeadersMiddleware
+        reads `X-Forwarded-Host`, and what has to be right is the query
+        parameter authlib puts in the URL the browser is actually sent to. On
+        the hostname that is not canonical this used to return the canonical
+        callback, which set the session cookie on a host the browser then left
+        -- the sign-in loop, with every individual step succeeding.
+        """
+        with _FakeKeycloak() as keycloak:
+            module = self._client_for(keycloak)
+            with TestClient(module.app) as client:
+                for host in (
+                    "streamlit.app.customer.com",
+                    "inst-streamlit.lit.excellence-cloud.de",
+                ):
+                    response = client.get(
+                        "/auth/login", headers=_ingress_headers(host), follow_redirects=False,
+                    )
+                    self.assertIn(
+                        response.status_code, (302, 303, 307),
+                        msg=f"{host}: expected a redirect to the IdP, got {response.status_code}",
+                    )
+                    location = response.headers.get("location", "")
+                    self.assertTrue(
+                        location.startswith(f"{keycloak.issuer}/protocol/openid-connect/auth"),
+                        msg=f"{host}: must be sent to the IdP, got {location[:120]}",
+                    )
+                    self.assertEqual(
+                        _redirect_uri_of(location), f"https://{host}/auth/callback",
+                        msg=f"{host}: the IdP must return the user to the host they are on",
+                    )
+
+    # -- 1.428 ---------------------------------------------------------
+    def test_1_428_a_forged_forwarded_host_never_reaches_the_idp(self) -> None:
+        """
+        Scenario 1.428: an unrecognised forwarded host cannot steer the redirect_uri.
+        Given: a request carrying a hostname this instance does not serve
+        When: /auth/login builds the redirect to Keycloak
+        Then: the canonical callback is used, and the forged hostname appears nowhere.
+
+        `X-Forwarded-Host` is set by whatever sits in front of the proxy, and
+        the value feeds the OIDC `redirect_uri`. Trusting it as it arrives
+        would let anyone able to set that header have Keycloak deliver an
+        authorization code to a host of their choosing, so the hostname list is
+        an allow-list and this is the scenario that keeps it one.
+        """
+        with _FakeKeycloak() as keycloak:
+            module = self._client_for(keycloak)
+            with TestClient(module.app) as client:
+                response = client.get(
+                    "/auth/login",
+                    headers=_ingress_headers("evil.example.net"),
+                    follow_redirects=False,
+                )
+                location = response.headers.get("location", "")
+
+        self.assertEqual(
+            _redirect_uri_of(location),
+            "https://inst-streamlit.lit.excellence-cloud.de/auth/callback",
+            msg="an unknown forwarded host must fall back to the canonical callback",
+        )
+        self.assertNotIn(
+            "evil.example.net", location,
+            msg="the forged hostname must appear nowhere in the IdP redirect",
+        )
+
+    # -- 1.429 ---------------------------------------------------------
+    def test_1_429_renewal_is_accepted_from_the_shell_on_the_customers_domain(self) -> None:
+        """
+        Scenario 1.429: the token-renewal preflight passes from an attached app host.
+        Given: the shell served on app.customer.com and the dashboard on the customer's domain
+        When: the browser preflights the credentialed POST to /auth/adopt
+        Then: it is allowed, named explicitly and with credentials -- and a
+              foreign origin is refused.
+
+        Renewal is how a dashboard outlives the access token it was opened
+        with. Refused, the dashboard works for about five minutes and then
+        stops, with a 403 in the console and nothing server-side naming the
+        cause. The negative half matters as much: this endpoint is
+        credentialed, so the allow-list must never widen to anyone asking.
+        """
+        with _FakeKeycloak() as keycloak:
+            module = self._client_for(keycloak)
+            with TestClient(module.app) as client:
+                headers = _ingress_headers("streamlit.app.customer.com")
+                allowed = client.options("/auth/adopt", headers={
+                    **headers,
+                    "origin": "https://app.customer.com",
+                    "access-control-request-method": "POST",
+                })
+                refused = client.options("/auth/adopt", headers={
+                    **headers,
+                    "origin": "https://attacker.example.net",
+                    "access-control-request-method": "POST",
+                })
+
+        self.assertEqual(
+            allowed.status_code, 204,
+            msg=f"the shell on the customer's domain must be allowed to renew; "
+                f"got {allowed.status_code}",
+        )
+        self.assertEqual(
+            allowed.headers.get("access-control-allow-origin"), "https://app.customer.com",
+            msg="the response must name the origin, never '*' -- it is credentialed",
+        )
+        self.assertEqual(
+            allowed.headers.get("access-control-allow-credentials"), "true",
+            msg="without this the browser discards the response of a credentialed call",
+        )
+        self.assertEqual(
+            refused.status_code, 403,
+            msg=f"a foreign origin must be refused; got {refused.status_code}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# what Reflex itself resolves
+# ---------------------------------------------------------------------------
+class TestCluster01ay_ReflexResolvesARewritableBackend(SimpleTestCase):
+    """Cluster 1ay: the assumption the multi-host Reflex design rests on."""
+
+    # -- 1.430 ---------------------------------------------------------
+    def test_1_430_the_compiled_backend_url_is_one_reflex_rewrites_per_browser(self) -> None:
+        """
+        Scenario 1.430: lex_config() leaves api_url on a host Reflex substitutes.
+        Given: a deployed instance with Reflex on two hostnames
+        When: `lex_config()` resolves the configuration Reflex compiles from
+        Then: `api_url` and the event URL are on a hostname listed in Reflex's own
+              SAME_DOMAIN_HOSTNAMES, which is what makes its frontend address the
+              backend at `window.location` instead of a hostname baked into the bundle.
+
+        The whole multi-host design rests on a property of Reflex, not of
+        lex-app: its generated `getBackendURL` rewrites a *localhost* backend
+        URL to the browser's own hostname and leaves any other verbatim. So
+        this reads the list out of the installed `state.js` rather than
+        trusting it -- a Reflex upgrade that narrowed it would otherwise break
+        every attached dashboard silently, and the only symptom would be a
+        websocket to the wrong host carrying no cookies.
+        """
+        pytest.importorskip("reflex", reason="reflex is not installed in this environment")
+        pytest.importorskip("reflex_enterprise")
+
+        import pathlib as _pathlib
+        import re as _re
+        from urllib.parse import urlparse as _urlparse
+
+        import reflex_base
+
+        from lex.lex_app.reflex.config import lex_config
+
+        with _Env(_env(ATTACHED_ENV, {
+            "PROJECT_ROOT": "/tmp/lex_1_430_project",
+            "REFLEX_ACCESS_TOKEN": "unused-for-config",
+        })):
+            os.makedirs("/tmp/lex_1_430_project", exist_ok=True)
+            config = lex_config()
+
+            from reflex_base.constants.event import Endpoint
+
+            api_host = _urlparse(config.api_url).hostname
+            event_host = _urlparse(Endpoint.EVENT.get_url()).hostname
+            cors = list(config.cors_allowed_origins)
+
+        state_js = _pathlib.Path(reflex_base.__file__).parent / ".templates/web/utils/state.js"
+        source = state_js.read_text()
+        rewritten = _re.search(r"SAME_DOMAIN_HOSTNAMES\s*=\s*\[(.*?)\]", source, _re.S).group(1)
+
+        self.assertIn(
+            f'"{api_host}"', rewritten,
+            msg=f"Reflex only substitutes {rewritten.strip()}; api_url is on {api_host!r}, "
+                f"so that hostname would be compiled into the bundle",
+        )
+        self.assertEqual(
+            event_host, api_host,
+            msg="the event websocket must be as rewritable as the rest of the backend",
+        )
+        self.assertIn(
+            "window.location.hostname", source,
+            msg="Reflex must still substitute the browser's hostname for a localhost backend",
+        )
+        self.assertEqual(
+            cors,
+            [
+                "https://inst-reflex.lit.excellence-cloud.de",
+                "https://reflex.app.customer.com",
+            ],
+            msg=f"every attached hostname must be an accepted websocket origin; got {cors}",
+        )

@@ -1506,7 +1506,7 @@ imports anything from `lex.lex_app`, whose settings module reads the environment
 | Test file | `lex/test_project/tests/init/test_1aq_reflex_dashboards.py` |
 | Test classes | `TestCluster01aq_Config` (1.357, 1.357b, 1.357c), `TestCluster01aq_KeycloakProvider` (1.358, 1.359, 1.369), `TestCluster01aq_Orm` (1.360–1.361), `TestCluster01aq_Dispatch` (1.362–1.363), `TestCluster01aq_PageChrome` (1.364), `TestCluster01aq_DispatchPage` (1.365, 1.365b), `TestCluster01aq_TheCompiledApp` (1.366), `TestCluster01aq_Registration` (1.367), `TestCluster01aq_EventLoops` (1.368) |
 | Fixtures | probe models `ReflexProbeFund` (both hooks), `ReflexProbeDefault` (`LexModel`, no overrides), `ReflexProbePlain` (plain Django model); a session's state tree built from Reflex's root `State`; `E2ETestCase` for the ORM and dispatch scenarios; subprocesses for 1.357c and 1.368 |
-| Tests landed | **17 pass / 0 fail** |
+| Tests landed | **21 pass / 0 fail** (20 pass / 1 skip where reflex is not installed) |
 | Status | ✅ Complete |
 
 | Scenario | Title | Asserts |
@@ -1818,13 +1818,13 @@ config each fail 1.404.
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.410 – 1.426 |
+| Scenario range | 1.410 – 1.430 |
 | Type | U / I |
 | Files covered | `lex/hosts.py` (new: `public_hosts`, `canonical_url`, `registrable_domain`, `same_site_host`, `same_site_url`, `host_of`, `CurrentHostMiddleware`), `lex/lex_app/settings.py` (`ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `MIDDLEWARE`), `lex/proxy.py` (`PUBLIC_HOSTS`, `_requested_host`, `_external_base_url`, `_callback_url`, `_frontend_origins`), `lex/lex_app/streamlit/Streamlit.py`, `lex/lex_app/reflex/Reflex.py`, `lex/lex_app/streamlit/embed.py` (`_resolve_base_url`), `lex/lex_app/reflex/config.py` (`public_origins`, `cors_allowed_origins`) |
 | Test file | `lex/test_project/tests/init/test_1ay_custom_domain_hosts.py` |
-| Test classes | `TestCluster01ay_PublicHostList` (1.410–1.412), `TestCluster01ay_SameSiteDashboard` (1.413–1.417, 1.426), `TestCluster01ay_DjangoAcceptsEveryAttachedHost` (1.418–1.419, 1.425), `TestCluster01ay_StreamlitProxyFollowsItsHost` (1.420–1.422), `TestCluster01ay_ReflexAcceptsEveryAttachedHost` (1.423–1.424) |
-| Fixtures | `ATTACHED_ENV` / `PLAIN_ENV` — one instance as the Instance Controller leaves it with and without a customer domain attached; `_Env` (set/remove env vars), `_request` (a Starlette request carrying a real `Host`), `_reimport_proxy_with` (the proxy resolves its hosts at import), `_django_host_settings` (a child process, because `ALLOWED_HOSTS` is resolved while `settings.py` imports) |
-| Tests landed | **17 pass / 0 fail** |
+| Test classes | `TestCluster01ay_PublicHostList` (1.410–1.412), `TestCluster01ay_SameSiteDashboard` (1.413–1.417, 1.426), `TestCluster01ay_DjangoAcceptsEveryAttachedHost` (1.418–1.419, 1.425), `TestCluster01ay_StreamlitProxyFollowsItsHost` (1.420–1.422), `TestCluster01ay_ReflexAcceptsEveryAttachedHost` (1.423–1.424), `TestCluster01ay_TheSignInRoundTripFollowsItsHost` (1.427–1.429), `TestCluster01ay_ReflexResolvesARewritableBackend` (1.430) |
+| Fixtures | `ATTACHED_ENV` / `PLAIN_ENV` — one instance as the Instance Controller leaves it with and without a customer domain attached; `_Env` (set/remove env vars), `_request` (a Starlette request carrying a real `Host`), `_reimport_proxy_with` (the proxy resolves its hosts at import), `_django_host_settings` (a child process, because `ALLOWED_HOSTS` is resolved while `settings.py` imports), `_FakeKeycloak` (an OIDC discovery document on loopback, so authlib builds a real redirect), `_ingress_headers` |
+| Tests landed | **21 pass / 0 fail** (20 pass / 1 skip where reflex is not installed) |
 | Status | ✅ Complete |
 
 | Scenario | Title | Asserts |
@@ -1845,6 +1845,12 @@ config each fail 1.404.
 | 1.423 | Reflex CORS | every attached reflex host as an `https://` origin, canonical first |
 | 1.424 | local Reflex | `public_origins()` is empty, so no `cors_allowed_origins` is set at all |
 | 1.426 | `lex_view()`'s frame | the app host on the dashboard's own registrable domain; the platform host for an instance with no custom domain; an explicit `REACT_APP_URL` wins; a local run keeps `http://localhost:8000` |
+| 1.427 | the sign-in round trip | through `TestClient(proxy.app)` with `X-Forwarded-Host`: `redirect_uri` is `https://<that host>/auth/callback`, for the attached host and the canonical one |
+| 1.428 | forged forwarded host | the canonical callback is used; `evil.example.net` appears nowhere in the IdP redirect |
+| 1.429 | renewal preflight | 204 + explicit `Allow-Origin` + `Allow-Credentials` from `https://app.customer.com`; 403 from a foreign origin |
+| 1.430 | Reflex's own resolution | `lex_config().api_url` and `Endpoint.EVENT.get_url()` are on a host listed in the installed `state.js`'s `SAME_DOMAIN_HOSTNAMES`; `cors_allowed_origins` holds both hostnames |
 | 1.425 | hardened instance | `LEX_CORS_ALLOWED_ORIGINS` keeps the operator's entry and gains both of the instance's own origins; the permissive default stays closed |
+
+**Mutation check:** making `_requested_host` return `""` and deriving the renewal origins from `DOMAIN_HOSTED` alone — i.e. the code as it was — fails 1.420, 1.422, 1.427 and 1.429. The same four behaviours were also reproduced against the base commit by serving `lex/proxy.py` with uvicorn and reading the `Location` header: a browser on `streamlit.app.customer.com` was sent to the platform callback, and the renewal preflight from `https://app.customer.com` came back 403.
 
 **Why a regression matters:** every failure here is silent and attributed to something else. A hostname absent from `ALLOWED_HOSTS` makes a correctly-delegated customer domain answer "400 Bad Request"; an OIDC callback built from the canonical host while the user is on another one loops the sign-in forever with every step succeeding; a dashboard framed across registrable domains is third-party and has never worked in Safari. The allow-list in 1.421 is the security edge: the request's host feeds the `redirect_uri`, so reading it straight off the header would let anyone able to set `Host` have Keycloak deliver an authorization code elsewhere.
