@@ -112,8 +112,11 @@ record rebuilt from the payload, as create, update and delete entries are:
   update and delete payloads keep their field-level pruning.
 - **Status rows** (`api/model_entries/auditlogstatus/list`) are as visible as
   their entry, and an entry fetched by id follows the same rule as the list.
-- **Tracebacks** of failed operations (`error_traceback`) are shown only to
-  superusers, on both `auditlog` and `auditlogstatus`.
+- **Tracebacks** of failed operations (`error_traceback`) follow their entry:
+  whoever may see the entry sees why it failed, on both `auditlog` and
+  `auditlogstatus`. This applies to every entry, including a failed
+  calculation run, so the record's Audit Log tab shows the traceback to
+  the people who may read the record.
 
 This is part of the `READ_SURFACES` hardening (on by default);
 `LEX_SEC_READ_SURFACES=false` restores the earlier payload-based check.
