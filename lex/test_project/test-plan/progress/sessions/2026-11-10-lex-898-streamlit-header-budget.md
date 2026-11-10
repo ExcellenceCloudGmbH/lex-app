@@ -48,5 +48,25 @@ upstream joined by a comma into a value that parses as neither.
 `x-streamlit-access-token` and now asserts it on `authorization` — the same fact about the same
 hop, under the header that carries it.
 
+**Driven once outside the suite, because the unit scenarios cannot see the symptom.** The
+scenarios assert the mechanism — the variable, the import order, the headers — but the failure they
+exist to prevent is a parse inside a library this checkout does not even have at a version that
+reads the variable (local is websockets 11.0.3). So: a venv with websockets 15.0.1, a real
+`websockets` server, and a client sending an 8310-byte `Cookie: st_access=…`, the header that
+carried the token on lex-1483.
+
+| | header-line limit in force | result |
+| --- | --- | --- |
+| library left alone | 8192 | `InvalidMessage: did not receive a valid HTTP response` |
+| `lex.ws_header_limits` imported first | 65536 | handshake completes, server message received |
+
+The same run settles the attribute lookup: websockets 15.0.1 carries only `MAX_LINE_LENGTH` and
+11.0.3 only `MAX_LINE`, so `websockets_line_limit_shortfall()` reading one name would have been
+silent on exactly the half it has to judge. It returns `None` on 15.0.1 and the warning on 11.0.3.
+
+The Keycloak half of LEX-898 was verified the same day against a throwaway Keycloak 26.7.2 — a
+heavy user's token drops 6207 → 1307 bytes and `validate_jwt_token` still accepts it; see the
+`lex-keycloak` README in `LEX_TERRAFORM_MODULES`.
+
 **Letter.** `bk` / 1.619–1.625, not the next free pair on `lex-app-v2` (`ay` / 1.410): open branches
 hold `ay` through `bj`. `bj` was taken the same way.
