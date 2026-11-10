@@ -57,6 +57,37 @@ logger = logging.getLogger(__name__)
 
 
 # -----------------------------------------------------------------------------
+# WebSocket handshake header-line limit
+# -----------------------------------------------------------------------------
+# Since Streamlit 1.66 its own server is uvicorn on the ``websockets-sansio``
+# backend, which parses the upgrade request with ``websockets.http11`` and caps
+# every header *line* at ``MAX_LINE_LENGTH`` (8192 bytes by default). A request
+# over that cap is not rejected: uvicorn never answers it, so our upstream
+# ``ws_connect`` sits in "timed out during opening handshake" while every plain
+# HTTP request to the same server succeeds. A Keycloak JWT for a user with many
+# roles, or a browser carrying a few parent-domain cookies, crosses 8 KB.
+#
+# The limit is a module global read on every parse, so raising it here covers
+# both servers in this process (ours and Streamlit's) whichever imported
+# ``websockets`` first. ``WEBSOCKETS_MAX_LINE_LENGTH`` still wins when set.
+WS_MIN_MAX_LINE_LENGTH = 64 * 1024
+
+
+def _raise_websockets_line_limit(minimum: int = WS_MIN_MAX_LINE_LENGTH) -> None:
+    if os.environ.get("WEBSOCKETS_MAX_LINE_LENGTH"):
+        return
+    try:
+        from websockets import http11
+    except Exception:  # pragma: no cover - websockets without http11
+        return
+    if getattr(http11, "MAX_LINE_LENGTH", minimum) < minimum:
+        http11.MAX_LINE_LENGTH = minimum
+
+
+_raise_websockets_line_limit()
+
+
+# -----------------------------------------------------------------------------
 # Config helpers
 # -----------------------------------------------------------------------------
 def _env_bool(name: str, default: bool) -> bool:
@@ -1122,6 +1153,30 @@ def _upstream_ws_url_and_origin(client_ws_url: str) -> Tuple[str, str]:
     return str(target), origin
 
 
+#: Cookies that belong to this proxy, not to Streamlit. Both carry a whole
+#: credential (``st_access`` is the access-token JWT, the session cookie is
+#: signed session state); the identity they prove is already handed upstream
+#: in the ``X-Streamlit-*`` headers, so forwarding them only inflates the one
+#: ``Cookie`` line toward the handshake limit above.
+_PROXY_OWNED_COOKIES = frozenset({"st_access", "session"})
+
+
+def _strip_proxy_cookies(headers: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+    out: List[Tuple[str, str]] = []
+    for name, value in headers:
+        if name.lower() != "cookie":
+            out.append((name, value))
+            continue
+        kept = [
+            part.strip()
+            for part in value.split(";")
+            if part.strip() and part.split("=", 1)[0].strip() not in _PROXY_OWNED_COOKIES
+        ]
+        if kept:
+            out.append((name, "; ".join(kept)))
+    return out
+
+
 async def ws_proxy(websocket: WebSocket):
     # Off-loop JWKS warmup: a blocking fetch here would stall every other
     # in-flight request and the existing WebSocket pumps.
@@ -1177,6 +1232,7 @@ async def ws_proxy(websocket: WebSocket):
         "authorization",
     }
     fwd: List[Tuple[str, str]] = [(k, v) for k, v in websocket.headers.items() if k.lower() not in excluded]
+    fwd = _strip_proxy_cookies(fwd)
 
     fwd.append(("X-Streamlit-User-ID", str(user_payload.get("sub") or "")))
     fwd.append(("X-Streamlit-User-Email", user_payload.get("email") or ""))
