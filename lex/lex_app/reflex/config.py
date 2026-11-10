@@ -145,6 +145,28 @@ def lex_auth_plugin(**options: Any):
     return rxe.AuthPlugin(**options)
 
 
+def public_origins() -> list[str]:
+    """Every origin a Reflex page of this instance may be served from.
+
+    One entry per hostname the dashboards answer on: the canonical one, plus
+    any customer-owned domain attached to the instance. The backend's event
+    websocket checks the browser's ``Origin`` against this list, so a hostname
+    missing from it is an attached domain whose dashboards load and then fail
+    to connect -- a blank page with a console error and nothing in any log.
+
+    Empty -- meaning "leave Reflex's own default alone" -- when the instance
+    has no public hostname configured at all, which is every local run.
+    """
+    from lex import hosts as lex_hosts
+
+    origins = []
+    for host in lex_hosts.public_hosts("reflex"):
+        if not host or host.startswith("localhost") or host.startswith("127."):
+            continue
+        origins.append(f"https://{host}")
+    return origins
+
+
 def lex_config(**overrides: Any):
     """An ``rxe.Config`` for the project, with lex-app's defaults.
 
@@ -167,5 +189,20 @@ def lex_config(**overrides: Any):
         # sign-in, so it would advertise nothing a crawler could open.
         "disable_plugins": [rx.plugins.SitemapPlugin],
     }
+
+    # No `api_url` here, deliberately. Reflex leaves it at `http://localhost:<backend
+    # port>`, and its generated frontend rewrites a localhost backend URL to
+    # `window.location` before opening the websocket (`getBackendURL` in
+    # reflex's state.js). That is precisely the behaviour an instance with
+    # custom domains needs: the dashboard addresses the backend on whichever
+    # hostname the browser reached it on, so one build serves the platform
+    # hostname and every attached customer domain. Pinning `api_url` to the
+    # canonical URL -- which an earlier deployment did -- hard-codes one
+    # hostname into the bundle, and every other hostname then opens a
+    # cross-origin websocket to it, carrying no cookies.
+    origins = public_origins()
+    if origins:
+        settings["cors_allowed_origins"] = origins
+
     settings.update(overrides)
     return rxe.Config(**settings)

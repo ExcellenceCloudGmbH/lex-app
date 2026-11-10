@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 409
+max_scenario: 425
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1303,3 +1303,27 @@ letters:
       model-structure payload types nodes Model / HTMLReport / Folder only, never Process (1.409).
       Each scenario checks the kept HTMLReport sibling too, so a broken registration cannot pass as
       a clean removal. The routes that served the feature are pinned by 10q.
+  ay:
+    title: Custom domains -- every attached hostname is accepted, and a dashboard is framed same-site
+    scenarios: 1.410-1.425
+    status: complete
+    tests:
+      pass: 16
+      skip: 0
+      xfail: 0
+    note: >-
+      A customer-owned domain attached by the Instance Controller makes an instance answer on
+      more than one hostname per role, and the pods have to know all of them. lex/hosts.py reads
+      LEX_APP_HOSTS / LEX_STREAMLIT_HOSTS / LEX_REFLEX_HOSTS (written by the lex-instance
+      terraform module only when a domain is attached) and falls back to DOMAIN_HOSTED /
+      STREAMLIT_URL / REFLEX_URL, which is the whole behaviour for every other instance
+      (1.410-1.411, 1.419, 1.424). Those hostnames reach ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS,
+      read in a child process because both are resolved while settings.py imports (1.418); the
+      Streamlit proxy builds its OIDC callback from the request's own host, allow-listed so a
+      forged Host header cannot steer the redirect_uri (1.420-1.421), and trusts every attached
+      app host as a token-renewal origin (1.422); Reflex's websocket CORS lists every attached
+      reflex host (1.423), and an instance hardened with LEX_CORS_ALLOWED_ORIGINS keeps its own
+      hostnames in that list rather than refusing its own new domain (1.425). The same-site half -- registrable_domain, same_site_url and
+      CurrentHostMiddleware (1.412-1.415) -- is what keeps the dashboards' iframes first-party:
+      a shell on app.customer.com frames streamlit.app.customer.com, not the platform host whose
+      cookies Safari would block (1.416-1.417).

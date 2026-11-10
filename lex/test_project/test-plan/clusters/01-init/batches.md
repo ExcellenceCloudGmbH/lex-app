@@ -1811,3 +1811,39 @@ config each fail 1.404.
 | 1.409 | no `Process` node type | the `api/model-structure` payload types the model `Model`, the report `HTMLReport`, the branch `Folder`; no node anywhere carries `Process` |
 
 **Why a regression matters:** a half-removed feature is worse than either state — a `registerProcess` that still collects classes looks like a working feature while `api/process/<name>` 404s, and a stale `Process` entry in the reserved-name set keeps rejecting a project's own model for a framework class that no longer exists.
+
+---
+
+### Batch 1ay — custom domains: every attached hostname accepted, dashboards framed same-site ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.410 – 1.425 |
+| Type | U / I |
+| Files covered | `lex/hosts.py` (new: `public_hosts`, `canonical_url`, `registrable_domain`, `same_site_host`, `same_site_url`, `host_of`, `CurrentHostMiddleware`), `lex/lex_app/settings.py` (`ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `MIDDLEWARE`), `lex/proxy.py` (`PUBLIC_HOSTS`, `_requested_host`, `_external_base_url`, `_callback_url`, `_frontend_origins`), `lex/lex_app/streamlit/Streamlit.py`, `lex/lex_app/reflex/Reflex.py`, `lex/lex_app/reflex/config.py` (`public_origins`, `cors_allowed_origins`) |
+| Test file | `lex/test_project/tests/init/test_1ay_custom_domain_hosts.py` |
+| Test classes | `TestCluster01ay_PublicHostList` (1.410–1.412), `TestCluster01ay_SameSiteDashboard` (1.413–1.417), `TestCluster01ay_DjangoAcceptsEveryAttachedHost` (1.418–1.419, 1.425), `TestCluster01ay_StreamlitProxyFollowsItsHost` (1.420–1.422), `TestCluster01ay_ReflexAcceptsEveryAttachedHost` (1.423–1.424) |
+| Fixtures | `ATTACHED_ENV` / `PLAIN_ENV` — one instance as the Instance Controller leaves it with and without a customer domain attached; `_Env` (set/remove env vars), `_request` (a Starlette request carrying a real `Host`), `_reimport_proxy_with` (the proxy resolves its hosts at import), `_django_host_settings` (a child process, because `ALLOWED_HOSTS` is resolved while `settings.py` imports) |
+| Tests landed | **16 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.410 | no custom domain, no change | `public_hosts` returns the canonical host alone for all three roles |
+| 1.411 | lenient list parsing | spacing, scheme, case, duplicates and a trailing comma normalise away; canonical first |
+| 1.412 | registrable domain | plain, deep and `co.uk` names; a customer domain and the platform's are different sites |
+| 1.413 | same-site dashboard | the viewer's own registrable domain wins, for Streamlit and Reflex alike |
+| 1.414 | fallback is verbatim | an unmatched viewer gets the canonical URL; `http://localhost:8501` / `:8502` keep scheme and port |
+| 1.415 | `CurrentHostMiddleware` | the request's host is the default viewer, and `current_host()` is empty again afterwards |
+| 1.416 | `Streamlit.get_html` | `src="https://streamlit.app.customer.com/?embed=true"` |
+| 1.417 | `Reflex.get_html` | `src="https://reflex.app.customer.com/?lex_embed=1"` |
+| 1.418 | Django host settings | both hosts in `ALLOWED_HOSTS`, both as exact `https://` CSRF origins, middleware installed |
+| 1.419 | no widening | with no host list, `ALLOWED_HOSTS` is exactly `[DOMAIN_HOSTED, 127.0.0.1, localhost, POD_IP]` |
+| 1.420 | callback follows the host | `_external_base_url` and `_callback_url` name the hostname the request arrived on |
+| 1.421 | allow-list, not header trust | `Host: evil.example.net` falls back to the canonical URL; `_requested_host` is `""` |
+| 1.422 | renewal origins | both app hosts and both dashboard hosts are trusted; `*` is not |
+| 1.423 | Reflex CORS | every attached reflex host as an `https://` origin, canonical first |
+| 1.424 | local Reflex | `public_origins()` is empty, so no `cors_allowed_origins` is set at all |
+| 1.425 | hardened instance | `LEX_CORS_ALLOWED_ORIGINS` keeps the operator's entry and gains both of the instance's own origins; the permissive default stays closed |
+
+**Why a regression matters:** every failure here is silent and attributed to something else. A hostname absent from `ALLOWED_HOSTS` makes a correctly-delegated customer domain answer "400 Bad Request"; an OIDC callback built from the canonical host while the user is on another one loops the sign-in forever with every step succeeding; a dashboard framed across registrable domains is third-party and has never worked in Safari. The allow-list in 1.421 is the security edge: the request's host feeds the `redirect_uri`, so reading it straight off the header would let anyone able to set `Host` have Keycloak deliver an authorization code elsewhere.

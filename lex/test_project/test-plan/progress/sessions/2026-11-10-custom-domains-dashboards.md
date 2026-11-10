@@ -1,0 +1,22 @@
+---
+date: 2026-11-10
+clusters: [1]
+tests_added: "16 new scenarios (1.410-1.425), new file test_1ay_custom_domain_hosts.py"
+suite_tally: "init: 671 pass / 14 skip / 4 fail (all four pre-existing and environmental: 1.357c and 1.368 subprocess imports, 1.381 x2 'No module named lex' from a temp cwd)"
+---
+
+# Batch 1ay — custom domains reach the pods, and dashboards stay first-party
+
+See [1ay](../../clusters/01-init/batches.md). The Instance Controller could already attach a
+customer's domain to an instance and route it, but nothing told the *processes*: Django rejected
+the hostname it had never heard of, the Streamlit proxy completed sign-in on the canonical host
+and left the user's host without a cookie, and Reflex's websocket CORS named one origin.
+`lex/hosts.py` is the single reader of `LEX_APP_HOSTS` / `LEX_STREAMLIT_HOSTS` /
+`LEX_REFLEX_HOSTS` (written by lex-instance 3.2.0) and falls back to the three `*_URL` variables,
+so an instance without a custom domain is byte-identical to before — asserted in 1.410, 1.419 and
+1.424 rather than assumed, because `ALLOWED_HOSTS` is a security boundary.
+
+The second half is `same_site_url`: a dashboard is framed from the hostname that shares a
+registrable domain with the page embedding it. Across registrable domains the iframe is a
+third-party context, and Safari blocks its cookies outright — which is why "Streamlit works for
+everyone except this customer" was a browser bug nobody could reproduce.

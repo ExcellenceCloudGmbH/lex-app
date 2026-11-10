@@ -30,6 +30,7 @@ import os
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 
+from lex import hosts as lex_hosts
 from lex.runtime_config import (
     derive_repo_name,
     resolve_local_sqlite_path,
@@ -187,18 +188,39 @@ if os.getenv("LEX_ENVIRONMENT_TAG", "envvar_not_existing") == "dev":
 else:
     DEBUG = False
 
-ALLOWED_HOSTS = [
+# Every hostname the instance ingress routes to this pod, canonical first: the
+# platform hostname and any customer-owned domain attached to the instance. An
+# attached domain reaches the very same pods as the platform one, so a hostname
+# missing here is a domain that resolves, routes, and is then answered with
+# "400 Bad Request" by Django -- and with a refused handshake by
+# AllowedHostsOriginValidator, which reads this same list.
+#
+# Written by the lex-instance terraform module only when a custom domain is
+# attached; `public_hosts` falls back to DOMAIN_HOSTED alone, which is what
+# every other instance has always had.
+_PUBLIC_APP_HOSTS = lex_hosts.public_hosts("app")
+
+# dict.fromkeys, not set(): DOMAIN_HOSTED is normally the first entry of
+# _PUBLIC_APP_HOSTS as well, and a duplicate in ALLOWED_HOSTS is only noise --
+# but an unordered list would make this setting differ between runs.
+ALLOWED_HOSTS = list(dict.fromkeys([
+    *_PUBLIC_APP_HOSTS,
     os.getenv("DOMAIN_HOSTED", "localhost"),
     "127.0.0.1",
     "localhost",
     os.environ.get("POD_IP", default="envvar_not_existing"),
-]
+]))
 
 LOGIN_REDIRECT_URL = "/process_admin/all"
 
 CSRF_TRUSTED_ORIGINS = [
     "https://*." + os.getenv("DOMAIN_HOSTED", "localhost"),
     "http://localhost:3000",
+    # Django matches CSRF origins exactly unless the entry starts with `*.`, so
+    # each host needs its own entry as well as the wildcard above -- a POST to
+    # `https://app.customer.com` carries that exact Origin, which
+    # `https://*.customer.com` does not match.
+    *[f"https://{host}" for host in _PUBLIC_APP_HOSTS if host and host != "localhost"],
 ]
 
 # Fail fast on missing critical configuration when deployed, instead of silently
@@ -356,6 +378,10 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
     "lex.authentication.middleware.ApiKeyAwareLoginRequiredMiddleware",
+    # Records the hostname each request arrived on, so an HTMLReport can frame
+    # its dashboard from a hostname on the same registrable domain -- see
+    # lex.hosts. Pure bookkeeping: it never rejects a request.
+    "lex.hosts.CurrentHostMiddleware",
     "oauth2_authcodeflow.middleware.RefreshSessionMiddleware",
     "oauth2_authcodeflow.middleware.RefreshAccessTokenMiddleware",
     "lex.api.middleware.keycloak_permissions.KeycloakPermissionsMiddleware",
@@ -803,6 +829,16 @@ _lex_cors_origins = [
     if origin.strip()
 ]
 if _lex_cors_origins:
+    # The instance's own hostnames are always in the list. An operator setting
+    # this variable is naming the THIRD PARTIES that may call the instance, not
+    # re-declaring the instance itself -- and once a customer-owned domain is
+    # attached, "itself" is more than one hostname. Leaving them out would mean
+    # a hardened instance stopped accepting its own newly attached domain, both
+    # for CORS and as an OIDC next/fail target
+    # (lex.authentication.middleware.OidcRedirectGuardMiddleware reads these).
+    _own_origins = [f"https://{host}" for host in _PUBLIC_APP_HOSTS if host and host != "localhost"]
+    _lex_cors_origins = list(dict.fromkeys(_lex_cors_origins + _own_origins))
+
     CORS_ORIGIN_ALLOW_ALL = False
     CORS_ALLOW_ALL_ORIGINS = False
     CORS_ALLOWED_ORIGINS = _lex_cors_origins

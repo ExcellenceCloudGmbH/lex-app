@@ -505,3 +505,30 @@ does not remove user launch configurations.
 | 1.409 | no `Process` node type | the structure payload types nodes `Model` / `HTMLReport` / `Folder` only |
 
 **Scenario range:** 1.406 – 1.409. **Test file:** `lex/test_project/tests/init/test_1ax_process_feature_removed.py`. **Type:** I. **Status:** ✅ Complete (2026-10-22). Batch: [1ax](batches.md).
+
+### 1ay. Custom domains — every attached hostname is accepted, and a dashboard is framed same-site ✅
+
+**What it tests:** an instance with a customer-owned domain attached answers on more than one hostname per role, and the pods behind the ingress have to agree. `lex/hosts.py` is the single place that knows which hostnames those are — read from `LEX_APP_HOSTS` / `LEX_STREAMLIT_HOSTS` / `LEX_REFLEX_HOSTS`, falling back to `DOMAIN_HOSTED` / `STREAMLIT_URL` / `REFLEX_URL` when nothing is configured. From there they reach Django's `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS`, the Streamlit proxy's OIDC callback and token-renewal allow-list, and Reflex's websocket CORS. The second half is which hostname a dashboard is *framed* from: the one sharing a registrable domain with the page embedding it.
+
+**Why a regression matters:** both halves fail silently and look like something else. A hostname missing from `ALLOWED_HOSTS` makes the customer's own domain answer "400 Bad Request" although DNS, Cloudflare and the ingress are all correct. A callback built from the canonical host while the user is on another one sets a host-only session cookie on a host the browser then leaves — an endless sign-in loop with every individual step succeeding. And a dashboard framed across registrable domains is a third-party iframe: it works in Chrome today and has never worked in Safari, which reads as "Streamlit is broken for this one customer".
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.410 | no custom domain, no change | each role reports its canonical host alone when no `LEX_*_HOSTS` is set |
+| 1.411 | the list is parsed leniently | spacing, scheme, case and duplicates normalise away; the canonical host stays first |
+| 1.412 | registrable domain | `customer.com`, a deep subdomain and `customer.co.uk` all reduce correctly |
+| 1.413 | same-site dashboard | a viewer on `app.customer.com` gets `streamlit.`/`reflex.app.customer.com`; one on the platform host keeps the platform dashboard |
+| 1.414 | fallback keeps scheme and port | an unmatched viewer gets the canonical URL; a local run keeps `http://localhost:8501/8502` |
+| 1.415 | the middleware supplies the viewer | the request's host is the default, and does not outlive the request |
+| 1.416 | the Streamlit report | iframe src is the same-site dashboard, still `?embed=true` |
+| 1.417 | the Reflex report | iframe src is the same-site dashboard, still `?lex_embed=1` |
+| 1.418 | Django accepts both hosts | both reach `ALLOWED_HOSTS`; both get an exact `https://` CSRF entry; the middleware is installed |
+| 1.419 | nothing new is accepted | with no host list, `ALLOWED_HOSTS` is exactly what it has always been |
+| 1.420 | the callback follows the user | `_external_base_url` / `_callback_url` name the hostname the request arrived on |
+| 1.421 | a forged Host cannot steer it | an unrecognised `Host` falls back to the canonical URL |
+| 1.422 | renewal from any attached host | every attached app and dashboard origin is trusted; `*` never is |
+| 1.423 | Reflex websocket origins | every attached reflex host is an allowed origin, canonical first |
+| 1.424 | a local Reflex run | no origins resolved, so Reflex keeps its own default |
+| 1.425 | a hardened instance | `LEX_CORS_ALLOWED_ORIGINS` keeps the operator's list AND the instance's own hostnames |
+
+**Scenario range:** 1.410 – 1.425. **Test file:** `lex/test_project/tests/init/test_1ay_custom_domain_hosts.py`. **Type:** U / I. **Status:** ✅ Complete (2026-11-10). Batch: [1ay](batches.md).

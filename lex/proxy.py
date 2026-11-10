@@ -30,6 +30,11 @@ from starlette.responses import (
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
+# The hostnames this instance is served on, per role. Deliberately a top-level
+# `lex` module: it imports no Django and triggers no package side effects, so
+# it is safe in this standalone proxy, which runs in its own uvicorn thread.
+from lex import hosts as lex_hosts
+
 # Respect X-Forwarded-* when behind ingress/LB
 try:
     from starlette.middleware.proxy_headers import ProxyHeadersMiddleware  # type: ignore
@@ -783,7 +788,54 @@ def _query_without_auth_token(request: Request) -> str:
     return urlencode(kept)
 
 
+#: Every hostname this dashboard is served on, from the environment the
+#: lex-instance terraform module writes: the canonical one first, then any
+#: customer-owned domain attached to the instance. Falls back to the canonical
+#: host alone, which is what an instance with no custom domain has.
+#:
+#: This is an ALLOW-LIST, and must stay one. `_external_base_url` builds the
+#: OIDC `redirect_uri` and the post-logout URL from the request's own host, so
+#: trusting the `Host` header as it arrives would let anyone who can set it
+#: have Keycloak redirect to a host of their choosing, carrying the
+#: authorization code with it.
+PUBLIC_HOSTS = frozenset(lex_hosts.public_hosts("streamlit"))
+
+
+def _requested_host(request: Request) -> str:
+    """The hostname the browser used, if it is one we are served on.
+
+    `request.url` already reflects `X-Forwarded-Host`/`X-Forwarded-Proto` where
+    ProxyHeadersMiddleware is installed, and the ingress sets both.
+    """
+    host = (request.url.hostname or "").strip().lower()
+    return host if host in PUBLIC_HOSTS else ""
+
+
 def _external_base_url(request: Request) -> str:
+    """The origin to build absolute URLs back to this proxy with.
+
+    The request's own host wins over the canonical ``STREAMLIT_URL`` whenever
+    we recognise it. An instance with a customer-owned domain attached serves
+    its dashboard on several hostnames at once, and a user who arrives on one
+    of the others must come back to *that* one: the session cookie this proxy
+    sets is host-only, so completing the sign-in on the canonical host would
+    leave the host the user is actually on with no cookie at all -- and a
+    sign-in loop that never terminates.
+    """
+    host = _requested_host(request)
+    if host:
+        # Only the HOST comes from the request. The scheme and port come from
+        # the canonical URL, because every hostname a role is served on shares
+        # them -- and because the request's own scheme is only trustworthy
+        # where ProxyHeadersMiddleware could be imported. Reading it anyway
+        # would put `http://` into the OIDC redirect_uri the moment that import
+        # failed, which Keycloak refuses and which no log here would explain.
+        scheme = PUBLIC_URL_OBJ.scheme if PUBLIC_URL_OBJ else (request.url.scheme or "https")
+        port = PUBLIC_URL_OBJ.port if PUBLIC_URL_OBJ else request.url.port
+        # `lex streamlit` serves http://localhost:8501, so a non-default port
+        # is kept; httpx reports None for the scheme's own default.
+        netloc = f"{host}:{port}" if port else host
+        return f"{scheme}://{netloc}"
     if PUBLIC_URL:
         return PUBLIC_URL
     return str(request.base_url).rstrip("/")
@@ -1819,14 +1871,22 @@ def _frontend_origins() -> frozenset:
         # Accept a bare host here too, so the two spellings behave alike.
         origins.add(override if "://" in override else f"https://{override}")
 
-    # DOMAIN_HOSTED is a bare hostname, matching how settings.py consumes it.
-    domain_hosted = (os.getenv("DOMAIN_HOSTED") or "").strip().strip("/")
-    if domain_hosted and not domain_hosted.startswith("localhost"):
-        origins.add(f"https://{domain_hosted}")
+    # Every hostname the shell is served on, not just DOMAIN_HOSTED: once a
+    # customer-owned domain is attached, the same shell answers on the platform
+    # hostname AND on the customer's, and a dashboard framed by the one that is
+    # not DOMAIN_HOSTED would be refused its renewed token -- which looks like
+    # a dashboard that works for five minutes and then quietly stops.
+    # `public_hosts` is DOMAIN_HOSTED alone when nothing else is configured,
+    # which is the behaviour this replaces.
+    for app_host in lex_hosts.public_hosts("app"):
+        if app_host and not app_host.startswith("localhost"):
+            origins.add(f"https://{app_host}")
 
     # The standalone (non-embedded) dashboard talking to itself needs no entry.
     if PUBLIC_URL:
         origins.add(PUBLIC_URL)
+    # ...and neither does one reached on an attached hostname of its own.
+    origins |= {f"https://{host}" for host in PUBLIC_HOSTS if not host.startswith("localhost")}
 
     # Development: DOMAIN_HOSTED is absent or "localhost" while the shell runs
     # on another port, which is a different *origin* and so still needs CORS.
