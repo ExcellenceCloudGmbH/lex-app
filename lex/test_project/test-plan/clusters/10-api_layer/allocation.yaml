@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 99
+max_scenario: 183
 letters:
   a:
     title: ''
@@ -194,3 +194,20 @@ letters:
       for CreateOrUpdate. The model-side removal is pinned by 1ax. Originally allocated as
       10p/10.91-10.94; #840 landed that letter and range on lex-app-v2 first, so this batch re-took
       the next free pair on merge.
+  ac:
+    title: 'Scheduled jobs through the REST API'
+    scenarios: 10.175-10.183
+    status: complete
+    tests:
+      pass: 9
+      skip: 0
+      xfail: 0
+    note: >-
+      Schedules are created, edited, switched off and run through the generic API and UI: every
+      definition mistake answers 400 naming the field, a save records who the job runs as and
+      moves its next slot, the ▶ button runs it now, a schedule declared in code can be switched
+      off but not rewritten, and an edit never resets a scheduled job's status. Allocated past
+      the letters and scenario IDs that in-flight branches (feat/ext-*, feat/auth-long-sessions)
+      already hold: the first letter absent from lex-app-v2 and every remote branch, and a range
+      above the highest max_scenario on any branch, so neither side has to renumber on merge.
+      Design: docs/superpowers/plans/2026-11-10-scheduled-jobs.md.

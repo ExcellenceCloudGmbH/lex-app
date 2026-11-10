@@ -203,3 +203,35 @@ nested calculation recalculated what the button refused. The save now asks with 
 record had before it (7.237).
 
 ---
+
+---
+
+### Batch 7x — A scheduled job's run is an ordinary calculation of its target ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.269 – 7.278 |
+| Type | E |
+| Files covered | `lex/scheduling/models.py` (`ScheduledJob.calculate`, the stale-copy guard in `save`), `lex/scheduling/dispatch.py` (`fire`), `lex/core/calculation_start.py` |
+| Test file | `lex/test_project/tests/calculations/test_7x_scheduled_job_runs.py` |
+| Test classes | `TestCluster07x_ScheduledJobRuns` (7.269–7.278) |
+| Fixtures | `ScheduledTargetCalc` (counts runs, can fail, can be held open by a gate, can be closed) — added to `calculations/models.py` with `ScheduledDeniedCalc` and `KeepsStatusOnEditCalc`, kept out of `ALL_MODELS` (also used by 8f, 10ac, 6v, 4z, 1bk) |
+| Tests landed | **10 pass / 0 fail** |
+| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bk) |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 7.269 | the target is the child | target calculated once and keeps its result; target and job SUCCESS; the job's log has `Scheduled job: <name>` |
+| 7.270 | a failing target fails the job | target and job ERROR; the job keeps the target's error |
+| 7.271 | every record, one bad | all three calculated; the good two keep SUCCESS and results; job ERROR with `1 of 3` and the record id |
+| 7.272 | closed records left alone | the closed record keeps its status; only the open one runs; job SUCCESS |
+| 7.273 | function target | the registered function is called once with the job's kwargs; job SUCCESS |
+| 7.274 | failing function | job ERROR keeping the function's error |
+| 7.275 | function removed from the code | job ERROR naming the missing function |
+| 7.276 | record deleted | job ERROR saying the record no longer exists |
+| 7.277 | success clears the old error | after a failed then a fixed run: SUCCESS and an empty error |
+| 7.278 | an edit during the run sticks | switching the job off mid-run starts no second run; after the run it is still off with no next slot |
+
+**Why a regression matters:** Scheduled work that fails silently, reports success for a failed target, rolls back a night's results because one record failed, or loses an edit made while it ran.
+
+**Allocation note:** Allocated past the letters and scenario IDs that in-flight branches (feat/ext-*, feat/auth-long-sessions) already hold: the first letter absent from lex-app-v2 and every remote branch, and a range above the highest max_scenario on any branch, so neither side has to renumber on merge. Design: [`docs/superpowers/plans/2026-11-10-scheduled-jobs.md`](../../../../../docs/superpowers/plans/2026-11-10-scheduled-jobs.md).

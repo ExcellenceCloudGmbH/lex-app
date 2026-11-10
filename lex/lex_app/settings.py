@@ -299,6 +299,7 @@ INSTALLED_APPS = [
     "lex.core.apps.CoreConfig",
     "lex.authentication.apps.AuthenticationConfig",
     "lex.audit_logging.apps.LoggingConfig",
+    "lex.scheduling.apps.SchedulingConfig",
     "lex.api.apps.ApiConfig",
     "lex.process_admin.apps.ProcessAdminConfig",
     "lex.lex_app.apps.LexAppConfig",
@@ -582,6 +583,23 @@ except Exception as e:
 
 # Make celery_active available as a module-level variable for backward compatibility
 celery_active = CELERY_ACTIVE
+
+# ---------------------------------------------------------------------------
+# Scheduled jobs (see docs/superpowers/plans/2026-11-10-scheduled-jobs.md)
+#
+# ScheduledJob rows are fired by a clock thread in the served backend
+# (lex.scheduling.loop), started from lex_app/asgi.py. ON by default: a clock
+# that is silently off looks exactly like one with nothing to do, so turning it
+# off is an explicit choice that the backend logs at WARNING.
+#   LEX_SCHEDULER_TICK_SECONDS          — how often due jobs are looked for.
+#   LEX_SCHEDULER_MISFIRE_GRACE_SECONDS — how late a slot may be and still run
+#     (after a restart or downtime); later slots are recorded as missed.
+# ---------------------------------------------------------------------------
+LEX_SCHEDULER_ENABLED = os.getenv("LEX_SCHEDULER_ENABLED", "true").strip().lower() == "true"
+LEX_SCHEDULER_TICK_SECONDS = int(os.getenv("LEX_SCHEDULER_TICK_SECONDS", "30"))
+LEX_SCHEDULER_MISFIRE_GRACE_SECONDS = int(
+    os.getenv("LEX_SCHEDULER_MISFIRE_GRACE_SECONDS", "3600")
+)
 
 # ---------------------------------------------------------------------------
 # Celery worker-recovery knobs (see docs/celery-worker-recovery/plan.md)

@@ -102,5 +102,19 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 
 **Scenario range:** 6.160 – 6.167. **Test file:** `lex/test_project/tests/audit_logging/test_6t_file_operation_audit_visibility.py`. **Type:** E. **Status:** ✅ Complete (2026-10-22). Batch: [6t](batches.md).
 
+
 ---
 
+### 6v. The audit entry of a scheduled run ✅
+
+**What it tests:** A scheduled run opens the same kind of audit entry a Calculate click opens — an `update` of the job under the run's click-shaped calculation id — authored by the run-as user (or `Scheduler`), carrying `trigger: {by: schedule, job, schedule}`, and is finalised like any run.
+
+**Why a regression matters:** Nightly jobs invisible in the audit log, attributed to nobody, or left pending forever.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 6.173 | audited as the run-as user | one `update` entry for the job; author = run-as user; `trigger.by = schedule`, `trigger.job`; click-shaped id; final snapshot present; status success |
+| 6.174 | a failed run | status failure with the traceback |
+| 6.175 | no run-as user | author `Scheduler`, never blank |
+
+**Scenario range:** 6.173 – 6.175. **Test file:** `lex/test_project/tests/audit_logging/test_6v_scheduled_run_audit.py`. **Type:** E. **Status:** ✅ Complete (2026-11-10). Batch: [6v](batches.md).

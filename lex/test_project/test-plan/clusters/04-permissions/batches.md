@@ -141,3 +141,29 @@ must not open a check on the whole model.
 | Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-23-create-on-filled-record.md) |
 
 ---
+
+---
+
+### Batch 4z — A schedule can do no more than the person who saved it ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.159 – 4.162 |
+| Type | E |
+| Files covered | `lex/scheduling/models.py` (`_calculate_denial`, `validate_definition`, `_real_user`) |
+| Test file | `lex/test_project/tests/permissions/test_4z_scheduled_job_permissions.py` |
+| Test classes | `TestCluster04z_ScheduledJobPermissions` (4.159–4.162) |
+| Fixtures | `ScheduledDeniedCalc` (readable, never editable), `ScheduledJobTestCase.scheduled_jobs_allowed()` |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bk) |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.159 | a forbidden record | 400 on `target_model` saying the caller may not calculate it; nothing stored |
+| 4.160 | every record of a forbidden model | 400 on `target_model`; nothing stored |
+| 4.161 | code is trusted | a schedule created without a request for the same model is stored and scheduled |
+| 4.162 | no access to schedules | creating one without the grant is refused (401/403); nothing stored |
+
+**Why a regression matters:** Anyone with access to schedules could calculate records they could never calculate themselves.
+
+**Allocation note:** Allocated past the letters and scenario IDs that in-flight branches (feat/ext-*, feat/auth-long-sessions) already hold: the first letter absent from lex-app-v2 and every remote branch, and a range above the highest max_scenario on any branch, so neither side has to renumber on merge. Design: [`docs/superpowers/plans/2026-11-10-scheduled-jobs.md`](../../../../../docs/superpowers/plans/2026-11-10-scheduled-jobs.md).

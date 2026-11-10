@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 409
+max_scenario: 629
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1303,3 +1303,21 @@ letters:
       model-structure payload types nodes Model / HTMLReport / Folder only, never Process (1.409).
       Each scenario checks the kept HTMLReport sibling too, so a broken registration cannot pass as
       a clean removal. The routes that served the feature are pinned by 10q.
+  bk:
+    title: 'Scheduler bootstrap — the clock in the served backend, code-declared schedules, `run_scheduler`'
+    scenarios: 1.619-1.629
+    status: complete
+    tests:
+      pass: 11
+      skip: 0
+      xfail: 0
+    note: >-
+      Every instance gets a scheduler with no configuration and no extra pod: the clock starts
+      only in the process serving the app, is on by default (off is a WARNING), survives failing
+      passes; `@lex_job(schedule=...)` declarations become schedule rows kept in step with the
+      code; `lex run_scheduler --once` does the same on demand; `ScheduledJob` is registered
+      like any model and kept out of history. Allocated past the letters and scenario IDs that
+      in-flight branches (feat/ext-*, feat/auth-long-sessions) already hold: the first letter
+      absent from lex-app-v2 and every remote branch, and a range above the highest max_scenario
+      on any branch, so neither side has to renumber on merge. Design:
+      docs/superpowers/plans/2026-11-10-scheduled-jobs.md.

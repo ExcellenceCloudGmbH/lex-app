@@ -1,7 +1,7 @@
 cluster: 6
 slug: audit_logging
 title: Audit Logging
-max_scenario: 167
+max_scenario: 175
 letters:
   a:
     title: ''
@@ -207,3 +207,19 @@ letters:
       (6.163); auditlogstatus rows follow their entry (6.164); tracebacks are superuser-only (6.165);
       the opt-out restores the payload check (6.166); the detail endpoint applies the list's rule
       (6.167). 6.160-6.165 and 6.167 fail on the #840 head.
+  v:
+    title: 'The audit entry of a scheduled run'
+    scenarios: 6.173-6.175
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      A scheduled run opens the same kind of audit entry a Calculate click opens — an `update`
+      of the job under the run's click-shaped calculation id — authored by the run-as user (or
+      `Scheduler`), carrying `trigger: {by: schedule, job, schedule}`, and is finalised like any
+      run. Allocated past the letters and scenario IDs that in-flight branches (feat/ext-*,
+      feat/auth-long-sessions) already hold: the first letter absent from lex-app-v2 and every
+      remote branch, and a range above the highest max_scenario on any branch, so neither side
+      has to renumber on merge. Design: docs/superpowers/plans/2026-11-10-scheduled-jobs.md.

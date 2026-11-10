@@ -144,6 +144,13 @@ class CalculationModel(LexModel):
     #: so a subclass can make it a property and decide per record.
     calculate_on_create = False
 
+    #: An edit through the app normally resets the status to NOT_CALCULATED: the
+    #: stored result no longer matches the edited inputs. A model whose status is
+    #: not a result of its fields — a scheduled job, whose status is its last
+    #: run's outcome — sets this to ``False`` and keeps its status through edits.
+    #: A run in progress then also stays visibly in progress while it is edited.
+    reset_calculation_on_edit = True
+
     class Meta:
         abstract = True
 

@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 120
+max_scenario: 162
 letters:
   a:
     title: ''
@@ -218,3 +218,20 @@ letters:
       refuses an edit/create whose check raises (4.120). LEX_SEC_FAIL_CLOSED=false restores the allow
       in each. All five fail on fix/audit-log-read-side-v2 (lex-app-v2 0ac01da8 + #842). 4.111-4.115 are
       reserved for 4q (permission_create on the filled record, separate PR).
+  z:
+    title: 'A schedule can do no more than the person who saved it'
+    scenarios: 4.159-4.162
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      A scheduled run has no request, so no Keycloak permissions to check when it fires; the
+      check happens when the schedule is saved — the same checks the Calculate button passes —
+      and the run then acts as that person. Schedules keep the framework's default permissions;
+      code is trusted. Allocated past the letters and scenario IDs that in-flight branches
+      (feat/ext-*, feat/auth-long-sessions) already hold: the first letter absent from
+      lex-app-v2 and every remote branch, and a range above the highest max_scenario on any branch,
+      so neither side has to renumber on merge. Design:
+      docs/superpowers/plans/2026-11-10-scheduled-jobs.md.

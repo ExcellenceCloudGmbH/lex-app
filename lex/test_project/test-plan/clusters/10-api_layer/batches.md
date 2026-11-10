@@ -118,3 +118,34 @@
 **Why a regression matters:** `run_step` was a second write path into every model, carrying its own copy of the permission checks the generic CRUD endpoints apply. A route that comes back by accident is a write surface nobody audits any more. And the removal had to be surgical — it ran through the one url list the whole frontend is served from, so 10.99 is the half that proves nothing else went with it.
 
 **Allocation note:** first written as 10p/10.91–10.94. [10p](#batch-10p--file-download-endpoints-write-an-audit-entry-) (#840) landed that letter and range on `lex-app-v2` while this branch was open, so the batch re-took the next free pair when the base was merged in. Letters are never renumbered; this one moved before it ever landed.
+
+---
+
+### Batch 10ac — Scheduled jobs through the REST API ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.175 – 10.183 |
+| Type | E |
+| Files covered | `lex/scheduling/models.py` (definition validation, `next_run_at`, `run_as`, code-managed refusal), `lex/api/views/model_entries/One.py` (create / update / calculate, now through `lex/core/calculation_start.py`; `reset_calculation_on_edit`), `lex/core/models/CalculationModel.py` (`reset_calculation_on_edit`), `lex/utilities/config/generic_app_config.py` (sidebar) |
+| Test file | `lex/test_project/tests/api_layer/test_10ac_scheduled_jobs_api.py` |
+| Test classes | `TestCluster10ac_ScheduledJobsApi` (10.175–10.183) |
+| Fixtures | `ScheduledJobTestCase.scheduled_jobs_allowed()` (stands in for an admin's Keycloak grant on `scheduling.ScheduledJob`), `ScheduledTargetCalc`, `KeepsStatusOnEditCalc` |
+| Tests landed | **9 pass / 0 fail** |
+| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bk) |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.175 | create sets next slot and run-as | 201; next slot = next 06:00 UTC; `run_as` = the creator; enabled |
+| 10.176 | mistakes answer 400 naming the field | bad cron, seconds field, no / both schedules, past `run_at`, unknown zone, unknown / non-calculation / self model, missing record, unknown function; nothing stored |
+| 10.177 | an edit moves the slot and the run-as | a second person's cron edit moves the slot and becomes `run_as`; off → no slot; on → a future slot |
+| 10.178 | ▶ runs now | PATCH `calculate=true` runs the target; job SUCCESS; next slot unchanged |
+| 10.179 | code-declared schedules | a cron edit answers 400 pointing at `@lex_job`; `enabled=false` works |
+| 10.180 | bare model names | `scheduledtargetcalc` is stored as `lex_app.ScheduledTargetCalc` |
+| 10.181 | in the sidebar | `api/model-structure` lists `scheduledjob` |
+| 10.182 | an edit during a run | the edit is stored; the job stays IN_PROGRESS; a due slot is skipped; one run |
+| 10.183 | `reset_calculation_on_edit` | a model setting it `False` keeps SUCCESS through an edit (and says so); an ordinary model is still reset |
+
+**Why a regression matters:** Stored schedules that can never run, a job running as someone who never saved it, the UI and the code fighting over a declared schedule, or an edit hiding a running job from the overlap check.
+
+**Allocation note:** Allocated past the letters and scenario IDs that in-flight branches (feat/ext-*, feat/auth-long-sessions) already hold: the first letter absent from lex-app-v2 and every remote branch, and a range above the highest max_scenario on any branch, so neither side has to renumber on merge. Design: [`docs/superpowers/plans/2026-11-10-scheduled-jobs.md`](../../../../../docs/superpowers/plans/2026-11-10-scheduled-jobs.md).

@@ -140,4 +140,32 @@
 
 **Scenario range:** 8.142 – 8.144. **Test file:** `lex/test_project/tests/celery_async/test_8ad_dispatched_task_cancel_marker.py`. **Type:** U. **Status:** ✅ Complete (Session 91 — July 2). Allocated `8ad` (next free letter after `8ac`); 8.142 picks up after cluster-8 scenario max 8.141. Source: `lex/lex_app/celery_tasks.py` (`lex_shared_task` wrapper). 8.142 dispatched run + marker set ⇒ raises `CalculationCancelled` before the wrapped function runs; 8.143 dispatched run + no marker ⇒ marker consulted, function runs normally; 8.144 synchronous run (no context) ⇒ cancel index never consulted, function runs. 3 pass / 0 fail.
 
+
 ---
+
+### 8f. Scheduled dispatch — cron in a time zone, exactly-once claim, overlap, missed slots, one-off, the Celery route ✅
+
+**What it tests:** The scheduler's clock calls `run_due_jobs(now)`; this pins what a cron expression means in a time zone and what a due slot does: it is claimed by exactly one clock, skipped while the previous run is still going, collapsed into one run when recently missed, recorded as missed beyond the grace window, run once for a one-off job, and sent to a Celery worker when Celery is on.
+
+**Why a regression matters:** Double runs, runs at the wrong hour twice a year, a pile-up of runs after an outage, or jobs that silently never run.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 8.167 | weekday schedule skips the weekend | `0 6 * * 1-5` after Friday 07:00 Berlin fires Mon–Thu 06:00 CET |
+| 8.168 | classic cron syntax | steps, range steps, lists, month/weekday names, `@hourly`/`@monthly`; `7` = `0` = Sunday |
+| 8.169 | day fields OR rule | both restricted → a day matching either fires; one `*` → only the other counts |
+| 8.170 | unusable expressions refused | empty, 4 or 6 fields, out of range, backwards range, zero step, never fires, `@reboot`, unknown macro or name — each with its reason |
+| 8.171 | spring-forward | a skipped 02:30 fires once at 03:00 CEST; a half-hourly schedule collapses the gap into one run |
+| 8.172 | fall-back | a repeated 02:30 fires once; a half-hourly schedule does not rerun the repeated hour |
+| 8.173 | unknown time zone refused | the message names a valid example |
+| 8.174 | a due job runs and moves on | only the due job starts; `last_run_at` = now; next slot = next 06:00; a job not due is untouched |
+| 8.175 | a disabled job never runs | no next slot; forced due, still ignored |
+| 8.176 | two clocks, one run | two threads with their own connections tick at once; one starts the slot; the target runs once |
+| 8.177 | runs never stack | a slot due mid-run is skipped with its reason and moves on; the run's own end-of-run save keeps the note and the moved slot |
+| 8.178 | recent misses collapse | five missed 10-minute slots inside the grace window cost one run; next slot = next mark after now |
+| 8.179 | old misses are recorded | a slot two hours late (grace one hour) does not run; the message names it; next slot = tomorrow |
+| 8.180 | one-off runs once | next slot = `run_at`; it runs once; afterwards no next slot and no second run |
+| 8.181 | the Celery route | with Celery on, `calc_and_save.delay` receives the job; nothing is calculated in the backend |
+| 8.182 | an old copy cannot bring a slot back | a copy loaded before the clock ran the slot, renamed and saved after: name stored, slot and status kept, nothing runs again |
+
+**Scenario range:** 8.167 – 8.182. **Test file:** `lex/test_project/tests/celery_async/test_8f_scheduled_dispatch.py`. **Type:** U + E. **Status:** ✅ Complete (2026-11-10). Batch: [8f](batches.md).

@@ -97,3 +97,25 @@ branches again per ``STORAGE_TYPE``. Each is recorded as an ``AuditLog`` row wit
 | 10.99 | the neighbours are untouched | `model-structure`, `project-info`, `calculationlog-tree`, `init-calculation-logs`, `clean-calculations`, `widget-structure`, `global-search-query`, `user-permissions`, `log` and `htmlreports` all still reverse |
 
 **Scenario range:** 10.97 – 10.99. **Test file:** `lex/test_project/tests/api_layer/test_10q_process_routes_removed.py`. **Type:** U. **Status:** ✅ Complete (2026-10-23). Batch: [10q](batches.md).
+
+---
+
+### 10ac. Scheduled jobs through the REST API ✅
+
+**What it tests:** Schedules are created, edited, switched off and run through the generic API and UI: every definition mistake answers 400 naming the field, a save records who the job runs as and moves its next slot, the ▶ button runs it now, a schedule declared in code can be switched off but not rewritten, and an edit never resets a scheduled job's status.
+
+**Why a regression matters:** Stored schedules that can never run, a job running as someone who never saved it, the UI and the code fighting over a declared schedule, or an edit hiding a running job from the overlap check.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.175 | create sets next slot and run-as | 201; next slot = next 06:00 UTC; `run_as` = the creator; enabled |
+| 10.176 | mistakes answer 400 naming the field | bad cron, seconds field, no / both schedules, past `run_at`, unknown zone, unknown / non-calculation / self model, missing record, unknown function; nothing stored |
+| 10.177 | an edit moves the slot and the run-as | a second person's cron edit moves the slot and becomes `run_as`; off → no slot; on → a future slot |
+| 10.178 | ▶ runs now | PATCH `calculate=true` runs the target; job SUCCESS; next slot unchanged |
+| 10.179 | code-declared schedules | a cron edit answers 400 pointing at `@lex_job`; `enabled=false` works |
+| 10.180 | bare model names | `scheduledtargetcalc` is stored as `lex_app.ScheduledTargetCalc` |
+| 10.181 | in the sidebar | `api/model-structure` lists `scheduledjob` |
+| 10.182 | an edit during a run | the edit is stored; the job stays IN_PROGRESS; a due slot is skipped; one run |
+| 10.183 | `reset_calculation_on_edit` | a model setting it `False` keeps SUCCESS through an edit (and says so); an ordinary model is still reset |
+
+**Scenario range:** 10.175 – 10.183. **Test file:** `lex/test_project/tests/api_layer/test_10ac_scheduled_jobs_api.py`. **Type:** E. **Status:** ✅ Complete (2026-11-10). Batch: [10ac](batches.md).

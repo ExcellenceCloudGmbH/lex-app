@@ -44,7 +44,9 @@ class GenericAppConfig(AppConfig):
         self.project_path = None
         self.model_structure_builder = None
         self.pending_relationships = None
-        self.untracked_models = ["calculationlog", "auditlog", "auditlogstatus", "legacyuserchangelog", "legacycalculationlog", "legacycalculationid"]
+        # ``scheduledjob``: every run rewrites the row (status, next slot), so
+        # history would grow without bound; definition edits are in the audit log.
+        self.untracked_models = ["calculationlog", "auditlog", "auditlogstatus", "legacyuserchangelog", "legacycalculationlog", "legacycalculationid", "scheduledjob"]
         self.discovered_models = None
         self.import_finder = None
 
@@ -66,7 +68,10 @@ class GenericAppConfig(AppConfig):
         },
         "Streamlit":{
             "streamlit": None
-        }
+        },
+        "ScheduledJob": {
+            "scheduledjob": None,
+        },
         }
         if reflex_enabled():
             predefined_structure["Reflex"] = {"reflex": None}

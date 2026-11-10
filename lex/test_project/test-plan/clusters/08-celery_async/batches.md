@@ -195,3 +195,41 @@
 | Note | Two assertions had to be strengthened before they could detect the defect, and both are worth remembering. (1) `edited_by`: a worker resolves the same fallback actor the fixture already carried, so an identical overwrite was invisible — 8.147 now seeds a distinct sentinel via `queryset.update()`. (2) The failing calc is deliberately `is_atomic = False`: under `is_atomic = True` the raise rolls the whole calculation back and would hide any stamp. Fixture note — the decorated tasks require explicit Celery task names; Celery derives a default name from `module.func_name` and all three `calculate` methods share one fixture module, so without them the last registration silently wins and one model runs another's body. |
 
 ---
+
+---
+
+### Batch 8f — Scheduled dispatch — cron in a time zone, exactly-once claim, overlap, missed slots, one-off, the Celery route ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.167 – 8.182 |
+| Type | U + E |
+| Files covered | `lex/scheduling/cron.py`, `lex/scheduling/dispatch.py` (`run_due_jobs`, `_claim`, `fire`), `lex/scheduling/models.py` (`next_slot_after`, the next-slot bookkeeping of `save`) |
+| Test file | `lex/test_project/tests/celery_async/test_8f_scheduled_dispatch.py` |
+| Test classes | `TestCluster08f_CronSchedule` (U, 8.167–8.173), `TestCluster08f_SchedulerTick` (E, 8.174–8.181) |
+| Fixtures | `ScheduledJobTestCase` and `ScheduledTargetCalc` (`tests/_scheduling_support.py`, `calculations/models.py`) |
+| Tests landed | **16 pass / 0 fail** |
+| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bk) |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 8.167 | weekday schedule skips the weekend | `0 6 * * 1-5` after Friday 07:00 Berlin fires Mon–Thu 06:00 CET |
+| 8.168 | classic cron syntax | steps, range steps, lists, month/weekday names, `@hourly`/`@monthly`; `7` = `0` = Sunday |
+| 8.169 | day fields OR rule | both restricted → a day matching either fires; one `*` → only the other counts |
+| 8.170 | unusable expressions refused | empty, 4 or 6 fields, out of range, backwards range, zero step, never fires, `@reboot`, unknown macro or name — each with its reason |
+| 8.171 | spring-forward | a skipped 02:30 fires once at 03:00 CEST; a half-hourly schedule collapses the gap into one run |
+| 8.172 | fall-back | a repeated 02:30 fires once; a half-hourly schedule does not rerun the repeated hour |
+| 8.173 | unknown time zone refused | the message names a valid example |
+| 8.174 | a due job runs and moves on | only the due job starts; `last_run_at` = now; next slot = next 06:00; a job not due is untouched |
+| 8.175 | a disabled job never runs | no next slot; forced due, still ignored |
+| 8.176 | two clocks, one run | two threads with their own connections tick at once; one starts the slot; the target runs once |
+| 8.177 | runs never stack | a slot due mid-run is skipped with its reason and moves on; the run's own end-of-run save keeps the note and the moved slot |
+| 8.178 | recent misses collapse | five missed 10-minute slots inside the grace window cost one run; next slot = next mark after now |
+| 8.179 | old misses are recorded | a slot two hours late (grace one hour) does not run; the message names it; next slot = tomorrow |
+| 8.180 | one-off runs once | next slot = `run_at`; it runs once; afterwards no next slot and no second run |
+| 8.181 | the Celery route | with Celery on, `calc_and_save.delay` receives the job; nothing is calculated in the backend |
+| 8.182 | an old copy cannot bring a slot back | a copy loaded before the clock ran the slot, renamed and saved after: name stored, slot and status kept, nothing runs again |
+
+**Why a regression matters:** Double runs, runs at the wrong hour twice a year, a pile-up of runs after an outage, or jobs that silently never run.
+
+**Allocation note:** Allocated past the letters and scenario IDs that in-flight branches (feat/ext-*, feat/auth-long-sessions) already hold: the first letter absent from lex-app-v2 and every remote branch, and a range above the highest max_scenario on any branch, so neither side has to renumber on merge. Design: [`docs/superpowers/plans/2026-11-10-scheduled-jobs.md`](../../../../../docs/superpowers/plans/2026-11-10-scheduled-jobs.md).
