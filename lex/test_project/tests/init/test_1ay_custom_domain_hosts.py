@@ -37,13 +37,14 @@ carries no host list, which is every instance without a custom domain and every
 local run. That fallback is itself a scenario below: it is what keeps this
 change invisible to the installations that do not use the feature.
 
-Cluster 1ay -- scenarios 1.410-1.425. Type: U / I.
+Cluster 1ay -- scenarios 1.410-1.426. Type: U / I.
 Covers: lex/hosts.py (public_hosts, canonical_url, registrable_domain,
         same_site_host, same_site_url, host_of, CurrentHostMiddleware),
         lex/lex_app/settings.py (ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS),
         lex/proxy.py (PUBLIC_HOSTS, _requested_host, _external_base_url,
         _callback_url, _frontend_origins),
         lex/lex_app/streamlit/Streamlit.py, lex/lex_app/reflex/Reflex.py,
+        lex/lex_app/streamlit/embed.py (_resolve_base_url),
         lex/lex_app/reflex/config.py (public_origins).
 Run: python -m lex pytest lex/test_project/tests/init/test_1ay_custom_domain_hosts.py -v
 """
@@ -441,6 +442,64 @@ class TestCluster01ay_SameSiteDashboard(SimpleTestCase):
             'src="https://streamlit.app.customer.com/?embed=true"', html,
             msg=f"the report must frame the same-site dashboard; got {html}",
         )
+
+    # -- 1.426 ---------------------------------------------------------
+    def test_1_426_lex_view_frames_the_app_on_the_dashboards_own_domain(self) -> None:
+        """
+        Scenario 1.426: the frame a dashboard draws around an app page is same-site too.
+        Given: a dashboard whose canonical hostname is on the customer's domain
+        When: `lex_view()` resolves where its frames point
+        Then: the application hostname on that same domain, not the platform one --
+              and an explicit REACT_APP_URL still wins.
+
+        This is the reverse direction of the iframe in 1.416, and it has the
+        same constraint: a frame across registrable domains is a third-party
+        context, so an app page framed inside a dashboard on
+        `streamlit.app.customer.com` has to come from `app.customer.com`.
+        Deriving it also gives a deployed dashboard a working frame with
+        nothing set, where the old fallback was `http://localhost:8000` --
+        which no deployment can load.
+        """
+        import lex.lex_app.streamlit.embed as embed
+
+        promoted = {
+            "DOMAIN_HOSTED": "inst.lit.excellence-cloud.de",
+            "STREAMLIT_URL": "https://streamlit.app.customer.com",
+            "LEX_APP_HOSTS": "inst.lit.excellence-cloud.de,app.customer.com",
+            "LEX_STREAMLIT_HOSTS": "streamlit.app.customer.com",
+            "REACT_APP_URL": None,
+            "LEX_FRONTEND_URL": None,
+        }
+        with _Env(promoted):
+            self.assertEqual(
+                embed._resolve_base_url(), "https://app.customer.com",
+                msg="the frame must stay on the domain the dashboard is served from",
+            )
+
+        with _Env(_env(PLAIN_ENV, {"REACT_APP_URL": None, "LEX_FRONTEND_URL": None})):
+            self.assertEqual(
+                embed._resolve_base_url(), "https://inst.lit.excellence-cloud.de",
+                msg="an instance without a custom domain frames its own platform hostname",
+            )
+
+        with _Env(_env(promoted, {"REACT_APP_URL": "https://elsewhere.example.com/"})):
+            self.assertEqual(
+                embed._resolve_base_url(), "https://elsewhere.example.com",
+                msg="an explicit override still wins, for a shell on neither host",
+            )
+
+        with _Env({
+            "DOMAIN_HOSTED": "localhost",
+            "STREAMLIT_URL": "http://localhost:8501",
+            "LEX_APP_HOSTS": None,
+            "LEX_STREAMLIT_HOSTS": None,
+            "REACT_APP_URL": None,
+            "LEX_FRONTEND_URL": None,
+        }):
+            self.assertEqual(
+                embed._resolve_base_url(), "http://localhost:8000",
+                msg="a local run keeps the development shell, not https://localhost",
+            )
 
     # -- 1.417 ---------------------------------------------------------
     def test_1_417_the_reflex_report_frames_the_same_site_dashboard(self) -> None:

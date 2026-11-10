@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 425
+max_scenario: 426
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1114,7 +1114,7 @@ letters:
     scenarios: 1.357-1.369
     status: complete
     tests:
-      pass: 16
+      pass: 17
       skip: 0
       xfail: 0
     note: >-
@@ -1305,10 +1305,10 @@ letters:
       a clean removal. The routes that served the feature are pinned by 10q.
   ay:
     title: Custom domains -- every attached hostname is accepted, and a dashboard is framed same-site
-    scenarios: 1.410-1.425
+    scenarios: 1.410-1.426
     status: complete
     tests:
-      pass: 16
+      pass: 17
       skip: 0
       xfail: 0
     note: >-
@@ -1326,4 +1326,6 @@ letters:
       hostnames in that list rather than refusing its own new domain (1.425). The same-site half -- registrable_domain, same_site_url and
       CurrentHostMiddleware (1.412-1.415) -- is what keeps the dashboards' iframes first-party:
       a shell on app.customer.com frames streamlit.app.customer.com, not the platform host whose
-      cookies Safari would block (1.416-1.417).
+      cookies Safari would block (1.416-1.417), and lex_view()'s frame -- the reverse direction --
+      points back at the app host on that same domain instead of the localhost it used to fall
+      back to (1.426).

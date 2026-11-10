@@ -155,6 +155,10 @@ def same_site_url(role: str, viewer_host: str = "") -> str:
     to be ``https``: a local ``lex streamlit`` run serves
     ``http://localhost:8501``, and hard-coding https there would frame a
     dashboard that cannot load.
+
+    Always a full URL, even where the role's own variable is a bare hostname --
+    ``DOMAIN_HOSTED`` is, while ``STREAMLIT_URL`` and ``REFLEX_URL`` are URLs --
+    because every caller puts the result in an ``href`` or an iframe ``src``.
     """
     canonical = canonical_url(role)
     host = same_site_host(role, viewer_host)
@@ -162,10 +166,8 @@ def same_site_url(role: str, viewer_host: str = "") -> str:
         return canonical
 
     parts = urlsplit(canonical if "://" in canonical else f"https://{canonical}")
-    if host_of(parts.netloc) == host:
-        # The canonical host itself: return it verbatim, port included.
-        return canonical
-    return f"{parts.scheme}://{host}"
+    port = parts.port
+    return f"{parts.scheme}://{host}:{port}" if port else f"{parts.scheme}://{host}"
 
 
 def set_current_host(host: str) -> None:
