@@ -505,3 +505,23 @@ does not remove user launch configurations.
 | 1.409 | no `Process` node type | the structure payload types nodes `Model` / `HTMLReport` / `Folder` only |
 
 **Scenario range:** 1.406 – 1.409. **Test file:** `lex/test_project/tests/init/test_1ax_process_feature_removed.py`. **Type:** I. **Status:** ✅ Complete (2026-10-22). Batch: [1ax](batches.md).
+
+---
+
+### 1bk. The Streamlit handshake stays inside everyone's header budget ✅
+
+**What it tests:** the auth proxy hands Streamlit the user's Keycloak access token in headers, so the token *is* a header line — and used to be three of them. Two limits sit on that line: `websockets` refuses one over `WEBSOCKETS_MAX_LINE_LENGTH` (8192 by default), and the ingress one over 16 KB. This batch covers the ceiling (`lex/ws_header_limits.py`, applied before anything can import `websockets`, reported when the installed release ignores it) and the single copy of the credential that now crosses to Streamlit.
+
+**Why a regression matters:** the failure is silent. uvicorn's `websockets-sansio` handler neither answers the handshake nor closes the socket when the parse fails, so lex-1483 showed a dashboard that never loaded, an open connection, and no log line naming a header (LEX-894). The ceiling only works if it is installed before the library's first import, which nothing observable at runtime would reveal, and only if the installed library reads the variable at all — it has existed since websockets 13. Every one of these scenarios passes trivially with a small token and the old code, which is why they assert the mechanism rather than a size.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.619 | the ceiling is the default | importing `lex.ws_header_limits` with the variable unset leaves it at `65536`, well above the library's own 8192 |
+| 1.620 | an operator's value wins | a configured `WEBSOCKETS_MAX_LINE_LENGTH` is never overwritten |
+| 1.621 | applied in time | `lex/bin/lex.py` imports it before `uvicorn`, `lex/proxy.py` before `websockets` — asserted on the import statements, not on a mention |
+| 1.622 | one copy, HTTP | a proxied request carries the token as `Authorization` only; `X-Forwarded-Access-Token` and `X-Streamlit-Access-Token` are gone |
+| 1.623 | not two Authorizations | a caller's own `Authorization` never travels beside the proxy's |
+| 1.624 | one copy, handshake | the WebSocket handshake carries it once, and `bearer_from_headers` still reads it |
+| 1.625 | a ceiling not in force says so | a websockets release parsing below the configured limit produces a warning naming both numbers |
+
+**Scenario range:** 1.619 – 1.625. **Test file:** `lex/test_project/tests/init/test_1bk_streamlit_header_budget.py`. **Type:** U. **Status:** ✅ Complete (2026-11-10). Batch: [1bk](batches.md).
