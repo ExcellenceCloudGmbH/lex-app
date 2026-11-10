@@ -64,6 +64,20 @@ The same run settles the attribute lookup: websockets 15.0.1 carries only `MAX_L
 11.0.3 only `MAX_LINE`, so `websockets_line_limit_shortfall()` reading one name would have been
 silent on exactly the half it has to judge. It returns `None` on 15.0.1 and the warning on 11.0.3.
 
+**And once through the whole stack**, because a header the upstream never sees is not a credential.
+The real `proxy:app` under uvicorn 0.54.0 with websockets 15.0.1, pointed at a recording stub, fed a
+token from a real authorization-code login — Keycloak's own login page, the redirect URI the module
+registers, the code exchange — against the scoped client:
+
+| hop | `Authorization` copies | retired headers | header bytes | identity |
+| --- | --- | --- | --- | --- |
+| `GET /dashboard` | 1, ours | none | 1544 | heavy@example.com, `jwt` |
+| `/_stcore/stream` handshake | 1, ours | none | 1766 | heavy@example.com, `jwt` |
+
+HTTP 200 from the upstream, and the socket opened and delivered a message. The same handshake on the
+old code carries two more copies of the token: +2356 bytes for this 1178-byte token, and ~25 KB for
+the 8.3 KB one lex-1483 had.
+
 The Keycloak half of LEX-898 was verified the same day against a throwaway Keycloak 26.7.2 — a
 heavy user's token drops 6207 → 1307 bytes and `validate_jwt_token` still accepts it; see the
 `lex-keycloak` README in `LEX_TERRAFORM_MODULES`.
