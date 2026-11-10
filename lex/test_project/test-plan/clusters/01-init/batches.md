@@ -1811,3 +1811,33 @@ config each fail 1.404.
 | 1.409 | no `Process` node type | the `api/model-structure` payload types the model `Model`, the report `HTMLReport`, the branch `Folder`; no node anywhere carries `Process` |
 
 **Why a regression matters:** a half-removed feature is worse than either state — a `registerProcess` that still collects classes looks like a working feature while `api/process/<name>` 404s, and a stale `Process` entry in the reserved-name set keeps rejecting a project's own model for a framework class that no longer exists.
+
+---
+
+### Batch 1bj — the initial-data load survives restarts and a second server process ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.609 – 1.618 |
+| Type | I (1.614 runs a child interpreter) |
+| Files covered | `lex/lex_app/initial_data_load.py` (new: lock, state record, decision, non-daemon thread), `lex/lex_app/apps.py` (`async_ready` hands the decision and the load to it) |
+| Test file | `lex/test_project/tests/init/test_1bj_initial_data_load_restart.py` |
+| Test classes | `TestCluster01bj_StartupEntryPoint` (1.609, 1.613), `TestCluster01bj_OneProcessAtATime` (1.610–1.612, 1.617), `TestCluster01bj_RecordedOutcome` (1.615, 1.616, 1.618), `TestCluster01bj_ProcessExit` (1.614) |
+| Fixtures | `SimpleItem` (E2E table); `_Seed`, a `ProcessAdminTestCase` naming `SimpleItem`; `_FakeLoad` in place of `load_data` (the seed body is 1f/1i's); `_OtherProcess`, a second database session holding the real advisory lock and either releasing it or dying with it |
+| Tests landed | **10 pass / 0 fail**; 1av, 1c/1f/1i and 8j unchanged (55 pass / 1 skip together) |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.609 | not a daemon | `async_ready`, called from the daemon `lex-async-ready` thread, loads in `lex-initial-data-load` with `daemon=False`, outside `WaitForTasks`; state `completed` |
+| 1.610 | the second process waits | while another session holds the lock and loads, nothing is decided here; afterwards the normal skip, the seed exists once |
+| 1.611 | a killed load is reported | the holder writes part of the seed and its session dies: `interrupted`, an ERROR naming the recovery, no load over the partial rows |
+| 1.612 | a stopping process gives up waiting | `abandoned`, nothing loaded |
+| 1.613 | MQ/Worker | the load runs inside `WaitForTasks` in the same non-daemon thread |
+| 1.614 | the process waits for the load | a child interpreter whose main thread returns mid-load exits only after the load finished |
+| 1.615 | a failed load | recorded `failed` with the error; the next start reports it, does not load over it |
+| 1.616 | died before writing | `running` with no rows is loaded again and recorded `completed` |
+| 1.617 | lock released | another session can take the lock after a load |
+| 1.618 | existing data | with no record or a `completed` one: the ordinary skip, no ERROR |
+
+**Why a regression matters:** the "all referenced models empty" gate cannot tell a finished seed from half of one. A load cut off by a restart left production with 89 of 179 companies and a log that said the data already existed; every later start skipped the load.

@@ -505,3 +505,26 @@ does not remove user launch configurations.
 | 1.409 | no `Process` node type | the structure payload types nodes `Model` / `HTMLReport` / `Folder` only |
 
 **Scenario range:** 1.406 – 1.409. **Test file:** `lex/test_project/tests/init/test_1ax_process_feature_removed.py`. **Type:** I. **Status:** ✅ Complete (2026-10-22). Batch: [1ax](batches.md).
+
+---
+
+### 1bj. The initial-data load survives restarts and a second server process ✅
+
+**What it tests:** the load `lex start` runs when every seed model is empty ends in one of two states, the whole seed or a clear report, however many server processes come and go during it. It runs in a non-daemon thread (a stopped process waits for it), one process decides at a time under a PostgreSQL advisory lock, and `lex_initial_data_load_state` records whether the last load finished.
+
+**Why a regression matters:** a load cut off mid-write leaves rows the "models are empty" gate reads as existing data, and the seed is never loaded again, silently.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.609 | not a daemon | the load thread started from `lex-async-ready` has `daemon=False` and loads the seed |
+| 1.610 | the second process waits | it decides only after the other load ended, and never loads a second copy |
+| 1.611 | a killed load is reported | `interrupted` + ERROR, no load over partial rows |
+| 1.612 | a stopping process gives up waiting | `abandoned` |
+| 1.613 | MQ/Worker | inside `WaitForTasks` |
+| 1.614 | the process waits for the load | a real interpreter exits only after the load |
+| 1.615 | a failed load | recorded and reported at the next start |
+| 1.616 | died before writing | loaded again |
+| 1.617 | lock released | free after a load |
+| 1.618 | existing data | the ordinary skip |
+
+**Scenario range:** 1.609 – 1.618. **Test file:** `lex/test_project/tests/init/test_1bj_initial_data_load_restart.py`. **Type:** I. **Status:** ✅ Complete (2026-11-10). Batch: [1bj](batches.md).

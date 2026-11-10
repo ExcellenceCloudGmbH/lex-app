@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 409
+max_scenario: 618
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1303,3 +1303,22 @@ letters:
       model-structure payload types nodes Model / HTMLReport / Folder only, never Process (1.409).
       Each scenario checks the kept HTMLReport sibling too, so a broken registration cannot pass as
       a clean removal. The routes that served the feature are pinned by 10q.
+  bj:
+    title: The initial-data load at server start survives restarts and a second server process
+    scenarios: 1.609-1.618
+    status: complete
+    tests:
+      pass: 10
+      skip: 0
+      xfail: 0
+    note: >-
+      Production lost part of its seed (5 quarters, 8 funds, 89 of 179 companies) and never loaded
+      again. The load thread inherited daemon=True from the lex-async-ready thread (7abf2a69), so the
+      --reload restart (terminate, then an unbounded join, which waited for a non-daemon load before)
+      killed it mid-write, and the next process read the partial rows as existing data. Now:
+      lex/lex_app/initial_data_load.py runs the decision and the load in a non-daemon thread, under a
+      PostgreSQL session advisory lock (a second process waits, then decides on the finished
+      database), and records running/completed/failed in lex_initial_data_load_state, so a load
+      killed outright is reported as interrupted at the next start instead of silently skipped.
+      Letters 1ay-1bi and scenarios up to 1.608 are taken by open branches, hence 1bj / 1.609.
+      Mutations: an inherited daemon flag fails 1.609, 1.613 and 1.614; no lock fails 1.610-1.612.

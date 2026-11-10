@@ -282,33 +282,17 @@ class LexAppConfig(GenericAppConfig):
 
         await sync_to_async(create_cache_tables, thread_sensitive=False)()
 
-        if await are_all_models_empty(test, generic_app_models):
-            # Prepare audit logging parameters for task execution
-            audit_enabled = is_audit_logging_enabled()
+        # The decision and the load run together in their own non-daemon thread, under
+        # a lock that lets one server process at a time decide (see initial_data_load).
+        from lex.lex_app.initial_data_load import start_initial_data_load
 
-            if os.getenv("DEPLOYMENT_ENVIRONMENT") and os.getenv("ARCHITECTURE") == "MQ/Worker":
-                from lex.lex_app.celery_tasks import load_data, WaitForTasks
-
-                def _load_initial_data_in_context():
-                    with WaitForTasks():
-                        load_data(
-                            test,
-                            generic_app_models,
-                            audit_enabled,
-                            project_config.initial_data,
-                        )
-
-                await sync_to_async(_load_initial_data_in_context, thread_sensitive=False)()
-            else:
-                # Pass audit logging parameters to thread
-                from lex.lex_app.celery_tasks import load_data
-                x = threading.Thread(target=load_data, args=(test, generic_app_models, audit_enabled, project_config.initial_data))
-                x.start()
-        else:
-            test.test_path = project_config.initial_data
-            non_empty_models = await sync_to_async(test.get_list_of_non_empty_models)(generic_app_models)
-            print(f"Loading Initial Data not triggered due to existence of objects of Model: {non_empty_models}")
-            print("Not all referenced Models are empty")
+        return start_initial_data_load(
+            test,
+            generic_app_models,
+            project_config.initial_data,
+            audit_enabled=is_audit_logging_enabled(),
+            mq_worker=bool(os.getenv("DEPLOYMENT_ENVIRONMENT")) and os.getenv("ARCHITECTURE") == "MQ/Worker",
+        )
 
 
     def validate_initial_data_path(self, initial_data_path):
