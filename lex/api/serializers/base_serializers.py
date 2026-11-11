@@ -286,6 +286,22 @@ class LexClearableFileField(serializers.FileField):
             if self.required:
                 self.fail("required")
             return ""
+        # A file too large for one request body arrives in pieces first and
+        # is referred to here by its upload token (see ChunkedUpload.py).
+        from lex.api.views.file_operations.ChunkedUpload import (
+            ChunkedUploadError,
+            is_upload_token,
+            resolve_upload_token,
+        )
+
+        if is_upload_token(data):
+            request = self.context.get("request")
+            if request is None:
+                raise serializers.ValidationError("A chunked upload needs a request context.")
+            try:
+                data = resolve_upload_token(data, request)
+            except ChunkedUploadError as exc:
+                raise serializers.ValidationError(str(exc)) from exc
         return super().to_internal_value(data)
 
 

@@ -284,7 +284,7 @@ class EditScopedItem(LexModel):
 
 
 class AttachmentItem(LexModel):
-    """File-bearing model for the clearable-file-field scenarios (12h).
+    """File-bearing model for the clearable-file-field (12h) and chunked-upload (12i) scenarios.
 
     ``document`` mirrors the common project shape: ``blank=True``,
     ``null=False`` — Django stores the empty value as ``""``.
@@ -304,6 +304,10 @@ class AttachmentItem(LexModel):
 
     def permission_edit(self, uc):
         return PermissionResult.allow_all("cluster 12h")
+
+    # 12i creates records through the API with a chunked upload.
+    def permission_create(self, uc):
+        return True
 
     def __str__(self) -> str:  # pragma: no cover
         return self.name
