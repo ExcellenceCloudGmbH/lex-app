@@ -37,7 +37,7 @@ carries no host list, which is every instance without a custom domain and every
 local run. That fallback is itself a scenario below: it is what keeps this
 change invisible to the installations that do not use the feature.
 
-Cluster 1ay -- scenarios 1.410-1.430. Type: U / I.
+Cluster 1ay -- scenarios 1.410-1.431. Type: U / I.
 Covers: lex/hosts.py (public_hosts, canonical_url, registrable_domain,
         same_site_host, same_site_url, host_of, CurrentHostMiddleware),
         lex/lex_app/settings.py (ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS),
@@ -451,6 +451,35 @@ class TestCluster01ay_SameSiteDashboard(SimpleTestCase):
                 lex_hosts.same_site_url("reflex", "localhost"), "http://localhost:8502",
                 msg="a local Reflex run keeps its scheme and port",
             )
+
+    # -- 1.431 ---------------------------------------------------------
+    def test_1_431_a_malformed_dashboard_url_does_not_crash_the_report(self) -> None:
+        """
+        Scenario 1.431: a dashboard URL with an unusable port degrades, it does not raise.
+        Given: STREAMLIT_URL carrying a port outside 0-65535, or a non-numeric one
+        When: the dashboard URL is resolved, as it is on every report render
+        Then: the hostname comes back without the port, and nothing is raised.
+
+        `urlsplit(...).port` raises `ValueError` for a port it cannot parse, and
+        this runs on every render. A typo in one environment variable would
+        otherwise become a 500 whose message names neither the variable nor the
+        value -- far harder to place than a browser saying it cannot connect to
+        the address shown.
+        """
+        for malformed in ("https://dash.example.com:99999", "https://dash.example.com:-1",
+                          "https://dash.example.com:abc"):
+            with self.subTest(url=malformed):
+                with _Env({
+                    "STREAMLIT_URL": malformed,
+                    "DOMAIN_HOSTED": "inst.lit.excellence-cloud.de",
+                    "LEX_STREAMLIT_HOSTS": None,
+                    "LEX_APP_HOSTS": None,
+                }):
+                    self.assertEqual(
+                        lex_hosts.same_site_url("streamlit", "unrelated.example.org"),
+                        "https://dash.example.com",
+                        msg=f"{malformed} must degrade to the host, not raise",
+                    )
 
     # -- 1.415 ---------------------------------------------------------
     def test_1_415_the_middleware_makes_the_requests_host_the_default_viewer(self) -> None:

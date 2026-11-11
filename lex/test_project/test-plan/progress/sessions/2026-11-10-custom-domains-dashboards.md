@@ -1,7 +1,7 @@
 ---
 date: 2026-11-10
 clusters: [1]
-tests_added: "21 new scenarios (1.410-1.430), new file test_1ay_custom_domain_hosts.py"
+tests_added: "22 new scenarios (1.410-1.431), new file test_1ay_custom_domain_hosts.py"
 suite_tally: "init (.venv-lex-core): 662 pass / 14 skip / 4 fail; the same 4 fail on the base commit (641 pass there), all subprocess-environment failures in 1aq and 1at"
 ---
 

@@ -535,5 +535,6 @@ does not remove user launch configurations.
 | 1.428 | a forged `X-Forwarded-Host` | falls back to the canonical callback; the forged name appears nowhere in the IdP redirect |
 | 1.429 | the renewal preflight | allowed and named from an attached app origin, with credentials; a foreign origin gets 403 |
 | 1.430 | what Reflex resolves | `api_url` and the event URL stay on a host in Reflex's own `SAME_DOMAIN_HOSTNAMES`; CORS lists both hostnames |
+| 1.431 | a malformed dashboard URL | an unparsable port degrades to the bare host instead of raising on every render |
 
-**Scenario range:** 1.410 – 1.430. **Test file:** `lex/test_project/tests/init/test_1ay_custom_domain_hosts.py`. **Type:** U / I. **Status:** ✅ Complete (2026-11-10). Batch: [1ay](batches.md).
+**Scenario range:** 1.410 – 1.431. **Test file:** `lex/test_project/tests/init/test_1ay_custom_domain_hosts.py`. **Type:** U / I. **Status:** ✅ Complete (2026-11-10). Batch: [1ay](batches.md).

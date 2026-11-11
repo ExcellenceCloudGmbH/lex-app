@@ -166,7 +166,15 @@ def same_site_url(role: str, viewer_host: str = "") -> str:
         return canonical
 
     parts = urlsplit(canonical if "://" in canonical else f"https://{canonical}")
-    port = parts.port
+    try:
+        port = parts.port
+    except ValueError:
+        # `urlsplit(...).port` raises for a port outside 0-65535, and this runs
+        # on every dashboard render. A typo in STREAMLIT_URL must not turn that
+        # into a 500 whose message names neither the variable nor the value --
+        # frame the host without a port and let the browser say it cannot
+        # connect, which at least points at the address.
+        port = None
     return f"{parts.scheme}://{host}:{port}" if port else f"{parts.scheme}://{host}"
 
 

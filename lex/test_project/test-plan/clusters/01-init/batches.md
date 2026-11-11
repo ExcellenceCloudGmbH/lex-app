@@ -1506,7 +1506,7 @@ imports anything from `lex.lex_app`, whose settings module reads the environment
 | Test file | `lex/test_project/tests/init/test_1aq_reflex_dashboards.py` |
 | Test classes | `TestCluster01aq_Config` (1.357, 1.357b, 1.357c), `TestCluster01aq_KeycloakProvider` (1.358, 1.359, 1.369), `TestCluster01aq_Orm` (1.360–1.361), `TestCluster01aq_Dispatch` (1.362–1.363), `TestCluster01aq_PageChrome` (1.364), `TestCluster01aq_DispatchPage` (1.365, 1.365b), `TestCluster01aq_TheCompiledApp` (1.366), `TestCluster01aq_Registration` (1.367), `TestCluster01aq_EventLoops` (1.368) |
 | Fixtures | probe models `ReflexProbeFund` (both hooks), `ReflexProbeDefault` (`LexModel`, no overrides), `ReflexProbePlain` (plain Django model); a session's state tree built from Reflex's root `State`; `E2ETestCase` for the ORM and dispatch scenarios; subprocesses for 1.357c and 1.368 |
-| Tests landed | **21 pass / 0 fail** (20 pass / 1 skip where reflex is not installed) |
+| Tests landed | **22 pass / 0 fail** (21 pass / 1 skip where reflex is not installed) |
 | Status | ✅ Complete |
 
 | Scenario | Title | Asserts |
@@ -1818,13 +1818,13 @@ config each fail 1.404.
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.410 – 1.430 |
+| Scenario range | 1.410 – 1.431 |
 | Type | U / I |
 | Files covered | `lex/hosts.py` (new: `public_hosts`, `canonical_url`, `registrable_domain`, `same_site_host`, `same_site_url`, `host_of`, `CurrentHostMiddleware`), `lex/lex_app/settings.py` (`ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `MIDDLEWARE`), `lex/proxy.py` (`PUBLIC_HOSTS`, `_requested_host`, `_external_base_url`, `_callback_url`, `_frontend_origins`), `lex/lex_app/streamlit/Streamlit.py`, `lex/lex_app/reflex/Reflex.py`, `lex/lex_app/streamlit/embed.py` (`_resolve_base_url`), `lex/lex_app/reflex/config.py` (`public_origins`, `cors_allowed_origins`), `scripts/check_custom_domain_live.py` |
 | Test file | `lex/test_project/tests/init/test_1ay_custom_domain_hosts.py` |
-| Test classes | `TestCluster01ay_PublicHostList` (1.410–1.412), `TestCluster01ay_SameSiteDashboard` (1.413–1.417, 1.426), `TestCluster01ay_DjangoAcceptsEveryAttachedHost` (1.418–1.419, 1.425), `TestCluster01ay_StreamlitProxyFollowsItsHost` (1.420–1.422), `TestCluster01ay_ReflexAcceptsEveryAttachedHost` (1.423–1.424), `TestCluster01ay_TheSignInRoundTripFollowsItsHost` (1.427–1.429), `TestCluster01ay_ReflexResolvesARewritableBackend` (1.430) |
+| Test classes | `TestCluster01ay_PublicHostList` (1.410–1.412), `TestCluster01ay_SameSiteDashboard` (1.413–1.417, 1.426, 1.431), `TestCluster01ay_DjangoAcceptsEveryAttachedHost` (1.418–1.419, 1.425), `TestCluster01ay_StreamlitProxyFollowsItsHost` (1.420–1.422), `TestCluster01ay_ReflexAcceptsEveryAttachedHost` (1.423–1.424), `TestCluster01ay_TheSignInRoundTripFollowsItsHost` (1.427–1.429), `TestCluster01ay_ReflexResolvesARewritableBackend` (1.430) |
 | Fixtures | `ATTACHED_ENV` / `PLAIN_ENV` — one instance as the Instance Controller leaves it with and without a customer domain attached; `_Env` (set/remove env vars), `_request` (a Starlette request carrying a real `Host`), `_reimport_proxy_with` (the proxy resolves its hosts at import), `_django_host_settings` (a child process, because `ALLOWED_HOSTS` is resolved while `settings.py` imports), `_FakeKeycloak` (an OIDC discovery document on loopback, so authlib builds a real redirect), `_ingress_headers` |
-| Tests landed | **21 pass / 0 fail** (20 pass / 1 skip where reflex is not installed) |
+| Tests landed | **22 pass / 0 fail** (21 pass / 1 skip where reflex is not installed) |
 | Status | ✅ Complete |
 
 | Scenario | Title | Asserts |
@@ -1849,6 +1849,7 @@ config each fail 1.404.
 | 1.428 | forged forwarded host | the canonical callback is used; `evil.example.net` appears nowhere in the IdP redirect |
 | 1.429 | renewal preflight | 204 + explicit `Allow-Origin` + `Allow-Credentials` from `https://app.customer.com`; 403 from a foreign origin |
 | 1.430 | Reflex's own resolution | `lex_config().api_url` and `Endpoint.EVENT.get_url()` are on a host listed in the installed `state.js`'s `SAME_DOMAIN_HOSTNAMES`; `cors_allowed_origins` holds both hostnames |
+| 1.431 | malformed dashboard URL | a port outside 0-65535, a negative one and a non-numeric one all degrade to `https://dash.example.com` rather than raising |
 | 1.425 | hardened instance | `LEX_CORS_ALLOWED_ORIGINS` keeps the operator's entry and gains both of the instance's own origins; the permissive default stays closed |
 
 **Live check:** `scripts/check_custom_domain_live.py` runs a real Streamlit server behind the real proxy under uvicorn, over loopback sockets, with the `X-Forwarded-*` headers the ingress sets — the layer no test here reaches. 12 checks: Streamlit's own health proxied on both hostnames, the frame-breakout page, and the sign-in redirect. On the base commit three of them fail, and they are the bug in full: the breakout sends the top window to the PLATFORM host's sign-in and the `redirect_uri` is the platform callback, so the browser returns to the attached hostname with no cookie and signs in again.
