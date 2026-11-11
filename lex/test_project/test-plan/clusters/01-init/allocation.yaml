@@ -1303,3 +1303,22 @@ letters:
       model-structure payload types nodes Model / HTMLReport / Folder only, never Process (1.409).
       Each scenario checks the kept HTMLReport sibling too, so a broken registration cannot pass as
       a clean removal. The routes that served the feature are pinned by 10q.
+  ay:
+    title: More than one hostname per instance (LEX_EXTRA_ALLOWED_HOSTS)
+    scenarios: 1.410-1.411
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      DOMAIN_HOSTED is a single name, so ALLOWED_HOSTS held exactly one real host and every
+      other hostname pointing at the same pod got a 400 from Django while the ingress routed
+      it happily. LEX_EXTRA_ALLOWED_HOSTS (comma-separated) appends those names and carries
+      them into CSRF_TRUSTED_ORIGINS, where a leading-dot host becomes the https://*.domain
+      wildcard an origin must be written as (1.410); "*" raises ImproperlyConfigured on a
+      deployed instance, because a pod that accepts any Host accepts Host-header poisoning
+      (1.411). USE_X_FORWARDED_HOST is on, so Django judges the host the client asked for and
+      an ingress-side rewrite cannot substitute for the list — which is what makes this the
+      only place a second hostname can be admitted. Both scenarios read the settings module in
+      a fresh interpreter, since ALLOWED_HOSTS is built once at import.

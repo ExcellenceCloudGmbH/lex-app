@@ -187,18 +187,52 @@ if os.getenv("LEX_ENVIRONMENT_TAG", "envvar_not_existing") == "dev":
 else:
     DEBUG = False
 
+# LEX_EXTRA_ALLOWED_HOSTS (comma-separated) names FURTHER hostnames this
+# instance answers on, beyond the one canonical DOMAIN_HOSTED.
+#
+# DOMAIN_HOSTED is a single name, so until this existed ALLOWED_HOSTS held
+# exactly one real host. Every other hostname pointed at the same pod — a
+# customer domain attached but not yet promoted, a dashboard host, a vanity
+# host put in front of one public route — got a 400 from Django while the
+# ingress happily routed it. USE_X_FORWARDED_HOST is True below, so Django
+# judges the host the CLIENT asked for: an ingress-side rewrite (upstream-vhost
+# and friends) cannot paper over this, which is why the name has to be listed
+# here. See also asgi.py, where the public health WebSocket is deliberately
+# exempt from AllowedHostsOriginValidator for the same class of failure.
+#
+# Entries are hostnames, not origins: "sign.example.com", or Django's own
+# leading-dot wildcard ".example.com" for every subdomain. "*" is refused
+# below — an instance that accepts any Host accepts Host-header poisoning.
+_lex_extra_allowed_hosts = [
+    host.strip().strip("/")
+    for host in os.getenv("LEX_EXTRA_ALLOWED_HOSTS", "").split(",")
+    if host.strip()
+]
+
 ALLOWED_HOSTS = [
     os.getenv("DOMAIN_HOSTED", "localhost"),
     "127.0.0.1",
     "localhost",
     os.environ.get("POD_IP", default="envvar_not_existing"),
-]
+] + _lex_extra_allowed_hosts
 
 LOGIN_REDIRECT_URL = "/process_admin/all"
 
+# The extra hosts are trusted for CSRF too: a host that serves the app at all
+# serves its forms, and a host listed in ALLOWED_HOSTS but missing here fails
+# every POST with "Origin checking failed" — a confusing half-working state.
+#
+# The two settings spell a wildcard differently. ALLOWED_HOSTS takes Django's
+# leading dot (".example.com" = the domain and every subdomain); an origin must
+# carry a scheme and spells it "https://*.example.com", which covers the
+# subdomains only. So ".example.com" becomes "https://*.example.com" and the
+# apex, if it serves the app, is listed in its own right.
 CSRF_TRUSTED_ORIGINS = [
     "https://*." + os.getenv("DOMAIN_HOSTED", "localhost"),
     "http://localhost:3000",
+] + [
+    f"https://*{host}" if host.startswith(".") else f"https://{host}"
+    for host in _lex_extra_allowed_hosts
 ]
 
 # Fail fast on missing critical configuration when deployed, instead of silently
@@ -216,6 +250,15 @@ if os.getenv("DEPLOYMENT_ENVIRONMENT") is not None:
             "DOMAIN_HOSTED must be set when DEPLOYMENT_ENVIRONMENT is set; without "
             "it ALLOWED_HOSTS only matches 'localhost' and all WebSocket/CSRF "
             "checks reject the real instance hostname."
+        )
+
+    if "*" in _lex_extra_allowed_hosts:
+        raise ImproperlyConfigured(
+            "LEX_EXTRA_ALLOWED_HOSTS must name hostnames, never '*'. A deployed "
+            "instance that accepts any Host header accepts Host-header poisoning: "
+            "password-reset and other absolute links would be built from whatever "
+            "the caller sent. Name each host, or use Django's leading-dot wildcard "
+            "('.example.com') for one domain's subdomains."
         )
 
     if _use_redis_channel_layer:
