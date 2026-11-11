@@ -16,10 +16,12 @@ instance. Each binds loopback ports and cleans up after itself.
 | `streamlit_check.py` | a real Streamlit server behind `lex/proxy.py` under uvicorn; health, the frame-breakout page and the sign-in redirect on both hostnames | `streamlit`, `uvicorn`, `httpx` |
 | `reflex_check.py` | a real `rx.App` backend under uvicorn; the event websocket opened on both hostnames, a foreign origin refused, and the old canonical-only CORS refusing the attached hostname | `reflex`, `reflex-enterprise`, `uvicorn`, `httpx`, `websockets` |
 | `get_backend_url_check.mjs` | Reflex's own `getBackendURL`, lifted verbatim out of the installed `state.js` and executed per hostname | `node` |
-| `keycloak_roundtrip_check.py` | the whole authorization code flow against a **real Keycloak** it starts in Docker: the proxy's `/auth/login`, Keycloak's own login form, the code exchange, and a signed-in request that reaches the dashboard | `docker`, `openssl`, `streamlit`, `uvicorn`, `httpx` |
+| `keycloak_roundtrip_check.py` | **Streamlit's** sign-in: the whole authorization code flow against a **real Keycloak** it starts in Docker — the proxy's `/auth/login`, Keycloak's own login form, the code exchange, and a signed-in request that reaches the dashboard | `docker`, `openssl`, `streamlit`, `uvicorn`, `httpx` |
+| `reflex_oidc_check.py` | **Reflex's** sign-in: `LexKeycloakAuthState._redirect_uri()`'s real output driven through the same real Keycloak — PKCE authorization request, login form, code, token exchange | the Keycloak above, `reflex`, `httpx` |
 
 ```bash
-python scripts/custom_domain_live/keycloak_roundtrip_check.py
+python scripts/custom_domain_live/keycloak_roundtrip_check.py   # also starts Keycloak
+python scripts/custom_domain_live/reflex_oidc_check.py          # reuses it
 python scripts/custom_domain_live/streamlit_check.py
 python scripts/custom_domain_live/reflex_check.py
 node scripts/custom_domain_live/get_backend_url_check.mjs \
@@ -53,6 +55,16 @@ It starts Keycloak over HTTPS with a throwaway certificate, because Keycloak
 marks its auth cookies `Secure` and a plain-HTTP client cannot send them back —
 every login POST is answered "Cookie not found". The container is removed again
 on the way out.
+
+`reflex_oidc_check.py` **passes on the base commit too, and that is why it is
+here.** Reflex's sign-in was always derived from the browser's URL, so unlike
+the Streamlit proxy it needed no change — what was broken for Reflex was the
+event websocket, not the sign-in. The check pins that the sign-in stays
+host-derived: a reflex-enterprise upgrade that built the redirect URI from a
+configured URL instead would break every attached domain, and the only symptom
+would be users landing on the platform hostname after signing in. It also shows
+Keycloak itself refusing a hostname nobody registered, which is where that
+boundary actually lives.
 
 `get_backend_url_check.mjs` shows the third failure mode directly: with
 `api_url` left on localhost, a page on either hostname opens
