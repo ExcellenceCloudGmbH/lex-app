@@ -819,6 +819,28 @@ class TestCluster01ay_StreamlitProxyFollowsItsHost(SimpleTestCase):
             msg="an unknown Host is not a hostname this proxy is served on",
         )
 
+        # A hostname the allow-list DOES accept, carrying a port that cannot be
+        # parsed. The allow-list compares hostnames and never looks at the
+        # port, so this reaches the URL builder -- where reading the port off
+        # the request would raise and turn a hostile header into a 500 on the
+        # sign-in path. Only reachable where no canonical URL is configured,
+        # which is a local run.
+        local = _reimport_proxy_with({
+            "DOMAIN_HOSTED": "inst.lit.excellence-cloud.de",
+            "LEX_STREAMLIT_HOSTS": "dash.customer.com",
+            "STREAMLIT_URL": None,
+            "BASE_URL": None,
+            "LEX_APP_HOSTS": None,
+            "SESSION_SECRET": "fixed",
+        })
+        for bad_port in (99999, -1):
+            with self.subTest(port=bad_port):
+                self.assertEqual(
+                    local._external_base_url(_request("dash.customer.com", port=bad_port)),
+                    "https://dash.customer.com",
+                    msg=f"a Host carrying port {bad_port} must lose the port, not raise",
+                )
+
     # -- 1.422 ---------------------------------------------------------
     def test_1_422_a_shell_on_any_attached_host_may_renew_the_dashboards_token(self) -> None:
         """

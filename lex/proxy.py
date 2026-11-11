@@ -831,7 +831,15 @@ def _external_base_url(request: Request) -> str:
         # would put `http://` into the OIDC redirect_uri the moment that import
         # failed, which Keycloak refuses and which no log here would explain.
         scheme = PUBLIC_URL_OBJ.scheme if PUBLIC_URL_OBJ else (request.url.scheme or "https")
-        port = PUBLIC_URL_OBJ.port if PUBLIC_URL_OBJ else request.url.port
+        try:
+            port = PUBLIC_URL_OBJ.port if PUBLIC_URL_OBJ else request.url.port
+        except ValueError:
+            # Reading a port out of the REQUEST parses whatever the Host header
+            # carried, and that header is attacker-influenced. `h:99999` and
+            # `h:-1` both raise, which would be a 500 on the sign-in path --
+            # from input the allow-list above has otherwise already accepted,
+            # since it compares hostnames and never looks at the port.
+            port = None
         # `lex streamlit` serves http://localhost:8501, so a non-default port
         # is kept; httpx reports None for the scheme's own default.
         netloc = f"{host}:{port}" if port else host
