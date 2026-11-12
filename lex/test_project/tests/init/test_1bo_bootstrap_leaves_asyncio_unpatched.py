@@ -22,10 +22,10 @@ Each scenario sets up a real downstream project (a folder with
 and a regression must fail here, not hang the rest of the suite. If the calls
 hang, a watchdog in the child prints every thread's stack and exits.
 
-Cluster 1ay -- scenarios 1.410-1.411. Type: U (fresh interpreter, no database).
+Cluster 1bo -- scenarios 1.665-1.666. Type: U (fresh interpreter, no database).
 Covers: lex/lex_app/apps.py (``LexAppConfig.ready()``), lex/bin/lex.py (the
         CLI environment the child starts from), lex/lex_app/asgi.py.
-Run: python -m lex pytest lex/test_project/tests/init/test_1ay_bootstrap_leaves_asyncio_unpatched.py -v
+Run: python -m lex pytest lex/test_project/tests/init/test_1bo_bootstrap_leaves_asyncio_unpatched.py -v
 """
 
 from __future__ import annotations
@@ -127,14 +127,14 @@ def _downstream_project() -> Path:
     The folder's name is the project's name, so it does not start with ``lex``
     (Lex's own checkouts skip the project startup) and is a valid identifier.
     """
-    project = Path(tempfile.mkdtemp(prefix="cluster1ay_")).resolve()
+    project = Path(tempfile.mkdtemp(prefix="cluster1bo_")).resolve()
     (project / "__init__.py").write_text("")
     (project / "lex_config.py").write_text(f'PROJECT_GROUPS = ["{project.name}"]\n')
     return project
 
 
-class TestCluster01ay_BootstrapLeavesAsyncioUnpatched(SimpleTestCase):
-    """Cluster 1ay: a project's startup leaves asyncio and async_to_sync usable."""
+class TestCluster01bo_BootstrapLeavesAsyncioUnpatched(SimpleTestCase):
+    """Cluster 1bo: a project's startup leaves asyncio and async_to_sync usable."""
 
     def _set_up_project(self, route: str) -> dict:
         """Set a fresh downstream project up by ``route``; return what it reports."""
@@ -182,10 +182,10 @@ class TestCluster01ay_BootstrapLeavesAsyncioUnpatched(SimpleTestCase):
             "each running its thread-sensitive work on the calling thread",
         )
 
-    # -- 1.410 ---------------------------------------------------------
-    def test_1_410_startup_with_no_loop_leaves_async_to_sync_usable(self) -> None:
+    # -- 1.665 ---------------------------------------------------------
+    def test_1_665_startup_with_no_loop_leaves_async_to_sync_usable(self) -> None:
         """
-        Scenario 1.410: a project set up with no event loop leaves asyncio alone.
+        Scenario 1.665: a project set up with no event loop leaves asyncio alone.
         Given: a downstream Lex project and a fresh process with no running
                loop: a management command, a Celery worker, a Streamlit script.
         When:  Django is set up (``LexAppConfig.ready()`` runs the project's
@@ -196,10 +196,10 @@ class TestCluster01ay_BootstrapLeavesAsyncioUnpatched(SimpleTestCase):
         """
         self._assert_unpatched_and_usable("no running loop", self._set_up_project("no-loop"))
 
-    # -- 1.411 ---------------------------------------------------------
-    def test_1_411_startup_inside_the_servers_loop_leaves_async_to_sync_usable(self) -> None:
+    # -- 1.666 ---------------------------------------------------------
+    def test_1_666_startup_inside_the_servers_loop_leaves_async_to_sync_usable(self) -> None:
         """
-        Scenario 1.411: a project set up inside a running loop leaves asyncio alone.
+        Scenario 1.666: a project set up inside a running loop leaves asyncio alone.
         Given: a downstream Lex project whose ASGI application (``lex_app.asgi``,
                what ``lex start`` serves) is imported inside a running asyncio
                loop, as uvicorn does.

@@ -380,7 +380,7 @@ does not remove user launch configurations.
 | 1.365 | the dispatch page | overriding hooks compiled in, broken hooks and structure modules refused loudly |
 | 1.366 | the compiled app | sign-in routes, guard before `resolve`, connection middleware, every dashboard |
 | 1.367 | registration | the `Reflex` report and sidebar entry only when enabled; discovery never imports the Reflex package twice |
-| 1.368 | granian's uvloop | Django setup on uvloop carries on and patches nothing, and `async_to_sync` works after it (rewritten for BUG-046; see 1ay below) |
+| 1.368 | granian's uvloop | Django setup on uvloop carries on and patches nothing, and `async_to_sync` works after it (rewritten for BUG-046; see 1bo below) |
 | 1.369 | `LexUser` | `username` and `display_name` from Keycloak's claims |
 
 **Scenario range:** 1.357 – 1.369. **Test file:** `lex/test_project/tests/init/test_1aq_reflex_dashboards.py`. **Type:** U + I. **Status:** ✅ Complete (2026-09-28). Batch: [1aq](batches.md). Permissions in Reflex dashboards are cluster [4n](../04-permissions/cluster.md); the search exclusion of the `Reflex` report is [10d](../10-api_layer/cluster.md).
@@ -508,7 +508,7 @@ does not remove user launch configurations.
 
 ---
 
-### 1ay. A project's startup leaves asyncio unpatched and `async_to_sync` usable ✅
+### 1bo. A project's startup leaves asyncio unpatched and `async_to_sync` usable ✅
 
 **What it tests:** that setting up a downstream Lex project changes nothing about asyncio. Every process the project runs does this setup: the web server, a Celery worker, a management command, Streamlit. `asyncio.run` stays the standard library's, and synchronous code can call into async code with `async_to_sync` as often as it needs to, from any thread.
 
@@ -516,9 +516,9 @@ does not remove user launch configurations.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.410 | set up with no running loop | after `django.setup()` of a downstream project in a fresh interpreter, `asyncio.run` is the standard library's, and two `async_to_sync` calls with thread-sensitive work both return, on the calling thread |
-| 1.411 | set up inside the server's loop | the same when `lex_app.asgi` is imported inside a running asyncio loop, as uvicorn does |
+| 1.665 | set up with no running loop | after `django.setup()` of a downstream project in a fresh interpreter, `asyncio.run` is the standard library's, and two `async_to_sync` calls with thread-sensitive work both return, on the calling thread |
+| 1.666 | set up inside the server's loop | the same when `lex_app.asgi` is imported inside a running asyncio loop, as uvicorn does |
 
 1.368 (1aq, granian's uvloop) was rewritten to the same contract: setup on uvloop carries on and patches nothing.
 
-**Scenario range:** 1.410 – 1.411. **Test file:** `lex/test_project/tests/init/test_1ay_bootstrap_leaves_asyncio_unpatched.py`. **Type:** U (fresh interpreter, no database). **Status:** ✅ Complete (2026-11-06). Batch: [1ay](batches.md). The startup reset's side of the same bug is cluster [8d](../08-celery_async/cluster.md).
+**Scenario range:** 1.665 – 1.666. **Test file:** `lex/test_project/tests/init/test_1bo_bootstrap_leaves_asyncio_unpatched.py`. **Type:** U (fresh interpreter, no database). **Status:** ✅ Complete (2026-11-06). Batch: [1bo](batches.md). The startup reset's side of the same bug is cluster [8d](../08-celery_async/cluster.md).

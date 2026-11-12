@@ -152,6 +152,6 @@
 | 8.155 | Inside a running asyncio loop (`lex start --loop asyncio`) | the same, with the models registered inside a running asyncio loop, where uvicorn sets Django up. No `SynchronousOnlyOperation`, no "loop is already running" |
 | 8.156 | Inside a running uvloop loop (plain `lex start`) | the same inside a running uvloop loop. Startup carries on (it used to fail with "Can't patch loop of type uvloop.Loop"), the row is ABORTED, and both calls return. Skipped where uvloop is not installed (Windows) |
 
-**Scenario range:** 8.154 – 8.156. **Test file:** `lex/test_project/tests/celery_async/test_8d_startup_reset_event_loops.py`. **Type:** I (a real `CalculationModel` row, reset by a fresh interpreter on this test's database). **Status:** ✅ Complete (2026-11-06). Batch: [8d](batches.md). The same bug in `LexAppConfig.ready()`, which applied the patch to every downstream process, is covered by cluster [1ay](../01-init/cluster.md).
+**Scenario range:** 8.154 – 8.156. **Test file:** `lex/test_project/tests/celery_async/test_8d_startup_reset_event_loops.py`. **Type:** I (a real `CalculationModel` row, reset by a fresh interpreter on this test's database). **Status:** ✅ Complete (2026-11-06). Batch: [8d](batches.md). The same bug in `LexAppConfig.ready()`, which applied the patch to every downstream process, is covered by cluster [1bo](../01-init/cluster.md).
 
 ---

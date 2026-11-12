@@ -804,7 +804,7 @@ class TestCluster01aq_EventLoops(TestCase):
 
         Rewritten for BUG-046. ``ready()`` used to call ``nest_asyncio.apply()``
         and skip it only where uvloop refused the patch. Now it patches nothing
-        on any loop (1ay, scenarios 1.410-1.411).
+        on any loop (1bo, scenarios 1.665-1.666).
 
         It runs in a subprocess because what is under test is process-wide
         state. ``PYTHONPATH`` points the child at this checkout. Without it, a

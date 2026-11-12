@@ -1522,7 +1522,7 @@ imports anything from `lex.lex_app`, whose settings module reads the environment
 | 1.365 | the dispatch page | only models that override a hook are compiled in; a hook that is not a classmethod/staticmethod or returns no component fails at compile; `_reflex_structure.py` may be absent but never silently broken |
 | 1.366 | the compiled app | sign-in and popup routes, the guard running before `resolve` on `/`, the connection middleware, the standard scopes without `offline_access`, the structure's pages and the models' dashboards |
 | 1.367 | registration | the report frames `REFLEX_URL` (default `:8502`) with `lex_embed=1`; it and its sidebar entry exist only with `IS_REFLEX_ENABLED=true`; discovery skips `_reflex_structure.py` and `rxconfig.py`, and the `reflex` directory only inside lex's own packages |
-| 1.368 | granian's uvloop | with uvloop's loop current, a downstream project's Django setup carries on and patches nothing, and `async_to_sync` works after it. It used to assert that `_apply_nest_asyncio` skipped uvloop and patched asyncio's own loop; it was rewritten for BUG-046 in batch 1ay (below) |
+| 1.368 | granian's uvloop | with uvloop's loop current, a downstream project's Django setup carries on and patches nothing, and `async_to_sync` works after it. It used to assert that `_apply_nest_asyncio` skipped uvloop and patched asyncio's own loop; it was rewritten for BUG-046 in batch 1bo (below) |
 | 1.369 | `LexUser` | `username` is `preferred_username`; `display_name` the name, else the username, else the email; both empty signed out |
 
 **1.361 was strengthened after a mutation run.** Its first form asserted only that a connection
@@ -1530,7 +1530,7 @@ inside an atomic block survived an event, and a middleware that closed it anyway
 Django's `close()` inside a transaction marks the connection (`closed_in_transaction`,
 `needs_rollback`) instead of dropping it. It now pins both flags and a query in the same
 transaction. Letting discovery walk the Reflex package fails 1.367. (Removing
-`_apply_nest_asyncio`'s guard used to fail 1.368. The function is gone since batch 1ay.)
+`_apply_nest_asyncio`'s guard used to fail 1.368. The function is gone since batch 1bo.)
 
 **1.357c caught a shadowed export.** The package serves its API lazily (PEP 562), and
 `orm` was both the `@orm` decorator and the name of the submodule defining it. Importing
@@ -1814,23 +1814,23 @@ config each fail 1.404.
 
 ---
 
-### Batch 1ay — a project's startup leaves asyncio unpatched and `async_to_sync` usable (BUG-046) ✅
+### Batch 1bo — a project's startup leaves asyncio unpatched and `async_to_sync` usable (BUG-046) ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.410 – 1.411 (and 1.368 rewritten) |
+| Scenario range | 1.665 – 1.666 (and 1.368 rewritten) |
 | Type | U |
-| Files covered | `lex/lex_app/apps.py` (`LexAppConfig.ready()`; `_apply_nest_asyncio` removed), `lex/bin/lex.py` (the environment the child starts from; the comment on the `lex streamlit` uvloop guard), `lex/lex_app/asgi.py` (imported inside a running loop for 1.411) |
-| Test file | `lex/test_project/tests/init/test_1ay_bootstrap_leaves_asyncio_unpatched.py`; 1.368 in `test_1aq_reflex_dashboards.py` |
-| Test classes | `TestCluster01ay_BootstrapLeavesAsyncioUnpatched` (1.410, 1.411); `TestCluster01aq_EventLoops` (1.368) |
-| Fixtures | a minimal downstream project per scenario (a temporary folder named `cluster1ay_*` holding `lex_config.py`), set up in a fresh interpreter started from this checkout (`PYTHONPATH`), with a `faulthandler` watchdog around the two `async_to_sync` calls; no database |
+| Files covered | `lex/lex_app/apps.py` (`LexAppConfig.ready()`; `_apply_nest_asyncio` removed), `lex/bin/lex.py` (the environment the child starts from; the comment on the `lex streamlit` uvloop guard), `lex/lex_app/asgi.py` (imported inside a running loop for 1.666) |
+| Test file | `lex/test_project/tests/init/test_1bo_bootstrap_leaves_asyncio_unpatched.py`; 1.368 in `test_1aq_reflex_dashboards.py` |
+| Test classes | `TestCluster01bo_BootstrapLeavesAsyncioUnpatched` (1.665, 1.666); `TestCluster01aq_EventLoops` (1.368) |
+| Fixtures | a minimal downstream project per scenario (a temporary folder named `cluster1bo_*` holding `lex_config.py`), set up in a fresh interpreter started from this checkout (`PYTHONPATH`), with a `faulthandler` watchdog around the two `async_to_sync` calls; no database |
 | Tests landed | **2 pass / 0 fail** (1.368 passes too). On v2.4.2 the watchdog fires in all three, because the second `async_to_sync` call blocks |
 | Status | ✅ Complete. BUG-046 resolved. |
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.410 | set up with no running loop | after a downstream project's `django.setup()`, `asyncio.run` is the standard library's, and two `async_to_sync` calls with thread-sensitive work both return, each running its work on the calling thread |
-| 1.411 | set up inside the server's loop | the same when `lex_app.asgi` (what `lex start` serves) is imported inside a running asyncio loop, as uvicorn does |
+| 1.665 | set up with no running loop | after a downstream project's `django.setup()`, `asyncio.run` is the standard library's, and two `async_to_sync` calls with thread-sensitive work both return, each running its work on the calling thread |
+| 1.666 | set up inside the server's loop | the same when `lex_app.asgi` (what `lex start` serves) is imported inside a running asyncio loop, as uvicorn does |
 | 1.368 (rewritten) | granian's uvloop | with uvloop's loop current, setup carries on, `asyncio.run` is the standard library's, and both calls return. The child now gets `PYTHONPATH`. Without it, a checkout that is not pip-installed cannot import lex in the child, which is why the old 1.368 was a v2.4.2 baseline failure |
 
 **Why nothing in lex needs nest_asyncio:** it was added when `ready()` called
