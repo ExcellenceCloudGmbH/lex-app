@@ -293,6 +293,52 @@ With this setting, the framework-generated serializer is additionally registered
 > [!tip] History tables pick up your default override automatically
 > When you override `api_serializers["default"]`, the framework also registers the auto-generated serializer under the same alias on the model's history and meta-history tables. You don't need to configure anything on `HistoricalInvestorCashflow` or `MetaHistoricalInvestorCashflow`—history-endpoint and snapshot lookups stay consistent for free.
 
+## Value lists
+
+In the grid, most columns filter by a *value list*: the column's values, each with
+its row count, ready to pick — see
+[[using-the-app/the-grid/filtering and sorting#Value Lists|Filtering & Sorting]].
+Whether a column gets one depends on its type, on your serializer, on the model and
+on the user. A column without one keeps its condition filter, exactly as before.
+
+**The column's type.** `CharField`, integer, `BooleanField`, `DateField` and
+`ForeignKey` columns get a value list, and so does any column with `choices`.
+`TextField` without `choices`, `DecimalField`, `FloatField`, `DateTimeField`,
+`JSONField`, file and many-to-many columns don't, and neither does a field type not
+named here. The primary key keeps its condition filter in the grid, integer or not.
+
+**The serializer.** A value list offers *stored* values, so a column only gets one
+when the grid shows it as stored. It has none when the serializer:
+
+- leaves it out, or makes it write-only;
+- computes it — a `SerializerMethodField`;
+- renames it with `source=`;
+- renders it through a field class with its own `to_representation` or
+  `get_attribute`, or through a nested serializer.
+
+A serializer class that overrides `to_representation` itself gives none of its
+columns a value list: that method could change any value on any row.
+
+**The model.** `lex_value_lists = False` turns value lists off for every column of a
+model, its history tables included:
+
+```python
+class InvoiceNote(LexModel):
+    lex_value_lists = False
+```
+
+Reach for it when counting a column's values would be expensive. The framework's own
+audit log does this, because whether a user may read an entry is decided entry by
+entry.
+
+**The user.** A column the user may not filter by has no value list for them — a
+column your `permission_read()` withholds from them on every record, for example.
+This follows the `FILTERS` security switch; see
+[[reference/Grid Filter API#Security switches|Grid Filter API]].
+
+The fields endpoint reports the result for each column — see
+[[reference/Grid Filter API|Grid Filter API]].
+
 ## Column display defaults
 
 How wide a grid column is, whether it is pinned, and whether it appears at all are decided by three parties:

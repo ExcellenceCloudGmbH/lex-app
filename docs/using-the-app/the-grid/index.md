@@ -25,7 +25,7 @@ flowchart LR
 ```
 
 ### [[using-the-app/the-grid/filtering and sorting|Filtering & Sorting]]
-Start broad, then narrow down. Column-level filters for text, numbers, dates, and foreign keys let you isolate exactly what matters. Multi-column sorting arranges data in the order that makes sense for your analysis.
+Start broad, then narrow down. Tick the values you want in a column's list, or add conditions on text, numbers and dates. Multi-column sorting arranges data in the order that makes sense for your analysis.
 
 ### [[using-the-app/the-grid/grouping and pivoting|Grouping & Pivoting]]
 Reshape your data without changing it. Group rows by any column to create collapsible hierarchies. Turn on pivot mode for cross-tabulation — expenses by team per quarter, for example — with automatic aggregation.

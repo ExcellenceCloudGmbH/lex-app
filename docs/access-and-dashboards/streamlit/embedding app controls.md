@@ -244,6 +244,13 @@ Keep explicit ids distinct from each other and from the derived ones.
 > raise: that widget renders an error card and its siblings keep working. The
 > spec was well-formed; the record was not there.
 
+## Sites allowed to embed Lex App
+
+The controls are Lex App pages shown in a frame. If the deployment sets
+`LEX_EMBED_ALLOWED_ORIGINS`, browsers show Lex App in a frame only on the sites it
+lists, so the dashboard's own address has to be one of them — see
+[[access-and-dashboards/streamlit/embedding app pages#Allowed sites|Allowed sites]].
+
 ## Related
 
 - [[access-and-dashboards/streamlit/embedding app pages|Embedding App Pages]] — the same idea for a whole lex-app route, and reacting to what happens in it
