@@ -2217,6 +2217,47 @@ threads, now has to apply it itself.
 
 **Allocation note:** Allocated past the letters and scenario IDs that in-flight branches (feat/ext-*, feat/auth-long-sessions) already hold: the first letter absent from lex-app-v2 and every remote branch, and a range above the highest max_scenario on any branch, so neither side has to renumber on merge. Design: [`docs/superpowers/plans/2026-11-10-scheduled-jobs.md`](../../../../../docs/superpowers/plans/2026-11-10-scheduled-jobs.md).
 
+### Batch 1bq — `lex init` writes migrations for the project only, never into site-packages ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.674 – 1.680 |
+| Type | U / I |
+| Files covered | `lex/lex_app/management/commands/init.py` (`project_app_label`, `execute_migrations`), `lex/lex_app/settings.py` (`INSTALLED_APPS`, `MIGRATION_MODULES`) |
+| Test file | `lex/test_project/tests/init/test_1bq_init_project_only_migrations.py` |
+| Test classes | `TestCluster01bq_InitMakesProjectMigrationsOnly` (1.674–1.676), `TestCluster01bq_NoAppDriftsFromItsMigrations` (1.677, 1.679, 1.680), `TestCluster01bq_ApiKeysFitTheirColumns` (1.678) |
+| Fixtures | none; 1.677 runs `lex makemigrations --check --dry-run` in a child process, as 1.147 does; 1.678 uses the test database |
+| Tests landed | **8 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.674 | no file in site-packages | with a project app installed, `lex init`'s migration step asks makemigrations about that app only; `project_app_label()` is the project folder's app when settings installed it |
+| 1.675 | the command line still decides | an app named on `--makemigrations-args` is what makemigrations gets |
+| 1.676 | a framework checkout | without a project app, makemigrations runs for every app, as before |
+| 1.677 | no app drifts | `lex makemigrations --check --dry-run` for every installed app finds nothing to generate |
+| 1.678 | wide enough for a real key | an API key created on the migrated test database is stored with its 145-character id and found again by its key |
+| 1.679 | one history, not two | lex overrides none of the api-key fork's migrations (no `MIGRATION_MODULES` entry), and the fork's own `0002` widens `id` and `hashed_key` to 150 under the name `lex init` used to generate |
+| 1.680 | the id its migrations made | oauth2_authcodeflow's app config (django-oauth2-codeflow 3.0's own) pins `default_auto_field` to `AutoField`, and `BlacklistedToken`'s id is one |
+
+**Why the api-key widening matters.** Making migrations for the project only would leave new databases
+with the fork's 100-character columns if nothing else widened them, and its keys need 145: an 8-character
+prefix, a dot, and `"sha512$$"` before a 128-character digest. The widening used to come from the file
+`lex init` wrote into site-packages. On its branch this batch shipped it from lex (`lex/lex_app/vendored`,
+through `MIGRATION_MODULES`) and pinned oauth2_authcodeflow's `default_auto_field` with an app config of
+its own. lex-app-v2 meanwhile moved to exc-djangorestframework-api-key 1.0.1, which ships the same
+`0002_alter_apikey_hashed_key_alter_apikey_id`, and to django-oauth2-codeflow 3.0, whose app config pins
+`AutoField`; so the merge dropped the vendored package, as its own note asked once the fork shipped the
+widening. Keeping the override would have hidden the fork's next migration.
+
+**Mutations (on the branch): four of four fail a test.** Not scoping makemigrations fails 1.674. Scoping
+it even when the caller named an app fails 1.675. Dropping the widening fails 1.677 and 1.678, on a fresh
+test database: the reused one keeps the widened columns.
+
+**Allocation note:** Allocated as 1av (1.386 – 1.392) on its branch; renumbered on merging lex-app-v2,
+where 1av was taken, to the first letter absent from lex-app-v2 and every remote branch, and a range
+above the highest `max_scenario` on any branch.
+
 
 ## Batch 1br — lex_view filters and on_filter (1.681-1.689)
 

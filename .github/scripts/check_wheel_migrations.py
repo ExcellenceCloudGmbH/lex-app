@@ -19,12 +19,11 @@ This runs the database half of `lex init` against the wheel itself:
      `lex createcachetable`, `lex makemigrations`, `lex migrate` in the order
      `lex init` runs them, and `lex migrate --check`.
 
-`lex init` runs makemigrations for every installed app, so an installed
-package whose models no longer match the migrations it ships gets a migration
-written into site-packages on every customer machine, and conflicts with the
-package's own next migration. The package that already does that is listed
-in KNOWN_THIRD_PARTY_DRIFT, reported as a warning on every run; any other
-package starting to drift fails the check, as does a lex app.
+An installed package whose models no longer match the migrations it ships
+fails the check too, like a lex app: a project's `makemigrations` would write
+a migration into its folder in site-packages, and the package's own next
+migration would conflict with it. KNOWN_THIRD_PARTY_DRIFT lists any such
+package the team has decided to live with for now, reported as a warning.
 
 It needs PostgreSQL on localhost:5432 with the `default` target's credentials.
 Not SQLite: the core migration does nothing on any other backend, so SQLite
@@ -79,17 +78,14 @@ class NoteTotal(CalculationModel):
         self.total += 1
 '''
 
-# Installed packages whose models already differ from the migrations they ship,
-# so `lex init` writes a migration for them into site-packages. Known and tracked:
-# each is reported on every run, and any other package that starts drifting fails.
-# (oauth2_authcodeflow left this list with django-oauth2-codeflow 3.0, whose AppConfig pins
-# default_auto_field; a drift in it fails the check again.)
-KNOWN_THIRD_PARTY_DRIFT = {
-    "rest_framework_api_key": (
-        "exc-djangorestframework-api-key 1.0.0 widened id and hashed_key to 150 characters in "
-        "its model and ships no migration for it"
-    ),
-}
+# Installed packages whose models differ from the migrations they ship, kept
+# on purpose, each with its reason: reported as a warning on every run. Any
+# other package that drifts fails. `lex init` now makes migrations for the
+# project's own app only, and neither former entry drifts any more:
+# oauth2_authcodeflow left with django-oauth2-codeflow 3.0, whose AppConfig pins
+# default_auto_field, and rest_framework_api_key with exc-djangorestframework-api-key
+# 1.0.1, which ships the migration widening id and hashed_key to 150 characters.
+KNOWN_THIRD_PARTY_DRIFT: dict[str, str] = {}
 
 # Before the project has a model: anything makemigrations finds is drift in the
 # framework or in an installed package, never the project's own.
