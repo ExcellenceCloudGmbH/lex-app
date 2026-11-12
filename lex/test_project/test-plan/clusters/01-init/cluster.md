@@ -860,3 +860,21 @@ does not remove user launch configurations.
 | 1.664 | registered, not history-tracked | in `processAdminSite.registered_models`; no `history` |
 
 **Scenario range:** 1.654 – 1.664. **Test file:** `lex/test_project/tests/init/test_1bn_scheduler_bootstrap.py`. **Type:** U + E. **Status:** ✅ Complete (2026-11-10). Batch: [1bn](batches.md).
+
+### 1bq. `lex init` writes migrations for the project only, never into site-packages ✅
+
+**What it tests:** that `lex init` makes migrations for the project's own app, and that no installed app's models drift from the migrations it has, so nothing is written into site-packages and a new database can store the API keys the framework creates.
+
+**Why a regression matters:** a migration written into an installed package's folder conflicts with that package's next migration under the same number, and `lex init` stops. Without the api-key widening, a new instance cannot create an API key.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.674 | no file in site-packages | with a project app installed, `lex init`'s migration step asks makemigrations about that app only; `project_app_label()` is the project folder's app when settings installed it |
+| 1.675 | the command line still decides | an app named on `--makemigrations-args` is what makemigrations gets |
+| 1.676 | a framework checkout | without a project app, makemigrations runs for every app, as before |
+| 1.677 | no app drifts | `lex makemigrations --check --dry-run` for every installed app finds nothing to generate |
+| 1.678 | wide enough for a real key | an API key created on the migrated test database is stored with its 145-character id and found again by its key |
+| 1.679 | one history, not two | lex overrides none of the api-key fork's migrations (no `MIGRATION_MODULES` entry), and the fork's own `0002` widens `id` and `hashed_key` to 150 under the name `lex init` used to generate |
+| 1.680 | the id its migrations made | oauth2_authcodeflow's app config (django-oauth2-codeflow 3.0's own) pins `default_auto_field` to `AutoField`, and `BlacklistedToken`'s id is one |
+
+**Scenario range:** 1.674 – 1.680. **Test file:** `lex/test_project/tests/init/test_1bq_init_project_only_migrations.py`. **Type:** U / I. **Status:** ✅ Complete (2026-10-12). Batch: [1bq](batches.md).
