@@ -204,9 +204,25 @@ letters:
       The read side of 6s, behind LEX_SEC_READ_SURFACES. A download entry is visible to whoever may
       read its record and hidden from others (6.160); a model-wide export entry to whoever may export
       the model (6.161); a record's history is one filtered query (6.162); the payload comes back whole
-      (6.163); auditlogstatus rows follow their entry (6.164); tracebacks are superuser-only (6.165);
+      (6.163); auditlogstatus rows follow their entry (6.164); tracebacks follow their entry (6.165,
+      superuser-only until LEX-1555);
       the opt-out restores the payload check (6.166); the detail endpoint applies the list's rule
       (6.167). 6.160-6.165 and 6.167 fail on the #840 head.
+  u:
+    title: Who reads a failed calculation's traceback (LEX-1555)
+    scenarios: 6.168-6.172
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      LEX-1555. A non-superuser who may read a calculation record reads its failed run's traceback in
+      the record's audit-log query (6.168), in auditlogstatus/list (6.169) and on both detail
+      endpoints (6.170); a caller who may not read the record sees neither row on any of the four
+      reads (6.171); a run started by its own create (calculate_on_create) reads the same (6.172).
+      6.168-6.170 and 6.172 fail on v2.4.2, where the traceback was superuser-only and so hidden from
+      every Keycloak user.
   v:
     title: 'The audit entry of a scheduled run'
     scenarios: 6.173-6.175

@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 162
+max_scenario: 163
 letters:
   a:
     title: ''
@@ -218,6 +218,45 @@ letters:
       refuses an edit/create whose check raises (4.120). LEX_SEC_FAIL_CLOSED=false restores the allow
       in each. All five fail on fix/audit-log-read-side-v2 (lex-app-v2 0ac01da8 + #842). 4.111-4.115 are
       reserved for 4q (permission_create on the filled record, separate PR).
+  x:
+    title: Per-user Keycloak calls stay with their user; forged tokens and look-alike paths get no access
+    scenarios: 4.138-4.147
+    status: complete
+    tests:
+      pass: 10
+      skip: 0
+      xfail: 0
+    note: >-
+      UMA permissions and userinfo were requested through python-keycloak, which sets the caller's
+      token on the process-wide connection before sending, so concurrent requests could receive
+      another user's answer (BUG-038). They now go through lex/api/keycloak/uma_client.py, the token
+      on its own request: 4.138 (240 concurrent middleware requests, 12 users, a stub Keycloak echoing
+      the token's user) and 4.139 (the KeycloakManager path Reflex, Streamlit and the token views
+      use). 4.140-4.143 classify Keycloak's answers and pin TLS verification and timeouts. 4.144: an
+      HS256 token signed with the client secret no longer signs anyone in, RS256 from the identity
+      provider still does (BUG-035). 4.145-4.147: login exemptions are anchored, so
+      /api/user_permissions/ and any path containing /health need a signed-in user again while the
+      real public endpoints stay public (BUG-036). Mutation, with KeycloakManager.py,
+      keycloak_permissions.py and settings.py put back to HEAD: 4.138 and 4.139 fail with other users'
+      permissions and profiles; 4.140 (None, not []), 4.142 (an unreachable Keycloak goes unlogged),
+      4.144 (no RS256-only setting), 4.146 (6 look-alike paths skip sign-in) and 4.147 (14 unanchored
+      patterns) fail too; 4.141, 4.143 and 4.145 pass. Letter x, not s-w: those are in flight on
+      feat/multi-value-filters (s, t) and the feat/ext-* branches (s-w, scenarios up to 4.137). Same
+      letter and IDs on lex-app-v2 and release/2.1.x.
+  aa:
+    title: The Streamlit token carries the caller's own Keycloak permissions
+    scenarios: 4.163-4.163
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      StreamlitTokenView imported KeycloakManager relative to lex/authentication/views, where no such
+      module exists; the ImportError was swallowed, so every Streamlit token carried no permissions.
+      It now uses lex.api.views.authentication.KeycloakManager (the per-request UMA client of 4x) and
+      maps None to []. Mutation: with the relative import back, 4.163 fails. Letter aa and 4.163, not
+      y/z or 4.148-4.162: those belong to open PRs #869 (4y) and #880 (4z).
   z:
     title: 'A schedule can do no more than the person who saved it'
     scenarios: 4.159-4.162

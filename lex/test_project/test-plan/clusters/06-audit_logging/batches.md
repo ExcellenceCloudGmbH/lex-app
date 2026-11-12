@@ -122,11 +122,26 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Type | E |
 | Files covered | `lex/api/utils/helpers.py` (`_can_read_file_operation`), `lex/api/views/model_entries/filter_backends.py` (`_handle_auditlog`, `_handle_auditlogstatus`), `lex/api/serializers/base_serializers.py` (payload pruning), `lex/api/security.py` (`is_readable`), `lex/audit_logging/models/AuditLogStatus.py`, `lex/audit_logging/serializers/AuditLogSerializer.py` (`get_error_traceback`) |
 | Test file | `lex/test_project/tests/audit_logging/test_6t_file_operation_audit_visibility.py` |
-| Test classes | `TestCluster06t_FileOperationAuditVisibility` (6.160 download entry follows the record; 6.161 export entry follows `permission_export`; 6.162 `resource&object_id&action` finds a record's download; 6.163 payload returned whole; 6.164 `auditlogstatus/list` follows its entry; 6.165 traceback superuser-only on both lists; 6.166 `LEX_SEC_READ_SURFACES=false` restores the payload check; 6.167 detail endpoint applies the list's rule) |
+| Test classes | `TestCluster06t_FileOperationAuditVisibility` (6.160 download entry follows the record; 6.161 export entry follows `permission_export`; 6.162 `resource&object_id&action` finds a record's download; 6.163 payload returned whole; 6.164 `auditlogstatus/list` follows its entry; 6.165 traceback follows the entry on both lists (superuser-only until LEX-1555, rewritten in 6u's change); 6.166 `LEX_SEC_READ_SURFACES=false` restores the payload check; 6.167 detail endpoint applies the list's rule) |
 | Fixtures | `AuditGuardedFile` in `tests/audit_logging/models.py` — readable by its `owner` only, exportable by `exporter` only; users `owner`, `stranger`, `exporter` and a superuser |
 | Tests landed | **8 pass / 0 fail** |
 | Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-22-audit-log-read-side.md). 4.53 (dispatch) and 6.145 (traceback read as superuser) updated |
 
+---
+
+### Batch 6u — Who reads a failed calculation's traceback (LEX-1555) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 6.168 – 6.172 |
+| Type | E |
+| Files covered | `lex/audit_logging/serializers/AuditLogSerializer.py` (`get_error_traceback`), `lex/audit_logging/models/AuditLogStatus.py` (`permission_read`) |
+| Test file | `lex/test_project/tests/audit_logging/test_6u_calculation_failure_traceback_visibility.py` |
+| Test classes | `TestCluster06u_CalculationFailureTracebackVisibility` (6.168 the record's audit-log query shows the failed run's traceback to its non-superuser reader; 6.169 `auditlogstatus/list` carries it; 6.170 both detail endpoints carry it; 6.171 a caller who may not read the record gets neither row, listed or by id; 6.172 a run started by `calculate_on_create` reads the same) |
+| Fixtures | `AuditOwnedCalc` and `AuditOwnedOnCreateCalc` in `tests/audit_logging/models.py`: readable, editable and runnable by their `owner` only; plain users `owner` and `stranger` (no superuser, as with every Keycloak user) |
+| Tests landed | **5 pass / 0 fail**; 6.168–6.170 and 6.172 fail on v2.4.2 |
+| Also changed | 6.165 rewritten to the new rule (owner and superuser read the traceback, stranger sees no row); 6.145 now reads as a non-superuser |
+| Status | ✅ Complete. See [session note](../../progress/sessions/2026-11-10-lex-1555-calc-failure-traceback.md) |
 ---
 
 ### Batch 6v — The audit entry of a scheduled run ✅

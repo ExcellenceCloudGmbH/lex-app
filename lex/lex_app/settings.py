@@ -30,6 +30,7 @@ import os
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 
+from lex import hosts as lex_hosts
 from lex.runtime_config import (
     derive_repo_name,
     resolve_local_sqlite_path,
@@ -176,9 +177,11 @@ if os.getenv("STORAGE_TYPE") == "GCS":
 # See https://docs.djangoproject.com/en/3.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv(
-    "DJANGO_SECRET_KEY", default="pjlulvaa77lteno-_y6!oxb%63xqiaw4%n%1or&77a!x9@nkd+"
-)
+#: The development fallback. It is published with this package, so it signs
+#: nothing a deployed instance can trust; deployed pods refuse to start on it
+#: (see the DEPLOYMENT_ENVIRONMENT checks below).
+PUBLISHED_DEFAULT_SECRET_KEY = "pjlulvaa77lteno-_y6!oxb%63xqiaw4%n%1or&77a!x9@nkd+"
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", default=PUBLISHED_DEFAULT_SECRET_KEY)
 QUACKBACK_WIDGET_SECRET = os.getenv("QUACKBACK_WIDGET_SECRET", "")
 
 # SECURITY WARNING: don't run with debug turned on in production!
@@ -187,18 +190,143 @@ if os.getenv("LEX_ENVIRONMENT_TAG", "envvar_not_existing") == "dev":
 else:
     DEBUG = False
 
-ALLOWED_HOSTS = [
+# LEX_EXTRA_ALLOWED_HOSTS (comma-separated) names FURTHER hostnames this
+# instance answers on, beyond the one canonical DOMAIN_HOSTED.
+#
+# DOMAIN_HOSTED is a single name, so until this existed ALLOWED_HOSTS held
+# exactly one real host. Every other hostname pointed at the same pod — a
+# customer domain attached but not yet promoted, a dashboard host, a vanity
+# host put in front of one public route — got a 400 from Django while the
+# ingress happily routed it. USE_X_FORWARDED_HOST is True below, so Django
+# judges the host the CLIENT asked for: an ingress-side rewrite (upstream-vhost
+# and friends) cannot paper over this, which is why the name has to be listed
+# here. See also asgi.py, where the public health WebSocket is deliberately
+# exempt from AllowedHostsOriginValidator for the same class of failure.
+#
+# Entries are hostnames, not origins: "sign.example.com", or Django's own
+# leading-dot wildcard ".example.com" for every subdomain. "*" is refused
+# below — an instance that accepts any Host accepts Host-header poisoning.
+_lex_extra_allowed_hosts = [
+    host.strip().strip("/")
+    for host in os.getenv("LEX_EXTRA_ALLOWED_HOSTS", "").split(",")
+    if host.strip()
+]
+
+#: Where Kubernetes mounts the pod's own namespace. Present in every pod with a service account,
+#: which is every pod the platform runs, and readable without any API call or new env var.
+K8S_NAMESPACE_FILE = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
+#: How the platform names an instance's backend Service: this prefix plus the instance identifier.
+BACKEND_SERVICE_PREFIX = "lex-backend-"
+
+
+def _k8s_namespace(path: str = K8S_NAMESPACE_FILE) -> str:
+    """This pod's namespace, or `""` outside a cluster.
+
+    Read from the mounted file rather than an environment variable because there is no namespace
+    variable to rely on - `POD_NAMESPACE` is NOT set in the platform's pods (measured). Any read
+    error means "not in a cluster", which is the correct answer on a developer's machine.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+def _cluster_service_hosts(instance: str, namespace: str) -> list:
+    """The DNS names this pod's own backend Service answers to from inside the cluster.
+
+    WHY THIS EXISTS. A lex instance is several pods sharing one database, and the ones that are not
+    the backend reach it by its Kubernetes Service name - `lex-backend-<instance>:7000` - because
+    that keeps the traffic inside the cluster, off the ingress and off TLS. Django then sees that
+    Service name in `Host:`, and until this function existed `ALLOWED_HOSTS` held only
+    `DOMAIN_HOSTED`, the loopback pair and `POD_IP`, so `CommonMiddleware` refused the request
+    before any view, permission class or model code ran:
+
+        django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header:
+        'lex-backend-<instance>:7000'. You may need to add 'lex-backend-<instance>'
+        to ALLOWED_HOSTS.
+
+    Measured on a customer instance on 2026-10-25: every service-to-service file write failed on
+    this and nothing else - the API key was registered and valid, and the route was correct.
+
+    `POD_IP` does not cover it. It is the address of whichever pod is reading these settings, so it
+    lets a caller reach THAT pod by IP; it says nothing about how other pods address the backend by
+    name, and a caller in another pod has no way to learn it.
+
+    Args:
+        instance: `INSTANCE_RESOURCE_IDENTIFIER`, or `""` outside a deployment.
+        namespace: the pod's namespace, or `""` when it could not be read.
+
+    Returns:
+        The short Service name plus the three longer Kubernetes DNS forms, or `[]` when there is no
+        instance identifier - which is a developer's machine, where nothing should be added.
+    """
+    if not instance:
+        return []
+    short = f"{BACKEND_SERVICE_PREFIX}{instance}"
+    if not namespace:
+        # In a cluster the namespace file is always there; without it the short name is still
+        # correct for a same-namespace caller, which is the only one that can use a short name.
+        return [short]
+    return [
+        short,
+        f"{short}.{namespace}",
+        f"{short}.{namespace}.svc",
+        f"{short}.{namespace}.svc.cluster.local",
+    ]
+
+
+# Every hostname the instance ingress routes to this pod, canonical first: the
+# platform hostname and any customer-owned domain attached to the instance. An
+# attached domain reaches the very same pods as the platform one, so a hostname
+# missing here is a domain that resolves, routes, and is then answered with
+# "400 Bad Request" by Django -- and with a refused handshake by
+# AllowedHostsOriginValidator, which reads this same list.
+#
+# Written by the lex-instance terraform module only when a custom domain is
+# attached; `public_hosts` falls back to DOMAIN_HOSTED alone, which is what
+# every other instance has always had.
+_PUBLIC_APP_HOSTS = lex_hosts.public_hosts("app")
+
+# dict.fromkeys, not set(): DOMAIN_HOSTED is normally the first entry of
+# _PUBLIC_APP_HOSTS as well, and a duplicate in ALLOWED_HOSTS is only noise --
+# but an unordered list would make this setting differ between runs.
+ALLOWED_HOSTS = list(dict.fromkeys([
+    *_PUBLIC_APP_HOSTS,
     os.getenv("DOMAIN_HOSTED", "localhost"),
     "127.0.0.1",
     "localhost",
     os.environ.get("POD_IP", default="envvar_not_existing"),
-]
+    *_lex_extra_allowed_hosts,
+    *_cluster_service_hosts(
+        (os.getenv("INSTANCE_RESOURCE_IDENTIFIER") or "").strip(), _k8s_namespace()
+    ),
+]))
 
 LOGIN_REDIRECT_URL = "/process_admin/all"
 
+# The extra hosts are trusted for CSRF too: a host that serves the app at all
+# serves its forms, and a host listed in ALLOWED_HOSTS but missing here fails
+# every POST with "Origin checking failed" — a confusing half-working state.
+#
+# The two settings spell a wildcard differently. ALLOWED_HOSTS takes Django's
+# leading dot (".example.com" = the domain and every subdomain); an origin must
+# carry a scheme and spells it "https://*.example.com", which covers the
+# subdomains only. So ".example.com" becomes "https://*.example.com" and the
+# apex, if it serves the app, is listed in its own right.
 CSRF_TRUSTED_ORIGINS = [
     "https://*." + os.getenv("DOMAIN_HOSTED", "localhost"),
     "http://localhost:3000",
+    # Django matches CSRF origins exactly unless the entry starts with `*.`, so
+    # each host needs its own entry as well as the wildcard above -- a POST to
+    # `https://app.customer.com` carries that exact Origin, which
+    # `https://*.customer.com` does not match.
+    *[f"https://{host}" for host in _PUBLIC_APP_HOSTS if host and host != "localhost"],
+] + [
+    f"https://*{host}" if host.startswith(".") else f"https://{host}"
+    for host in _lex_extra_allowed_hosts
 ]
 
 # Fail fast on missing critical configuration when deployed, instead of silently
@@ -216,6 +344,28 @@ if os.getenv("DEPLOYMENT_ENVIRONMENT") is not None:
             "DOMAIN_HOSTED must be set when DEPLOYMENT_ENVIRONMENT is set; without "
             "it ALLOWED_HOSTS only matches 'localhost' and all WebSocket/CSRF "
             "checks reject the real instance hostname."
+        )
+
+    if "*" in _lex_extra_allowed_hosts:
+        raise ImproperlyConfigured(
+            "LEX_EXTRA_ALLOWED_HOSTS must name hostnames, never '*'. A deployed "
+            "instance that accepts any Host header accepts Host-header poisoning: "
+            "password-reset and other absolute links would be built from whatever "
+            "the caller sent. Name each host, or use Django's leading-dot wildcard "
+            "('.example.com') for one domain's subdomains."
+        )
+
+    # The secret key signs session data, password-reset and signing tokens and
+    # derives the dashboard proxy's cookie key. The fallback above is public, so
+    # a deployed pod running on it (or on nothing) hands every signature to
+    # anyone who has read this package. Every deployed instance gets its own
+    # key from Terraform; refuse to start without one.
+    _deployed_secret_key = (os.getenv("DJANGO_SECRET_KEY") or "").strip()
+    if not _deployed_secret_key or _deployed_secret_key == PUBLISHED_DEFAULT_SECRET_KEY:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY must be set to a private value when DEPLOYMENT_ENVIRONMENT "
+            "is set; the built-in development key is public and must not sign anything "
+            "on a deployed instance."
         )
 
     if _use_redis_channel_layer:
@@ -357,6 +507,10 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
     "lex.authentication.middleware.ApiKeyAwareLoginRequiredMiddleware",
+    # Records the hostname each request arrived on, so an HTMLReport can frame
+    # its dashboard from a hostname on the same registrable domain -- see
+    # lex.hosts. Pure bookkeeping: it never rejects a request.
+    "lex.hosts.CurrentHostMiddleware",
     "oauth2_authcodeflow.middleware.RefreshSessionMiddleware",
     "oauth2_authcodeflow.middleware.RefreshAccessTokenMiddleware",
     "lex.api.middleware.keycloak_permissions.KeycloakPermissionsMiddleware",
@@ -721,6 +875,11 @@ else:
     AUTHENTICATION_BACKENDS = ("django.contrib.auth.backends.ModelBackend",)
 
 OIDC_RP_SCOPES = ["openid", "email", "profile"]
+# Keycloak signs ID tokens with RS256. The library's default list also accepts
+# HS256/384/512 with the *client secret* as the key, and the secret sits in every
+# instance's environment: anyone holding it could mint a token for any e-mail and
+# be accepted as that user by the bearer path. Accept only Keycloak's algorithm.
+OIDC_RP_SIGN_ALGOS_ALLOWED = ["RS256"]
 _django_base_path = os.getenv("DJANGO_BASE_PATH", "").strip().strip("/")
 _admin_exempt_patterns = [
     r"^/admin(?:/|$)",
@@ -735,28 +894,62 @@ if _django_base_path:
         ]
     )
 
+# Paths that may be requested without a signed-in user. The library tests them
+# with re.search, so every pattern is anchored at both ends: an unanchored
+# "/health" or "api/user" also exempted any path *containing* it -- e.g.
+# /api/user_permissions/ or /api/model_entries/healthx/list -- from the login
+# requirement. The optional "api/" prefix keeps the /api/api/... form the
+# ingress produces for the frontend's apiHost.
 OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS = [
-    "/manifest.json",
-    "manifest.json",
-    "/health",
-    "/favicon.ico",
-    "api/user/",
-    "/api/user",
-    "api/health",
-    "api/active-calculations",
-    "/api/active-calculations",
-    "api/favicon.ico",
-    "api/api/user/",
-    "api/api/user",
-    "api/api/active-calculations",
-    "/api/api/active-calculations",
+    r"^/manifest\.json$",
+    r"^/favicon\.ico$",
+    r"^/api/favicon\.ico$",
+    r"^/health/?$",
+    r"^/(?:api/)?api/health/?$",
+    r"^/(?:api/)?api/user/?$",
+    r"^/(?:api/)?api/active-calculations/?$",
 ] + _admin_exempt_patterns
 
 OIDC_MIDDLEWARE_NO_REFRESH_URL_PATTERNS = [
     r"^/health$",
     r"^/favicon\.ico$",
 ] + _admin_exempt_patterns
-OIDC_RP_USE_PKCE = False
+# PKCE (S256) on the authorization-code flow. The client is confidential, so the
+# secret is still sent with the code exchange (FORCE_SECRET_WITH_PKCE); PKCE adds
+# a per-login verifier, which makes an intercepted code useless.
+OIDC_RP_USE_PKCE = True
+OIDC_RP_FORCE_SECRET_WITH_PKCE = True
+
+
+def _session_cookie_age_days() -> int:
+    """``LEX_SESSION_COOKIE_AGE_DAYS`` (default 31): how long an idle sign-in survives."""
+    raw = os.getenv("LEX_SESSION_COOKIE_AGE_DAYS", "31").strip()
+    try:
+        days = int(raw)
+    except ValueError:
+        from django.core.exceptions import ImproperlyConfigured
+
+        raise ImproperlyConfigured(
+            f"LEX_SESSION_COOKIE_AGE_DAYS must be a whole number of days, got {raw!r}."
+        ) from None
+    if days < 2:
+        from django.core.exceptions import ImproperlyConfigured
+
+        raise ImproperlyConfigured(
+            f"LEX_SESSION_COOKIE_AGE_DAYS must be at least 2 (got {days}); the OIDC session "
+            "timeout has to fit inside the cookie lifetime."
+        )
+    return days
+
+
+# Session lifetime. Keycloak decides how long a sign-in lasts (app realms: 30 days
+# idle / 90 days max). Django must not end it earlier: the session cookie lives
+# 31 days and is re-sent whenever the session is saved (each token refresh), and
+# the library's own session clock -- which slides on each refresh from
+# django-oauth2-codeflow 2.1.0 on -- is 30 days, one day inside the cookie as the
+# library requires.
+SESSION_COOKIE_AGE = _session_cookie_age_days() * 86400
+OIDC_MIDDLEWARE_SESSION_TIMEOUT_SECONDS = min(30 * 86400, SESSION_COOKIE_AGE - 86400)
 SESSION_COOKIE_SECURE = os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
 CSRF_COOKIE_SECURE = os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -821,6 +1014,16 @@ _lex_cors_origins = [
     if origin.strip()
 ]
 if _lex_cors_origins:
+    # The instance's own hostnames are always in the list. An operator setting
+    # this variable is naming the THIRD PARTIES that may call the instance, not
+    # re-declaring the instance itself -- and once a customer-owned domain is
+    # attached, "itself" is more than one hostname. Leaving them out would mean
+    # a hardened instance stopped accepting its own newly attached domain, both
+    # for CORS and as an OIDC next/fail target
+    # (lex.authentication.middleware.OidcRedirectGuardMiddleware reads these).
+    _own_origins = [f"https://{host}" for host in _PUBLIC_APP_HOSTS if host and host != "localhost"]
+    _lex_cors_origins = list(dict.fromkeys(_lex_cors_origins + _own_origins))
+
     CORS_ORIGIN_ALLOW_ALL = False
     CORS_ALLOW_ALL_ORIGINS = False
     CORS_ALLOWED_ORIGINS = _lex_cors_origins

@@ -152,6 +152,46 @@ letters:
       because a failed calculation rolls its writes back (pinned so a future partial-commit change
       cannot silently reintroduce the leak). 8.153 pins the boundary - a decorated calculate() with Celery OFF is clean, so the trigger is decoration AND Celery dispatch, not decoration alone. Fixture note - the decorated tasks need explicit Celery
       task names; all three calculate methods share one module and would otherwise collide.
+  e:
+    title: create(*args) reach calculate() on every route, Celery included (BUG-054)
+    scenarios: 8.157-8.163
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      The Celery task calc_and_save called model.lex_func()() with no arguments, so
+      create(*args) reached calculate() on the sync routes and was dropped on the Celery
+      route. Each group message is (group, group_index, *create_args); the task now names
+      the group_index slot and passes the rest on. The message keeps its shape, so a
+      message queued, redelivered or requeued by worker recovery before an upgrade is read
+      the same way by an old and a new worker (8.159). Routes: Celery (8.157, and 8.158 with
+      no arguments), a worker running a group message (8.159), the task's other sender
+      dispatch_calculation_task (8.160), sync streaming (8.161), sync materialising (8.162),
+      Celery with the fallback after a failed task (8.163). 8.157, 8.159 and 8.163 fail on
+      v2.4.2. Mutation-checked: passing the index on fails 8.157-8.159 and 8.163; moving the
+      index to a keyword fails 8.159. Letter d and 8.154-8.156 belong to PR #865, so 8e
+      starts at 8.157.
+  d:
+    title: The startup reset works on every route and leaves asyncio usable (BUG-046)
+    scenarios: 8.154-8.156
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      The startup reset (register_models -> _handle_calculation_model_reset under
+      CALLED_FROM_START_COMMAND) runs its ORM work on a thread of its own, which closes its
+      connection, instead of through nest_asyncio. Each scenario starts a fresh interpreter by one
+      route: no running loop (8.154), inside a running asyncio loop as uvicorn --loop asyncio does
+      (8.155), inside a running uvloop loop as plain uvicorn does when uvloop is installed (8.156).
+      It resets a real stuck row on this test's database, then calls async_to_sync twice with
+      thread-sensitive ORM work. A watchdog in the child turns a hang into a failure with every
+      thread's stack. All three fail on v2.4.2: 8.154 and 8.155 hang, and 8.156 stops startup with
+      "Can't patch loop of type uvloop.Loop". 8x's tearDown no longer applies nest_asyncio. Letter
+      d is the first absent from this file, which does not list the existing 8aa-8ad.
   f:
     title: 'Scheduled dispatch — cron in a time zone, exactly-once claim, overlap, missed slots, one-off, the Celery route'
     scenarios: 8.167-8.182

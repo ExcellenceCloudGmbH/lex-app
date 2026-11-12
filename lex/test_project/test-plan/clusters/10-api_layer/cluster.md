@@ -100,6 +100,38 @@ branches again per ``STORAGE_TYPE``. Each is recorded as an ``AuditLog`` row wit
 
 ---
 
+### 10r. `api/htmlreport/<name>` hands a report the request, and the Streamlit frame a credential ✅
+
+**What it tests:** the route every `HTMLReport` in a project is rendered through, and the one report the framework ships. The `Streamlit` report frames the project's dashboard, which lives on its own host behind the auth proxy; a cross-origin frame cannot authenticate itself, so the embedding page must hand it the bootstrap `auth_token` the proxy exchanges for a session cookie. The route supplies the request that makes this possible — but only to a report that declares a second parameter, so `HTMLReport`'s published `get_html(self, user)` is unchanged for every project that subclasses it.
+
+**Why a regression matters:** framed without a credential, the dashboard 401s, and a framed 401 is answered with a page that moves the *top* window to the dashboard host's login — so clicking **Streamlit** inside an instance took the whole browser tab out of it. And this route renders every report a project has, so widening the call signature for all of them would break them all at once.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.100 | the sidebar entry frames a dashboard that can let the user in | the frame is on `STREAMLIT_URL` carrying the session's access token as `auth_token`; the response answers `Cache-Control: no-store` |
+| 10.101 | nothing to hand it means nothing handed | no OIDC token on the session → no `auth_token` key at all, not an empty or placeholder one |
+| 10.102 | the published `get_html(self, user)` is unchanged | the one-parameter report renders untouched; the two-parameter one gets the request; a `TypeError` from inside a report is not read as a signature |
+
+**Scenario range:** 10.100 – 10.102. **Test file:** `lex/test_project/tests/api_layer/test_10r_html_report_request_and_streamlit_frame.py`. **Type:** E (10.102 also U). **Status:** ✅ Complete (2026-11-03). Batch: [10r](batches.md).
+
+### 10ad — `model_info` ships the project's per-column display options
+
+**What it tests:** a project writes how its own columns should look on its serializer
+(`Meta.lex_column_options`), and the endpoint the frontend blocks on before drawing any
+table carries it. LEX-1556: a customer asked for a narrower ID column, and `list_ui` could
+say exactly one thing (`hide_actions_column`) and nothing about a column.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.184 | the declaration reaches the frontend | `list_ui.columns` keyed by field name, carrying the declared options; `hide_actions_column` untouched |
+| 10.185 | a plain DRF serializer gets the same contract | a project's own non-`LexSerializer` class answers identically — one payload, one reader, no second code path |
+| 10.186 | a model declaring nothing answers the key | `columns: {}`, so "declared nothing" and "declared an empty thing" cannot diverge between readers |
+| 10.187 | a malformed declaration never breaks the endpoint | the response still arrives and the one usable declaration survives; a typo costs that option, not every list view of the model |
+
+**Scenario range:** 10.184 – 10.187. **Test file:** `lex/test_project/tests/api_layer/test_10ad_list_ui_column_options.py`. **Type:** U. **Status:** ✅ Complete (2026-11-10). Batch: [10ad](batches.md). Paired with [12p](../12-serializers/cluster.md) and frontend clusters F03p/F03q.
+
+---
+
 ### 10ac. Scheduled jobs through the REST API ✅
 
 **What it tests:** Schedules are created, edited, switched off and run through the generic API and UI: every definition mistake answers 400 naming the field, a save records who the job runs as and moves its next slot, the ▶ button runs it now, a schedule declared in code can be switched off but not rewritten, and an edit never resets a scheduled job's status.

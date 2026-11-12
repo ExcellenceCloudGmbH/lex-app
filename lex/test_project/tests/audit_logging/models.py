@@ -152,13 +152,78 @@ class AuditGuardedFile(LexModel):
         return True
 
 
+class _AuditOwnedCalcBase(CalculationModel):
+    """A calculation only its owner may read, edit and run (cluster 6u).
+
+    LEX-1555: whoever may read a failed run's audit entry must be able to
+    read its traceback; whoever may not read the record must not see the
+    entry (and so not the traceback) at all.
+    """
+
+    name = models.CharField(max_length=200)
+    owner = models.CharField(max_length=150, blank=True, default="")
+    should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    class Meta:
+        abstract = True
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        if self.should_fail:
+            raise RuntimeError(f"{type(self).__name__}({self.name!r}) failing on purpose")
+
+    def _is_owner(self, uc):
+        return bool(self.owner) and getattr(getattr(uc, "user", None), "username", None) == self.owner
+
+    def permission_read(self, uc):
+        if self._is_owner(uc):
+            return PermissionResult.allow_all("cluster 6u: owner")
+        return PermissionResult.deny("cluster 6u: not the owner")
+
+    def permission_edit(self, uc):
+        if self._is_owner(uc):
+            return PermissionResult.allow_all("cluster 6u: owner")
+        return PermissionResult.deny("cluster 6u: not the owner")
+
+    def permission_list(self, uc):
+        return True
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return False
+
+
+class AuditOwnedCalc(_AuditOwnedCalcBase):
+    """Run from the Calculate button (``PATCH ?calculate=true``)."""
+
+    class Meta:
+        app_label = "lex_app"
+
+
+class AuditOwnedOnCreateCalc(_AuditOwnedCalcBase):
+    """Run by its own create (``calculate_on_create``)."""
+
+    calculate_on_create = True
+
+    class Meta:
+        app_label = "lex_app"
+
+
 ALL_MODELS = [AuditSimpleItem, AuditAtomicCalc, AuditNonAtomicCalc]
 FILE_MODELS = [AuditFileItem]
 GUARDED_FILE_MODELS = [AuditGuardedFile]
+OWNED_CALC_MODELS = [AuditOwnedCalc, AuditOwnedOnCreateCalc]
 
 AUDIT_SIMPLE = "auditsimpleitem"
 AUDIT_ATOMIC = "auditatomiccalc"
 AUDIT_NONATOMIC = "auditnonatomiccalc"
 AUDIT_FILE = "auditfileitem"
 AUDIT_GUARDED = "auditguardedfile"
+AUDIT_OWNED_CALC = "auditownedcalc"
+AUDIT_OWNED_ON_CREATE = "auditownedoncreatecalc"
 

@@ -326,7 +326,15 @@ class TestCluster12e_FactoryContract(SimpleTestCase):
         wrapped = _wrap_custom_serializer(HiddenActionsSerializer, WideItem)
 
         self.assertTrue(wrapped.Meta.hide_actions_column)
-        self.assertEqual(wrapped.get_list_ui_options(), {"hide_actions_column": True})
+        # `columns` joined this payload with cluster 12l (per-column display
+        # options, LEX-1556). The scenario's claim — the flag survives
+        # wrapping — is unchanged; it simply no longer also asserts that
+        # `list_ui` has nothing else in it. That the column options survive
+        # the same wrapping is 12.72's claim.
+        self.assertEqual(
+            wrapped.get_list_ui_options(),
+            {"hide_actions_column": True, "columns": {}},
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover

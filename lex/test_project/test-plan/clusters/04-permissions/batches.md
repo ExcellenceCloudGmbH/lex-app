@@ -142,6 +142,42 @@ must not open a check on the whole model.
 
 ---
 
+### Batch 4x — per-user Keycloak calls stay with their user; forged tokens and look-alike paths ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.138 – 4.147 |
+| Type | U (4.138–4.143), I (4.144–4.147) |
+| Files covered | `lex/api/keycloak/uma_client.py` (new), `lex/api/views/authentication/KeycloakManager.py` (`get_uma_permissions`, `get_userinfo`, `get_user_permissions`), `lex/api/middleware/keycloak_permissions.py`, `lex/authentication/views/token_views.py`, `lex/streamlit_app.py` (`get_user_info`), `lex/lex_app/settings.py` (`OIDC_RP_SIGN_ALGOS_ALLOWED`, `OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS`) |
+| Test file | `lex/test_project/tests/permissions/test_4x_keycloak_call_isolation.py` |
+| Test classes | `TestCluster04x_ConcurrentUsersStayApart` (4.138–4.139), `TestCluster04x_KeycloakAnswersAreClassified` (4.140–4.143), `TestCluster04x_ForgedBearerTokens` (4.144), `TestCluster04x_AnchoredLoginExemptions` (4.145–4.147) |
+| Fixtures | a threaded stub Keycloak (`_StubKeycloak`) answering UMA and userinfo for whichever bearer token a request carries; an RSA key pair per module; explicit OP settings so the bearer backend starts without network; a 1 µs thread switch interval in 4.138–4.139, so the interleavings of a loaded server happen in the test too (at CPython's default 5 ms the race stays hidden) |
+| Tests landed | **10 pass / 0 fail** against django-oauth2-codeflow 2.1.0 — Mutation, with KeycloakManager.py, keycloak_permissions.py and settings.py put back to HEAD: 4.138 and 4.139 fail with other users' permissions and profiles; 4.140 (None, not []), 4.142 (an unreachable Keycloak goes unlogged), 4.144 (no RS256-only setting), 4.146 (6 look-alike paths skip sign-in) and 4.147 (14 unanchored patterns) fail too; 4.141, 4.143 and 4.145 pass. |
+| Also changed | `test_4g_user_permissions_api.py` 4.32/4.32b and `api_layer/test_10o_error_and_route_hardening.py` 10.90: their fake manager answers `get_userinfo`, because the middleware no longer reaches into the shared python-keycloak connection (`km.oidc`). Intent unchanged. |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-06-auth-hotfixes.md) |
+
+**Allocation note:** Letter x, not s-w: those are in flight on feat/multi-value-filters (s, t) and the feat/ext-* branches (s-w, scenarios up to 4.137). Same letter and IDs on lex-app-v2 and release/2.1.x.
+
+---
+
+### Batch 4aa — the Streamlit token carries the caller's own Keycloak permissions ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.163 – 4.163 |
+| Type | U |
+| Files covered | `lex/authentication/views/token_views.py` (`StreamlitTokenView._get_user_permissions`) |
+| Test file | `lex/test_project/tests/permissions/test_4aa_streamlit_token_permissions.py` |
+| Test classes | `TestCluster04aa_StreamlitTokenPermissions` (4.163) |
+| Fixtures | none — `RequestFactory` requests; `KeycloakManager` patched |
+| Tests landed | **1 pass / 0 fail** — Mutation: with the old relative import, 4.163 fails |
+| Status | ✅ Complete |
+
+**Allocation note:** Letter aa and 4.163: 4y (4.148–4.158) is lex-app #869's and 4z (to 4.162) is #880's.
+
+---
+
+
 ---
 
 ### Batch 4z — A schedule can do no more than the person who saved it ✅
