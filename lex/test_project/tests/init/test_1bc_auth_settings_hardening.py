@@ -11,9 +11,10 @@ Intent
   ``DOMAIN_HOSTED``.
 * **Django never ends a sign-in before Keycloak does.** Keycloak decides how long
   a sign-in lasts (app realms: 30 days idle). The session cookie lives 31 days
-  by default (``LEX_SESSION_COOKIE_AGE_DAYS``) and the library's own session
-  clock is 30 days, inside the cookie as the library requires -- previously the
-  14-day Django default and a fixed 7-day library cap logged people out early.
+  by default (``LEX_SESSION_COOKIE_AGE_DAYS``) and slides; from
+  django-oauth2-codeflow 3.0 (lex-app 2.5) the library has no clock of its own
+  -- previously the 14-day Django default and a fixed 7-day library cap logged
+  people out early.
 * **Every authorization-code exchange is PKCE-protected.** Both relying parties
   on the shared Keycloak client -- Django's sign-in and the dashboard proxy's own
   sign-in -- send an S256 challenge and keep the verifier server-side, so an
@@ -21,8 +22,10 @@ Intent
 
 Cluster 1bc -- scenarios 1.481-1.489. Type: U (1.481-1.486, 1.489) and I (1.487-1.488).
 Covers: lex/lex_app/settings.py (PUBLISHED_DEFAULT_SECRET_KEY, deployed checks,
-SESSION_COOKIE_AGE, OIDC_MIDDLEWARE_SESSION_TIMEOUT_SECONDS, OIDC_RP_USE_PKCE,
-OIDC_RP_FORCE_SECRET_WITH_PKCE), lex/proxy.py (OIDC client registration).
+SESSION_COOKIE_AGE, OIDC_RP_USE_PKCE, OIDC_RP_CLIENT_AUTH_METHOD), lex/proxy.py
+(OIDC client registration). Updated for django-oauth2-codeflow 3.0 in lex-app 2.5
+(batch 1bd): the library's 2.x session clock and its session layout are gone, the
+intent of each scenario is unchanged.
 Run: python -m lex pytest lex/test_project/tests/init/test_1bc_auth_settings_hardening.py -v
 """
 
@@ -40,14 +43,13 @@ from unittest import mock
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
-import jwt
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase, TestCase, override_settings
+from oauth2_authcodeflow.constants import SESSION_PENDING_LOGINS
+from oauth2_authcodeflow.testing import FakeOP
 from starlette.testclient import TestClient
 
 import lex
@@ -82,9 +84,10 @@ _SETTINGS_PROBE = (
     "    print(json.dumps({'error': type(exc).__name__, 'message': str(exc)}))\n"
     "else:\n"
     "    print(json.dumps({'secret_key': s.SECRET_KEY, 'cookie_age': s.SESSION_COOKIE_AGE,\n"
-    "        'oidc_timeout': s.OIDC_MIDDLEWARE_SESSION_TIMEOUT_SECONDS,\n"
+    "        'session_cap': getattr(s, 'OIDC_SESSION_MAX_AGE_SECONDS', None),\n"
+    "        'legacy_clock': hasattr(s, 'OIDC_MIDDLEWARE_SESSION_TIMEOUT_SECONDS'),\n"
     "        'algos': s.OIDC_RP_SIGN_ALGOS_ALLOWED, 'pkce': s.OIDC_RP_USE_PKCE,\n"
-    "        'secret_with_pkce': s.OIDC_RP_FORCE_SECRET_WITH_PKCE}))\n"
+    "        'auth_method': s.OIDC_RP_CLIENT_AUTH_METHOD}))\n"
 )
 
 
@@ -158,17 +161,18 @@ class TestCluster01bc_SessionLifetime(SimpleTestCase):
         Scenario 1.484: by default a sign-in survives 30 idle days on the Django side.
         Given: no LEX_SESSION_COOKIE_AGE_DAYS
         When: the settings module is imported
-        Then: the session cookie lives 31 days and the library's session clock 30 days,
-              inside the cookie; ID tokens are accepted as RS256 only; PKCE is on with the
-              client secret still sent for the confidential client.
+        Then: the session cookie lives 31 days and nothing on the Django side ends a sign-in
+              earlier (no library cap, no 2.x session clock); ID tokens are accepted as RS256
+              only; PKCE is on with the client secret still sent for the confidential client.
         """
         report = _settings_in_fresh_interpreter()
         self.assertEqual(report["cookie_age"], 31 * DAY)
-        self.assertEqual(report["oidc_timeout"], 30 * DAY)
-        self.assertLess(report["oidc_timeout"], report["cookie_age"], "the library requires timeout < cookie age")
+        self.assertIsNone(report["session_cap"], "Keycloak decides when a sign-in ends; no Django-side cap")
+        self.assertFalse(report["legacy_clock"], "the 2.x session clock setting must be gone")
         self.assertEqual(report["algos"], ["RS256"])
         self.assertTrue(report["pkce"], "PKCE must be on")
-        self.assertTrue(report["secret_with_pkce"], "the confidential client must still send its secret")
+        self.assertEqual(report["auth_method"], "client_secret_post",
+                         "the confidential client must still send its secret")
 
     # -- 1.485 ---------------------------------------------------------
     def test_1_485_lifetime_follows_the_environment_and_rejects_nonsense(self) -> None:
@@ -176,13 +180,13 @@ class TestCluster01bc_SessionLifetime(SimpleTestCase):
         Scenario 1.485: LEX_SESSION_COOKIE_AGE_DAYS sets the lifetime; unusable values stop startup.
         Given: LEX_SESSION_COOKIE_AGE_DAYS set to 45, 10, "abc" and 1
         When: the settings module is imported with each
-        Then: 45 gives a 45-day cookie with the 30-day session clock; 10 gives 10 days with a
-              9-day clock (still inside the cookie); "abc" and 1 refuse to start with a clear error.
+        Then: 45 gives a 45-day cookie and 10 a 10-day one, still with no cap of the library's
+              own; "abc" and 1 refuse to start with a clear error.
         """
         long = _settings_in_fresh_interpreter(LEX_SESSION_COOKIE_AGE_DAYS="45")
-        self.assertEqual((long["cookie_age"], long["oidc_timeout"]), (45 * DAY, 30 * DAY))
+        self.assertEqual((long["cookie_age"], long["session_cap"]), (45 * DAY, None))
         short = _settings_in_fresh_interpreter(LEX_SESSION_COOKIE_AGE_DAYS="10")
-        self.assertEqual((short["cookie_age"], short["oidc_timeout"]), (10 * DAY, 9 * DAY))
+        self.assertEqual((short["cookie_age"], short["session_cap"]), (10 * DAY, None))
         for bad in ("abc", "1"):
             with self.subTest(value=bad):
                 report = _settings_in_fresh_interpreter(LEX_SESSION_COOKIE_AGE_DAYS=bad)
@@ -192,44 +196,33 @@ class TestCluster01bc_SessionLifetime(SimpleTestCase):
     # -- 1.486 ---------------------------------------------------------
     def test_1_486_library_session_middleware_accepts_the_configured_lifetimes(self) -> None:
         """
-        Scenario 1.486: the OIDC session middleware starts with the configured lifetimes.
-        Given: the default settings, and the shortest allowed override (2 days -> 1-day clock)
-        When: the library's RefreshSessionMiddleware is constructed, as Django does at startup
-        Then: it does not raise -- its "timeout must be shorter than the cookie" check holds.
+        Scenario 1.486: the OIDC session middleware starts, and its own check agrees with the lifetime.
+        Given: the default settings, and the shortest allowed override (2 days)
+        When: the library's OIDCSessionMiddleware is constructed, as Django does at startup, and
+              its system check on SESSION_COOKIE_AGE (oauth2_authcodeflow.W003) runs
+        Then: the middleware starts in both cases; the default 31-day cookie passes the check,
+              while the 2-day one is flagged as shorter than an OP's idle window.
         """
-        from oauth2_authcodeflow.middleware import RefreshSessionMiddleware
+        from oauth2_authcodeflow.checks import check_session_cookie_age
+        from oauth2_authcodeflow.middleware import OIDCSessionMiddleware
 
-        RefreshSessionMiddleware(lambda request: None)
-        with override_settings(SESSION_COOKIE_AGE=2 * DAY, OIDC_MIDDLEWARE_SESSION_TIMEOUT_SECONDS=DAY):
+        OIDCSessionMiddleware(lambda request: None)
+        self.assertEqual(check_session_cookie_age(), [], "31 days must satisfy the library's lifetime check")
+        with override_settings(SESSION_COOKIE_AGE=2 * DAY):
             try:
-                RefreshSessionMiddleware(lambda request: None)
+                OIDCSessionMiddleware(lambda request: None)
             except ImproperlyConfigured as exc:  # pragma: no cover - the assertion message is the point
-                self.fail(f"the library rejected the configured lifetimes: {exc}")
+                self.fail(f"the library rejected the configured lifetime: {exc}")
+            self.assertEqual([w.id for w in check_session_cookie_age()], ["oauth2_authcodeflow.W003"])
 
 
-def _rsa_keypair():
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    public_pem = key.public_key().public_bytes(
-        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-    return key, public_pem
-
-
-_PRIVATE_KEY, _PUBLIC_PEM = _rsa_keypair()
 _CLIENT_ID = "lex-app"
 _CLIENT_SECRET = "the-instance-client-secret"
 
 _OIDC_FLOW_SETTINGS = dict(
     OIDC_RP_CLIENT_ID=_CLIENT_ID,
     OIDC_RP_CLIENT_SECRET=_CLIENT_SECRET,
-    OIDC_OP_DISCOVERY_DOCUMENT_URL="",
-    OIDC_OP_AUTHORIZATION_URL="https://keycloak.test/realms/lex/protocol/openid-connect/auth",
-    OIDC_OP_TOKEN_URL="https://keycloak.test/realms/lex/protocol/openid-connect/token",
-    OIDC_OP_USERINFO_URL="https://keycloak.test/realms/lex/protocol/openid-connect/userinfo",
-    OIDC_OP_JWKS_URL=None,
-    OIDC_OP_END_SESSION_URL=None,
     OIDC_OP_FETCH_USER_INFO=False,
-    OIDC_RP_IDP_SIGN_KEY=_PUBLIC_PEM,
     AUTHENTICATION_BACKENDS=(
         "oauth2_authcodeflow.auth.AuthenticationBackend",
         "django.contrib.auth.backends.ModelBackend",
@@ -245,12 +238,27 @@ def _s256(verifier: str) -> str:
 class TestCluster01bc_DjangoSignInUsesPkce(TestCase):
     """1.487-1.488: Django's sign-in sends a PKCE challenge and proves it at the code exchange."""
 
+    def setUp(self) -> None:
+        # An in-process Keycloak stand-in (django-oauth2-codeflow's FakeOP): discovery, JWKS
+        # and a token endpoint that records what the code exchange sent.
+        self.op = FakeOP()
+        op_settings = override_settings(**self.op.django_settings())
+        op_settings.enable()
+        self.addCleanup(op_settings.disable)
+        self.op.install()
+        self.addCleanup(self.op.uninstall)
+
     def _start_sign_in(self):
         response = self.client.get("/oidc/authenticate", {"next": "/after-sign-in", "fail": "/sign-in-failed"})
         self.assertEqual(response.status_code, 302, response.content[:300])
         location = urlparse(response["Location"])
-        self.assertTrue(response["Location"].startswith(_OIDC_FLOW_SETTINGS["OIDC_OP_AUTHORIZATION_URL"]))
+        self.assertTrue(response["Location"].startswith(self.op.authorization_endpoint), response["Location"])
         return parse_qs(location.query)
+
+    def _verifier(self, state: str) -> str:
+        """The verifier the server kept for the sign-in started with ``state``."""
+        pending = self.client.session.get(SESSION_PENDING_LOGINS) or {}
+        return (pending.get(state) or {}).get("verifier") or ""
 
     # -- 1.487 ---------------------------------------------------------
     def test_1_487_sign_in_redirect_carries_an_s256_challenge(self) -> None:
@@ -265,7 +273,7 @@ class TestCluster01bc_DjangoSignInUsesPkce(TestCase):
         query = self._start_sign_in()
         self.assertEqual(query.get("code_challenge_method"), ["S256"])
         self.assertNotIn("code_verifier", query, "the verifier must never leave the server")
-        verifier = self.client.session.get("oidc_challenge")
+        verifier = self._verifier(query["state"][0])
         self.assertTrue(verifier, "the verifier must be kept in the session")
         self.assertEqual(query["code_challenge"], [_s256(verifier)])
 
@@ -280,27 +288,17 @@ class TestCluster01bc_DjangoSignInUsesPkce(TestCase):
               the user is signed in and sent to the page they asked for.
         """
         query = self._start_sign_in()
-        verifier = self.client.session["oidc_challenge"]
-        claims = {"aud": _CLIENT_ID, "email": "signed.in@example.com", "sub": "kc-user-1",
-                  "iat": int(time.time()), "exp": int(time.time()) + 300}
-        if query.get("nonce"):
-            claims["nonce"] = query["nonce"][0]
-        id_token = jwt.encode(claims, _PRIVATE_KEY, algorithm="RS256")
-        token_response = mock.Mock(status_code=200)
-        token_response.json.return_value = {
-            "id_token": id_token, "access_token": "at", "refresh_token": "rt", "expires_in": 300,
-        }
-        callback = {"code": "the-authorization-code"}
-        if query.get("state"):
-            callback["state"] = query["state"][0]
-        with mock.patch("oauth2_authcodeflow.auth.request_post", return_value=token_response) as post:
-            response = self.client.get("/oidc/callback", callback)
+        state = query["state"][0]
+        verifier = self._verifier(state)
+        code = self.op.authorization_code("kc-user-1", nonce=query["nonce"][0], email="signed.in@example.com")
+        response = self.client.get("/oidc/callback", {"code": code, "state": state})
 
-        sent = post.call_args.kwargs.get("data") or post.call_args.args[1]
-        self.assertEqual(sent.get("grant_type"), "authorization_code")
+        exchanges = [call for call in self.op.token_calls if call.get("grant_type") == "authorization_code"]
+        self.assertEqual(len(exchanges), 1, self.op.token_calls)
+        sent = exchanges[0]
         self.assertEqual(sent.get("code_verifier"), verifier, "the code exchange must prove the PKCE verifier")
         self.assertEqual(sent.get("client_secret"), _CLIENT_SECRET, "the confidential client must still authenticate")
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 302, response.content[:300])
         self.assertTrue(response["Location"].endswith("/after-sign-in"), response["Location"])
         user = get_user_model().objects.get(email="signed.in@example.com")
         self.assertEqual(str(self.client.session.get("_auth_user_id")), str(user.pk), "the user must be signed in")

@@ -41,11 +41,11 @@ class Streamlit(HTMLReport):
         base = lex_hosts.same_site_url("streamlit")
         params = {"embed": "true"}
 
-        # The session's own Keycloak access token -- the same value
+        # The sign-in's own Keycloak access token -- the same value
         # `StreamlitTokenView` hands the React shell for the same purpose. It is
         # short-lived and carries no refresh token, so what travels here is no
         # more than the proxy already accepts on the embedded path.
-        token = getattr(request, "session", {}).get("oidc_access_token") if request else None
+        token = _frame_token(request)
         if token:
             params["auth_token"] = token
 
@@ -53,3 +53,32 @@ class Streamlit(HTMLReport):
               src="{base}/?{urlencode(params)}"
               style="width:100%;border:none;height:100%"
             ></iframe>"""
+
+
+def _frame_token(request):
+    """The access token to bootstrap the frame with, or ``None``.
+
+    Read through django-oauth2-codeflow 3 (``get_access_token``, renewed first when it would
+    expire within a minute), as :class:`StreamlitTokenView` does: since lex-app 2.5 a sign-in's
+    tokens live encrypted in its ``OIDCSession`` row, not in session keys. Nothing is handed
+    when there is no request, no OIDC sign-in (an API key, an admin login), when the sign-in
+    has ended or Keycloak cannot renew it -- the frame then takes the proxy's own path -- and
+    under ``LEX_STREAMLIT_AUTH=handoff``, where the proxy ignores ``auth_token`` and signs the
+    dashboard in through the hand-off instead.
+    """
+    if request is None:
+        return None
+    from lex.authentication.dashboards.modes import HANDOFF, streamlit_auth_mode
+
+    if streamlit_auth_mode() == HANDOFF:
+        return None
+    try:
+        from oauth2_authcodeflow.tokens import get_access_token
+
+        from lex.authentication.views.token_views import TOKEN_REFRESH_SKEW_SECONDS
+
+        return get_access_token(
+            getattr(request, "_request", request), min_ttl=TOKEN_REFRESH_SKEW_SECONDS
+        ) or None
+    except Exception:  # an ended sign-in or an unreachable Keycloak: frame without a token
+        return None

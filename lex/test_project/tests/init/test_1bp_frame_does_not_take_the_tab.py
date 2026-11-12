@@ -262,7 +262,10 @@ class TestCluster01bp_TheReportedJourney(SimpleTestCase):
         claims = {"sub": "u1", "email": "u@example.com", "exp": 4_000_000_000}
         session = SimpleNamespace(session={"oidc_access_token": "bootstrap-jwt"})
 
-        with patch.dict(os.environ, {"STREAMLIT_URL": "https://dash.example.com"}):
+        # lex-app 2.5: the report reads the sign-in's token through django-oauth2-codeflow 3.
+        with patch.dict(os.environ, {"STREAMLIT_URL": "https://dash.example.com"}), \
+             patch("oauth2_authcodeflow.tokens.get_access_token",
+                   lambda request, **_kw: request.session.get("oidc_access_token")):
             html = Streamlit().get_html(None, session)
 
         with patch.object(proxy, "validate_jwt_token", lambda _t: claims), \

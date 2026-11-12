@@ -22,7 +22,7 @@ This runs the database half of `lex init` against the wheel itself:
 `lex init` runs makemigrations for every installed app, so an installed
 package whose models no longer match the migrations it ships gets a migration
 written into site-packages on every customer machine, and conflicts with the
-package's own next migration. The two packages that already do that are listed
+package's own next migration. The package that already does that is listed
 in KNOWN_THIRD_PARTY_DRIFT, reported as a warning on every run; any other
 package starting to drift fails the check, as does a lex app.
 
@@ -82,11 +82,9 @@ class NoteTotal(CalculationModel):
 # Installed packages whose models already differ from the migrations they ship,
 # so `lex init` writes a migration for them into site-packages. Known and tracked:
 # each is reported on every run, and any other package that starts drifting fails.
+# (oauth2_authcodeflow left this list with django-oauth2-codeflow 3.0, whose AppConfig pins
+# default_auto_field; a drift in it fails the check again.)
 KNOWN_THIRD_PARTY_DRIFT = {
-    "oauth2_authcodeflow": (
-        "it sets no default_auto_field, so lex's DEFAULT_AUTO_FIELD (BigAutoField) makes its "
-        "implicit id a bigint its migrations never created"
-    ),
     "rest_framework_api_key": (
         "exc-djangorestframework-api-key 1.0.0 widened id and hashed_key to 150 characters in "
         "its model and ships no migration for it"

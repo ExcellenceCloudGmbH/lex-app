@@ -16,10 +16,17 @@ import subprocess
 import sys
 import tempfile
 import time
+import importlib.util
 import unittest
 from pathlib import Path
 
 from lex.tools import setup_with_ai
+
+#: These exercise lex-mcp-local, where the `lex ai-*` commands and their file helpers live now;
+#: without it installed (`lex setup-with-ai`) there is nothing of theirs to test.
+_needs_lex_mcp = unittest.skipUnless(
+    importlib.util.find_spec("lex_mcp") is not None, "needs lex-mcp-local (lex setup-with-ai)"
+)
 
 
 class ConsoleEncodingTests(unittest.TestCase):
@@ -87,6 +94,7 @@ class ProcessLivenessTests(unittest.TestCase):
         self.assertFalse(setup_with_ai._is_process_running(0))
         self.assertFalse(setup_with_ai._is_process_running(-1))
 
+    @_needs_lex_mcp
     def test_sigkill_is_never_named_unguarded(self) -> None:
         """The crash was an AttributeError, which ``except OSError`` misses."""
         self.assertEqual(hasattr(signal, "SIGKILL"), os.name != "nt")
@@ -112,6 +120,7 @@ class LongPathTests(unittest.TestCase):
     which reads as a missing file rather than a path 20 characters too long.
     """
 
+    @_needs_lex_mcp
     def test_a_path_past_max_path_round_trips(self) -> None:
         from lex_mcp import fsutil
 
@@ -170,6 +179,7 @@ class LongPathTests(unittest.TestCase):
             except OSError:
                 pass
 
+    @_needs_lex_mcp
     def test_the_error_names_the_length_rather_than_blaming_the_file(self) -> None:
         from lex_mcp import fsutil
 
@@ -195,6 +205,7 @@ class ReadOnlyAndLockedAssetTests(unittest.TestCase):
     call -- so one such file failed every tool call in the project.
     """
 
+    @_needs_lex_mcp
     def test_a_read_only_destination_is_rewritten(self) -> None:
         from lex_mcp import fsutil
 
@@ -210,6 +221,7 @@ class ReadOnlyAndLockedAssetTests(unittest.TestCase):
             finally:
                 os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
 
+    @_needs_lex_mcp
     def test_an_unwritable_asset_is_collected_not_raised(self) -> None:
         """Reported per file so the rest of the tree still gets restored."""
         from lex_mcp.ai_assets import DirectoryVerificationResult
@@ -271,6 +283,7 @@ class CommandSurfaceTests(unittest.TestCase):
         self.assertIsNotNone(self._resolve("ai-verify"))
         self.assertIsNotNone(self._resolve("ai_verify"))
 
+    @_needs_lex_mcp
     def test_only_the_canonical_spelling_is_listed(self) -> None:
         """`lex --help` advertises one spelling per command.
 
@@ -302,6 +315,7 @@ class CommandSurfaceTests(unittest.TestCase):
         self.assertIsNone(self._resolve("aircraft"))
         self.assertIsNone(self._resolve("nonsense"))
 
+    @_needs_lex_mcp
     def test_ai_worktree_can_actually_be_invoked(self) -> None:
         """--help is not proof that a command runs.
 
@@ -322,6 +336,7 @@ class CommandSurfaceTests(unittest.TestCase):
         # is the success condition; the option parsing is what is under test.
         self.assertIn("No worktree was prepared", result.output)
 
+    @_needs_lex_mcp
     def test_every_ai_command_skips_the_django_bootstrap(self) -> None:
         """Derived from what the group resolves, not a list kept by hand.
 
@@ -477,6 +492,7 @@ class OnboardingInterpreterTests(unittest.TestCase):
         self.assertIsNone(response)
         self.assertIsNotNone(error)
 
+    @_needs_lex_mcp
     def test_this_interpreter_answers_in_process(self) -> None:
         response, error = setup_with_ai.invoke_onboarding(sys.executable, "describe")
         self.assertIsNone(error, error)

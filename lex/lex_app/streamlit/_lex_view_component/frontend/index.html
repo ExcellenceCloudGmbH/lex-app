@@ -27,7 +27,9 @@
         the component function.
       * setFrameHeight tells Streamlit how tall to render the iframe.
   -->
-  <iframe id="frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+  <!-- allow-popups-to-escape-sandbox: a window the embedded app opens (its sign-in popup, a
+       file, an external link) is a normal window, not one bound by this frame's sandbox. -->
+  <iframe id="frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"></iframe>
 
   <script>
     // ── Streamlit bridge minimal shim ────────────────────────────────

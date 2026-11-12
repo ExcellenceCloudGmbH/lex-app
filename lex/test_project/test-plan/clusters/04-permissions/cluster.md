@@ -158,15 +158,35 @@
 
 **Scenario range:** 4.138 – 4.147. **Test file:** `lex/test_project/tests/permissions/test_4x_keycloak_call_isolation.py`. **Type:** U (4.138–4.143), I (4.144–4.147). **Status:** ✅ Complete (2026-11-06). Batch: [4x](batches.md).
 
+### 4y. The permission lookup is lazy, cached per token, single-flight and never a silent deny ✅
+
+**Gap:** every request made two or more synchronous Keycloak calls (UMA + userinfo), and any failure became `[]` — a signed-in user saw "permission denied" during a Keycloak blip. Now `request.user_permissions` / `userinfo` / `client_roles` are lazy; profile and roles come from the sign-in (`request.oidc`, the access token's `resource_access`); UMA answers are cached per token digest (≤ min(60 s, token lifetime)), single-flight, behind their own breaker; `access_denied` is `[]`, a rejected token 401, an outage 503 — and every fail-closed site passes those through.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.148 | lazy | no UMA call until read; one then |
+| 4.149 | cached per token | one call per token, never across users |
+| 4.150 | TTL | ≤ min(60 s, token lifetime) |
+| 4.151 | single flight | one call for concurrent requests, outcome shared |
+| 4.152 | `access_denied` | `[]`, 403 `permission_denied`, still signed in |
+| 4.153 | token rejected | 401 `session_expired`, before the view for writes |
+| 4.154 | Keycloak down | 503 `auth_unavailable`, before the view for writes |
+| 4.155 | UMA breaker | opens, blocks, recovers; issuer mismatch = config outage |
+| 4.156 | roles from the sign-in | token roles, claims profile, no userinfo call |
+| 4.157 | `guarded()` | auth outcomes re-raised in both modes |
+| 4.158 | fail-closed sites | 503/401 instead of a denial or a grant |
+
+**Scenario range:** 4.148 – 4.158. **Test file:** `lex/test_project/tests/permissions/test_4y_permission_lookup.py`. **Type:** U (4.148–4.151, 4.155–4.157), E (4.152–4.154, 4.158). **Status:** ✅ Complete (2026-11-06). Batch: [4y](batches.md).
+
 ### 4aa. The Streamlit token carries the caller's own Keycloak permissions ✅
 
 **Gap:** `StreamlitTokenView` imported `KeycloakManager` from a module that does not exist; the error was swallowed and every Streamlit token carried no permissions.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 4.163 | the token view asks Keycloak with the caller's token | the caller's bearer token reaches `get_uma_permissions` and its answer is returned; `None` and a missing token give `[]` |
+| 4.163 | the token view asks Keycloak with the caller's token | since lex-app 2.5: two signed-in callers each get exactly their own sign-in's access token, with their own client roles in it, and the view asks Keycloak for no permissions (before 2.5: the caller's bearer token reached `get_uma_permissions`) |
 
-**Scenario range:** 4.163 – 4.163. **Test file:** `lex/test_project/tests/permissions/test_4aa_streamlit_token_permissions.py`. **Type:** U. **Status:** ✅ Complete (2026-11-12). Batch: [4aa](batches.md).
+**Scenario range:** 4.163 – 4.163. **Test file:** `lex/test_project/tests/permissions/test_4aa_streamlit_token_permissions.py`. **Type:** E. **Status:** ✅ Complete (2026-11-12). Batch: [4aa](batches.md).
 
 
 ---

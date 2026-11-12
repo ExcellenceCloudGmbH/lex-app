@@ -1855,6 +1855,135 @@ threads, now has to apply it itself.
 **Allocation note:** Letter bc, not ay/az/ba/bb: those are held by in-flight branches (ay on fix/streamlit-report-frames-unauthenticated and others, az/ba on release/2.1.x, ba/bb on feat/fleet-metrics-calculation-events), which also claim scenarios up to 1.480. The same letter and scenario IDs are used on lex-app-v2 and release/2.1.x, so a merge between the lines is a no-op.
 
 ---
+
+### Batch 1bd — lex-app 2.5 on django-oauth2-codeflow 3.0: settings, routes and bootstrap ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.490 – 1.500 |
+| Type | U (1.490–1.493, 1.496–1.497, 1.499–1.500), I (1.494–1.495, 1.498) |
+| Files covered | `lex/lex_app/settings.py` (`MIDDLEWARE`, `KEYCLOAK_INTERNAL_URL`, `OIDC_OP_DISCOVERY_DOCUMENT_URL`, `OIDC_OP_ISSUER`, `OIDC_RP_CLIENT_AUTH_METHOD`, `KEYCLOAK_VERIFY_SSL`, `OIDC_TOKEN_ENCRYPTION_KEYS`, `CORS_*`, `OIDC_ALLOWED_REDIRECT_HOSTS`, `OIDC_LOGIN_REQUIRED_EXEMPT_URL_PATTERNS`, `OIDC_SESSION_EXEMPT_URL_PATTERNS`, `LOGGING`), `lex/core/security_flags.py` (`CORS`), `lex/core/instance_hosts.py` (new), `lex/lex_app/urls.py`, `lex/process_admin/sites/process_admin_site.py`, `lex/lex_app/management/commands/init.py` (`SNAPSHOT_CLIENT_KEYS`, `_snapshot_client_settings`, `_restore_client_settings`) |
+| Test file | `lex/test_project/tests/init/test_1bd_auth_core_settings.py` |
+| Test classes | `TestCluster01bd_MiddlewareOrder` (1.490), `TestCluster01bd_KeycloakSettings` (1.491–1.492), `TestCluster01bd_StrictCors` (1.493), `TestCluster01bd_CorsOnTheWire` (1.494), `TestCluster01bd_RedirectTargets` (1.495), `TestCluster01bd_InstanceHosts` (1.496), `TestCluster01bd_EventLog` (1.497), `TestCluster01bd_ContractRoutes` (1.498), `TestCluster01bd_InitKeepsClientHardening` (1.499), `TestCluster01bd_NoLibraryMigrationDrift` (1.500) |
+| Fixtures | fresh interpreters importing the settings with a controlled environment (deployed / local, Keycloak, `LEX_INSTANCE_HOSTS`); django-oauth2-codeflow's `FakeOP` for the sign-in redirect; a mocked Keycloak admin client for `lex init`; Django's migration autodetector in a fresh, `lex`-bootstrapped process |
+| Tests landed | **11 pass / 0 fail** against django-oauth2-codeflow 3.0.0 |
+| Also changed | 1bc 1.484–1.488 (3.0 has no library clock: no cap and no 2.x timeout setting; the PKCE verifier is read from the pending sign-in keyed by `state`; the code exchange is checked against `FakeOP`'s token endpoint; 1.486 uses the library's W003 check), 1aa 1.217–1.219 (the token comes from the sign-in via `create_oidc_session`, not from session keys; the issuer side moved into `TestCluster01aa_EmbeddedTokenIssuer`), 1av 1.392 (strict CORS by default; `LEX_CORS_ALLOWED_ORIGINS` adds origins). Intent unchanged in each. |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-06-auth-long-sessions-core.md) |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.490 | middleware order | Session → CORS → Common → CSRF → Auth → Bearer → OIDCSession → … → API-key login → permissions; no 2.x aliases; library E001 passes |
+| 1.491 | internal discovery, public issuer | discovery on `KEYCLOAK_INTERNAL_URL`, `OIDC_OP_ISSUER` on `KEYCLOAK_URL`; PKCE + `client_secret_post`; no 2.x names |
+| 1.492 | TLS and encryption keys | `KEYCLOAK_VERIFY_SSL` true when deployed, false locally, env wins (bool or CA path); `OIDC_TOKEN_ENCRYPTION_KEYS` list or None |
+| 1.493 | strict CORS | exactly the instance origins + `LEX_CORS_ALLOWED_ORIGINS`, no localhost when deployed, no `*`, no allow-all; `LEX_SEC_CORS=false` allows all |
+| 1.494 | CORS on the wire | an allowed origin is echoed with credentials; a foreign origin gets no `Access-Control-Allow-Origin` |
+| 1.495 | redirect targets | `next` = a `LEX_INSTANCE_HOSTS` host or a path reaches Keycloak; a foreign site is refused with 400 |
+| 1.496 | `LEX_INSTANCE_HOSTS` | JSON shape → hosts/origins; fallback to `DOMAIN_HOSTED`/`STREAMLIT_URL`/`REFLEX_URL`; bad input dropped without raising |
+| 1.497 | sign-out events visible | `event=oidc.session.ended` reaches stdout at INFO with `LOG_LEVEL=WARNING`, deployed and local |
+| 1.498 | contract routes | `api/auth/session`, `oidc/auth-complete` resolve to lex's views before `oidc/`, also in the process-admin site; login-exempt; look-alikes are not |
+| 1.499 | `lex init` keeps hardening | snapshot holds `attributes` and `frontchannelLogout`; restore merges attributes, keeps new ones, one PUT, none when unchanged |
+| 1.500 | no library migration drift | the autodetector plans nothing for `oauth2_authcodeflow` under lex's `BigAutoField` |
+
+**Why a regression matters:** a wrong middleware order or issuer signs people out (or keeps them out); permissive CORS lets any website act as the signed-in user; an unparsed `LEX_INSTANCE_HOSTS` breaks the dashboard hand-off; and a sign-out that does not reach the log is invisible to the alerts built on it.
+
+**Allocation note:** Letter bd: az, ba and bb are held by in-flight branches (see [1bc](#batch-1bc--deployed-secret-key-session-lifetime-and-pkce-)).
+
+---
+
+### Batch 1be — Streamlit dashboards sign in through the app (the Django-anchored hand-off) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.501 – 1.540 (1.533 – 1.540: security review fixes, 2026-11-06) |
+| Type | U (1.501–1.502, 1.512–1.514, 1.519, 1.521–1.528), I (1.503–1.511, 1.515–1.518, 1.520, 1.533–1.540 transactional; 1.529–1.532) |
+| Files covered | `lex/proxy.py` (hand-off section: `_start_handoff`, `auth_handoff`, `auth_required`, `_handoff_auth`, `_proxy_with_handoff`, `_ws_refuse`, `_send_upstream`; `proxy`, `ws_proxy`/`_ws_relay`, `internal_token`, `adopt_token`, `login`, `auth_callback`, `oauth2_logout`, `oauth2_sign_out`, `_PROXY_OWNED_HEADERS`, `LEX_STREAMLIT_AUTH`, `_build_token_store`), `lex/authentication/dashboards/` (new: `modes`, `cookies`, `sites`, `handoff`, `broker`), `lex/authentication/models/_dashboards.py` + `migrations/0002_dashboard_handoff.py` (new), `lex/authentication/views/handoff_views.py` (new, through the round trip), `lex/authentication/management/commands/prune_dashboard_sessions.py` (new), `lex/streamlit_app.py` (`_pull_from_proxy`, `renew_access_token`, `needs_session_recovery`, `render_session_recovery`, `_sync_tokens_from_headers`, `_logout_href`; `_post_refresh` deleted), `lex/lex_app/streamlit/embed.py` (`validated_lex_app_origin`, `remember_lex_app_origin`, `_resolve_base_url`), both component `frontend/index.html`, `lex/bin/lex.py` (`_check_streamlit_auth_env`), `lex/lex_app/settings.py` (`_instance_app_hosts`, `ALLOWED_HOSTS`, exempt patterns). Review fixes: `lex/proxy.py` (`_ws_origin_allowed`, `auth_status` + `/auth/status`, `_handle_standing_blocking`, `_read_handle_any`, `_resolve_handle_blocking(can_set_cookie)`, `_relative`, `_current_relative_path`, dual fall-through in `proxy` and `internal_token`), `lex/authentication/dashboards/sites.py` (`local_path`), `broker.py` (`standing_problem`), `handoff.py` (`select_for_update(of=("self",))`), `lex/streamlit_app.py` (`_in_dashboard_document`, `_handoff_recovery_js`, `_auth_watch_js`, `render_theme_follower`) |
+| Test file | `lex/test_project/tests/init/test_1be_streamlit_handoff.py` |
+| Test classes | `TestCluster01be_HandoffStart` (1.501–1.502), `TestCluster01be_HandoffRoundTrip` (1.503–1.507, 1.509–1.511, 1.515–1.516), `TestCluster01be_KeycloakOutage` (1.508), `TestCluster01be_BlockedCookiesAndPages` (1.512–1.514), `TestCluster01be_Modes` (1.517–1.518, 1.520), `TestCluster01be_LegacyAndFlag` (1.519, 1.521–1.522), `TestCluster01be_StreamlitProcess` (1.523–1.526), `TestCluster01be_Frames` (1.527–1.528), `TestCluster01be_Housekeeping` (1.529–1.530), `TestCluster01be_SettingsAndMigration` (1.531–1.532), `TestCluster01be_ReviewHardening` (1.533–1.540) |
+| Fixtures | the real proxy app through Starlette's `TestClient` (https dashboard host) and the real app through Django's test client (app host) with committed rows (`TransactionTestCase`), signed in with `lex.lex_app.tests.auth.sign_in`; `_upstream_send` / `ws_connect` stand in for Streamlit and record every header as sent; django-oauth2-codeflow's `FakeOP` answers 503 for the outage; fresh interpreters for the settings and the autodetector; `CaptureQueriesContext` for the redeem's lock (1.536); `_JS_HARNESS` runs the component scripts of 1.524 and 1.539 under node (when installed) against a stand-in of the browser's frame rules -- a sandboxed frame is refused when it navigates its parent, a `<script>` it adds to the same-origin dashboard document runs as that document's own |
+| Tests landed | **40 pass / 0 fail** (32 + 8 review scenarios) |
+| Also changed | 1ac 1.238 (guards the observable boundary -- no POST to Keycloak -- instead of patching the deleted `_post_refresh`) and 1ac 1.239 (now asserts the plan's replacement: a silent proxy is an outage, never a refresh of Streamlit's own). Both asserted the behaviour plan §6.3.5 removes. Review: 1.524 rewritten -- it pinned the recovery script navigating the dashboard document from its component frame (`d.location.replace`), which a browser refuses for a sandboxed frame; it now asserts the navigation the user gets, run against that rule. |
+| Mutation check | accepting any `state`, forwarding client identity headers, no blocked-cookie stop, no `Partitioned`, treating 503 as ended, a broker that never revokes, ignoring the frontend's `lex_app_origin`: each fails its scenario (1.505, 1.520, 1.512, 1.501/1.503, 1.523, 1.507/1.509, 1.502). Review fixes, 15 mutants, all killed: no Origin check / only with the hand-off (1.533); no handle clear on the legacy answer / pull 401 on a dead handle in dual (1.534); raw path in `_relative` / in the legacy strip (1.535); `select_for_update()` without `of` (1.536); the pull claiming the re-set (1.537); unprefixed cookie read on https (1.538); `/auth/status` 200 for an ended binding, no watcher, a watcher ignoring 401, the watcher run in the component frame, the old recovery navigating its parent (1.539, 1.524); a broker ignoring `is_active` (1.540) |
+| Not exercised | the JSON 503 and the WebSocket close 4503 on a database outage (the document's 503 page is, in 1.535), the plain-http cookie names end to end in a browser, the storage-access button's behaviour, the watcher in a real browser (node runs it against a stand-in; skipped where node is missing) |
+| Review notes | Accepted without change (finding 10): concurrent hand-offs rewrite the whole nonce cookie -- at most five nonces, the frozen `__Host-lex_dash_hs` name kept, a lost nonce costs one more hand-off (1.512's counter). Finding 6 residual: the redeem's read and lock no longer touch the sign-in row, but its commit's deferred foreign-key check takes `FOR KEY SHARE` on it, which waits while the library holds the row `FOR UPDATE` across a refresh (measured: waits at `COMMIT` for the hold; 0.04 s when the holder uses `FOR NO KEY UPDATE`) -- the library's lock mode, reported to the coordinator. |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-06-lex-surfaces-streamlit.md) |
+
+**Why a regression matters:** see [cluster.md § 1be](cluster.md). **Known bugs:** BUG-037 (resolved here; 1.520 is its regression gate), BUG-039 (cross-site WebSocket hijacking, shipped in v2.4.2; resolved, 1.533), BUG-040 (open redirect from the dashboard host, shipped in v2.4.2; resolved, 1.535).
+
+---
+
+### Batch 1bf — MCP embeds sign in with a single-use ticket, into a read-only cookie ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.541 – 1.556 (1.554 – 1.556: security review fixes, 2026-11-06; reserved to 1.560, 1.557 – 1.560 unused) |
+| Type | I (transactional: the MCP tool issues tickets from a worker thread) |
+| Files covered | `lex/core/middleware/embed_token_auth.py` (removed: 1.546 pins that a token in `?auth_token=` or an embed page's `Referer` signs nobody in), `lex/authentication/dashboards/embed.py` (new: `issue_embed_ticket`, `EmbedTicketMiddleware`; review: `_without_ticket` on-origin, GET-only redeem, the holder's handle passed to the redeem), `lex/authentication/dashboards/handoff.py` (`aud="embed"`; review: `holder_handle`), `lex/authentication/dashboards/broker.py`, `lex/authentication/dashboards/sites.py` (`local_path`), `lex/mcp_server/tools/embed.py` (`_embed_view_inner`, `_issue_embed_ticket`; review: `ToolResult` with the ticketed URL in `_meta`, the widget's `metaUrl`), `lex/lex_app/settings.py` (`MIDDLEWARE`) |
+| Test file | `lex/test_project/tests/init/test_1bf_mcp_embed_ticket.py` |
+| Test classes | `TestCluster01bf_TicketIssue` (1.541, 1.550), `TestCluster01bf_Redemption` (1.542–1.545, 1.553–1.556), `TestCluster01bf_TheCookie` (1.546–1.549, 1.552), `TestCluster01bf_McpTool` (1.551) |
+| Fixtures | `FakeOP` signs the MCP tokens (and serves the JWKS they are validated with); Keycloak UMA stubbed (`stub_keycloak_uma`); the app through Django's test client on its own host; for 1.551, stand-ins for exactly the names the tool imports from modules this line does not ship (`lex.mcp_server.config/registry/context` live on an unmerged branch; `fastmcp` and the MCP SDK are not installed) -- the real ones are used when present |
+| Tests landed | **16 pass / 0 fail** (13 + 3 review scenarios; 1.551 rewritten: the ticketed URL now lives only in the result's `_meta`, the stand-in `fastmcp.tools` gained `ToolResult`) |
+| Mutation check | writes allowed, a cookie that outlives the token, the ticket left in the URL, no token validation, the tool forwarding `auth_token`: each fails its scenario (1.547, 1.542, 1.542, 1.550, 1.551). Review fixes, 4 mutants, all killed: the raw request path in the ticket redirect (1.554), revoking on the holder's own replay (1.555), HEAD redeeming (1.556), the ticketed URL in the model-visible structured content (1.551) |
+| Review notes | Accepted without change (finding 13c): a ticket is not bound to a browser -- whoever opens the embed URL within its 60 seconds gets the read-only embed. The URL is only ever in the widget's `_meta`, single-use, and a second presenter revokes the embed. |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-06-lex-surfaces-streamlit.md) |
+
+**Why a regression matters:** see [cluster.md § 1bf](cluster.md).
+
+---
+
+### Batch 1bg — Reflex dashboards stay signed in as long as Keycloak keeps the session ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.561 – 1.591 (reserved to 1.600; 1.592 – 1.600 unused); 1.580 – 1.591 and the revised 1.566 from the security review of 2026-11-06 |
+| Type | U (1.561–1.576, 1.580–1.591), I (1.577–1.579) |
+| Files covered | `lex/lex_app/reflex/auth.py` (`LexKeycloakAuthState._verify_jwt`, `_validate_tokens`, `_refresh_access_token`, `_lex_try_refresh`, `_lex_refresh`, `_lex_refresh_with_keycloak`, `_lex_token_request`, `_lex_adopt`, `_lex_sign_out`, `_fetch_userinfo`, `_get_userinfo`, `_reset_auth`; since the review also `_lex_verify`, `do_access_token_refresh`, `_lex_check_token_set`, `_lex_kept`, `_lex_withhold_identity`, `_lex_expire_identity`, `_lex_recovered`, `_lex_userinfo_unavailable`, `start_login`, `_lex_uma_permissions`, the `sign_in_unavailable` var, `SignInExpiryMiddleware`, `lex_login_page`, `current_access_token`; `RefreshResult`, `UserinfoStatusError`; the 30-day cookie patch around the class), `lex/lex_app/reflex/_token_guard.py` (new; since the review the bounded `LocalStore`, the lock heartbeat `extend_if`, `may_refetch_keys`, the sealed-for payload, the cooldown's lower bound), `lex/lex_app/reflex/backchannel.py` (new), `lex/lex_app/reflex/app.py` (the middleware), `lex/lex_app/urls.py` (the receiver's import) |
+| Test file | `lex/test_project/tests/init/test_1bg_reflex_session_hardening.py` |
+| Test classes | `TestCluster01bg_AtHash` (1.561–1.562), `TestCluster01bg_RefreshErrors` (1.563–1.568), `TestCluster01bg_SingleFlight` (1.569–1.571), `TestCluster01bg_Cooldown` (1.572), `TestCluster01bg_CookiesAndVersion` (1.573–1.574), `TestCluster01bg_RedisFallback` (1.575), `TestCluster01bg_AcrossReplicas` (1.576, opt-in Redis), `TestCluster01bg_BackChannel` (1.577–1.579; 1.579 opt-in Redis), `TestCluster01bg_ReviewExpiredSignIn` (1.580–1.581), `TestCluster01bg_ReviewForeignProfile` (1.582), `TestCluster01bg_ReviewVerification` (1.583–1.584), `TestCluster01bg_ReviewRetries` (1.585–1.586), `TestCluster01bg_ReviewStore` (1.587–1.589), `TestCluster01bg_ReviewAudit` (1.590), `TestCluster01bg_ReviewLockAcrossReplicas` (1.591, opt-in Redis) |
+| Fixtures | Keycloak faked at the plugin's HTTP-client boundary (`reflex_enterprise.auth.oidc.config.DEFAULT_HTTP_CLIENT`: discovery, JWKS, token and userinfo endpoints, scripted answers and delays; tokens signed with django-oauth2-codeflow's test key, so FakeOP and the dashboard agree); the browser recorded at `chain_event_out_of_band` / `call_event_from_computed_var`; the cookie-sync route registration stubbed (it lives on the running app); the guard's clocks movable; one Reflex root state per tab; `CELERY_BROKER_URL` overridden (none, an unreachable port, or `LEX_REFLEX_REDIS_TEST_URL`); FakeOP + the real `/oidc/backchannel-logout` for 1.577–1.579; since the review: lex's per-event middleware run before each simulated event, tokens issued with a chosen `iat` or signed with a second RSA key (`kid` `rotated`), the plugin's audit sink (`emit_audit`) recorded with its plugin guard patched, the lock's lifetime patched to 0.2 s |
+| Tests landed | **28 pass / 3 skipped** in a default run (1.576, 1.579 and 1.591 need `LEX_REFLEX_REDIS_TEST_URL`); **31 pass / 0 fail** with it (`redis://127.0.0.1:6391/0`), 19 subtests. Before the review fixes: 17/2 and 19/0 |
+| Mutation check | Removing the overrides one at a time (a throwaway pytest plugin) fails: `_verify_jwt` → 1.561–1.562; `_refresh_access_token`/`_get_userinfo`/`_fetch_userinfo` → 1.563–1.568 (all 10 subtests), 1.572, 1.577; `_validate_tokens` → 1.577. Review fixes, each undone in a scratch copy of the source (never the worktree): per-event middleware a no-op → 1.580; `_lex_access_valid` ignoring expiry → 1.566; `_lex_uma_permissions` or `current_access_token` without the expiry check → 1.566; `start_login` going to Keycloak, or no redirect back on recovery → 1.581; serving any cached profile → 1.582; `leeway=0` → 1.583; no key-set refetch → 1.584; storing without `_lex_check_token_set` → 1.583; no re-arm in `_lex_kept` → 1.585 (all 4 subtests); no lock heartbeat → 1.586; `RedisStore.extend_if` not extending → 1.591 (1.586 still passes: the Redis path is its own); no `for` check in `published` → 1.587; no sub/sid check in `_lex_adopt` → 1.587; no sweep → 1.588; no lower bound on the cooldown → 1.589; the back-channel outcome audited again → 1.590 |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-06-lex-surfaces-reflex-ws.md) |
+
+**Why a regression matters:** dashboards sign users out during a Keycloak blip, a misconfigured client, a clock skew (BUG-050) or a key rotation (BUG-051), two tabs refresh each other's tokens once a second all day (BUG-048), every tab and replica asks Keycloak for its own refresh, sessions end after 7 days, a dashboard stays signed in after the user was signed out everywhere else, or serves an identity -- possibly another user's -- that Keycloak no longer vouches for.
+
+**Also found:** reflex-enterprise's own `at_hash` check compares the ID token with the value the tab remembered, so it *accepts* an ID token from one exchange with the access token of another (1.562 fails without lex's override). Recorded with the loop as BUG-048; to be reported upstream with the other §6.4 items. The check is made only where the tab remembers an expected value (a tab that has stored tokens itself); a tab that has not checks no `at_hash`, as in the plugin -- accepted in the review (finding 12), BUG-048 says what is guaranteed. The review also found two shipped plugin defects, fixed for lex's provider: ID tokens checked with no clock leeway (BUG-050) and the key set cached for the life of the process (BUG-051).
+
+---
+
+### Batch 1bh — The shipped sign-in helper for tests ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.601 – 1.606 |
+| Type | I |
+| Files covered | `lex/lex_app/tests/auth.py` (new: `sign_in`, `create_sign_in`, `oidc_test_settings`, `stub_keycloak_uma`, `OIDC_BACKEND`, `UMA_FETCH`); `lex/test_project/tests/_e2e_test_case.py` and `lex/tests/e2e/_e2e_test_case.py` now re-export `OIDC_BACKEND`, `oidc_test_settings` and `sign_in` from it. `sign_in` undoes its settings only while they are still in force (`_override_for_test`), so a test method's own `@override_settings` no longer leaks into later tests (1.606) |
+| Test file | `lex/test_project/tests/init/test_1bh_test_sign_in_helper.py` |
+| Test classes | `TestCluster01bh_TestSignInHelper` (1.601–1.606) |
+| Fixtures | Django `TestCase`; `APIClient`; Keycloak "configured" at `https://keycloak.invalid` through `os.environ` so a lookup that bypassed the stub would fail; a throwaway `unittest.TestCase` whose cleanups the test runs |
+| Tests landed | **6 pass / 0 fail**; 1.606 fails against the old cleanup (a throwaway mutant plugin); the re-export users `test_10aa_auth_contract_v2.py` and `test_4y_permission_lookup.py` still pass (32 pass together, 43 subtests) |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-06-lex-test-sign-in-helper.md) |
+
+**Why a regression matters:** downstream projects (atrium, armira, customer projects) update their tests for 2.5 with this helper; without it they hand-craft sessions that grant nothing, or call a real Keycloak with test tokens.
+
+---
+
+### Batch 1bi — The lex CLI answers a failing management command like manage.py ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.607 – 1.608 |
+| Type | I |
+| Files covered | `lex/bin/lex.py` (`_forward_to_django`: `CommandError` → `CommandError: <message>` on stderr and the command's exit code; `--traceback` re-raises) |
+| Test file | `lex/test_project/tests/init/test_1bi_cli_command_errors.py` |
+| Test classes | `TestCluster01bi_CliCommandErrors` (1.607–1.608) |
+| Fixtures | Django `SimpleTestCase` (no database); Click's `CliRunner` on the `lex` group after `_install_dynamic_commands()` |
+| Tests landed | **2 pass / 0 fail**; 1.607 fails against the old forwarding (a throwaway mutant plugin); `test_1m_cli_commands.py` still passes (9 pass, 1 skip without lex-mcp-local) |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-06-lex-cli-command-errors.md) |
+
+**Why a regression matters:** the sign-in operating commands (`lex oidc_check`, `lex oidc_cleanup`, `lex oidc_rotate_keys`, `lex prune_dashboard_sessions`) report problems through `CommandError`; a traceback there reads as a crash in the maintenance job's log.
+
+---
+
 ### Batch 1bp — a frame another application put on screen does not get to move that tab ✅
 
 | Property | Value |

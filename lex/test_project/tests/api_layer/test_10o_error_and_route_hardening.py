@@ -25,7 +25,7 @@ lex/authentication/middleware.py (OidcRedirectGuardMiddleware),
 lex/lex_app/settings.py (MIDDLEWARE), lex/react/views.py (serve_react),
 lex/process_admin/sites/process_admin_site.py and
 lex/api/views/global_search_for_models/Search.py (?q=),
-lex/api/middleware/keycloak_permissions.py (_shared_manager).
+lex/api/middleware/keycloak_permissions.py (no KeycloakManager per request).
 Run: python -m lex pytest lex/test_project/tests/api_layer/test_10o_error_and_route_hardening.py -v
 """
 
@@ -41,7 +41,6 @@ from django.http import HttpResponse
 from django.test import RequestFactory, SimpleTestCase, override_settings
 from django.urls import resolve
 
-from lex.api.middleware import keycloak_permissions
 from lex.api.middleware.keycloak_permissions import KeycloakPermissionsMiddleware
 from lex.authentication.middleware import OidcRedirectGuardMiddleware
 from lex.test_project.tests._e2e_test_case import E2ETestCase
@@ -289,51 +288,67 @@ class TestCluster10o_GlobalSearchQuery(E2ETestCase):
         self.assertEqual(empty.json(), "No match found")
 
 
-class _FakeManager:
+class _CountingManager:
+    """Counts KeycloakManager constructions (each one opened admin/UMA clients)."""
+
     instances = 0
 
     def __init__(self):
         type(self).instances += 1
 
-    def get_uma_permissions(self, token):
-        return [{"rsname": "app.Model", "resource_set_id": None, "scopes": ["read"]}]
-
-    def get_userinfo(self, token):
-        # The middleware asks the manager's per-call userinfo (batch 4x), not the
-        # shared python-keycloak connection it used to reach through ``oidc``.
-        return {"client_roles": ["analyst"]}
-
 
 class TestCluster10o_KeycloakManagerPerProcess(SimpleTestCase):
-    """KeycloakPermissionsMiddleware keeps one KeycloakManager per process."""
+    """KeycloakPermissionsMiddleware builds no KeycloakManager for a request."""
 
     def setUp(self) -> None:
-        keycloak_permissions._reset_shared_manager()
-        self.addCleanup(keycloak_permissions._reset_shared_manager)
-        _FakeManager.instances = 0
-        patcher = mock.patch.object(keycloak_permissions, "KeycloakManager", _FakeManager)
+        from lex.api.middleware.keycloak_permissions import reset_uma_cache
+
+        _CountingManager.instances = 0
+        patcher = mock.patch(
+            "lex.api.views.authentication.KeycloakManager.KeycloakManager", _CountingManager
+        )
         patcher.start()
         self.addCleanup(patcher.stop)
+        reset_uma_cache()
+        self.addCleanup(reset_uma_cache)
+        env = mock.patch.dict(
+            os.environ, {"KEYCLOAK_URL": "https://kc.test", "KEYCLOAK_REALM": "lex", "OIDC_RP_CLIENT_ID": "lex-app"}
+        )
+        env.start()
+        self.addCleanup(env.stop)
 
     # -- 10.90 ---------------------------------------------------------
     def test_10_90_one_manager_for_many_requests(self) -> None:
         """
-        Scenario 10.90: requests share one KeycloakManager; answers are unchanged.
-        Given: three requests with bearer tokens and one without
-        When: the middleware handles them
-        Then: the manager was built once; every token request got the
-              permissions and client roles; the request without a token got the
-              empty defaults and built nothing.
+        Scenario 10.90: requests build no KeycloakManager; answers are unchanged.
+        Given: three requests signed in with bearer tokens and one without
+        When: the middleware handles them and their permissions and roles are read
+        Then: no KeycloakManager was built (since 2.5 the permissions come from one cached
+              UMA call per token and the roles from the token itself); every token request
+              got the permissions and client roles; the request without a token got the
+              empty defaults and called nothing.
         """
+        from oauth2_authcodeflow.context import OIDCContext
+
+        answer = [{"rsname": "app.Model", "resource_set_id": None, "scopes": ["read"]}]
         requests = []
-        for token in ("a.b.c", "d.e.f", "g.h.i", None):
-            headers = {"HTTP_AUTHORIZATION": f"Bearer {token}"} if token else {}
-            request = RequestFactory().get("/api/x", **headers)
-            request.session = {}
-            KeycloakPermissionsMiddleware(lambda r: HttpResponse("ok"))(request)
-            requests.append(request)
-        self.assertEqual(_FakeManager.instances, 1)
-        for request in requests[:3]:
-            self.assertEqual(request.user_permissions[0]["scopes"], ["read"])
-            self.assertEqual(request.client_roles, ["analyst"])
-        self.assertEqual((requests[3].user_permissions, requests[3].client_roles), ([], []))
+        with mock.patch(
+            "lex.api.middleware.keycloak_permissions.uma_client.fetch_uma_permissions", return_value=answer
+        ) as fetch, override_settings(OIDC_RP_CLIENT_ID="lex-app"):
+            for token in ("a.b.c", "d.e.f", "g.h.i", None):
+                headers = {"HTTP_AUTHORIZATION": f"Bearer {token}"} if token else {}
+                request = RequestFactory().get("/api/x", **headers)
+                request.session = {}
+                if token:
+                    request.oidc = OIDCContext.from_bearer(
+                        token, {"sub": token, "exp": 4102444800,
+                                "resource_access": {"lex-app": {"roles": ["analyst"]}}}
+                    )
+                KeycloakPermissionsMiddleware(lambda r: HttpResponse("ok"))(request)
+                requests.append(request)
+            for request in requests[:3]:
+                self.assertEqual(request.user_permissions[0]["scopes"], ["read"])
+                self.assertEqual(request.client_roles, ["analyst"])
+            self.assertEqual((requests[3].user_permissions, requests[3].client_roles), ([], []))
+        self.assertEqual(_CountingManager.instances, 0, "no request may build a KeycloakManager")
+        self.assertEqual(fetch.call_count, 3, "one UMA call per token, none without one")

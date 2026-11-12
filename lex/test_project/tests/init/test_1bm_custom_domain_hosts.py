@@ -720,15 +720,19 @@ class TestCluster01bm_DjangoAcceptsEveryAttachedHost(SimpleTestCase):
             "LEX_CORS_ALLOWED_ORIGINS": "https://partner.example.com",
         }))
 
-        self.assertEqual(
-            settings["cors_allowed_origins"],
-            [
-                "https://partner.example.com",
-                "https://inst.lit.excellence-cloud.de",
-                "https://app.customer.com",
-            ],
-            msg="the operator's list is kept, with the instance's own hostnames added",
-        )
+        # Since lex-app 2.5 (#869) the CORS list is always built from the instance's own
+        # origins (DOMAIN_HOSTED, LEX_INSTANCE_HOSTS, every lex.hosts app host) plus the
+        # operator's list -- and, off a deployment, the local dev servers -- so what is
+        # pinned here is membership, not one exact list.
+        origins = settings["cors_allowed_origins"]
+        for origin in (
+            "https://partner.example.com",
+            "https://inst.lit.excellence-cloud.de",
+            "https://app.customer.com",
+        ):
+            self.assertIn(origin, origins, msg="the operator's list is kept, with the instance's own hostnames added")
+        self.assertEqual(len(origins), len(set(origins)), msg="each origin once")
+        self.assertFalse(any("*" in origin for origin in origins), msg="never a wildcard")
         self.assertFalse(
             settings["cors_allow_all_origins"],
             msg="an explicit allow-list must still close the permissive default",

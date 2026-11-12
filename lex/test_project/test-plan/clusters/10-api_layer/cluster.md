@@ -98,6 +98,51 @@ branches again per ``STORAGE_TYPE``. Each is recorded as an ``AuditLog`` row wit
 
 **Scenario range:** 10.97 – 10.99. **Test file:** `lex/test_project/tests/api_layer/test_10q_process_routes_removed.py`. **Type:** U. **Status:** ✅ Complete (2026-10-23). Batch: [10q](batches.md).
 
+### 10aa. lex's REST surface speaks the HTTP auth contract v2 ✅
+
+**What it tests:** what a client sees when authentication or authorization is the problem — 401 (session gone: re-authenticate), 403 with a code (refused or CSRF: stay signed in), 503 `auth_unavailable` (retry) — on lex's real routes: DRF's answers, `api/user/` from the validated sign-in, `api/auth/session`, `oidc/auth-complete`, the silent re-authentication round trip, the embedded-dashboard token, and every server case of the contract's shared fixtures.
+
+**Why a regression matters:** frontends route on these answers; a wrong one signs users out or strands them.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.152 | anonymous DRF → 401 | 401 + `WWW-Authenticate`, `code: not_authenticated` |
+| 10.153 | rejected bearer | `Bearer error="invalid_token"` |
+| 10.154 | CSRF stays on | a bearer header never switches CSRF off for a session |
+| 10.155 | refusals | 403 `permission_denied` / `csrf_failed` |
+| 10.156 | `api/user/` from the sign-in | profile + roles, no Keycloak call |
+| 10.157 | `api/user/` when unusable | 401 `session_expired` / 503 `auth_unavailable` |
+| 10.158 | `api/auth/session` | status + capabilities, 401 when signed out |
+| 10.159 | `oidc/auth-complete` | same-origin result message, no token |
+| 10.160 | silent re-auth round trip | `prompt=none` failure and success |
+| 10.161 | dashboard token | renewed before expiry; 401 after the end |
+| 10.162 | fixture `session_missing` | matches the contract |
+| 10.163 | fixture `session_expired` | matches the contract |
+| 10.164 | fixture `auth_unavailable` | matches, through refresh and UMA |
+| 10.165 | fixture `permission_denied` | matches the contract |
+| 10.166 | fixture `csrf_failed` | matches the contract |
+
+**Scenario range:** 10.152 – 10.166. **Test file:** `lex/test_project/tests/api_layer/test_10aa_auth_contract_v2.py`. **Type:** E. **Status:** ✅ Complete (2026-11-06). Batch: [10aa](batches.md).
+
+### 10ab. The app's half of the Streamlit hand-off ✅
+
+**What it tests:** `GET oidc/handoff` (plan "long-lived sessions" §6.3, item 2) -- a signed-in browser gets a single-use, 60-second code bound to its sign-in, the audience, the dashboard origin and the dashboard's `state`; without a sign-in a frame goes back with `error=login_required` (Keycloak never renders in a frame) and a page signs in first; only dashboard origins the instance lists are ever redirected to. And what `api/auth/*` says about it: `dashboard_handoff: ["streamlit"]` exactly while `LEX_STREAMLIT_AUTH` is `dual` or `handoff`, and a placeholder from `api/auth/streamlit-token/` in `handoff` mode.
+
+**Why a regression matters:** an open redirect on the sign-in path, a code sent to the wrong host, a Keycloak page in a frame, or a frontend choosing a path the server does not serve.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.167 | a bound single-use code | 302 to `<dashboard>/auth/handoff?code&state&next`; no-store, no-referrer; 60 s; refused for any other audience, origin or state |
+| 10.168 | no sign-in | frame → `error=login_required`; page → `oidc/authenticate?next=<hand-off>`; background → 401; no code |
+| 10.169 | ended sign-in | `login_required` in the frame (not the middleware's sign-in page); Django session signed out |
+| 10.170 | no open redirect | unlisted/relative return, bad state, other aud → 400 without Location; legacy → 404; loopback only locally |
+| 10.171 | Keycloak down | 503 `auth_unavailable` + Retry-After; no code; sign-in kept |
+| 10.172 | the capability | legacy → `[]`; dual, handoff → `["streamlit"]`; a typo → `[]` |
+| 10.173 | the placeholder | handoff → not-a-JWT placeholder, an hour, `dashboard_handoff: true`, no-store, no credential; dual → the real token; anonymous → 401 |
+| 10.174 | exact exemption | `/oidc/handoff[/]` answered by the view; `/oidc/handoffx`, `/api/oidc/handoff` → 401 |
+
+**Scenario range:** 10.167 – 10.174. **Test file:** `lex/test_project/tests/api_layer/test_10ab_dashboard_handoff_endpoint.py`. **Type:** E. **Status:** ✅ Complete (2026-11-06). Batch: [10ab](batches.md).
+
 ---
 
 ### 10r. `api/htmlreport/<name>` hands a report the request, and the Streamlit frame a credential ✅

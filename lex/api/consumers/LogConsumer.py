@@ -3,15 +3,21 @@ import json
 
 from channels.generic.websocket import AsyncWebsocketConsumer
 
+from lex.api.consumers.auth import LexSocketAuthMixin
+
 
 # from lex.lex_app.LexLogger.LexLogger import LexLogger
 
 
-class LogConsumer(AsyncWebsocketConsumer):
+class LogConsumer(LexSocketAuthMixin, AsyncWebsocketConsumer):
+    """``ws/logs``: the LexLogger stream, for signed-in users (see ``auth``)."""
+
     # logger = LexLogger()
     socket = None
 
     async def connect(self):
+        if not await self.lex_socket_connect():
+            return
         if self.socket is not None:
             await self.socket.disconnect(None)
         self.socket = self
@@ -19,6 +25,7 @@ class LogConsumer(AsyncWebsocketConsumer):
         await self.accept()
 
     async def disconnect(self, close_code):
+        await self.lex_socket_disconnect()
         await self.channel_layer.group_discard("log_group", self.channel_name)
         await super().disconnect(close_code)
 

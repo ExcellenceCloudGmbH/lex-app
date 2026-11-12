@@ -13,7 +13,7 @@ from lex.api.utils.helpers import get_default_read_permission_scope
 from lex.core.models.LexModel import LexModel, UserContext
 from rest_framework import filters
 
-from lex.api.security import remember
+from lex.api.security import is_auth_outage, remember
 from lex.core.security_flags import strict
 
 logger = logging.getLogger(__name__)
@@ -234,7 +234,9 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
             try:
                 if not can_read_from_payload(request, row, base_user_context=base_user_context):
                     excluded.append(row.pk)
-            except Exception:
+            except Exception as exc:
+                if is_auth_outage(exc):
+                    raise  # an outage answers 503/401; it never hides rows
                 if strict("FAIL_CLOSED"):
                     logger.exception("audit-log visibility check raised for row %s; row hidden", row.pk)
                     excluded.append(row.pk)
@@ -287,7 +289,9 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
                     if not target_instance.can_read(request):
                         excluded.append(instance.pk)
                 # else: allow by default if no permission method
-            except Exception:
+            except Exception as exc:
+                if is_auth_outage(exc):
+                    raise  # an outage answers 503/401; it never hides rows
                 if strict("FAIL_CLOSED"):
                     logger.exception("permission_read raised for %s row %s; row hidden", type(instance).__name__, instance.pk)
                     excluded.append(instance.pk)

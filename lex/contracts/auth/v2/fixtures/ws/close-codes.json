@@ -1,0 +1,53 @@
+{
+  "contract": 2,
+  "cases": [
+    {
+      "id": "ws-4401",
+      "code": 4401,
+      "expect": {
+        "action": "reauth"
+      },
+      "description": "Not authenticated or the session ended: stop reconnecting, re-authenticate."
+    },
+    {
+      "id": "ws-4403",
+      "code": 4403,
+      "expect": {
+        "action": "stop"
+      },
+      "description": "Forbidden: stop, do not re-authenticate."
+    },
+    {
+      "id": "ws-4503",
+      "code": 4503,
+      "expect": {
+        "action": "backoff"
+      },
+      "description": "Auth backend unavailable: reconnect with backoff."
+    },
+    {
+      "id": "ws-1006",
+      "code": 1006,
+      "expect": {
+        "action": "reconnect"
+      },
+      "description": "Abnormal closure (network): reconnect as before."
+    },
+    {
+      "id": "ws-1000",
+      "code": 1000,
+      "expect": {
+        "action": "reconnect"
+      },
+      "description": "Normal closure: reconnect as before."
+    },
+    {
+      "id": "ws-1011",
+      "code": 1011,
+      "expect": {
+        "action": "reconnect"
+      },
+      "description": "Server error: reconnect as before."
+    }
+  ]
+}

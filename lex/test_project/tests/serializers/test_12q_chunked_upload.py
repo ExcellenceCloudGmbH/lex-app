@@ -33,6 +33,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from lex.api.views.file_operations import ChunkedUpload
+from lex.lex_app.tests.auth import create_sign_in
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, ATTACHMENT, AttachmentItem
@@ -92,10 +93,8 @@ class TestCluster12q_ChunkedUpload(E2ETestCase):
         User.objects.filter(username="e2e_other").delete()
         other = User.objects.create_user(username="e2e_other", password="pw")
         client = APIClient()
-        client.force_login(other)
-        session = client.session
-        session["oidc_expires_at"] = (timezone.now() + timedelta(hours=1)).timestamp()
-        session.save()
+        # lex-app 2.5: a sign-in is a server-side OIDCSession, as for the main user (E2ETestCase).
+        create_sign_in(client, other)
         return client
 
     def _stored(self, item: AttachmentItem) -> bytes:

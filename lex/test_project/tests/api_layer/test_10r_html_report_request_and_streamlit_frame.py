@@ -95,12 +95,19 @@ class TestCluster10r_StreamlitFrameCredential(E2ETestCase):
         return reverse("process_admin_rest_api:htmlreports", kwargs={"report_name": name})
 
     def _with_access_token(self, token):
-        session = self.client.session
+        """Give the client an OIDC sign-in (``token`` truthy) or none; return its access token.
+
+        lex-app 2.5 (django-oauth2-codeflow 3) keeps a sign-in's tokens in its ``OIDCSession``
+        row, so a hand-made ``session["oidc_access_token"]`` no longer means anything.
+        """
         if token is None:
-            session.pop("oidc_access_token", None)
-        else:
-            session["oidc_access_token"] = token
-        session.save()
+            # Signed in to Django, not through OIDC (an admin login): nothing to hand the frame.
+            self.client.logout()
+            self.client.force_login(self.user, backend="django.contrib.auth.backends.ModelBackend")
+            return None
+        from lex.lex_app.tests.auth import sign_in
+
+        return sign_in(self, self.client, self.user).access_token
 
     # -- 10.100 --------------------------------------------------------
     def test_10_100_the_streamlit_report_frames_the_dashboard_with_a_credential(self) -> None:
@@ -115,7 +122,7 @@ class TestCluster10r_StreamlitFrameCredential(E2ETestCase):
                and the response carrying that token is not one a cache may keep.
         """
         url = self._register("streamlit", Streamlit)
-        self._with_access_token(ACCESS_TOKEN)
+        access_token = self._with_access_token(ACCESS_TOKEN)
 
         with mock.patch.dict(os.environ, {"STREAMLIT_URL": DASHBOARD_HOST}):
             response = self.client.get(url)
@@ -127,7 +134,7 @@ class TestCluster10r_StreamlitFrameCredential(E2ETestCase):
             msg="the frame must point at the configured dashboard host",
         )
         self.assertEqual(
-            parse_qs(src.query).get("auth_token"), [ACCESS_TOKEN],
+            parse_qs(src.query).get("auth_token"), [access_token],
             msg="a cross-origin frame cannot authenticate itself -- without the bootstrap "
                 "token the proxy 401s it and the 401 takes over the browser tab",
         )

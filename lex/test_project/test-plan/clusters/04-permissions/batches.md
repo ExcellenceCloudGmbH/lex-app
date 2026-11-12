@@ -160,17 +160,52 @@ must not open a check on the whole model.
 
 ---
 
+### Batch 4y — the permission lookup is lazy, cached per token, single-flight and never a silent deny ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.148 – 4.158 |
+| Type | U (4.148–4.151, 4.155–4.157), E (4.152–4.154, 4.158) |
+| Files covered | `lex/api/middleware/keycloak_permissions.py` (rewritten: lazy attributes, `uma_permissions`, cache, single flight, `keycloak_uma` breaker, contract answers), `lex/api/keycloak/uma_client.py` (`KEYCLOAK_INTERNAL_URL`, issuer mismatch → configuration outage, `category`), `lex/api/security.py` (`is_auth_outage`, `guarded`), `lex/authentication/drf_exceptions.py` (`AuthUnavailable`, `SessionRejected`), `lex/authentication/identity.py`, `lex/core/models/LexModel.py` (`UserContext._extract_client_roles`), the fail-closed sites in `One.py`, `filter_backends.py`, `PermissionAwareSerializerMixin.py`, `DestroyOneWithPayloadMixin.py`, `ModelExport.py`, `base_serializers.py`, `api/utils/helpers.py` |
+| Test file | `lex/test_project/tests/permissions/test_4y_permission_lookup.py` |
+| Test classes | `TestCluster04y_LazyAndCached` (4.148–4.151), `TestCluster04y_BreakerAndRoles` (4.155–4.156), `TestCluster04y_OutagesAreNotDenials` (4.157), `TestCluster04y_KeycloakAnswersEndToEnd` (4.152–4.154), `TestCluster04y_FailClosedSitesPassOutagesThrough` (4.158) |
+| Fixtures | bearer `OIDCContext`s per token; `create_oidc_session` sign-ins; the UMA call patched at `lex.api.keycloak.uma_client`; an injectable cache clock; the library breaker's clock; `KeycloakItem` and the new `OutageItem` (`permissions/models.py`) |
+| Tests landed | **11 pass / 0 fail** against django-oauth2-codeflow 3.0.0 |
+| Also changed | 4g 4.31–4.34 (seam: a sign-in and the UMA call; 4.32b now expects `AuthUnavailable`, not `[]`; 4.33 role shapes from the token; 4.34: session tokens are never used — the old `cleanup_invalid_tokens` helper is gone with the session tokens), 4x 4.138 (bearer contexts; one settings override for all threads), 4.141/4.142 (401 `session_expired` / 503 instead of `[]`, by design), 4.144 (a `FakeOP` access token as the control; the forgery carries `iss`/`aud`/`typ`), 4.145–4.147 (a DRF 401 now carries `login_url` too; `OIDC_LOGIN_REQUIRED_EXEMPT_URL_PATTERNS`), 4o 4.98 (eleven flags), 4q 4.111 (the create refusal keeps its `message` and adds the contract's `detail` and `code: permission_denied`) |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-06-auth-long-sessions-core.md) |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.148 | lazy | no UMA call until `user_permissions` is read; one then; roles/profile never call |
+| 4.149 | cached per token | one call per token; another user's token its own answer; SHA-256 keys; mutation does not leak |
+| 4.150 | TTL | reused ≤ min(60 s, token lifetime), asked again after |
+| 4.151 | single flight | 16 concurrent requests, one call; a failure shared by all |
+| 4.152 | `access_denied` | `[]`; create 403 `permission_denied`; still signed in |
+| 4.153 | token rejected | 401 `session_expired` with `WWW-Authenticate`; write refused before the view |
+| 4.154 | Keycloak down | 503 `auth_unavailable` + `Retry-After` for permissions, list and create; nothing stored; still signed in |
+| 4.155 | UMA breaker | opens after failures, blocks calls, a probe closes it; token-endpoint breaker untouched; issuer mismatch = config outage; UMA on the internal URL |
+| 4.156 | roles from the sign-in | `request.client_roles`, `UserContext.client_roles` from `resource_access`; profile from claims; no userinfo call; stale session ignored |
+| 4.157 | `guarded()` | every auth outcome re-raised with `LEX_SEC_FAIL_CLOSED` on and off; ordinary errors still deny/allow |
+| 4.158 | fail-closed sites | list, detail, create, update, delete, export answer 503 (401 for an ended sign-in); nothing changed |
+
+**Why a regression matters:** an outage read as "no permission" shows signed-in users denials during a Keycloak blip (and frontends sign them out); a cache keyed wrongly hands one user another's permissions; an uncached lookup puts two or more Keycloak calls back on every request.
+
+**Allocation note:** Letter y: s–w are held by in-flight branches (see [4x](#batch-4x--per-user-keycloak-calls-stay-with-their-user-forged-tokens-and-look-alike-paths-)).
+
+---
+
 ### Batch 4aa — the Streamlit token carries the caller's own Keycloak permissions ✅
 
 | Property | Value |
 | --- | --- |
 | Scenario range | 4.163 – 4.163 |
-| Type | U |
-| Files covered | `lex/authentication/views/token_views.py` (`StreamlitTokenView._get_user_permissions`) |
+| Type | E (U until lex-app 2.5) |
+| Files covered | `lex/authentication/views/token_views.py` (`StreamlitTokenView.post`; `_get_user_permissions` until lex-app 2.5) |
 | Test file | `lex/test_project/tests/permissions/test_4aa_streamlit_token_permissions.py` |
 | Test classes | `TestCluster04aa_StreamlitTokenPermissions` (4.163) |
-| Fixtures | none — `RequestFactory` requests; `KeycloakManager` patched |
+| Fixtures | two sign-ins through `lex.lex_app.tests.auth.sign_in` (different client roles); the UMA fetch patched to prove the view asks for nothing |
 | Tests landed | **1 pass / 0 fail** — Mutation: with the old relative import, 4.163 fails |
+| Also changed | lex-app 2.5 (#869): the view no longer mints a token with embedded permissions; it hands out the caller's own sign-in token. 4.163 was rewritten to the same intent: each caller gets exactly their own token, with their own roles, and the view asks Keycloak for nothing |
 | Status | ✅ Complete |
 
 **Allocation note:** Letter aa and 4.163: 4y (4.148–4.158) is lex-app #869's and 4z (to 4.162) is #880's.

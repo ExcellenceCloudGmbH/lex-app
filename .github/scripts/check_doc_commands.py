@@ -14,7 +14,10 @@ importing anything:
 
   * `@lex.command(name=...)` in lex/bin/lex.py            -- implemented by the CLI
   * module basenames under lex/**/management/commands/     -- Django passthrough
+    (not `_`-prefixed helpers, which Django does not load)
   * Django's own built-ins                                 -- also passthrough
+  * commands of installed apps lex depends on              -- also passthrough
+    (django-oauth2-codeflow's `oidc_*`, `clearsessions`)
   * anything matching `ai-*` / `ai_*`                       -- delegated at runtime
     to lex-mcp-local, which this repo cannot enumerate
 
@@ -78,6 +81,20 @@ DJANGO_BUILTINS = {
     "testserver",
 }
 
+#: Commands of installed apps beyond Django's core, which the CLI forwards the same way
+#: (``lex <name>`` runs the Django command ``<name>``): they exist in every lex
+#: install because lex depends on these apps, yet their modules live in site-packages,
+#: where the scan of ``lex/`` cannot see them. The docs name them -- ``lex oidc_check``
+#: for the internal Keycloak URL, the daily ``lex oidc_cleanup`` / ``lex clearsessions``
+#: job -- so they must count as commands here. They are not lex's to document, so they
+#: stay out of the coverage check (``coverage()`` reads only the CLI and ``lex/``).
+FORWARDED_LIBRARY_COMMANDS = {
+    # django-oauth2-codeflow (a pinned dependency; its app is in INSTALLED_APPS)
+    "oidc_check", "oidc_cleanup", "oidc_rotate_keys", "oidc_urls",
+    # django.contrib.sessions
+    "clearsessions",
+}
+
 #: Words that follow "lex " in prose without being commands.
 #:
 #: "looks" arrives with the CLI reference's own heading, "Where lex looks for
@@ -102,7 +119,7 @@ MENTION = re.compile(r"(?<![\w-])lex ([A-Za-z][A-Za-z0-9_-]*)")
 
 
 def known_commands() -> set[str]:
-    names = set(DJANGO_BUILTINS)
+    names = set(DJANGO_BUILTINS) | FORWARDED_LIBRARY_COMMANDS
     if CLI_SOURCE.is_file():
         names |= set(COMMAND_NAME.findall(CLI_SOURCE.read_text(encoding="utf-8")))
     for path in management_commands(REPO / "lex"):

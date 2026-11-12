@@ -173,3 +173,38 @@ API_SIMPLE = "apisimpleitem"
 API_LAYER_CALC = "apilayercalc"
 EXPLODING = "explodingitem"
 DOWNLOADABLE = "downloadabledocument"
+
+
+class ContractItem(LexModel):
+    """Cluster 10aa: a model everyone may read and edit, but only superusers create or delete.
+
+    Its refusals are the permission answers of the HTTP auth contract v2 (403
+    ``permission_denied``, the user stays signed in).
+    """
+
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 10aa: read-open")
+
+    def permission_list(self, uc):
+        return True
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 10aa: edit-open")
+
+    def permission_create(self, uc):
+        return bool(uc.is_superuser)
+
+    def permission_delete(self, uc):
+        return bool(uc.is_superuser)
+
+
+CONTRACT_MODELS = [ContractItem]
+CONTRACT_ITEM = "contractitem"

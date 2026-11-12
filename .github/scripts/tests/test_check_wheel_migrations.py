@@ -289,7 +289,7 @@ def test_framework_drift_in_the_wheel_fails(tmp_path, capsys):
 
 
 def test_known_third_party_drift_warns_and_carries_on(tmp_path, capsys):
-    """Two installed packages already ship models their migrations do not
+    """An installed package already ships models its migrations do not
     match. That is known and tracked: it is reported on every run, and does
     not block the check of lex's own migrations."""
     packages = _site_packages(tmp_path)
@@ -305,6 +305,26 @@ def test_known_third_party_drift_warns_and_carries_on(tmp_path, capsys):
         assert app in out
     assert "site-packages" in out
     assert runner.lex_commands()[-1] == "migrate --check", "The init steps must still run."
+
+
+def test_oauth2_authcodeflow_is_no_longer_known_drift():
+    """django-oauth2-codeflow 3.0 pins its AppConfig.default_auto_field, so lex's
+    BigAutoField no longer makes `lex init` write a migration into it. Its entry is
+    gone, and a drift in it is a regression again."""
+    assert "oauth2_authcodeflow" not in check.KNOWN_THIRD_PARTY_DRIFT
+    assert list(check.KNOWN_THIRD_PARTY_DRIFT) == ["rest_framework_api_key"]
+
+
+def test_drift_in_oauth2_authcodeflow_fails_again(tmp_path, capsys):
+    """A migration django would write into oauth2_authcodeflow now fails the check."""
+    path = _site_packages(tmp_path) / "oauth2_authcodeflow" / "migrations" / "0007_alter_oidcsession_id.py"
+    runner = FakeRunner(fail_on="makemigrations --check --dry-run",
+                        failure_output=_planned("oauth2_authcodeflow", path))
+    code, out = _run(tmp_path, runner, capsys)
+
+    assert code == 1
+    assert "oauth2_authcodeflow" in out
+    assert "KNOWN_THIRD_PARTY_DRIFT" in out
 
 
 def test_new_third_party_drift_fails(tmp_path, capsys):
