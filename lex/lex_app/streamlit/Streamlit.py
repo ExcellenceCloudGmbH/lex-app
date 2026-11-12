@@ -1,7 +1,7 @@
-import os
 from urllib.parse import urlencode
 
 from lex.core.models.HTMLReport import HTMLReport
+from lex import hosts as lex_hosts
 
 
 class Streamlit(HTMLReport):
@@ -31,7 +31,14 @@ class Streamlit(HTMLReport):
         built exactly as before; it is only a browser that needs the token, and
         only a browser that can be thrown out of its tab without one.
         """
-        base = os.getenv("STREAMLIT_URL", "http://localhost:8501")
+        # Not STREAMLIT_URL directly: an instance with a customer-owned domain
+        # attached serves its dashboard on more than one hostname, and framing
+        # the canonical one inside a shell on the customer's domain makes the
+        # iframe a third-party context whose cookies Safari blocks outright --
+        # so the dashboard never signs in. `same_site_url` picks the hostname
+        # that shares a registrable domain with the one this request arrived
+        # on, and falls back to the canonical URL when there is no such host.
+        base = lex_hosts.same_site_url("streamlit")
         params = {"embed": "true"}
 
         # The session's own Keycloak access token -- the same value

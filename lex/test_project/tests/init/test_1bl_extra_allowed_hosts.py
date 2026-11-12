@@ -103,7 +103,8 @@ class TestCluster01bl_ExtraAllowedHosts(SimpleTestCase):
         Given: a fresh interpreter with and without LEX_EXTRA_ALLOWED_HOSTS
         When: lex's settings module is imported
         Then: without it ALLOWED_HOSTS is exactly the four it always held and
-              CSRF_TRUSTED_ORIGINS the two it always held; with it each name is
+              CSRF_TRUSTED_ORIGINS its baseline (the canonical wildcard, the dev
+              frontend and the canonical origin itself); with it each name is
               appended (trimmed, no trailing slash) and carried into
               CSRF_TRUSTED_ORIGINS as an https origin, a leading-dot host as
               the "https://*.domain" wildcard an origin has to be written as.
@@ -112,7 +113,14 @@ class TestCluster01bl_ExtraAllowedHosts(SimpleTestCase):
         before_hosts, before_csrf = _fresh(_READ, DOMAIN_HOSTED="canonical.example.com")
         self.assertEqual(before_hosts[0], "canonical.example.com")
         self.assertEqual(len(before_hosts), 4, msg=f"unexpected baseline: {before_hosts}")
-        self.assertEqual(len(before_csrf), 2, msg=f"unexpected baseline: {before_csrf}")
+        # The canonical host is trusted twice over: the "*." wildcard for its subdomains and, since
+        # the custom-domain work (lex-app #882, 1bm), its own exact origin, which the wildcard
+        # does not match.
+        self.assertEqual(
+            before_csrf,
+            ["https://*.canonical.example.com", "http://localhost:3000", "https://canonical.example.com"],
+            msg=f"unexpected baseline: {before_csrf}",
+        )
 
         after_hosts, after_csrf = _fresh(
             _READ,
