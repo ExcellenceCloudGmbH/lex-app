@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 187
+max_scenario: 189
 letters:
   a:
     title: ''
@@ -299,3 +299,33 @@ letters:
       already hold: the first letter absent from lex-app-v2 and every remote branch, and a range
       above the highest max_scenario on any branch, so neither side has to renumber on merge.
       Design: docs/superpowers/plans/2026-11-10-scheduled-jobs.md.
+  ae:
+    title: The fields endpoint's value_list flag, and no filter bar
+    scenarios: 10.188-10.189
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      Every descriptor of GET api/model_info/<model>/fields carries value_list, computed by
+      value_list_field -- the resolver filter_values uses (lex/api/utils/filterable_fields.py) --
+      for the serializer the list renders through (UserModelSerializer for auth.User); a field with
+      no column behind it is false (10.188: char, integer, boolean, date, FK and choice true;
+      TextField, decimal, JSON, credential-shaped, write-only and renamed fields false; every column
+      of ValueListOptOutItem and AuditLog false; auth.User's flags agree with what filter_values
+      accepts). Merged with lex-app-v2: value_list also asks the filter allow-list (LEX_SEC_FILTERS)
+      whether the caller may filter by the column (4.176); 10.188 builds its own container, so its
+      helper points the allow-list at that container.
+      Native column filters (spec Amendment 18): the grid's own column filters are the only filter
+      UI, so list_ui.filter_bar is withdrawn -- Meta.filter_bar, a model's filter_bar,
+      _resolve_filter_bar and the fields endpoint's per-caller narrowing. 10.189 pins that list_ui
+      has no filter_bar key for a model and a serializer that still declare one, while every field
+      keeps value_list. The bar's scenarios (Meta.filter_bar, the model fallback, dropped names, a
+      filter_bar that is not a list) and their fixture FilterBarColumnItem are gone, 10.94 became
+      10.188, the file is test_10ae_fields_value_list_flag.py, and test_10i's 10.25 and test_12e's
+      12.35 pin lex-app-v2's list_ui dicts again.
+      Allocation: first 10p/10.91-10.92. lex-app-v2 landed 10p and 10q (10.91-10.99) while this
+      branch was open, so the batch moved to the next free letter on merge.
+      Renumbered on merging lex-app-v2 (2026-11-12): 10r and its scenarios were taken there, so it is 10ae,
+      the first letter free on lex-app-v2 and every remote branch, with a range above the highest max_scenario.

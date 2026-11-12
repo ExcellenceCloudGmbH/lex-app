@@ -205,3 +205,36 @@
 | 4.162 | no access to schedules | creating one without the grant is refused (401/403); nothing stored |
 
 **Scenario range:** 4.159 – 4.162. **Test file:** `lex/test_project/tests/permissions/test_4z_scheduled_job_permissions.py`. **Type:** E. **Status:** ✅ Complete (2026-11-10). Batch: [4z](batches.md).
+
+
+### 4ab. filter_values and read permissions
+
+| # | Scenario | What We Assert | Status |
+|---|----------|----------------|--------|
+| 4.164 | Field hidden on some rows | Counted only on rows that allow it | ✅ |
+| 4.165 | Rows hidden by permission_read | Never counted, in any column | ✅ |
+| 4.166 | Field readable on no row the other filters leave | 200 with an empty list | ✅ |
+| 4.167 | Field the serializer does not expose | 400 "is not filterable" | ✅ |
+| 4.168 | Write-only field (`extra_kwargs`, `HiddenField`) | 400 "is not filterable"; no stored value in the response | ✅ |
+| 4.169 | Field class with its own `to_representation` or `get_attribute`; a nested serializer on an FK column | 400 for each; a class that only inherits DRF's methods is still listed | ✅ |
+| 4.170 | Serializer class that rewrites its rows | No column listed through it; the default serializer still lists them | ✅ |
+| 4.171 | Record-level read grant, database path | Only the granted row is counted; other rows' values never appear | ✅ |
+
+**Scenario range:** 4.164 – 4.171. **Test file:** `lex/test_project/tests/permissions/test_4ab_filter_values_permissions.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/views/model_entries/FilterValues.py`, `lex/api/utils/filterable_fields.py`, `lex/api/views/model_entries/filter_backends.py`. Batch: [4ab](batches.md).
+
+---
+
+---
+
+### 4ac. filter_values under lex-app-v2's secure defaults ✅
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.172 | raising `permission_read`, per row | the row is in neither the list nor the counts; `LEX_SEC_FAIL_CLOSED=false` still leaves it out of the counts |
+| 4.173 | raising `can_read`, per row | the serializer withholds the record from the list and the counts |
+| 4.174 | raising `permission_read`, database count | the read filter withholds the row from both; `LEX_SEC_FAIL_CLOSED=false` lists and counts it |
+| 4.175 | field withheld on every record | 400 "is not filterable", no value in the body; `LEX_SEC_FILTERS=false` or `LEX_LEGACY_SECURITY=true` 200 empty; an hr member gets the values |
+| 4.176 | fields endpoint | `value_list` false for the column; legacy and hr get it back |
+| 4.177 | `permission_list` false | `filter_values` 404 like the list; `LEX_SEC_NOT_FOUND=false` or `LEX_LEGACY_SECURITY=true` 200 |
+
+**Scenario range:** 4.172 – 4.177. **Test file:** `lex/test_project/tests/permissions/test_4ac_filter_values_secure_defaults.py`. **Type:** E. **Status:** ✅ Complete (2026-10-19). Batch: [4ac](batches.md).

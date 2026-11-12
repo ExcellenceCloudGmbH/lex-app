@@ -238,3 +238,45 @@ must not open a check on the whole model.
 **Why a regression matters:** Anyone with access to schedules could calculate records they could never calculate themselves.
 
 **Allocation note:** Allocated past the letters and scenario IDs that in-flight branches (feat/ext-*, feat/auth-long-sessions) already hold: the first letter absent from lex-app-v2 and every remote branch, and a range above the highest max_scenario on any branch, so neither side has to renumber on merge. Design: [`docs/superpowers/plans/2026-11-10-scheduled-jobs.md`](../../../../../docs/superpowers/plans/2026-11-10-scheduled-jobs.md).
+
+
+## Batch 4ab — filter_values honours row and field read permissions (4.164-4.171)
+
+- **Type:** E
+- **Files covered:** `lex/api/views/model_entries/FilterValues.py`, `lex/api/utils/filterable_fields.py`
+  (`value_list_field`, `renders_rows_as_stored`, `_renders_value_as_stored`),
+  `lex/api/serializers/base_serializers.py` (`_wrap_custom_serializer`'s `_KEEPS_FIELD_VALUES` mark),
+  `lex/api/views/model_entries/filter_backends.py` (the read filter 4.165 and 4.171 rely on)
+- **Test file:** `lex/test_project/tests/permissions/test_4ab_filter_values_permissions.py`
+- **Test classes:** `TestCluster04ab_FilterValuesPermissions`
+- **Fixtures:** new `RowFieldItem`; `FieldLevelItem`; `KeycloakItem` (4.171); `OwnedItem` (4.169's nested-
+  serializer subtest, with a per-record Keycloak grant like 4.171's); serializers registered on
+  `RowFieldItem.api_serializers` for one test each (4.168-4.170), and on `OwnedItem.api_serializers` for
+  the 4.169 nested-serializer subtest
+- **Status:** complete — 8 pass
+- **Merged with lex-app-v2:** 4.166 now asks for region under a filter that leaves only
+  the private rows, which all hide it (200, empty); a field withheld on every record is refused
+  instead (4.175, spec Amendment 17).
+- **Final review (4.168-4.171):** a write-only field, a field class with its own `get_attribute` or
+  `to_representation`, a nested serializer on an FK column, and every field of a serializer that
+  rewrites its rows are refused with the standard 400; on the database path a record-level grant
+  limits the count to that record. Mutation: the read filter replaced by the identity fails 4.171 alone.
+
+---
+
+### Batch 4ac — filter_values follows the list under lex-app-v2's secure defaults ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.172 – 4.177 |
+| Type | E |
+| Files covered | `lex/api/views/model_entries/FilterValues.py` (`_filterable_field`, `_count_per_row`, `_count_in_database`), `lex/api/utils/filterable_fields.py` (`value_list_field`'s `request`), `lex/api/views/model_info/Fields.py` (`value_list` per caller), `lex/api/serializers/base_serializers.py` (`readable_field_names`), `lex/api/views/model_entries/filter_backends.py`, `lex/api/filter_policy.py` |
+| Test file | `lex/test_project/tests/permissions/test_4ac_filter_values_secure_defaults.py` |
+| Test classes | `TestCluster04ac_FilterValuesSecureDefaults` |
+| Fixtures | new `ReadCheckRaisesItem` (`can_read` raises for "boom"); `RaisingReadItem` (4o), `FieldLevelItem`, `RowFieldItem`; a serializer that is not a LexSerializer resolved for `RaisingReadItem` (4.174); `LEX_SEC_*`/`LEX_LEGACY_SECURITY` cleared per test |
+| Tests landed | **6 pass / 0 fail** |
+| Also changed | 4.166 (per-row empty list), 10.188's helper (then 10.94; the allow-list reads the container the test builds), spec Amendment 17 |
+| Native column filters | 4.176 no longer checks `list_ui.filter_bar`: the filter bar is withdrawn (spec Amendment 18) — see [session note](../../progress/sessions/2026-10-20-native-column-filters.md) |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-19-merge-lex-app-v2-secure-defaults.md) |
+
+---
