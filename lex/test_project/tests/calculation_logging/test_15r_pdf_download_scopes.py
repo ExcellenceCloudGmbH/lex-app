@@ -1,4 +1,4 @@
-"""Cluster 15m — the calculation-log PDF can cover one step, a branch, or the whole run.
+"""Cluster 15r — the calculation-log PDF can cover one step, a branch, or the whole run.
 
 Intent (customer request LEX-1554, 2026-11-06): "Currently, the calculation
 tree can only be downloaded one part at a time, but I would like to download
@@ -18,9 +18,9 @@ Golden Rule: we assert what a reader finds in the file (whose logs are in it,
 whose are not, how it is sectioned) and what the audit trail records -- not
 how the rows were gathered.
 
-Cluster 15m — scenarios 15.56–15.62. Type: E.
+Cluster 15r — scenarios 15.83–15.89. Type: E.
 Covers: lex/api/views/calculations/DownloadMarkdownPdf.py
-Run: python -m lex pytest lex/test_project/tests/calculation_logging/test_15m_pdf_download_scopes.py -v
+Run: python -m lex pytest lex/test_project/tests/calculation_logging/test_15r_pdf_download_scopes.py -v
 """
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def _extract_pdf_text(pdf_bytes: bytes) -> str:
     return "".join(page.extract_text() for page in reader.pages)
 
 
-class TestCluster15m_PdfDownloadScopes(_CalcLogTestCase):
+class TestCluster15r_PdfDownloadScopes(_CalcLogTestCase):
     """GET api/download-pdf/<pk>/?scope=node|subtree|calculation."""
 
     def setUp(self):
@@ -97,10 +97,10 @@ class TestCluster15m_PdfDownloadScopes(_CalcLogTestCase):
         details = self._log("Details body.", parent=root, heading="Calculation details")
         return root, health, ltip, year, details
 
-    # -- 15.56 ---------------------------------------------------------
-    def test_15_56_whole_calculation_from_any_node(self) -> None:
+    # -- 15.83 ---------------------------------------------------------
+    def test_15_83_whole_calculation_from_any_node(self) -> None:
         """
-        Scenario 15.56: the whole tree downloads in one step, from any node.
+        Scenario 15.83: the whole tree downloads in one step, from any node.
 
         Given: a calculation tree (root → Health Check → PE LTIP 2 → 2017,
                plus a sibling "Calculation details" branch).
@@ -141,10 +141,10 @@ class TestCluster15m_PdfDownloadScopes(_CalcLogTestCase):
             "Sections must read in tree order: a whole branch before its sibling.",
         )
 
-    # -- 15.57 ---------------------------------------------------------
-    def test_15_57_every_root_is_included_and_titled_other_runs_are_not(self) -> None:
+    # -- 15.84 ---------------------------------------------------------
+    def test_15_84_every_root_is_included_and_titled_other_runs_are_not(self) -> None:
         """
-        Scenario 15.57: "the whole calculation" is what the Execution tree
+        Scenario 15.84: "the whole calculation" is what the Execution tree
         shows -- every root of that calculation, and nothing from any other.
 
         Given: one calculation with two root logs (each with a child), and a
@@ -176,10 +176,10 @@ class TestCluster15m_PdfDownloadScopes(_CalcLogTestCase):
             "A log of a different calculation must never be swept into the PDF.",
         )
 
-    # -- 15.58 ---------------------------------------------------------
-    def test_15_58_subtree_scope_matches_the_older_flag(self) -> None:
+    # -- 15.85 ---------------------------------------------------------
+    def test_15_85_subtree_scope_matches_the_older_flag(self) -> None:
         """
-        Scenario 15.58: ``scope=subtree`` is "this node and everything below
+        Scenario 15.85: ``scope=subtree`` is "this node and everything below
         it" -- the same document ``include_descendants=true`` produces.
 
         Given: the Health Check tree.
@@ -208,10 +208,10 @@ class TestCluster15m_PdfDownloadScopes(_CalcLogTestCase):
                     f"in the {params!r} subtree PDF.",
                 )
 
-    # -- 15.59 ---------------------------------------------------------
-    def test_15_59_scope_wins_over_the_older_flag(self) -> None:
+    # -- 15.86 ---------------------------------------------------------
+    def test_15_86_scope_wins_over_the_older_flag(self) -> None:
         """
-        Scenario 15.59: an explicit ``scope`` decides, whatever else is sent.
+        Scenario 15.86: an explicit ``scope`` decides, whatever else is sent.
 
         Given: a parent with one child.
         When: ``?scope=node&include_descendants=true`` is requested.
@@ -229,10 +229,10 @@ class TestCluster15m_PdfDownloadScopes(_CalcLogTestCase):
             "scope=node asked for one log; include_descendants must not widen it.",
         )
 
-    # -- 15.60 ---------------------------------------------------------
-    def test_15_60_unknown_scope_is_refused_and_audited(self) -> None:
+    # -- 15.87 ---------------------------------------------------------
+    def test_15_87_unknown_scope_is_refused_and_audited(self) -> None:
         """
-        Scenario 15.60: an unknown scope is a 400, never a quiet single log.
+        Scenario 15.87: an unknown scope is a 400, never a quiet single log.
 
         Given: a log.
         When: ``?scope=everything`` is requested.
@@ -262,10 +262,10 @@ class TestCluster15m_PdfDownloadScopes(_CalcLogTestCase):
             "descendants were included.",
         )
 
-    # -- 15.61 ---------------------------------------------------------
-    def test_15_61_whole_calculation_download_is_audited_with_its_scope(self) -> None:
+    # -- 15.88 ---------------------------------------------------------
+    def test_15_88_whole_calculation_download_is_audited_with_its_scope(self) -> None:
         """
-        Scenario 15.61: the audit trail tells a whole-calculation download
+        Scenario 15.88: the audit trail tells a whole-calculation download
         apart from a single step or a branch.
 
         Given: the five-log Health Check tree.
@@ -293,10 +293,10 @@ class TestCluster15m_PdfDownloadScopes(_CalcLogTestCase):
         self.assertEqual(row.payload.get("filename"), f"document_{health.pk}_calculation.pdf")
         self.assertGreater(row.payload.get("size_bytes") or 0, 0)
 
-    # -- 15.62 ---------------------------------------------------------
-    def test_15_62_an_oversized_calculation_says_it_was_cut(self) -> None:
+    # -- 15.89 ---------------------------------------------------------
+    def test_15_89_an_oversized_calculation_says_it_was_cut(self) -> None:
         """
-        Scenario 15.62: a calculation larger than the cap is cut visibly.
+        Scenario 15.89: a calculation larger than the cap is cut visibly.
 
         Given: the section cap lowered to 3 and a five-log calculation.
         When: ``?scope=calculation`` is downloaded.

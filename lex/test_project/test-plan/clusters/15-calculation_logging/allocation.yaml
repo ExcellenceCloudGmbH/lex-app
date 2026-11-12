@@ -1,7 +1,7 @@
 cluster: 15
 slug: calculation_logging
 title: Calculation Logging Surface
-max_scenario: 62
+max_scenario: 89
 letters:
   a:
     title: LexLogger builder API and content shape
@@ -157,9 +157,9 @@ letters:
       the system (15.53). A rendering failure is a `failure` entry with the 500 and no delivered
       size (15.54), and a log the caller may not see is a recorded refusal keeping the 404's
       traceback, with nothing attached (15.55).
-  m:
+  r:
     title: The calculation-log PDF covers one step, a branch, or the whole calculation
-    scenarios: 15.56-15.62
+    scenarios: 15.83-15.89
     status: complete
     tests:
       pass: 7
@@ -171,7 +171,7 @@ letters:
       buttons. GET api/download-pdf/<pk>/ takes ?scope=node|subtree|calculation; include_descendants=true
       stays as the older spelling of subtree. calculation renders every row sharing the log's
       calculationId (the Execution tree's rows), every root titled when there are several, in one
-      query, capped by MAX_SUBTREE_NODES with a visible note. 15.56 is the customer's request from a
-      leaf; 15.57 multiple roots and no foreign run; 15.58 subtree == the old flag; 15.59 scope wins;
-      15.60 an unknown scope is an audited 400, never a quiet single log; 15.61 the audit payload;
-      15.62 truncation.
+      query, capped by MAX_SUBTREE_NODES with a visible note. 15.83 is the customer's request from a
+      leaf; 15.84 multiple roots and no foreign run; 15.85 subtree == the old flag; 15.86 scope wins;
+      15.87 an unknown scope is an audited 400, never a quiet single log; 15.88 the audit payload;
+      15.89 truncation.
