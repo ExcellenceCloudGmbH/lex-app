@@ -14,6 +14,8 @@ from rest_framework import serializers, viewsets
 
 logger = logging.getLogger(__name__)
 
+from lex.api.serializers.list_ui_columns import build_column_options
+
 # Field-names that React-Admin expects
 from lex.api.serializers.sensitive_fields import (
     filter_sensitive_field_names,
@@ -385,10 +387,20 @@ class LexSerializer(serializers.ModelSerializer):
 
     @classmethod
     def get_list_ui_options(cls) -> dict:
-        """Expose serializer-level frontend list options via ``Meta``."""
+        """
+        Expose serializer-level frontend list options via ``Meta``.
+
+        ``columns`` carries the per-column display defaults a project declares
+        in ``Meta.lex_column_options`` -- the developer layer of the three that
+        decide how a table looks (the user's own Settings panel and a saved
+        view are the other two). See
+        ``lex.api.serializers.list_ui_columns`` for the options and why
+        an invalid one is dropped rather than raised.
+        """
         meta = getattr(cls, "Meta", None)
         return {
             "hide_actions_column": bool(getattr(meta, "hide_actions_column", False)),
+            "columns": build_column_options(meta),
         }
 
     # ------------------------------------------------------------------
