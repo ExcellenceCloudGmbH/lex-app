@@ -154,3 +154,33 @@ and anything that path drops is lost for exactly the serializers that were custo
 purpose.
 
 ---
+
+### Batch 12q — Files larger than one request body are uploaded in pieces ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 12.73 – 12.80 |
+| Type | E |
+| Files covered | `lex/api/views/file_operations/ChunkedUpload.py` (new: start, chunk, status, delete, expiry sweep), `lex/api/serializers/base_serializers.py` (`LexClearableFileField` resolving `lex-chunked-upload:<id>`), `lex/process_admin/sites/process_admin_site.py` (the `api/chunked-uploads/` routes) |
+| Test file | `lex/test_project/tests/serializers/test_12q_chunked_upload.py` |
+| Test classes | `TestCluster12q_ChunkedUpload` |
+| Fixtures | cluster-12 `AttachmentItem` (from 12h; now also `permission_create`), a temporary `MEDIA_ROOT` per test, `CHUNK_SIZE` patched to 4 bytes |
+| Tests landed | **8 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 12.73 | create with a chunked upload | four pieces sent in reverse order, the last one short; the created record stores the original bytes under the original name |
+| 12.74 | update with a chunked upload | PUT with the token replaces the file intact, although the update path validates the payload more than once |
+| 12.75 | an incomplete upload is refused | a token with a missing piece is a 400 naming the gap; no record is created |
+| 12.76 | an upload belongs to its user | another user gets 404 sending a piece, reading and deleting, and a 400 using the token; the owner's upload is untouched |
+| 12.77 | piece size and index are checked | a short piece, a wrong-length last piece and an index past the end are 400; the right piece is 200 |
+| 12.78 | size cap and bad ids | a declared size above `LEX_CHUNKED_UPLOAD_MAX_SIZE` is a 413 up front; a path-like upload id is a 404 |
+| 12.79 | delete removes the pieces | DELETE by the owner is 204, the upload is then 404 and its manifest is gone from storage |
+| 12.80 | expired uploads are swept | an upload older than the TTL is deleted when the next one starts; the fresh one stays |
+
+**Why a regression matters:** Cloudflare, the per-instance Ingress and ModSecurity each cap a request body at about 100 MB, and no infrastructure setting raises all three, so above that size this is the only way a file reaches the instance at all. Without it the browser says "Failed to fetch" and the backend logs nothing. Ownership (12.76) and the size and index checks (12.77–12.78) are what keep a shared, token-addressed store from becoming a way to read or corrupt another user's upload.
+
+Letter q: 12p is #878's and 12l is reserved for the feat/ext-* branches. The batch was first drafted as 12i (12.42–12.49), which `lex-app-v2` already holds.
+
+---

@@ -1,7 +1,7 @@
 cluster: 12
 slug: serializers
 title: Serializer Contract
-max_scenario: 72
+max_scenario: 80
 letters:
   a:
     title: Read contract — field visibility & framework-managed fields
@@ -198,3 +198,23 @@ letters:
       and anything that path drops is lost for exactly the serializers that were customised on
       purpose.
 
+  q:
+    title: Files larger than one request body are uploaded in pieces
+    scenarios: 12.73-12.80
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      Every request body is capped at about 100 MB before Django sees it (Cloudflare, the
+      Ingress, ModSecurity), so a 606 MB claims CSV failed in the browser as "Failed to fetch".
+      The client now uploads such a file in pieces to api/chunked-uploads/ and sends
+      lex-chunked-upload:<id> as the file field's value; LexClearableFileField joins the pieces
+      into one file. 12.73 create through a token, pieces sent out of order; 12.74 update, whose
+      path validates the payload more than once; 12.75 an incomplete upload is a 400 and creates
+      nothing; 12.76 another user gets 404 on every route and the token fails for them; 12.77 a
+      piece of the wrong size or index is refused; 12.78 the size cap is a 413 and a path-like id
+      a 404; 12.79 DELETE removes the pieces; 12.80 expired uploads are swept when a new one
+      starts. Letter q, past 12p (#878) and the 12l reserved for the feat/ext-* branches; first
+      drafted as 12i (12.42-12.49), which lex-app-v2 already holds.
