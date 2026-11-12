@@ -198,5 +198,11 @@ class TestCluster01bh_TestSignInHelper(TestCase):
 
         response = client.get("/api/user/")
 
-        self.assertEqual(response.status_code, 200, response.content[:300])
-        self.assertEqual(response.json()["client_roles"], [])
+        # Where a Keycloak authorization server is configured (as in the release gate), 2.5 refuses a
+        # session that has no OIDC sign-in outright; with none configured it answers without roles.
+        # Either way the hand-made session["oidc_userinfo"] grants nothing.
+        if response.status_code == 401:
+            self.assertEqual(response.json()["error"], "session_expired", response.content[:300])
+        else:
+            self.assertEqual(response.status_code, 200, response.content[:300])
+            self.assertEqual(response.json()["client_roles"], [])
