@@ -1461,3 +1461,22 @@ letters:
       LEX_TERRAFORM_MODULES (the per-instance Keycloak client no longer runs with full scope);
       these are the guards under it. Mutations against lex-app-v2: 1.621, 1.622 and 1.624 fail.
       Letter and range taken well clear of ay-bj, which open branches hold.
+  bl:
+    title: More than one hostname per instance (LEX_EXTRA_ALLOWED_HOSTS)
+    scenarios: 1.630-1.631
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      DOMAIN_HOSTED is a single name, so ALLOWED_HOSTS held exactly one real host and every
+      other hostname pointing at the same pod got a 400 from Django while the ingress routed
+      it happily. LEX_EXTRA_ALLOWED_HOSTS (comma-separated) appends those names and carries
+      them into CSRF_TRUSTED_ORIGINS, where a leading-dot host becomes the https://*.domain
+      wildcard an origin must be written as (1.630); "*" raises ImproperlyConfigured on a
+      deployed instance, because a pod that accepts any Host accepts Host-header poisoning
+      (1.631). USE_X_FORWARDED_HOST is on, so Django judges the host the client asked for and
+      an ingress-side rewrite cannot substitute for the list — which is what makes this the
+      only place a second hostname can be admitted. Both scenarios read the settings module in
+      a fresh interpreter, since ALLOWED_HOSTS is built once at import.
