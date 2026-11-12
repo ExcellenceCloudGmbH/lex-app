@@ -41,6 +41,11 @@ class LogRootCalc(CalculationModel):
     child_mode = models.CharField(max_length=40, default="log_only")
     units_csv = models.CharField(max_length=200, default="u1")
     calculation_error_message = models.TextField(blank=True, default="")
+    # What the run's live log held when a mode below read it, as the log
+    # panel's backfill would (15.65, 15.76, 15.77). A field rather than an
+    # attribute: on the Celery route calculate() runs on the task's copy of
+    # the root, and only what is saved comes back.
+    live_log_after_inner = models.TextField(null=True, blank=True)
 
     is_atomic = True
 
@@ -49,6 +54,35 @@ class LogRootCalc(CalculationModel):
 
     def __str__(self) -> str:  # pragma: no cover
         return self.name
+
+    def _read_live_log(self):
+        """The run's live log, read the way the log panel's backfill does
+        (InitCalculationLogs), as someone opening the panel now would."""
+        from lex.api.utils import operation_context
+        from lex.audit_logging.utils.CacheManager import CacheManager
+
+        return CacheManager.get_message(
+            CacheManager.build_cache_key(
+                f"{self._meta.model_name}_{self.pk}",
+                operation_context.get()["calculation_id"],
+            )
+        )
+
+    def _save_failing_nested_then_read_live_log(self, failing_model):
+        """Save a nested CalculationModel that fails, handle the failure, read
+        the run's live log, and carry on logging (15.76, 15.77)."""
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+        from lex.core.models.CalculationModel import CalculationModelException
+
+        try:
+            failing_model(
+                name=self.units_csv,
+                is_calculated=failing_model.IN_PROGRESS,
+            ).save()
+        except CalculationModelException:
+            pass
+        self.live_log_after_inner = self._read_live_log()
+        LexLogger().add_text("root recovered").log()
 
     def calculate(self):
         # Local imports — these are only used inside calculate(), and
@@ -103,6 +137,76 @@ class LogRootCalc(CalculationModel):
             # transaction, so the rollback takes both log rows with it.
             LexLogger().add_text("step one done").log()
             raise ValueError("step two failed")
+        if self.child_mode == "fail_child_then_log":
+            # The batch stops at the failing child (fail-fast); the root
+            # handles that and carries on logging (cluster 15m, 15.62).
+            from lex.core.exceptions import CalculatedModelError
+
+            try:
+                LogFailingChild.create(unit=units)
+            except CalculatedModelError:
+                LexLogger().add_text("root recovered").log()
+            return
+        if self.child_mode == "quiet_three_level":
+            LogQuietMiddle.create(unit=units)
+            return
+        if self.child_mode == "celery_loud":
+            LogCeleryLoudChild.create(unit=units)
+            return
+        if self.child_mode == "celery_quiet_three_level":
+            LogCeleryQuietMiddle.create(unit=units)
+            return
+        if self.child_mode == "calcmodel_then_read_live_log":
+            # Once the nested CalculationModel has finished, read this run's
+            # live log (15.65).
+            LogInnerSavedCalc(
+                name=self.units_csv,
+                is_calculated=LogInnerSavedCalc.IN_PROGRESS,
+            ).save()
+            self.live_log_after_inner = self._read_live_log()
+            return
+        if self.child_mode == "celery_calcmodel_chain":
+            # A nested CalculationModel whose calculate() is a
+            # @lex_shared_task: dispatched as itself on the Celery route (15.72).
+            LogCeleryInnerSavedCalc(
+                name=self.units_csv,
+                is_calculated=LogCeleryInnerSavedCalc.IN_PROGRESS,
+            ).save()
+            return
+        if self.child_mode == "celery_calcmodel_chain_3":
+            # A @lex_shared_task middle that saves a nested CalculationModel
+            # of its own while it runs on the worker (15.73).
+            LogCeleryMiddleSavedCalc(
+                name=self.units_csv,
+                is_calculated=LogCeleryMiddleSavedCalc.IN_PROGRESS,
+            ).save()
+            return
+        if self.child_mode == "failing_caught_read_live_log":
+            self._save_failing_nested_then_read_live_log(LogFailingInnerSavedCalc)
+            return
+        if self.child_mode == "celery_failing_caught_read_live_log":
+            self._save_failing_nested_then_read_live_log(LogCeleryFailingInnerSavedCalc)
+            return
+        if self.child_mode == "failing_calcmodel":
+            # The nested CalculationModel's failure fails the root (15.66).
+            LogFailingInnerSavedCalc(
+                name=self.units_csv,
+                is_calculated=LogFailingInnerSavedCalc.IN_PROGRESS,
+            ).save()
+            return
+        if self.child_mode == "failing_calcmodel_caught":
+            # The root handles the nested CalculationModel's failure and
+            # carries on (15.67).
+            from lex.core.models.CalculationModel import CalculationModelException
+
+            try:
+                LogFailingInnerSavedCalc(
+                    name=self.units_csv,
+                    is_calculated=LogFailingInnerSavedCalc.IN_PROGRESS,
+                ).save()
+            except CalculationModelException:
+                LexLogger().add_text("root recovered").log()
+            return
 
 
 @_permissive
@@ -346,3 +450,300 @@ class LogOnCreateCalc(CalculationModel):
         from lex.audit_logging.handlers.LexLogger import LexLogger
 
         LexLogger().add_text(f"created {self.name}").log()
+
+
+# ── Cluster 15m / 15n: a generated row's log is filed under that row ──
+# Kept out of ALL_MODELS: only 15m and 15n create them.
+
+
+@_permissive
+class LogFailingChild(CalculatedModelMixin):
+    """Combinatorial child that logs, then fails when ``unit == "bad"``.
+
+    The failure stops the batch; the lines it wrote before failing must
+    still be filed under it (15.62).
+    """
+
+    unit = models.CharField(max_length=50)
+
+    defining_fields = ["unit"]
+    parallelizable_fields: list[str] = []
+
+    class Meta:
+        app_label = "lex_app"
+
+    def get_selected_key_list(self, key):
+        # Fallback only — the root passes the units as overrides.
+        if key == "unit":
+            return ["ok"]
+        return []
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LexLogger().add_text(f"before failure {self.unit}").log()
+        if self.unit == "bad":
+            raise ValueError(f"LogFailingChild({self.unit}) failing on purpose")
+
+
+@_permissive
+class LogQuietMiddle(CalculatedModelMixin):
+    """Middle layer that creates its grandchildren first and logs only
+    after them, so the grandchild is the first to need the middle's row
+    (15.60, 15.61)."""
+
+    unit = models.CharField(max_length=50)
+
+    defining_fields = ["unit"]
+    parallelizable_fields: list[str] = []
+
+    class Meta:
+        app_label = "lex_app"
+
+    def get_selected_key_list(self, key):
+        # Fallback only — the root passes the units as overrides.
+        if key == "unit":
+            return ["u1"]
+        return []
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LogGrandchildCalc.create(unit=[self.unit])
+        LexLogger().add_text(f"middle after {self.unit}").log()
+
+
+GENERATED_ROW_MODELS = [LogFailingChild, LogQuietMiddle]
+
+
+# ── Cluster 15o: a nested CalculationModel's synchronous run ──
+# Kept out of ALL_MODELS: only 15o creates it.
+
+
+@_permissive
+class LogFailingInnerSavedCalc(CalculationModel):
+    """Like LogInnerSavedCalc, but its calculate() fails after logging, inside
+    its own transaction (15.66, 15.67)."""
+
+    name = models.CharField(max_length=100)
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self):  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LexLogger().add_text(f"failing inner {self.name}").log()
+        raise ValueError(f"LogFailingInnerSavedCalc({self.name}) failing on purpose")
+
+
+NESTED_RUN_MODELS = [LogFailingInnerSavedCalc]
+
+
+@_permissive
+class LogCeleryLoudChild(CalculatedModelMixin):
+    """Like LogLoudChild, but ``calculate()`` is a ``@lex_shared_task``, so
+    ``create()`` takes the Celery route when Celery is active (15.63)."""
+
+    unit = models.CharField(max_length=50)
+
+    defining_fields = ["unit"]
+    parallelizable_fields: list[str] = []
+
+    class Meta:
+        app_label = "lex_app"
+
+    def get_selected_key_list(self, key):
+        # Fallback only — the root passes the units as overrides.
+        if key == "unit":
+            return ["u1"]
+        return []
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LexLogger().add_text(f"celery loud {self.unit}").log()
+
+
+@_permissive
+class LogCeleryGrandchild(CalculatedModelMixin):
+    """Deepest layer of the Celery three-level chain — always logs (15.64)."""
+
+    unit = models.CharField(max_length=50)
+
+    defining_fields = ["unit"]
+    parallelizable_fields: list[str] = []
+
+    class Meta:
+        app_label = "lex_app"
+
+    def get_selected_key_list(self, key):
+        # Fallback only — the middle passes the unit as an override.
+        if key == "unit":
+            return ["u1"]
+        return []
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LexLogger().add_text(f"celery grandchild {self.unit}").log()
+
+
+@_permissive
+class LogCeleryQuietMiddle(CalculatedModelMixin):
+    """Celery middle layer: dispatches its grandchildren before it has
+    logged anything, and logs only after them (15.64). It is unsaved while
+    its calculate() runs, so the stack shipped to the grandchildren's tasks
+    carries a model with no primary key."""
+
+    unit = models.CharField(max_length=50)
+
+    defining_fields = ["unit"]
+    parallelizable_fields: list[str] = []
+
+    class Meta:
+        app_label = "lex_app"
+
+    def get_selected_key_list(self, key):
+        # Fallback only — the root passes the units as overrides.
+        if key == "unit":
+            return ["u1"]
+        return []
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LogCeleryGrandchild.create(unit=[self.unit])
+        LexLogger().add_text(f"celery middle after {self.unit}").log()
+
+
+from lex.lex_app.celery_tasks import lex_shared_task  # noqa: E402
+
+# Explicit task names: Celery names a task after ``module.function`` and all
+# three ``calculate`` methods live in this module, so without them the last
+# registration would run every model's calculate() (see celery_async/models.py).
+LogCeleryLoudChild.calculate = lex_shared_task(
+    name="test_15n.celery_loud_child.calculate"
+)(LogCeleryLoudChild.calculate)
+LogCeleryGrandchild.calculate = lex_shared_task(
+    name="test_15n.celery_grandchild.calculate"
+)(LogCeleryGrandchild.calculate)
+LogCeleryQuietMiddle.calculate = lex_shared_task(
+    name="test_15n.celery_quiet_middle.calculate"
+)(LogCeleryQuietMiddle.calculate)
+
+CELERY_ROUTE_MODELS = [LogCeleryLoudChild, LogCeleryGrandchild, LogCeleryQuietMiddle]
+
+
+# ── Cluster 15p: a CalculationModel whose calculate() is a @lex_shared_task ──
+# Kept out of ALL_MODELS: only 15p creates them. With Celery active,
+# calculate_hook dispatches each of them as its own decorated task, not
+# through the generic calc_and_save.
+
+
+@_permissive
+class LogCeleryInnerSavedCalc(CalculationModel):
+    """Like LogInnerSavedCalc, with a @lex_shared_task calculate() (15.72)."""
+
+    name = models.CharField(max_length=100)
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self):  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LexLogger().add_text(f"celery inner {self.name}").log()
+
+
+@_permissive
+class LogCeleryFailingInnerSavedCalc(CalculationModel):
+    """Like LogFailingInnerSavedCalc, with a @lex_shared_task calculate()
+    that logs and then fails (15.77)."""
+
+    name = models.CharField(max_length=100)
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self):  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LexLogger().add_text(f"celery failing inner {self.name}").log()
+        raise ValueError(f"LogCeleryFailingInnerSavedCalc({self.name}) failing on purpose")
+
+
+@_permissive
+class LogCeleryMiddleSavedCalc(CalculationModel):
+    """Like LogMiddleSavedCalc, with a @lex_shared_task calculate(): logs and
+    saves a LogInnerSavedCalc while it runs on the worker (15.73)."""
+
+    name = models.CharField(max_length=100)
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self):  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LexLogger().add_text(f"celery middle {self.name}").log()
+        LogInnerSavedCalc(
+            name=f"inner-from-{self.name}",
+            is_calculated=LogInnerSavedCalc.IN_PROGRESS,
+        ).save()
+
+
+@_permissive
+class LogCeleryRootCalc(CalculationModel):
+    """A root with a @lex_shared_task calculate() that logs one line (15.74)."""
+
+    name = models.CharField(max_length=100)
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self):  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LexLogger().add_text(f"celery root {self.name}").log()
+
+
+LogCeleryInnerSavedCalc.calculate = lex_shared_task(
+    name="test_15p.celery_inner_saved_calc.calculate"
+)(LogCeleryInnerSavedCalc.calculate)
+LogCeleryFailingInnerSavedCalc.calculate = lex_shared_task(
+    name="test_15p.celery_failing_inner_saved_calc.calculate"
+)(LogCeleryFailingInnerSavedCalc.calculate)
+LogCeleryMiddleSavedCalc.calculate = lex_shared_task(
+    name="test_15p.celery_middle_saved_calc.calculate"
+)(LogCeleryMiddleSavedCalc.calculate)
+LogCeleryRootCalc.calculate = lex_shared_task(
+    name="test_15p.celery_root_calc.calculate"
+)(LogCeleryRootCalc.calculate)
+
+DECORATED_RUN_MODELS = [
+    LogCeleryInnerSavedCalc,
+    LogCeleryFailingInnerSavedCalc,
+    LogCeleryMiddleSavedCalc,
+    LogCeleryRootCalc,
+]

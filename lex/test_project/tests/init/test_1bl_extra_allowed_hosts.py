@@ -139,7 +139,14 @@ class TestCluster01bl_ExtraAllowedHosts(SimpleTestCase):
               second imports cleanly. Off a deployed instance "*" is not the
               framework's business and startup is unaffected.
         """
-        deployed = dict(_REDIS, DEPLOYMENT_ENVIRONMENT="prod", DOMAIN_HOSTED="canonical.example.com")
+        # A deployed instance must also carry its own DJANGO_SECRET_KEY (lex-app #866, 1bc), or it
+        # refuses to start for that reason instead -- which is not what this scenario is about.
+        deployed = dict(
+            _REDIS,
+            DEPLOYMENT_ENVIRONMENT="prod",
+            DOMAIN_HOSTED="canonical.example.com",
+            DJANGO_SECRET_KEY="test-1bl-private-key-not-the-published-default",
+        )
 
         name, message = _fresh(_IMPORT_OUTCOME, **deployed, LEX_EXTRA_ALLOWED_HOSTS="*")
         self.assertEqual(name, "ImproperlyConfigured", msg=message)

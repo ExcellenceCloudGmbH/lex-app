@@ -1502,7 +1502,7 @@ imports anything from `lex.lex_app`, whose settings module reads the environment
 | --- | --- |
 | Scenario range | 1.357 – 1.369 |
 | Type | U + I |
-| Files covered | `lex/lex_app/reflex/` (`config.py`, `auth.py` — `LexKeycloakAuthState`, `LexUser` —, `django_orm.py`, `dashboards.py`, `app.py`, `Reflex.py`, `examples/_reflex_structure.py`), `lex/reflex_app.py`, `lex/utilities/config/generic_app_config.py`, `lex/lex_app/apps.py` (`_apply_nest_asyncio`, `register_models`), `lex/process_admin/utils/model_structure_builder.py`, `lex/core/models/LexModel.py` (`reflex_main` / `reflex_class_main`) |
+| Files covered | `lex/lex_app/reflex/` (`config.py`, `auth.py` — `LexKeycloakAuthState`, `LexUser` —, `django_orm.py`, `dashboards.py`, `app.py`, `Reflex.py`, `examples/_reflex_structure.py`), `lex/reflex_app.py`, `lex/utilities/config/generic_app_config.py`, `lex/lex_app/apps.py` (`ready()`, `register_models`), `lex/process_admin/utils/model_structure_builder.py`, `lex/core/models/LexModel.py` (`reflex_main` / `reflex_class_main`) |
 | Test file | `lex/test_project/tests/init/test_1aq_reflex_dashboards.py` |
 | Test classes | `TestCluster01aq_Config` (1.357, 1.357b, 1.357c), `TestCluster01aq_KeycloakProvider` (1.358, 1.359, 1.369), `TestCluster01aq_Orm` (1.360–1.361), `TestCluster01aq_Dispatch` (1.362–1.363), `TestCluster01aq_PageChrome` (1.364), `TestCluster01aq_DispatchPage` (1.365, 1.365b), `TestCluster01aq_TheCompiledApp` (1.366), `TestCluster01aq_Registration` (1.367), `TestCluster01aq_EventLoops` (1.368) |
 | Fixtures | probe models `ReflexProbeFund` (both hooks), `ReflexProbeDefault` (`LexModel`, no overrides), `ReflexProbePlain` (plain Django model); a session's state tree built from Reflex's root `State`; `E2ETestCase` for the ORM and dispatch scenarios; subprocesses for 1.357c and 1.368 |
@@ -1522,15 +1522,15 @@ imports anything from `lex.lex_app`, whose settings module reads the environment
 | 1.365 | the dispatch page | only models that override a hook are compiled in; a hook that is not a classmethod/staticmethod or returns no component fails at compile; `_reflex_structure.py` may be absent but never silently broken |
 | 1.366 | the compiled app | sign-in and popup routes, the guard running before `resolve` on `/`, the connection middleware, the standard scopes without `offline_access`, the structure's pages and the models' dashboards |
 | 1.367 | registration | the report frames `REFLEX_URL` (default `:8502`) with `lex_embed=1`; it and its sidebar entry exist only with `IS_REFLEX_ENABLED=true`; discovery skips `_reflex_structure.py` and `rxconfig.py`, and the `reflex` directory only inside lex's own packages |
-| 1.368 | granian's uvloop | `AppConfig.ready()` skips `nest_asyncio` on a loop it cannot patch instead of failing |
+| 1.368 | granian's uvloop | with uvloop's loop current, a downstream project's Django setup carries on and patches nothing, and `async_to_sync` works after it. It used to assert that `_apply_nest_asyncio` skipped uvloop and patched asyncio's own loop; it was rewritten for BUG-046 in batch 1bo (below) |
 | 1.369 | `LexUser` | `username` is `preferred_username`; `display_name` the name, else the username, else the email; both empty signed out |
 
 **1.361 was strengthened after a mutation run.** Its first form asserted only that a connection
 inside an atomic block survived an event, and a middleware that closed it anyway still passed:
 Django's `close()` inside a transaction marks the connection (`closed_in_transaction`,
 `needs_rollback`) instead of dropping it. It now pins both flags and a query in the same
-transaction. Removing `_apply_nest_asyncio`'s guard fails 1.368; letting discovery walk the Reflex
-package fails 1.367.
+transaction. Letting discovery walk the Reflex package fails 1.367. (Removing
+`_apply_nest_asyncio`'s guard used to fail 1.368. The function is gone since batch 1bo.)
 
 **1.357c caught a shadowed export.** The package serves its API lazily (PEP 562), and
 `orm` was both the `@orm` decorator and the name of the submodule defining it. Importing
@@ -1541,8 +1541,8 @@ found it; the module is now `django_orm.py`, and 1.360 uses the public import pa
 
 **Two scenarios run the way Reflex constrains them.** The auth plugin binds itself to the process
 on the first compile and refuses a second, so 1.366 compiles the real `lex.reflex_app` once in
-`setUpClass` and every assertion reads that compile. `nest_asyncio` patches asyncio process-wide,
-so 1.368 runs in a subprocess rather than leave the rest of the suite on a patched loop.
+`setUpClass` and every assertion reads that compile. 1.368 runs in a subprocess because it checks
+process-wide asyncio state, which a regression would otherwise leave patched for the rest of the suite.
 
 The browser half — Keycloak's redirect and callback, the dashboards rendering signed in, embed
 mode, sign-out, and a cross-site frame signing in through the popup — was verified end to end
@@ -1811,6 +1811,181 @@ config each fail 1.404.
 | 1.409 | no `Process` node type | the `api/model-structure` payload types the model `Model`, the report `HTMLReport`, the branch `Folder`; no node anywhere carries `Process` |
 
 **Why a regression matters:** a half-removed feature is worse than either state — a `registerProcess` that still collects classes looks like a working feature while `api/process/<name>` 404s, and a stale `Process` entry in the reserved-name set keeps rejecting a project's own model for a framework class that no longer exists.
+
+---
+
+### Batch 1bo — a project's startup leaves asyncio unpatched and `async_to_sync` usable (BUG-046) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.665 – 1.666 (and 1.368 rewritten) |
+| Type | U |
+| Files covered | `lex/lex_app/apps.py` (`LexAppConfig.ready()`; `_apply_nest_asyncio` removed), `lex/bin/lex.py` (the environment the child starts from; the comment on the `lex streamlit` uvloop guard), `lex/lex_app/asgi.py` (imported inside a running loop for 1.666) |
+| Test file | `lex/test_project/tests/init/test_1bo_bootstrap_leaves_asyncio_unpatched.py`; 1.368 in `test_1aq_reflex_dashboards.py` |
+| Test classes | `TestCluster01bo_BootstrapLeavesAsyncioUnpatched` (1.665, 1.666); `TestCluster01aq_EventLoops` (1.368) |
+| Fixtures | a minimal downstream project per scenario (a temporary folder named `cluster1bo_*` holding `lex_config.py`), set up in a fresh interpreter started from this checkout (`PYTHONPATH`), with a `faulthandler` watchdog around the two `async_to_sync` calls; no database |
+| Tests landed | **2 pass / 0 fail** (1.368 passes too). On v2.4.2 the watchdog fires in all three, because the second `async_to_sync` call blocks |
+| Status | ✅ Complete. BUG-046 resolved. |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.665 | set up with no running loop | after a downstream project's `django.setup()`, `asyncio.run` is the standard library's, and two `async_to_sync` calls with thread-sensitive work both return, each running its work on the calling thread |
+| 1.666 | set up inside the server's loop | the same when `lex_app.asgi` (what `lex start` serves) is imported inside a running asyncio loop, as uvicorn does |
+| 1.368 (rewritten) | granian's uvloop | with uvloop's loop current, setup carries on, `asyncio.run` is the standard library's, and both calls return. The child now gets `PYTHONPATH`. Without it, a checkout that is not pip-installed cannot import lex in the child, which is why the old 1.368 was a v2.4.2 baseline failure |
+
+**Why nothing in lex needs nest_asyncio:** it was added when `ready()` called
+`asyncio.run(self.async_ready(...))` directly, inside the loop uvicorn sets Django up in.
+`async_ready` has since moved to a thread of its own, and the startup reset now runs on one too
+(8d). Streamlit, Reflex, Celery and Channels never use it. Downstream code that relied on its side
+effects, such as a nested `run_until_complete` or `get_event_loop()` creating loops in worker
+threads, now has to apply it itself.
+### Batch 1bc — deployed secret key, session lifetime and PKCE ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.481 – 1.489 |
+| Type | U (1.481–1.486, 1.489), I (1.487–1.488) |
+| Files covered | `lex/lex_app/settings.py` (`PUBLISHED_DEFAULT_SECRET_KEY` + deployed check, `SESSION_COOKIE_AGE`, `OIDC_MIDDLEWARE_SESSION_TIMEOUT_SECONDS`, `OIDC_RP_USE_PKCE`, `OIDC_RP_FORCE_SECRET_WITH_PKCE`), `lex/proxy.py` (OIDC client registration: `code_challenge_method`) |
+| Test file | `lex/test_project/tests/init/test_1bc_auth_settings_hardening.py` |
+| Test classes | `TestCluster01bc_DeployedSecretKey` (1.481–1.483), `TestCluster01bc_SessionLifetime` (1.484–1.486), `TestCluster01bc_DjangoSignInUsesPkce` (1.487–1.488), `TestCluster01bc_ProxySignInUsesPkce` (1.489) |
+| Fixtures | fresh interpreters importing the settings; an RSA key pair per module; the token endpoint mocked at `oauth2_authcodeflow.auth.request_post`; authlib server metadata patched on the proxy's client |
+| Tests landed | **9 pass / 0 fail** against django-oauth2-codeflow 2.1.0 |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-06-auth-hotfixes.md) |
+
+**Allocation note:** Letter bc, not ay/az/ba/bb: those are held by in-flight branches (ay on fix/streamlit-report-frames-unauthenticated and others, az/ba on release/2.1.x, ba/bb on feat/fleet-metrics-calculation-events), which also claim scenarios up to 1.480. The same letter and scenario IDs are used on lex-app-v2 and release/2.1.x, so a merge between the lines is a no-op.
+
+---
+### Batch 1bp — a frame another application put on screen does not get to move that tab ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.667 – 1.673 |
+| Type | U |
+| Files covered | `lex/proxy.py` (`_frame_may_move_the_tab`, `_frame_breakout_response`, `proxy`), `lex/lex_app/streamlit/Streamlit.py` (`get_html`) at the join |
+| Test file | `lex/test_project/tests/init/test_1bp_frame_does_not_take_the_tab.py` |
+| Test classes | `TestCluster01bp_FrameDoesNotTakeTheTab` (1.667–1.671), `TestCluster01bp_TheReportedJourney` (1.672–1.673) |
+| Fixtures | a hand-built Starlette `Request` parameterised by `Sec-Fetch-Site`; for the join, the real `Streamlit` report's own output driven against `proxy.app` through `TestClient`, with `validate_jwt_token` and `_upstream_send` stubbed (the Keycloak and Streamlit boundaries) |
+| Tests landed | **7 pass / 0 fail** |
+| Also run | cluster 1z (1.211–1.216), unchanged and still 6 pass — the breakout itself is not narrowed, only who may script the navigation |
+### Batch 1az — a machine endpoint on the dashboard origin cannot take over the user's tab ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.415 – 1.422 |
+| Type | U |
+| Files covered | `lex/proxy.py` (`_NON_LANDING_PREFIXES`, `_NON_LANDING_PATHS`, `_is_landing_path`, `_safe_next_path`, `_unauthenticated_response`, `_is_top_level_document_request`, `theme_relay`, `_THEME_RELAY_CONFIGURED`) |
+| Test file | `lex/test_project/tests/init/test_1az_proxy_tab_takeover.py` |
+| Test classes | `TestCluster01az_WhereALoginMayReturnTo` (1.415–1.417), `TestCluster01az_WhoMayMoveTheTopWindow` (1.418–1.419), `TestCluster01az_LandingOnTheRelayAnyway` (1.420–1.422) |
+| Fixtures | none — a hand-built Starlette `Request` per case; `PUBLIC_URL`, `_THEME_RELAY_CONFIGURED` and `_THEME_RELAY_ALLOWED` patched per scenario, `_put_tokens`/`oauth.oidc` stubbed for the callback |
+| Tests landed | **8 pass / 0 fail** (13 subtests) |
+### Batch 1ay — `ALLOWED_HOSTS` accepts the instance's own backend Service name ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.410 – 1.414 |
+| Type | U |
+| Files covered | `lex/lex_app/settings.py` (`K8S_NAMESPACE_FILE`, `BACKEND_SERVICE_PREFIX`, `_k8s_namespace`, `_cluster_service_hosts`, `ALLOWED_HOSTS`) |
+| Test file | `lex/test_project/tests/init/test_1ay_allowed_hosts_in_cluster.py` |
+| Test classes | `TestCluster1ay_AllowedHostsAcceptsTheInClusterService` (1.410–1.414) |
+| Fixtures | none — the two helpers are pure, so no settings re-import and no environment patching is needed |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.667 | the shell's frame leaves the shell's tab alone | `Sec-Fetch-Site: same-site` → no `window.top.location`, but still 401, still `lex-auth-required`, still `target="_top"` at this proxy's login |
+| 1.668 | an unrelated embedder has no more claim | `Sec-Fetch-Site: cross-site` → the same |
+| 1.669 | this origin's own frame still recovers | `Sec-Fetch-Site: same-origin` → the automatic navigation is kept |
+| 1.670 | a client that names no embedder is unchanged | no `Sec-Fetch-Site` → pre-existing behaviour, as scenario 1.214 has it for the rest of this routing |
+| 1.671 | the embedder check is a header read | `SAME-SITE` / `Cross-Site` refused, `same-origin` and absent allowed |
+| 1.672 | the frame the report builds is let in | the URL the real `Streamlit` report produces, loaded as a framed document against the real proxy app, banks the token, is redirected without it and ends on the dashboard's own bytes |
+| 1.673 | the fault and the amplifier, observed together | the URL the report produces with no session token still 401s, and that 401 moves no window |
+
+**Why a regression matters:** this is the amplifier, not the fault. Batch 10r stops the Streamlit report framing its dashboard without a credential, so the 401 that started the reported tab takeover no longer happens — but any frame that cannot authenticate, for any reason, could still move a window belonging to the page the user was reading. LEX-1477 fixed this one path at a time (`/_lex/*`, `/_stcore/*`); naming the embedder fixes the class. The counterweight is 1.669 and 1.670: withhold the navigation from everything and the dashboard's own recovery goes with it.
+| 1.415 | a utility path is never a return target | `_safe_next_path` rejects `/_lex/theme-relay`, `/_stcore/health`, `/_stcore/host-config`, `/auth/token`, `/auth/adopt` and `/_lex/theme-relay?mode=dark`; `/`, a deep view and one with query + fragment survive unchanged |
+| 1.416 | a stashed utility path lands on `/` | `auth_callback` with `/_lex/theme-relay` in the session redirects to `/` |
+| 1.417 | no return target for a top-level utility visit | an unauthenticated `Sec-Fetch-Dest: document` load of `/auth/token` redirects to a bare `/auth/login`, with no `next` |
+| 1.418 | a hidden utility frame gets a 401, not a breakout | a framed load of each utility path returns `JSONResponse` 401 whose body carries no `window.top.location` |
+| 1.419 | a framed dashboard still breaks out | a framed load of `/?model=Period` is still the 401 HTML breakout, still attempting top-nav, still carrying `next=%2F%3Fmodel%3DPeriod` |
+| 1.420 | a top-level visit is sent back to the frontend | with `_THEME_RELAY_CONFIGURED`, `theme_relay` answers a `document` request with a 303 to that origin |
+| 1.421 | an unconfigured deployment does not bounce to localhost | with nothing configured, the same request is served the relay (200), not redirected |
+| 1.422 | the framed relay is untouched | a `Sec-Fetch-Dest: iframe` request still gets 200, the shared storage key, and `frame-ancestors <frontend>` |
+
+**Why a regression matters:** this is LEX-1477, and the shape of the failure is why it took a customer to find it. Nothing errors. The frontend frames a hidden, zero-sized `/_lex/theme-relay`; on 2.1.11 the proxy had no such route (it arrived in 2.2.0 with `8780a119`), so that frame fell into the authenticated catch-all, 401'd, and was handed the frame-breakout page — whose entire purpose is `window.top.location = <login>`. Keycloak had a live SSO session, so the round trip returned immediately and `auth_callback` honoured `next=/_lex/theme-relay`. The result was a tab that, intermittently and only when clicking a model with an embedded dashboard, left the instance frontend and parked on a blank storage document at `https://<instance>-streamlit.../\_lex/theme-relay`, with no error, no log line the user could see, and nothing to connect it to a theme shim.
+
+**Why the route existing is not the fix:** adding `/_lex/theme-relay` removes the one 401 that was observed. It does not remove the rule that produced the outcome — *whatever* 401s inside a frame may move the top window, and *whatever* path 401'd becomes where the browser is left afterwards. Both halves are now bounded by what the path is: only a page may escalate, and only a page may be returned to. 1.419 is the counterweight that keeps the narrowing honest — withhold the breakout from everything and an expired dashboard shows Keycloak's "refused to connect" wall again, which is the failure the breakout was written for in the first place (1.211).
+
+**Frontend twin:** `process-admin-general-client` batch F12u (F12.104–F12.108) closes the same hole from the other side — the relay frame is sandboxed so nothing served there can navigate the tab at all, and the shell attributes a `lex-auth-required` message to the dashboard frame rather than to its origin, which is what let an invisible frame on that origin drive a full-page navigation.
+| 1.410 | short Service name accepted | `lex-backend-<instance>` is among the derived hosts |
+| 1.411 | the three longer DNS forms accepted | `.<ns>`, `.<ns>.svc` and `.<ns>.svc.cluster.local` are all present |
+| 1.412 | nothing added off-cluster | no instance identifier yields `[]`, whatever the namespace says |
+| 1.413 | unreadable namespace degrades | an empty namespace yields exactly the short name, and does not raise |
+| 1.414 | the namespace file is read safely | `_k8s_namespace` on a missing path returns `""` rather than raising |
+
+**Why a regression matters:** Django compares `Host:` against `ALLOWED_HOSTS` in `CommonMiddleware`, before any view, permission class or model code runs — so a Service name missing from the list is not a permission failure and not a routing failure, it is a `DisallowedHost` with nothing downstream reached. It breaks every service-to-service call an instance makes while leaving the browser-facing surface working, which is exactly how it was found: on a customer instance on 2026-10-25 every file write failed with `OSError` and the backend logged `Invalid HTTP_HOST header: 'lex-backend-armira-self-servi-prod-1492:7000'`, with a valid registered API key and a correct route. `POD_IP`, already in the list, does not cover it — it is the reading pod's own address, so it says nothing about how other pods address the backend by name, and a caller has no way to learn it.
+
+**Why the namespace comes from a file:** `POD_NAMESPACE` is not set in the platform's pods (measured), while `/var/run/secrets/kubernetes.io/serviceaccount/namespace` is mounted in every pod with a service account. Reading it introduces no new required environment variable — which matters here, because `settings.py` already refuses to start when `DOMAIN_HOSTED` is missing, and a second such variable would turn a missing value into a crash-loop rather than a fix.
+
+---
+
+### Batch 1bj — the initial-data load survives restarts and a second server process ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.609 – 1.618 |
+| Type | I (1.614 runs a child interpreter) |
+| Files covered | `lex/lex_app/initial_data_load.py` (new: lock, state record, decision, non-daemon thread), `lex/lex_app/apps.py` (`async_ready` hands the decision and the load to it) |
+| Test file | `lex/test_project/tests/init/test_1bj_initial_data_load_restart.py` |
+| Test classes | `TestCluster01bj_StartupEntryPoint` (1.609, 1.613), `TestCluster01bj_OneProcessAtATime` (1.610–1.612, 1.617), `TestCluster01bj_RecordedOutcome` (1.615, 1.616, 1.618), `TestCluster01bj_ProcessExit` (1.614) |
+| Fixtures | `SimpleItem` (E2E table); `_Seed`, a `ProcessAdminTestCase` naming `SimpleItem`; `_FakeLoad` in place of `load_data` (the seed body is 1f/1i's); `_OtherProcess`, a second database session holding the real advisory lock and either releasing it or dying with it |
+| Tests landed | **10 pass / 0 fail**; 1av, 1c/1f/1i and 8j unchanged (55 pass / 1 skip together) |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.609 | not a daemon | `async_ready`, called from the daemon `lex-async-ready` thread, loads in `lex-initial-data-load` with `daemon=False`, outside `WaitForTasks`; state `completed` |
+| 1.610 | the second process waits | while another session holds the lock and loads, nothing is decided here; afterwards the normal skip, the seed exists once |
+| 1.611 | a killed load is reported | the holder writes part of the seed and its session dies: `interrupted`, an ERROR naming the recovery, no load over the partial rows |
+| 1.612 | a stopping process gives up waiting | `abandoned`, nothing loaded |
+| 1.613 | MQ/Worker | the load runs inside `WaitForTasks` in the same non-daemon thread |
+| 1.614 | the process waits for the load | a child interpreter whose main thread returns mid-load exits only after the load finished |
+| 1.615 | a failed load | recorded `failed` with the error; the next start reports it, does not load over it |
+| 1.616 | died before writing | `running` with no rows is loaded again and recorded `completed` |
+| 1.617 | lock released | another session can take the lock after a load |
+| 1.618 | existing data | with no record or a `completed` one: the ordinary skip, no ERROR |
+
+**Why a regression matters:** the "all referenced models empty" gate cannot tell a finished seed from half of one. A load cut off by a restart left production with 89 of 179 companies and a log that said the data already existed; every later start skipped the load.
+
+---
+
+### Batch 1bk — the Streamlit handshake stays inside everyone's header budget ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.619 – 1.625 |
+| Type | U |
+| Files covered | `lex/ws_header_limits.py` (new: `apply_websocket_header_limits`, `websockets_line_limit_shortfall`), `lex/bin/lex.py` (import order, the `streamlit` command's launch diagnostic), `lex/proxy.py` (import order, credential forwarding in `ws_proxy` and `proxy`), `lex/streamlit_app.py` (`bearer_from_headers`, read-side only) |
+| Test file | `lex/test_project/tests/init/test_1bk_streamlit_header_budget.py` |
+| Test classes | `TestCluster01bk_WebsocketHeaderLimit` (1.619–1.621, 1.625), `TestCluster01bk_SingleCredentialHeader` (1.622–1.624) |
+| Fixtures | `_RawCapturingUpstream` — like 1ac's stub but keeping header names verbatim, because the case-only duplicate this batch guards is invisible to a dict keyed on the lowered name; `_FakeUpstreamWS` keeping the handshake list as sent; `patch.object(websockets.http11, "MAX_LINE", …)` for the shortfall check, so the result does not depend on the installed release |
+| Tests landed | **7 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.619 | the ceiling is the default | with the variable unset, importing `lex.ws_header_limits` leaves `WEBSOCKETS_MAX_LINE_LENGTH` at `65536`, and at least twice the library's own 8192 |
+| 1.620 | an operator's value wins | a pre-set `131072` survives the import — `setdefault`, not `set` |
+| 1.621 | applied in time | `from lex import ws_header_limits` precedes `import uvicorn` in `lex/bin/lex.py` and `from websockets …` in `lex/proxy.py`, matched as import statements so `starlette.websockets` cannot anchor the check |
+| 1.622 | one copy, HTTP | a proxied `/dashboard` request carries `Authorization: Bearer <token>` exactly once and neither `X-Forwarded-Access-Token` nor `X-Streamlit-Access-Token` |
+| 1.623 | not two Authorizations | a request sending its own `Authorization` reaches the upstream with only the proxy's |
+| 1.624 | one copy, handshake | the `/_stcore/stream` handshake carries one `Authorization`, no retired header, and `lex.streamlit_app.bearer_from_headers` returns that token |
+| 1.625 | a ceiling not in force says so | `MAX_LINE` 8192 against a configured 65536 returns a sentence naming both; equal values return `None` |
+
+**Why a regression matters:** the failure mode is an open socket and a blank page. uvicorn's `websockets-sansio` handler neither answers nor closes on a handshake parse error, so LEX-894 (instance lex-1483) presented as a Streamlit dashboard that never loaded, with nothing in any log naming a header. The root cause — a per-instance Keycloak client running with full scope, so every instance's token carried every other instance's roles and audience — is removed in LEX_TERRAFORM_MODULES (`modules/lex-keycloak`, LEX-898). This batch is the floor under it, and each half can be broken silently: a ceiling applied one import too late has no effect, a websockets below 13 ignores it outright, and either leaves the environment saying 65536 while the handshake still dies at 8 KB.
+
+**Mutations against lex-app-v2 (the pre-change tree):** 1.621 fails for both modules, 1.622 and 1.624 fail for both retired headers. 1.619, 1.620, 1.623 and 1.625 pass there — 1.623 pins an invariant (`authorization` in `_HOP_BY_HOP`) that this change makes load-bearing rather than one it introduces, and the other three guard the new module against being weakened later.
+
+**Letter:** taken at `bk` / 1.619–1.625 rather than the next free pair on `lex-app-v2` (`ay` / 1.410): open branches hold `ay` through `bj`, and the same step was taken for `bj`.
 
 ---
 

@@ -273,7 +273,9 @@ class TestCluster01av_CacheTables(TransactionTestCase):
                            autospec=True, side_effect=decide), \
                 mock.patch("lex.lex_app.tests.ProcessAdminTestCase.ProcessAdminTestCase.get_list_of_non_empty_models",
                            return_value=[]):
-            asyncio.run(app_config.async_ready({}))
+            # The decision runs in the load thread async_ready starts (cluster 1bj).
+            load_thread = asyncio.run(app_config.async_ready({}))
+            load_thread.join(60)
         self.assertEqual(seen.get("tables"), {"default_cache", "oidc_cache"})
 
 

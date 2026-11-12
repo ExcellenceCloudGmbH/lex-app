@@ -176,9 +176,11 @@ if os.getenv("STORAGE_TYPE") == "GCS":
 # See https://docs.djangoproject.com/en/3.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv(
-    "DJANGO_SECRET_KEY", default="pjlulvaa77lteno-_y6!oxb%63xqiaw4%n%1or&77a!x9@nkd+"
-)
+#: The development fallback. It is published with this package, so it signs
+#: nothing a deployed instance can trust; deployed pods refuse to start on it
+#: (see the DEPLOYMENT_ENVIRONMENT checks below).
+PUBLISHED_DEFAULT_SECRET_KEY = "pjlulvaa77lteno-_y6!oxb%63xqiaw4%n%1or&77a!x9@nkd+"
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", default=PUBLISHED_DEFAULT_SECRET_KEY)
 QUACKBACK_WIDGET_SECRET = os.getenv("QUACKBACK_WIDGET_SECRET", "")
 
 # SECURITY WARNING: don't run with debug turned on in production!
@@ -209,12 +211,80 @@ _lex_extra_allowed_hosts = [
     if host.strip()
 ]
 
+#: Where Kubernetes mounts the pod's own namespace. Present in every pod with a service account,
+#: which is every pod the platform runs, and readable without any API call or new env var.
+K8S_NAMESPACE_FILE = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
+#: How the platform names an instance's backend Service: this prefix plus the instance identifier.
+BACKEND_SERVICE_PREFIX = "lex-backend-"
+
+
+def _k8s_namespace(path: str = K8S_NAMESPACE_FILE) -> str:
+    """This pod's namespace, or `""` outside a cluster.
+
+    Read from the mounted file rather than an environment variable because there is no namespace
+    variable to rely on - `POD_NAMESPACE` is NOT set in the platform's pods (measured). Any read
+    error means "not in a cluster", which is the correct answer on a developer's machine.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+def _cluster_service_hosts(instance: str, namespace: str) -> list:
+    """The DNS names this pod's own backend Service answers to from inside the cluster.
+
+    WHY THIS EXISTS. A lex instance is several pods sharing one database, and the ones that are not
+    the backend reach it by its Kubernetes Service name - `lex-backend-<instance>:7000` - because
+    that keeps the traffic inside the cluster, off the ingress and off TLS. Django then sees that
+    Service name in `Host:`, and until this function existed `ALLOWED_HOSTS` held only
+    `DOMAIN_HOSTED`, the loopback pair and `POD_IP`, so `CommonMiddleware` refused the request
+    before any view, permission class or model code ran:
+
+        django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header:
+        'lex-backend-<instance>:7000'. You may need to add 'lex-backend-<instance>'
+        to ALLOWED_HOSTS.
+
+    Measured on a customer instance on 2026-10-25: every service-to-service file write failed on
+    this and nothing else - the API key was registered and valid, and the route was correct.
+
+    `POD_IP` does not cover it. It is the address of whichever pod is reading these settings, so it
+    lets a caller reach THAT pod by IP; it says nothing about how other pods address the backend by
+    name, and a caller in another pod has no way to learn it.
+
+    Args:
+        instance: `INSTANCE_RESOURCE_IDENTIFIER`, or `""` outside a deployment.
+        namespace: the pod's namespace, or `""` when it could not be read.
+
+    Returns:
+        The short Service name plus the three longer Kubernetes DNS forms, or `[]` when there is no
+        instance identifier - which is a developer's machine, where nothing should be added.
+    """
+    if not instance:
+        return []
+    short = f"{BACKEND_SERVICE_PREFIX}{instance}"
+    if not namespace:
+        # In a cluster the namespace file is always there; without it the short name is still
+        # correct for a same-namespace caller, which is the only one that can use a short name.
+        return [short]
+    return [
+        short,
+        f"{short}.{namespace}",
+        f"{short}.{namespace}.svc",
+        f"{short}.{namespace}.svc.cluster.local",
+    ]
+
+
 ALLOWED_HOSTS = [
     os.getenv("DOMAIN_HOSTED", "localhost"),
     "127.0.0.1",
     "localhost",
     os.environ.get("POD_IP", default="envvar_not_existing"),
-] + _lex_extra_allowed_hosts
+] + _lex_extra_allowed_hosts + _cluster_service_hosts(
+    (os.getenv("INSTANCE_RESOURCE_IDENTIFIER") or "").strip(), _k8s_namespace()
+)
 
 LOGIN_REDIRECT_URL = "/process_admin/all"
 
@@ -259,6 +329,19 @@ if os.getenv("DEPLOYMENT_ENVIRONMENT") is not None:
             "password-reset and other absolute links would be built from whatever "
             "the caller sent. Name each host, or use Django's leading-dot wildcard "
             "('.example.com') for one domain's subdomains."
+        )
+
+    # The secret key signs session data, password-reset and signing tokens and
+    # derives the dashboard proxy's cookie key. The fallback above is public, so
+    # a deployed pod running on it (or on nothing) hands every signature to
+    # anyone who has read this package. Every deployed instance gets its own
+    # key from Terraform; refuse to start without one.
+    _deployed_secret_key = (os.getenv("DJANGO_SECRET_KEY") or "").strip()
+    if not _deployed_secret_key or _deployed_secret_key == PUBLISHED_DEFAULT_SECRET_KEY:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY must be set to a private value when DEPLOYMENT_ENVIRONMENT "
+            "is set; the built-in development key is public and must not sign anything "
+            "on a deployed instance."
         )
 
     if _use_redis_channel_layer:
@@ -746,6 +829,11 @@ else:
     AUTHENTICATION_BACKENDS = ("django.contrib.auth.backends.ModelBackend",)
 
 OIDC_RP_SCOPES = ["openid", "email", "profile"]
+# Keycloak signs ID tokens with RS256. The library's default list also accepts
+# HS256/384/512 with the *client secret* as the key, and the secret sits in every
+# instance's environment: anyone holding it could mint a token for any e-mail and
+# be accepted as that user by the bearer path. Accept only Keycloak's algorithm.
+OIDC_RP_SIGN_ALGOS_ALLOWED = ["RS256"]
 _django_base_path = os.getenv("DJANGO_BASE_PATH", "").strip().strip("/")
 _admin_exempt_patterns = [
     r"^/admin(?:/|$)",
@@ -760,28 +848,62 @@ if _django_base_path:
         ]
     )
 
+# Paths that may be requested without a signed-in user. The library tests them
+# with re.search, so every pattern is anchored at both ends: an unanchored
+# "/health" or "api/user" also exempted any path *containing* it -- e.g.
+# /api/user_permissions/ or /api/model_entries/healthx/list -- from the login
+# requirement. The optional "api/" prefix keeps the /api/api/... form the
+# ingress produces for the frontend's apiHost.
 OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS = [
-    "/manifest.json",
-    "manifest.json",
-    "/health",
-    "/favicon.ico",
-    "api/user/",
-    "/api/user",
-    "api/health",
-    "api/active-calculations",
-    "/api/active-calculations",
-    "api/favicon.ico",
-    "api/api/user/",
-    "api/api/user",
-    "api/api/active-calculations",
-    "/api/api/active-calculations",
+    r"^/manifest\.json$",
+    r"^/favicon\.ico$",
+    r"^/api/favicon\.ico$",
+    r"^/health/?$",
+    r"^/(?:api/)?api/health/?$",
+    r"^/(?:api/)?api/user/?$",
+    r"^/(?:api/)?api/active-calculations/?$",
 ] + _admin_exempt_patterns
 
 OIDC_MIDDLEWARE_NO_REFRESH_URL_PATTERNS = [
     r"^/health$",
     r"^/favicon\.ico$",
 ] + _admin_exempt_patterns
-OIDC_RP_USE_PKCE = False
+# PKCE (S256) on the authorization-code flow. The client is confidential, so the
+# secret is still sent with the code exchange (FORCE_SECRET_WITH_PKCE); PKCE adds
+# a per-login verifier, which makes an intercepted code useless.
+OIDC_RP_USE_PKCE = True
+OIDC_RP_FORCE_SECRET_WITH_PKCE = True
+
+
+def _session_cookie_age_days() -> int:
+    """``LEX_SESSION_COOKIE_AGE_DAYS`` (default 31): how long an idle sign-in survives."""
+    raw = os.getenv("LEX_SESSION_COOKIE_AGE_DAYS", "31").strip()
+    try:
+        days = int(raw)
+    except ValueError:
+        from django.core.exceptions import ImproperlyConfigured
+
+        raise ImproperlyConfigured(
+            f"LEX_SESSION_COOKIE_AGE_DAYS must be a whole number of days, got {raw!r}."
+        ) from None
+    if days < 2:
+        from django.core.exceptions import ImproperlyConfigured
+
+        raise ImproperlyConfigured(
+            f"LEX_SESSION_COOKIE_AGE_DAYS must be at least 2 (got {days}); the OIDC session "
+            "timeout has to fit inside the cookie lifetime."
+        )
+    return days
+
+
+# Session lifetime. Keycloak decides how long a sign-in lasts (app realms: 30 days
+# idle / 90 days max). Django must not end it earlier: the session cookie lives
+# 31 days and is re-sent whenever the session is saved (each token refresh), and
+# the library's own session clock -- which slides on each refresh from
+# django-oauth2-codeflow 2.1.0 on -- is 30 days, one day inside the cookie as the
+# library requires.
+SESSION_COOKIE_AGE = _session_cookie_age_days() * 86400
+OIDC_MIDDLEWARE_SESSION_TIMEOUT_SECONDS = min(30 * 86400, SESSION_COOKIE_AGE - 86400)
 SESSION_COOKIE_SECURE = os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
 CSRF_COOKIE_SECURE = os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
