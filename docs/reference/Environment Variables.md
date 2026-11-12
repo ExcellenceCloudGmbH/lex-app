@@ -105,6 +105,35 @@ These govern how the framework recovers tasks from dead workers and how idle wor
 
 `OIDC_ISSUER` and `OIDC_VERIFY_SSL` apply to the Reflex sign-in too, with the same meaning as for the Streamlit proxy.
 
+## Embedding
+
+Which sites may show Lex App inside a frame: a Streamlit dashboard's [[access-and-dashboards/streamlit/embedding app pages|embedded pages]] and [[access-and-dashboards/streamlit/embedding app controls|app controls]], or any other page that embeds it.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `LEX_EMBED_ALLOWED_ORIGINS` | unset | The sites allowed to embed Lex App, as a comma-separated list of origins: `https://dashboards.example.com,http://localhost:8501`. Only these sites can use an embedded table's filter channel — the `filter` event and the filters `lex_view` sends into the frame — and once it is set, no other site may frame Lex App at all. See [[access-and-dashboards/streamlit/embedding app pages#Allowed sites\|Allowed sites]]. |
+
+How each entry is read:
+
+- **An origin and nothing more.** `http` or `https`, a host, and a port only when it isn't the scheme's default. A path, a query, a fragment, a user name or a wildcard (`https://*.example.com`) refuses the entry; a single trailing `/` is accepted.
+- **Written as the browser writes it.** Scheme and host are lower-cased, `:443` on `https` and `:80` on `http` are dropped, and a duplicate counts once, so `HTTPS://Dashboards.Example.com:443/` becomes `https://dashboards.example.com`. An international domain name is IDNA-encoded: `müller.example` becomes `xn--mller-kva.example`.
+- **A strict host.** After encoding, the host may hold only letters, digits, hyphens and dots, as a hostname or an IPv4 address does. Two kinds of host are refused even though they look valid:
+  - an IPv6 literal, such as `http://[::1]:8501`;
+  - a host containing `ß`, `ς`, a zero-width joiner or a zero-width non-joiner. Python and the browser encode these differently, so the entry could name a different site from the one the browser reports.
+- **Refused entries are dropped,** and a warning in the server log names them. A blank item from a stray comma is skipped.
+
+What the setting changes:
+
+| Value | Who may frame Lex App's pages | The `filter` channel |
+|---|---|---|
+| Unset or blank | Unchanged — no `frame-ancestors` directive is added | Off |
+| At least one valid origin | Lex App itself and the listed sites: `Content-Security-Policy: frame-ancestors 'self' <origins>` | On, for the listed sites |
+| Set, but no valid origin | Lex App itself only: `frame-ancestors 'self'`, with a warning in the server log | Off |
+
+The last row fails closed: a list that is all typos never leaves Lex App open to framing by every site.
+
+For a Streamlit dashboard, list the origin the browser shows for the dashboard page: on a deployment the origin of `STREAMLIT_URL` (or `BASE_URL`), and locally `http://localhost:8501`.
+
 ## Keycloak / OIDC
 
 | Variable                         | Purpose                                                                                                                                                                                                                                                                      |
@@ -316,7 +345,8 @@ What each flag does:
 - `NOT_FOUND` — a record the caller may not read answers 404 on the record,
   history and bulk endpoints (it used to answer 200 with `{}`); a bulk read
   leaves unreadable ids out; `permission_list` returning false makes the list
-  404; an unknown path under `api/` is a JSON 404, not the app's index page.
+  and its value lists 404; an unknown path under `api/` is a JSON 404, not the
+  app's index page.
 - `READ_SURFACES` — history, global search, export and file download apply read
   permission.
 - `EDIT` — `permission_edit`, `permission_delete` and `permission_create` run on
@@ -325,7 +355,8 @@ What each flag does:
   `CREATE_NOT_ALLOWED`), never a 403: bundled frontends released before the
   sign-out fix signed the user out on any 403.
 - `FILTERS` — list filters and ordering only on fields the caller can see; the
-  primary key is always allowed. Otherwise 400 `FILTER_NOT_ALLOWED`.
+  primary key is always allowed. Otherwise 400 `FILTER_NOT_ALLOWED`. A column the
+  caller may not filter by has no value list either.
 - `TRACEBACKS` — no server traceback in error responses unless `DEBUG` or
   `LEX_API_TRACEBACKS=true`.
 - `OIDC_REDIRECT` — `next` and `fail` on `/oidc/*` (sign-in, logout,

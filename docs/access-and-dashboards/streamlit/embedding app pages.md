@@ -25,7 +25,7 @@ There are three levels to this, and you can stop after the first:
 from lex.lex_app.streamlit import lex_view
 ```
 
-Call it without callback flags and it behaves exactly as a plain embed always has — nothing about existing call sites changes. Turn on one or more `on_*` flags when you want Python to react to what the user does.
+Call it without callback flags or `filters` and it behaves exactly as a plain embed always has — nothing about existing call sites changes. Turn on one or more `on_*` flags when you want Python to react to what the user does, and pass `filters` when Python should decide what the table shows — see [Filtering the embedded table](#filtering-the-embedded-table).
 
 ## Basic usage
 
@@ -39,20 +39,21 @@ if event and event["type"] == "select":
     st.write("Selected row IDs:", event["payload"]["ids"])
 ```
 
-When at least one callback flag is set, `lex_view()` switches from a plain iframe to a bidirectional component and returns the latest **event envelope** (or `None` until the first event arrives). Each time the user acts in the embedded page, Streamlit re-runs your script with the new event as the return value.
+When at least one callback flag is set — or `filters` is passed — `lex_view()` switches from a plain iframe to a bidirectional component and returns the latest **event envelope** (or `None` until the first event arrives). Each time the user acts in the embedded page, Streamlit re-runs your script with the new event as the return value.
 
 ## Callback flags
 
 Turn on only what you need:
 
-| Flag           | `type`       | `payload`                | Fires when…                                   |
-| -------------- | ------------ | ------------------------ | --------------------------------------------- |
-| `on_create`    | `"create"`   | `resource`, `id`, `data` | A create form saves                           |
-| `on_update`    | `"update"`   | `resource`, `id`, `data` | An edit form saves                            |
-| `on_delete`    | `"delete"`   | `resource`, `id`         | A record is deleted from the edit toolbar     |
-| `on_select`    | `"select"`   | `resource`, `ids`        | The grid selection changes (debounced 150 ms) |
-| `on_navigate`  | `"navigate"` | `from`, `to`             | The embedded app routes somewhere else        |
-| `on_flow_step` | —            | —                        | Nothing is emitted for this type — see below  |
+| Flag           | `type`       | `payload`                                          | Fires when…                                                                                    |
+| -------------- | ------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `on_create`    | `"create"`   | `resource`, `id`, `data`                           | A create form saves                                                                            |
+| `on_update`    | `"update"`   | `resource`, `id`, `data`                           | An edit form saves                                                                             |
+| `on_delete`    | `"delete"`   | `resource`, `id`                                   | A record is deleted from the edit toolbar                                                      |
+| `on_select`    | `"select"`   | `resource`, `ids`                                  | The grid selection changes (debounced 150 ms)                                                  |
+| `on_navigate`  | `"navigate"` | `from`, `to`                                       | The embedded app routes somewhere else                                                         |
+| `on_filter`    | `"filter"`   | `resource`, `filters`, `filter_model`, `row_count` | The table's filters change — see [Filtering the embedded table](#filtering-the-embedded-table) |
+| `on_flow_step` | —            | —                                                  | Nothing is emitted for this type — see below                                                   |
 
 `data` on a create or update is the **whole saved record** as the API returned it, not just the id.
 
@@ -107,9 +108,13 @@ choice = st.selectbox("View", ["default", "summary"])
 event = lex_view("investor", serializer=choice, on_select=True, key="investors")
 ```
 
+`filters` is the exception: it travels beside the URL rather than in it, so
+changing it never starts a new component.
+
 Two calls that build the same URL — the same table with the same options — build
 the same key, and Streamlit refuses the second with a duplicate-key error; give
-each its own `key`. A plain embed, with no `on_*` flag, ignores `key` altogether.
+each its own `key`. A plain embed, with no `on_*` flag and no `filters`, ignores
+`key` altogether.
 
 ![Five rows selected in the embedded table, and the event envelope rendered beside it](images/streamlit/callbacks.png)
 
@@ -122,7 +127,7 @@ Every event the embedded page sends back is a dict with a stable shape:
 
 | Key       | Meaning                                                                                                                                                 |
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `type`    | The event kind — `"create"`, `"update"`, `"delete"`, `"select"` or `"navigate"`                                                                         |
+| `type`    | The event kind — `"create"`, `"update"`, `"delete"`, `"select"`, `"navigate"` or `"filter"`                                                             |
 | `payload` | Type-specific data; the table under [[access-and-dashboards/streamlit/embedding app pages#Callback flags\|Callback flags]] gives the keys for each type |
 | `id`      | A unique event ID, used to de-duplicate re-runs so your handler doesn't fire twice for the same event                                                   |
 | `ts`      | Milliseconds since the epoch, set in the browser when the event was raised                                                                              |
@@ -313,6 +318,164 @@ lex_view("investor", serializer="InvestorWithFundSerializer")
 
 If the name isn't a serializer registered for that model, the embedded request returns HTTP `400` with a validation error rather than silently falling back.
 
+## Filtering the embedded table
+
+An embedded table can open already filtered and tell Python when its filters change:
+
+```python
+from lex.lex_app.streamlit import lex_view
+
+event = lex_view(
+    "invoice",
+    filters={"status": ["open", "overdue"], "region": 3},
+    on_filter=True,
+    key="invoices",
+)
+```
+
+| Argument | Default | What it does |
+|---|---|---|
+| `filters` | `None` | Picks values in the table's value lists — [Setting the filters](#setting-the-filters) |
+| `on_filter` | `False` | Sends a `"filter"` event when the table's filters change — [Hearing filter changes](#hearing-filter-changes) |
+
+`filters` works on the table's value-list columns — the ones whose filter lists their
+values with a row count, described in
+[[using-the-app/the-grid/filtering and sorting#Value Lists|Filtering & Sorting]].
+Inside the frame, users filter the table the way they do in the app: in its column
+filters and the **Filters** tab. `on_filter`, and any change to `filters` after the
+table's first load, also need one setting on the Lex App side: see
+[Allowed sites](#allowed-sites).
+
+### Setting the filters
+
+`filters` maps a column name to the values to pick:
+
+| You pass | It means |
+|---|---|
+| A list — `["open", "overdue"]` | Pick these values |
+| One value — `3` | Pick just this one |
+| `None`, or an empty list | Clear all of the column's values |
+
+Pass stored values, not the labels the grid shows: a related record's id, `True` or
+`False`, a date as a `date` or as `"2026-03-31"`, a choice's stored value. `None`
+inside a list picks *(Blank)*. Strings, numbers, booleans, dates, `Decimal` and `UUID`
+are accepted, alone or in a list, tuple or set; anything else raises `TypeError` at the
+call, and so does a `filters` that isn't a dict of column names.
+
+How the table takes them:
+
+- **On top of what it has.** The picked values of the columns you name are replaced,
+  whatever the saved view or the user had picked. A condition typed in a column's
+  filter stays, and so does every other column's filter.
+- **On the table showing.** The first filters go to the table the embed opened with,
+  never to another table the user reaches inside the frame. A change you pass later
+  goes to whichever table is showing when it arrives.
+- **On value-list columns only.** A name that isn't one is ignored, with a warning in
+  the browser console.
+- **Without a reload.** Pass different filters on a later rerun and they are sent into
+  the frame; the table refilters in place.
+- **Without overriding the user.** Passing the same filters again sends nothing, so an
+  ordinary rerun doesn't undo what the user changed inside the frame. Only filters
+  that differ from the ones the frame last received are sent — and if the frame
+  reloads, say after a sign-in, it receives your current ones again.
+
+> [!note] Keep passing a dict
+> Without an `on_*` flag, `filters` is what switches `lex_view` to the bidirectional
+> component. A call that alternates between a dict and `filters=None` swaps the
+> component for a plain iframe and back, reloading the table each time. To clear a
+> column's values, keep the dict and give that column `None`: `filters={"region": None}`.
+
+The first filters travel in the frame's address. A long list — a few hundred ids — is
+kept out of it once the encoded filters pass 2,000 characters, and sent into the frame
+when the frame has loaded instead, so it needs [Allowed sites](#allowed-sites) just
+like a later change.
+
+### Hearing filter changes
+
+With `on_filter=True`, the table sends a `"filter"` event each time its filters change
+— whether the user changed them or your `filters` did — once it has reloaded with
+them:
+
+| Payload key | What it holds |
+|---|---|
+| `resource` | The table's model, e.g. `"invoice"` |
+| `filters` | The value-list selections: column name to the picked keys, e.g. `{"status": ["open", "overdue"]}` |
+| `filter_model` | The table's whole filter state, conditions included, in AG Grid's filter-model format |
+| `row_count` | How many rows the table has with these filters, or `None` if it couldn't tell |
+
+The keys in `filters` are strings — a related record's id arrives as `"42"`, a yes/no
+value as `"true"` — and `None` stands for *(Blank)*. They can go straight into another
+call's `filters=`.
+
+```python
+event = lex_view("invoice", on_filter=True, key="invoices")
+if event and event["type"] == "filter":
+    st.metric("Invoices shown", event["payload"]["row_count"])
+```
+
+The event arrives about 300 ms after the table has reloaded; a reload that fails sends
+none. A value list applies on every pick, so with `on_filter=True` the script reruns
+once per pick, not once per Apply.
+
+Pass a table's filters on to a *different* table — see
+[Linking two tables](#linking-two-tables) below. Don't echo them back into the same
+table's `filters=`: the frame already keeps its own picks across re-runs, and an echo
+that reaches Python one re-run late can land after the user's next pick and undo it.
+
+### Linking two tables
+
+Pick orders in one table and show their lines in the other:
+
+```python
+picked = lex_view("order", on_select=True, key="orders")
+ids = picked["payload"]["ids"] if picked and picked["type"] == "select" else None
+lex_view("order_line", filters={"order": ids}, key="lines")
+```
+
+Each selection reruns the script, and the second call passes the new ids: the lines
+table refilters in place, without reloading. With nothing selected, `ids` is `None` or
+`[]`, and either clears the filter, so the lines table shows every line. The same
+pattern works with `on_filter`: read one table's `filters` and pass them to another
+table that has the same column.
+
+Each selection reaches the lines table as a filter change sent into the frame, so
+this needs [Allowed sites](#allowed-sites).
+
+### Allowed sites
+
+Three things only work for a dashboard whose address Lex App has been given:
+
+- the `filter` event (`on_filter`);
+- a change to `filters` after the table's first load — every rerun that passes
+  different filters;
+- a first-load filter list too long for the frame's address.
+
+Without it the table still opens with its first filters, but later changes are
+ignored and no `filter` event arrives; the browser console of the embedded page says
+why.
+
+Name the dashboard's own address in the Lex App deployment's
+`LEX_EMBED_ALLOWED_ORIGINS`: the origin the dashboard is served from — scheme, host,
+and the port if it isn't the default. On a Lex App deployment that is the origin of
+the dashboard proxy's public address, `STREAMLIT_URL` (or `BASE_URL`). It is not Lex
+App's own address, even when users open the dashboard inside Lex App.
+
+```bash
+LEX_EMBED_ALLOWED_ORIGINS=https://dashboards.example.com
+```
+
+Locally that is usually `http://localhost:8501`, where `lex streamlit` serves the
+dashboard. Write the host exactly as the browser does: `localhost` and `127.0.0.1` are
+different origins. If your dashboards share Lex App's own address, list that address.
+
+The setting does more than open this channel. Once it is set, browsers show Lex App's
+pages in a frame only inside Lex App itself and on the sites it lists — so list every
+site that embeds Lex App. For your dashboards, their one address covers `lex_view` and
+the [[access-and-dashboards/streamlit/embedding app controls|app controls]] alike.
+Entries that aren't valid origins are dropped, and if none is left, only Lex App itself
+may show its pages in a frame. The accepted forms are listed under
+[[reference/Environment Variables#Embedding|Environment Variables]].
+
 ## Existing embed options still work
 
 All the layout and routing options you already use remain available alongside the callbacks: `hide_toolbar`, `hide_actions`, `redirect_after` / `redirect_after_create` / `redirect_after_update`, `height`, `width`, `scrolling`, `extra_params`, and `base_url`. (In bidirectional mode `width` and `scrolling` are ignored — the component is always full width.)
@@ -330,7 +493,9 @@ say — it is `hide_toolbar` that removes the app's Create button; `hide_actions
 leaves it alone.
 
 Neither makes the grid read-only. Whether a cell can be edited in place is
-decided by the user's permissions, and both options leave that untouched.
+decided by the user's permissions, and both options leave that untouched. Nor
+does either hide the column filters or the **Filters** tab, which belong to the
+grid, not the toolbar.
 
 > [!note] `hide_actions` needs a newer interface
 > It takes effect with a lex-app-frontend release newer than 2.2.0. Up to 2.2.0
@@ -393,4 +558,6 @@ host page and stays in step with Lex App in both directions, without a reload �
 
 - [[access-and-dashboards/streamlit/embedding app controls|Embedding App Controls]] — the same idea for a single control rather than a whole page
 - [[model-your-data/serializers|Serializers]] — what `serializer=` selects, and how to register one
+- [[using-the-app/the-grid/filtering and sorting|Filtering & Sorting]] — value lists, as users see them
+- [[reference/Environment Variables|Environment Variables]] — `LEX_EMBED_ALLOWED_ORIGINS` and the dashboard settings
 - [[access-and-dashboards/streamlit/standalone dashboards|Standalone Dashboards]] — the page these calls usually live on
