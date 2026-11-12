@@ -266,6 +266,49 @@ normal deployment.
 > stops and tells you. The error names the variable and lists the accepted
 > values.
 
+## Security
+
+Every hardening below is **on by default**. The switches exist so a project can
+migrate step by step; they are not meant to stay off.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `LEX_LEGACY_SECURITY` | `false` | `true` switches every hardening off and restores the earlier behaviour. A migration aid; it logs a warning once. |
+| `LEX_SEC_<FLAG>` | unset | `true` or `false` for one hardening, and wins over `LEX_LEGACY_SECURITY`. Flags: `FAIL_CLOSED`, `NOT_FOUND`, `READ_SURFACES`, `EDIT`, `FILTERS`, `TRACEBACKS`, `OIDC_REDIRECT`, `INTERNAL`, `HISTORY_WRITE`. |
+| `LEX_API_TRACEBACKS` | unset | `true` puts the server traceback into API error responses, `false` never does, not even with `DEBUG`. Unset: only with `DEBUG`. |
+| `LEX_CORS_ALLOWED_ORIGINS` | unset | Comma-separated origins, e.g. `https://app.example.com,https://admin.example.com`. When set, only these origins may make credentialed cross-origin requests, replacing the permissive default. They are also accepted as sign-in redirect targets. |
+
+What each flag does:
+
+- `FAIL_CLOSED` — a permission method that raises denies instead of allowing.
+- `NOT_FOUND` — a record the caller may not read answers 404 on the record,
+  history and bulk endpoints (it used to answer 200 with `{}`); a bulk read
+  leaves unreadable ids out; `permission_list` returning false makes the list
+  404; an unknown path under `api/` is a JSON 404, not the app's index page.
+- `READ_SURFACES` — history, global search, export and file download apply read
+  permission.
+- `EDIT` — `permission_edit`, `permission_delete` and `permission_create` run on
+  PATCH, PUT, bulk and `run_step`. A refusal is a 400 with
+  `{code, detail, error}` (`EDIT_NOT_ALLOWED`, `DELETE_NOT_ALLOWED`,
+  `CREATE_NOT_ALLOWED`), never a 403: the bundled frontend signs the user out on
+  403.
+- `FILTERS` — list filters and ordering only on fields the caller can see; the
+  primary key is always allowed. Otherwise 400 `FILTER_NOT_ALLOWED`.
+- `TRACEBACKS` — no server traceback in error responses unless `DEBUG` or
+  `LEX_API_TRACEBACKS=true`.
+- `OIDC_REDIRECT` — `next` and `fail` on `/oidc/*` (sign-in, logout,
+  `total_logout`) must be relative, the site's own host, or an origin in
+  `CSRF_TRUSTED_ORIGINS` or `LEX_CORS_ALLOWED_ORIGINS`; anything else answers
+  400 `REDIRECT_NOT_ALLOWED`. A frontend served from a different origin in
+  development needs its origin in one of the two lists.
+- `INTERNAL` — deleting unused files only for superusers and users with the
+  Keycloak client role `admin`; writing to the server log and changing Django
+  users and groups only for superusers; the calculation-log tree and its PDF
+  show only logs of records the caller may read.
+- `HISTORY_WRITE` — history rows can be changed or deleted only by superusers
+  (400 `EDIT_NOT_ALLOWED` otherwise); their `lex_reserved_scopes` say so to the
+  client.
+
 ## Behaviour switches
 
 Knobs that change how the framework behaves rather than what it connects to.
