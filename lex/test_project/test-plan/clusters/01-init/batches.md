@@ -1955,3 +1955,34 @@ threads, now has to apply it itself.
 | 1.618 | existing data | with no record or a `completed` one: the ordinary skip, no ERROR |
 
 **Why a regression matters:** the "all referenced models empty" gate cannot tell a finished seed from half of one. A load cut off by a restart left production with 89 of 179 companies and a log that said the data already existed; every later start skipped the load.
+
+---
+
+### Batch 1bk — the Streamlit handshake stays inside everyone's header budget ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.619 – 1.625 |
+| Type | U |
+| Files covered | `lex/ws_header_limits.py` (new: `apply_websocket_header_limits`, `websockets_line_limit_shortfall`), `lex/bin/lex.py` (import order, the `streamlit` command's launch diagnostic), `lex/proxy.py` (import order, credential forwarding in `ws_proxy` and `proxy`), `lex/streamlit_app.py` (`bearer_from_headers`, read-side only) |
+| Test file | `lex/test_project/tests/init/test_1bk_streamlit_header_budget.py` |
+| Test classes | `TestCluster01bk_WebsocketHeaderLimit` (1.619–1.621, 1.625), `TestCluster01bk_SingleCredentialHeader` (1.622–1.624) |
+| Fixtures | `_RawCapturingUpstream` — like 1ac's stub but keeping header names verbatim, because the case-only duplicate this batch guards is invisible to a dict keyed on the lowered name; `_FakeUpstreamWS` keeping the handshake list as sent; `patch.object(websockets.http11, "MAX_LINE", …)` for the shortfall check, so the result does not depend on the installed release |
+| Tests landed | **7 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.619 | the ceiling is the default | with the variable unset, importing `lex.ws_header_limits` leaves `WEBSOCKETS_MAX_LINE_LENGTH` at `65536`, and at least twice the library's own 8192 |
+| 1.620 | an operator's value wins | a pre-set `131072` survives the import — `setdefault`, not `set` |
+| 1.621 | applied in time | `from lex import ws_header_limits` precedes `import uvicorn` in `lex/bin/lex.py` and `from websockets …` in `lex/proxy.py`, matched as import statements so `starlette.websockets` cannot anchor the check |
+| 1.622 | one copy, HTTP | a proxied `/dashboard` request carries `Authorization: Bearer <token>` exactly once and neither `X-Forwarded-Access-Token` nor `X-Streamlit-Access-Token` |
+| 1.623 | not two Authorizations | a request sending its own `Authorization` reaches the upstream with only the proxy's |
+| 1.624 | one copy, handshake | the `/_stcore/stream` handshake carries one `Authorization`, no retired header, and `lex.streamlit_app.bearer_from_headers` returns that token |
+| 1.625 | a ceiling not in force says so | `MAX_LINE` 8192 against a configured 65536 returns a sentence naming both; equal values return `None` |
+
+**Why a regression matters:** the failure mode is an open socket and a blank page. uvicorn's `websockets-sansio` handler neither answers nor closes on a handshake parse error, so LEX-894 (instance lex-1483) presented as a Streamlit dashboard that never loaded, with nothing in any log naming a header. The root cause — a per-instance Keycloak client running with full scope, so every instance's token carried every other instance's roles and audience — is removed in LEX_TERRAFORM_MODULES (`modules/lex-keycloak`, LEX-898). This batch is the floor under it, and each half can be broken silently: a ceiling applied one import too late has no effect, a websockets below 13 ignores it outright, and either leaves the environment saying 65536 while the handshake still dies at 8 KB.
+
+**Mutations against lex-app-v2 (the pre-change tree):** 1.621 fails for both modules, 1.622 and 1.624 fail for both retired headers. 1.619, 1.620, 1.623 and 1.625 pass there — 1.623 pins an invariant (`authorization` in `_HOP_BY_HOP`) that this change makes load-bearing rather than one it introduces, and the other three guard the new module against being weakened later.
+
+**Letter:** taken at `bk` / 1.619–1.625 rather than the next free pair on `lex-app-v2` (`ay` / 1.410): open branches hold `ay` through `bj`, and the same step was taken for `bj`.

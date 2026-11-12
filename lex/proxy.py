@@ -45,6 +45,14 @@ try:
 except Exception:  # pragma: no cover
     redis = None  # type: ignore
 
+# Must precede the `websockets` import below -- the library reads its
+# header-line limit from the environment as `websockets.http11` is imported, and
+# the access token this proxy forwards upstream is one header line. `lex
+# streamlit` already applies this before it starts the server; this covers a
+# deployment that runs `proxy:app` under its own uvicorn. See
+# lex/ws_header_limits.py.
+from lex import ws_header_limits  # noqa: F401  (imported for its side effect)
+
 try:
     from websockets.asyncio.client import connect as ws_connect  # websockets >= 12
 except Exception:
@@ -1275,10 +1283,14 @@ async def ws_proxy(websocket: WebSocket):
     fwd.append(("X-Streamlit-Auth-Method", auth_method))
     fwd.append(("X-Forwarded-User", user_payload.get("email") or ""))
 
+    # One copy of the access token, not three. `bearer_from_headers` in
+    # lex/streamlit_app.py reads `Authorization` and always has, so nothing
+    # upstream loses the credential; `X-Forwarded-Access-Token` and
+    # `X-Streamlit-Access-Token` repeated the same bytes for no reader. The
+    # handshake is where that mattered: three copies of a pre-LEX-898 token were
+    # ~25 KB of headers on the one request that opens a connection for hours.
     if user_payload.get("access_token"):
         fwd.append(("Authorization", f"Bearer {user_payload['access_token']}"))
-        fwd.append(("X-Forwarded-Access-Token", user_payload["access_token"]))
-        fwd.append(("X-Streamlit-Access-Token", user_payload["access_token"]))
     if user_payload.get("id_token"):
         fwd.append(("X-Forwarded-Id-Token", user_payload["id_token"]))
     if user_payload.get("refresh_token"):
@@ -1797,11 +1809,19 @@ async def proxy(request: Request):
     fwd_headers["X-Streamlit-Auth-Method"] = auth_method
     fwd_headers["X-Forwarded-User"] = user_payload.get("email") or ""
 
-    # Forward access token if present (either from JWT auth or session)
+    # Forward the access token if present (either from JWT auth or session), in
+    # one header -- see the WebSocket path above for why three became one.
+    #
+    # Nothing has to clear the caller's own `Authorization` first: `_HOP_BY_HOP`
+    # already drops it, as the WebSocket path's `excluded` does. That was
+    # housekeeping while a third header outranked `Authorization` in the
+    # upstream's reader; now that this is the only copy of the credential it is
+    # what keeps a caller from sending a second one alongside it -- Starlette
+    # hands header names lower-cased, so the two would be different dict keys
+    # and both would go, reaching the upstream joined by a comma into a value
+    # that parses as neither.
     if user_payload.get("access_token"):
         fwd_headers["Authorization"] = f"Bearer {user_payload['access_token']}"
-        fwd_headers["X-Forwarded-Access-Token"] = user_payload["access_token"]
-        fwd_headers["X-Streamlit-Access-Token"] = user_payload["access_token"]
 
     if user_payload.get("id_token"):
         fwd_headers["X-Forwarded-Id-Token"] = user_payload["id_token"]

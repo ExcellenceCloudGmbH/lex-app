@@ -1435,3 +1435,29 @@ letters:
       killed outright is reported as interrupted at the next start instead of silently skipped.
       Letters 1ay-1bi and scenarios up to 1.608 are taken by open branches, hence 1bj / 1.609.
       Mutations: an inherited daemon flag fails 1.609, 1.613 and 1.614; no lock fails 1.610-1.612.
+  bk:
+    title: The Streamlit handshake stays inside everyone's header budget
+    scenarios: 1.619-1.625
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      LEX-898, the lex-app half of the LEX-894 (lex-1483) Streamlit incident. The proxy puts the
+      user's access token on the WebSocket handshake, so the token is a header line, and websockets
+      refuses one over WEBSOCKETS_MAX_LINE_LENGTH (8192 by default) by neither answering nor closing
+      -- an open socket, a page that never loads, nothing in any log. lex/ws_header_limits.py raises
+      that ceiling to 65536 by setdefault (1.619) without overwriting a deployment's own value
+      (1.620), and is imported before uvicorn in lex/bin/lex.py and before websockets in
+      lex/proxy.py, asserted on the source because the library reads the variable once at import and
+      a correct value applied one import too late is indistinguishable from none (1.621). The
+      variable only exists from websockets 13, so `lex streamlit` warns when the installed release
+      parses at a lower hard-coded limit -- a ceiling that is not in force must say so (1.625). The
+      proxy now forwards the token once, as Authorization, instead of also as
+      X-Forwarded-Access-Token and X-Streamlit-Access-Token (1.622, 1.624), which is what makes
+      `authorization` in _HOP_BY_HOP load-bearing rather than housekeeping (1.623): two
+      Authorization headers reach the upstream joined by a comma. The root cause is removed in
+      LEX_TERRAFORM_MODULES (the per-instance Keycloak client no longer runs with full scope);
+      these are the guards under it. Mutations against lex-app-v2: 1.621, 1.622 and 1.624 fail.
+      Letter and range taken well clear of ay-bj, which open branches hold.

@@ -285,7 +285,7 @@ class TestCluster01ac_ProxyRenewalChannel(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         forwarded = _CapturingUpstream.last_headers
         self.assertEqual(forwarded.get("x-streamlit-auth-method"), "jwt")
-        self.assertEqual(forwarded.get("x-streamlit-access-token"), handoff)
+        self.assertEqual(forwarded.get("authorization"), f"Bearer {handoff}")
 
     def test_1_246_the_websocket_handshake_carries_the_renewable_credential(self):
         """
