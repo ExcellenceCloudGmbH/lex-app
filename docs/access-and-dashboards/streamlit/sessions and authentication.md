@@ -2,30 +2,61 @@
 title: Sessions & Authentication
 ---
 
-A dashboard runs as the person looking at it. Nothing on the pages before this one asks you to configure that — the identity arrives on its own, and the dashboard can call the API with the viewer's permissions. This page is what is happening underneath, and the two settings that matter before you deploy.
+A dashboard runs as the person looking at it. Nothing on the pages before this one asks you to configure that — the identity arrives on its own, and the dashboard can call the API with the viewer's permissions. This page is what is happening underneath, and the settings that matter before you deploy.
 
 ## Signing in happens once
 
-When a dashboard is embedded in the Lex App frontend, the user's access token is handed to the Streamlit proxy on the iframe's first request. The proxy immediately turns it into a session cookie and redirects to the same view without the token, so it never sits in the address bar, browser history, or `Referer` headers.
+A dashboard embedded in the Lex App frontend signs in through the app, so the user does not log in again for Streamlit. `LEX_STREAMLIT_AUTH` decides how; set the same value on the backend and on the Streamlit pod:
 
-That gives you four things without writing any code:
+| `LEX_STREAMLIT_AUTH` | How the dashboard signs in |
+|---|---|
+| `legacy` (default) | The frontend hands the user's access token to the proxy on the frame's first request. The proxy turns it into a session cookie, redirects to the same view without the token, and renews the tokens itself. |
+| `handoff` | The dashboard signs in through the app's own sign-in and holds no token at all. Recommended. |
+| `dual` | Both, for a rollout: a dashboard signed in the old way keeps working, a new one hands off. |
+
+Either way you get four things without writing any code:
 
 - **No second sign-in** — the user does not log in again for Streamlit.
 - **Identity you can trace** — actions in the dashboard are linked to the user's [Keycloak](https://www.keycloak.org/documentation) identity.
 - **The viewer's permissions** — the dashboard can call the Lex App API as them, and [[access-and-dashboards/permissions|permissions]] apply exactly as they do in the grid.
-- **Dashboards that stay open** — the proxy refreshes tokens and keeps disconnected Streamlit sessions around long enough to survive re-authentication or a network blip.
+- **Dashboards that stay open** — tokens are renewed in the background, and disconnected Streamlit sessions are kept long enough to survive re-authentication or a network blip.
 
 Defining the dashboard methods is the whole of the developer's part.
 
-## Staying signed in
+## Signing in through the app
 
-Access tokens are short-lived and dashboards often stay open longer than one lasts. Lex App renews the token in the background through the proxy, without reloading the dashboard, so widgets and `st.session_state` keep their state across a renewal and across normal Streamlit script re-runs.
+With `handoff`, the dashboard's first load goes through the app, inside the frame, where the user is already signed in. It comes back with a cookie, `__Host-lex_dash`, which names the user's sign-in in the app and nothing else: no token reaches the browser or the address bar. From then on the proxy asks that sign-in for a current access token on every request. So:
 
-Sessions still follow Keycloak's maximum lifetime, and a revoked Keycloak session stops working immediately. When renewal genuinely cannot continue, the embedded dashboard asks the surrounding app to re-authenticate and returns the user to the same view.
+- **The dashboard stays signed in as long as the app does** — weeks, not minutes. See [[access-and-dashboards/sign-in and sessions|Sign-in & Sessions]].
+- **Signing out ends it.** Signing out of the app, Keycloak ending the session, or an administrator deactivating the user ends the dashboard's sign-in too. The frame then asks the app to sign the user in again: within a minute while the dashboard is visible, at once when it becomes visible again — also when its connection had dropped, without a reload.
+- **An outage does not.** When Keycloak cannot be reached, the dashboard keeps the token it has while that is valid, then runs with the user's identity alone until Keycloak answers again. Nobody is signed out.
+- **Your code gets only what it needs:** the access token and the user's identity, never a refresh token.
+
+The cookie slides with use: the dashboard's own pages renew it, at most once a day. In `dual`, a dashboard whose hand-off sign-in has ended keeps working through the old sign-in, and the dead cookie is cleared.
+
+Put the dashboard on a host that shares a site with the app — `app.acme.com` and `dash.acme.com`, say — and list both in `LEX_INSTANCE_HOSTS`; hosted instances get this from the platform. A browser that refuses the dashboard's cookie inside a frame gets a page offering to allow it, or to open the dashboard in a tab of its own, instead of a sign-in loop.
+
+To sign out of the dashboard alone, open `/oauth2/logout` on it; `/oauth2/sign_out` signs the user out of the app as well.
+
+In every mode, `legacy` included, the proxy accepts a dashboard's live connection only from the dashboard's own page: a WebSocket whose `Origin` is not the dashboard's host (the one the browser used, a dashboard host in `LEX_INSTANCE_HOSTS`, or `STREAMLIT_URL`) is closed with `4403`. Clients that are not browsers send no `Origin` and are authenticated as before.
+
+## Staying signed in with `legacy`
+
+Access tokens are short-lived and dashboards often stay open longer than one lasts. With `legacy`, Lex App renews the token in the background through the proxy, without reloading the dashboard, so widgets and `st.session_state` keep their state across a renewal and across normal Streamlit script re-runs.
+
+Sessions still follow Keycloak's maximum lifetime, and a revoked Keycloak session stops working immediately. When renewal genuinely cannot continue, the embedded dashboard asks the surrounding app to re-authenticate and returns the user to the same view. A proxy that does not answer is treated as an outage: the dashboard waits and asks again, and does not sign the user out.
 
 ## Before you deploy
 
-Two settings decide whether dashboard sessions survive restarts and load balancing. Neither needs attention in development.
+None of this needs attention in development.
+
+### With `handoff`
+
+The Streamlit pod reads the app's database, which `lex streamlit` already connects it to, and needs `LEX_INSTANCE_HOSTS` to find the app. It needs no Redis, however many replicas run: the proxy keeps no tokens. Run `lex prune_dashboard_sessions` once a day with `lex oidc_cleanup`; the platform does this for hosted instances.
+
+The proxy answers its own routes under `/auth/` (`/auth/handoff`, `/auth/required`, `/auth/status`, `/auth/token`). An ingress that sends the whole dashboard host to the proxy needs nothing more; one that routes by path must include `/auth/`. On HTTPS only the `__Host-lex_dash` cookie counts; the unprefixed `lex_dash` exists for development proxies on plain HTTP.
+
+With `legacy` and `dual`, two settings decide whether dashboard sessions survive restarts and load balancing.
 
 ### Session cookie signing
 
