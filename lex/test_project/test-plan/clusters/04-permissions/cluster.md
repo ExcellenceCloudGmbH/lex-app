@@ -188,3 +188,20 @@
 
 **Scenario range:** 4.163 – 4.163. **Test file:** `lex/test_project/tests/permissions/test_4aa_streamlit_token_permissions.py`. **Type:** E. **Status:** ✅ Complete (2026-11-12). Batch: [4aa](batches.md).
 
+
+---
+
+### 4z. A schedule can do no more than the person who saved it ✅
+
+**What it tests:** A scheduled run has no request, so no Keycloak permissions to check when it fires; the check happens when the schedule is saved — the same checks the Calculate button passes — and the run then acts as that person. Schedules keep the framework's default permissions; code is trusted.
+
+**Why a regression matters:** Anyone with access to schedules could calculate records they could never calculate themselves.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.159 | a forbidden record | 400 on `target_model` saying the caller may not calculate it; nothing stored |
+| 4.160 | every record of a forbidden model | 400 on `target_model`; nothing stored |
+| 4.161 | code is trusted | a schedule created without a request for the same model is stored and scheduled |
+| 4.162 | no access to schedules | creating one without the grant is refused (401/403); nothing stored |
+
+**Scenario range:** 4.159 – 4.162. **Test file:** `lex/test_project/tests/permissions/test_4z_scheduled_job_permissions.py`. **Type:** E. **Status:** ✅ Complete (2026-11-10). Batch: [4z](batches.md).

@@ -836,3 +836,27 @@ does not remove user launch configurations.
 | 1.653 | a malformed dashboard URL | an unparsable port degrades to the bare host instead of raising on every render |
 
 **Scenario range:** 1.632 – 1.653. **Test file:** `lex/test_project/tests/init/test_1bm_custom_domain_hosts.py`. **Type:** U / I. **Status:** ✅ Complete (2026-11-10). Batch: [1bm](batches.md).
+
+---
+
+### 1bn. Scheduler bootstrap — the clock in the served backend, code-declared schedules, `run_scheduler` ✅
+
+**What it tests:** Every instance gets a scheduler with no configuration and no extra pod: the clock starts only in the process serving the app, is on by default (off is a WARNING), survives failing passes; `@lex_job(schedule=...)` declarations become schedule rows kept in step with the code; `lex run_scheduler --once` does the same on demand; `ScheduledJob` is registered like any model and kept out of history.
+
+**Why a regression matters:** Instances with no scheduler, clocks in the wrong processes, declared schedules drifting from the code, or a history table growing on every run.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.654 | only in the served backend | importing `lex_app.asgi` in a test run starts nothing; a served start starts one thread; a second start returns it; it stops |
+| 1.655 | off is said out loud | `LEX_SCHEDULER_ENABLED=false` → no clock and a WARNING that no scheduled job will run |
+| 1.656 | on by default | enabled, 30 s tick, one-hour grace without any `LEX_SCHEDULER_*` variable |
+| 1.657 | survives failing passes | two raising ticks are logged and the clock keeps ticking |
+| 1.658 | a declaration becomes a row | `managed_by_code`, function target, cron, zone, kwargs, enabled, scheduled, no run-as |
+| 1.659 | code owns the schedule, the user the switch | a changed cron is applied; a user's `enabled=false` is kept |
+| 1.660 | a removed declaration | switched off (not deleted) with a message; declared again, switched back on |
+| 1.661 | a person's schedule is never taken over | same name created in the app: unchanged, conflict reported |
+| 1.662 | one function per name | a second function is refused naming it; the same function again is fine; a never-firing schedule is refused |
+| 1.663 | `run_scheduler --once` | syncs declarations, starts the due job, waits for it (SUCCESS), reports `fired=[...]` |
+| 1.664 | registered, not history-tracked | in `processAdminSite.registered_models`; no `history` |
+
+**Scenario range:** 1.654 – 1.664. **Test file:** `lex/test_project/tests/init/test_1bn_scheduler_bootstrap.py`. **Type:** U + E. **Status:** ✅ Complete (2026-11-10). Batch: [1bn](batches.md).

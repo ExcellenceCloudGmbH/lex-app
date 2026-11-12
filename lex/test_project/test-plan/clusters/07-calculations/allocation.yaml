@@ -3,7 +3,7 @@ slug: calculations
 title: Calculation State Machine
 test_dirs:
 - calculations
-max_scenario: 237
+max_scenario: 278
 letters:
   a:
     title: ''
@@ -227,3 +227,19 @@ letters:
       record created closed (its calculation_closed_reason() answers a reason) does not calculate on
       create, and nothing of a run happens for it: no registration, broadcast, cache entry, run audit entry or history row; 7.237 the method sees the status from
       before the run, so a record that closes itself once SUCCESS runs exactly once, nested or not.
+  x:
+    title: 'A scheduled job''s run is an ordinary calculation of its target'
+    scenarios: 7.269-7.278
+    status: complete
+    tests:
+      pass: 10
+      skip: 0
+      xfail: 0
+    note: >-
+      Firing a job starts the job's own calculation the way the Calculate button does; the job's
+      `calculate()` calculates its target record (the parent → child pattern), every record of a
+      model, or calls a registered function. Allocated past the letters and scenario IDs that
+      in-flight branches (feat/ext-*, feat/auth-long-sessions) already hold: the first letter
+      absent from lex-app-v2 and every remote branch, and a range above the highest max_scenario
+      on any branch, so neither side has to renumber on merge. Design:
+      docs/superpowers/plans/2026-11-10-scheduled-jobs.md.

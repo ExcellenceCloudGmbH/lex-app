@@ -102,3 +102,11 @@ def on_server_shutdown(*args, **kwargs):
 
 
 atexit.register(on_server_shutdown)
+
+
+# The scheduler's clock runs in the process that serves this application — the
+# only process that imports this module (not the uvicorn reloader's parent, not
+# Celery workers, not management commands). See lex.scheduling.loop.
+from lex.scheduling.loop import start_scheduler_for_served_backend  # noqa: E402
+
+start_scheduler_for_served_backend()
