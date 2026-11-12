@@ -1,7 +1,7 @@
 cluster: 15
 slug: calculation_logging
 title: Calculation Logging Surface
-max_scenario: 55
+max_scenario: 60
 letters:
   a:
     title: LexLogger builder API and content shape
@@ -157,3 +157,30 @@ letters:
       the system (15.53). A rendering failure is a `failure` entry with the 500 and no delivered
       size (15.54), and a log the caller may not see is a recorded refusal keeping the 404's
       traceback, with nothing attached (15.55).
+  m:
+    title: The calculation-log table is readable again
+    scenarios: 15.56-15.60
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      LEX-1555, second half. LexSerializer.to_representation asked
+      type(instance).can_read before asking whether the model declares one, and
+      CalculationLog is a plain django.db.models.Model - so every read of the
+      calculation-log table through model_entries raised AttributeError and
+      answered 500. The two branches beneath it guard themselves with
+      has_can_read / has_permission_read; this one ran first and raised before
+      they could. One 500, read twice by the frontend: react-admin's <Show>
+      answers a failed getOne by redirecting to the resource's list (15.56), and
+      AG Grid's server-side row model renders a block it could not load as "ERR"
+      in every cell (15.57) - which is exactly what the reporter saw on the
+      Details tab of a failed run's log. 15.58 is the third reader, the log
+      tree's per-node text. 15.59 is the guard the other way: a model that does
+      declare can_read still serves the decision the list filter remembered
+      (BUG-011), so the capability check costs the per-request memo nothing.
+      15.60 pins the one query the log drawer asks - newest audit entry whose
+      terminal status is the one the row ended with, under the
+      <model>_<pk>_ prefix - and that its answer carries error_traceback for a
+      plain user, which is the drawer's half of 6u.
