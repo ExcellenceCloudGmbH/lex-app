@@ -506,7 +506,7 @@ does not remove user launch configurations.
 
 **Scenario range:** 1.406 – 1.409. **Test file:** `lex/test_project/tests/init/test_1ax_process_feature_removed.py`. **Type:** I. **Status:** ✅ Complete (2026-10-22). Batch: [1ax](batches.md).
 
-### 1ay. Custom domains — every attached hostname is accepted, and a dashboard is framed same-site ✅
+### 1bm. Custom domains — every attached hostname is accepted, and a dashboard is framed same-site ✅
 
 **What it tests:** an instance with a customer-owned domain attached answers on more than one hostname per role, and the pods behind the ingress have to agree. `lex/hosts.py` is the single place that knows which hostnames those are — read from `LEX_APP_HOSTS` / `LEX_STREAMLIT_HOSTS` / `LEX_REFLEX_HOSTS`, falling back to `DOMAIN_HOSTED` / `STREAMLIT_URL` / `REFLEX_URL` when nothing is configured. From there they reach Django's `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS`, the Streamlit proxy's OIDC callback and token-renewal allow-list, and Reflex's websocket CORS. The second half is which hostname a dashboard is *framed* from: the one sharing a registrable domain with the page embedding it.
 
@@ -514,27 +514,27 @@ does not remove user launch configurations.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.410 | no custom domain, no change | each role reports its canonical host alone when no `LEX_*_HOSTS` is set |
-| 1.411 | the list is parsed leniently | spacing, scheme, case and duplicates normalise away; the canonical host stays first |
-| 1.412 | registrable domain | `customer.com`, a deep subdomain and `customer.co.uk` all reduce correctly |
-| 1.413 | same-site dashboard | a viewer on `app.customer.com` gets `streamlit.`/`reflex.app.customer.com`; one on the platform host keeps the platform dashboard |
-| 1.414 | fallback keeps scheme and port | an unmatched viewer gets the canonical URL; a local run keeps `http://localhost:8501/8502` |
-| 1.415 | the middleware supplies the viewer | the request's host is the default, and does not outlive the request |
-| 1.416 | the Streamlit report | iframe src is the same-site dashboard, still `?embed=true` |
-| 1.417 | the Reflex report | iframe src is the same-site dashboard, still `?lex_embed=1` |
-| 1.418 | Django accepts both hosts | both reach `ALLOWED_HOSTS`; both get an exact `https://` CSRF entry; the middleware is installed |
-| 1.419 | nothing new is accepted | with no host list, `ALLOWED_HOSTS` is exactly what it has always been |
-| 1.420 | the callback follows the user | `_external_base_url` / `_callback_url` name the hostname the request arrived on |
-| 1.421 | a forged Host cannot steer it | an unrecognised `Host` falls back to the canonical URL |
-| 1.422 | renewal from any attached host | every attached app and dashboard origin is trusted; `*` never is |
-| 1.423 | Reflex websocket origins | every attached reflex host is an allowed origin, canonical first |
-| 1.424 | a local Reflex run | no origins resolved, so Reflex keeps its own default |
-| 1.425 | a hardened instance | `LEX_CORS_ALLOWED_ORIGINS` keeps the operator's list AND the instance's own hostnames |
-| 1.426 | `lex_view()`'s frame | points at the app host on the dashboard's own domain; an explicit `REACT_APP_URL` still wins |
-| 1.427 | the sign-in round trip | `/auth/login` through the whole app: the IdP redirect's `redirect_uri` is on the hostname the browser used |
-| 1.428 | a forged `X-Forwarded-Host` | falls back to the canonical callback; the forged name appears nowhere in the IdP redirect |
-| 1.429 | the renewal preflight | allowed and named from an attached app origin, with credentials; a foreign origin gets 403 |
-| 1.430 | what Reflex resolves | `api_url` and the event URL stay on a host in Reflex's own `SAME_DOMAIN_HOSTNAMES`; CORS lists both hostnames |
-| 1.431 | a malformed dashboard URL | an unparsable port degrades to the bare host instead of raising on every render |
+| 1.632 | no custom domain, no change | each role reports its canonical host alone when no `LEX_*_HOSTS` is set |
+| 1.633 | the list is parsed leniently | spacing, scheme, case and duplicates normalise away; the canonical host stays first |
+| 1.634 | registrable domain | `customer.com`, a deep subdomain and `customer.co.uk` all reduce correctly |
+| 1.635 | same-site dashboard | a viewer on `app.customer.com` gets `streamlit.`/`reflex.app.customer.com`; one on the platform host keeps the platform dashboard |
+| 1.636 | fallback keeps scheme and port | an unmatched viewer gets the canonical URL; a local run keeps `http://localhost:8501/8502` |
+| 1.637 | the middleware supplies the viewer | the request's host is the default, and does not outlive the request |
+| 1.638 | the Streamlit report | iframe src is the same-site dashboard, still `?embed=true` |
+| 1.639 | the Reflex report | iframe src is the same-site dashboard, still `?lex_embed=1` |
+| 1.640 | Django accepts both hosts | both reach `ALLOWED_HOSTS`; both get an exact `https://` CSRF entry; the middleware is installed |
+| 1.641 | nothing new is accepted | with no host list, `ALLOWED_HOSTS` is exactly what it has always been |
+| 1.642 | the callback follows the user | `_external_base_url` / `_callback_url` name the hostname the request arrived on |
+| 1.643 | a forged Host cannot steer it | an unrecognised `Host` falls back to the canonical URL |
+| 1.644 | renewal from any attached host | every attached app and dashboard origin is trusted; `*` never is |
+| 1.645 | Reflex websocket origins | every attached reflex host is an allowed origin, canonical first |
+| 1.646 | a local Reflex run | no origins resolved, so Reflex keeps its own default |
+| 1.647 | a hardened instance | `LEX_CORS_ALLOWED_ORIGINS` keeps the operator's list AND the instance's own hostnames |
+| 1.648 | `lex_view()`'s frame | points at the app host on the dashboard's own domain; an explicit `REACT_APP_URL` still wins |
+| 1.649 | the sign-in round trip | `/auth/login` through the whole app: the IdP redirect's `redirect_uri` is on the hostname the browser used |
+| 1.650 | a forged `X-Forwarded-Host` | falls back to the canonical callback; the forged name appears nowhere in the IdP redirect |
+| 1.651 | the renewal preflight | allowed and named from an attached app origin, with credentials; a foreign origin gets 403 |
+| 1.652 | what Reflex resolves | `api_url` and the event URL stay on a host in Reflex's own `SAME_DOMAIN_HOSTNAMES`; CORS lists both hostnames |
+| 1.653 | a malformed dashboard URL | an unparsable port degrades to the bare host instead of raising on every render |
 
-**Scenario range:** 1.410 – 1.431. **Test file:** `lex/test_project/tests/init/test_1ay_custom_domain_hosts.py`. **Type:** U / I. **Status:** ✅ Complete (2026-11-10). Batch: [1ay](batches.md).
+**Scenario range:** 1.632 – 1.653. **Test file:** `lex/test_project/tests/init/test_1bm_custom_domain_hosts.py`. **Type:** U / I. **Status:** ✅ Complete (2026-11-10). Batch: [1bm](batches.md).

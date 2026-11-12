@@ -1,4 +1,4 @@
-"""Cluster 1ay: an instance answers on every hostname it is reached on, and
+"""Cluster 1bm: an instance answers on every hostname it is reached on, and
 frames its dashboards from the one that shares the viewer's registrable domain.
 
 Intent
@@ -37,7 +37,7 @@ carries no host list, which is every instance without a custom domain and every
 local run. That fallback is itself a scenario below: it is what keeps this
 change invisible to the installations that do not use the feature.
 
-Cluster 1ay -- scenarios 1.410-1.431. Type: U / I.
+Cluster 1bm -- scenarios 1.632-1.653. Type: U / I.
 Covers: lex/hosts.py (public_hosts, canonical_url, registrable_domain,
         same_site_host, same_site_url, host_of, CurrentHostMiddleware),
         lex/lex_app/settings.py (ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS),
@@ -47,7 +47,7 @@ Covers: lex/hosts.py (public_hosts, canonical_url, registrable_domain,
         lex/lex_app/streamlit/Streamlit.py, lex/lex_app/reflex/Reflex.py,
         lex/lex_app/streamlit/embed.py (_resolve_base_url),
         lex/lex_app/reflex/config.py (public_origins).
-Run: python -m lex pytest lex/test_project/tests/init/test_1ay_custom_domain_hosts.py -v
+Run: python -m lex pytest lex/test_project/tests/init/test_1bm_custom_domain_hosts.py -v
 """
 
 from __future__ import annotations
@@ -286,13 +286,13 @@ def _django_host_settings(env: dict) -> dict:
 # ---------------------------------------------------------------------------
 # the host list itself
 # ---------------------------------------------------------------------------
-class TestCluster01ay_PublicHostList(SimpleTestCase):
-    """Cluster 1ay: which hostnames an instance believes it answers on."""
+class TestCluster01bm_PublicHostList(SimpleTestCase):
+    """Cluster 1bm: which hostnames an instance believes it answers on."""
 
-    # -- 1.410 ---------------------------------------------------------
-    def test_1_410_an_instance_without_custom_domains_has_exactly_its_canonical_host(self) -> None:
+    # -- 1.632 ---------------------------------------------------------
+    def test_1_632_an_instance_without_custom_domains_has_exactly_its_canonical_host(self) -> None:
         """
-        Scenario 1.410: with no host list configured, each role reports its canonical host alone.
+        Scenario 1.632: with no host list configured, each role reports its canonical host alone.
         Given: DOMAIN_HOSTED, STREAMLIT_URL and REFLEX_URL, and no LEX_*_HOSTS
         When: the hostnames of each role are resolved
         Then: each is a single-entry list holding that role's own hostname.
@@ -321,10 +321,10 @@ class TestCluster01ay_PublicHostList(SimpleTestCase):
                 msg="REFLEX_URL is the whole truth when no dashboard domain is attached",
             )
 
-    # -- 1.411 ---------------------------------------------------------
-    def test_1_411_the_configured_list_is_read_canonical_first_and_deduplicated(self) -> None:
+    # -- 1.633 ---------------------------------------------------------
+    def test_1_633_the_configured_list_is_read_canonical_first_and_deduplicated(self) -> None:
         """
-        Scenario 1.411: the host list is parsed leniently and keeps the canonical host first.
+        Scenario 1.633: the host list is parsed leniently and keeps the canonical host first.
         Given: LEX_APP_HOSTS written with spacing, a full URL, a duplicate and a trailing comma
         When: the app's hostnames are resolved
         Then: bare lower-case hostnames come back, in order, with the canonical one first.
@@ -346,10 +346,10 @@ class TestCluster01ay_PublicHostList(SimpleTestCase):
                 msg="whitespace, scheme, case and duplicates must all normalise away",
             )
 
-    # -- 1.412 ---------------------------------------------------------
-    def test_1_412_the_registrable_domain_is_what_cookies_are_scoped_to(self) -> None:
+    # -- 1.634 ---------------------------------------------------------
+    def test_1_634_the_registrable_domain_is_what_cookies_are_scoped_to(self) -> None:
         """
-        Scenario 1.412: a hostname reduces to the domain it is registered under.
+        Scenario 1.634: a hostname reduces to the domain it is registered under.
         Given: a bare domain, a deep subdomain, and a name under a two-part suffix
         When: the registrable domain of each is taken
         Then: `customer.com`, `customer.com` and `customer.co.uk` come back.
@@ -379,13 +379,13 @@ class TestCluster01ay_PublicHostList(SimpleTestCase):
 # ---------------------------------------------------------------------------
 # picking the hostname to frame
 # ---------------------------------------------------------------------------
-class TestCluster01ay_SameSiteDashboard(SimpleTestCase):
-    """Cluster 1ay: a dashboard is framed from the viewer's own registrable domain."""
+class TestCluster01bm_SameSiteDashboard(SimpleTestCase):
+    """Cluster 1bm: a dashboard is framed from the viewer's own registrable domain."""
 
-    # -- 1.413 ---------------------------------------------------------
-    def test_1_413_a_viewer_on_the_customer_domain_gets_the_customer_dashboard(self) -> None:
+    # -- 1.635 ---------------------------------------------------------
+    def test_1_635_a_viewer_on_the_customer_domain_gets_the_customer_dashboard(self) -> None:
         """
-        Scenario 1.413: the dashboard host follows the host the shell is served on.
+        Scenario 1.635: the dashboard host follows the host the shell is served on.
         Given: an instance reachable on both its platform hostname and app.customer.com
         When: the dashboard URL is resolved for a viewer on each of them
         Then: each viewer gets the dashboard hostname on their own registrable domain.
@@ -413,10 +413,10 @@ class TestCluster01ay_SameSiteDashboard(SimpleTestCase):
                 msg="a viewer on the platform hostname must keep the platform dashboard",
             )
 
-    # -- 1.414 ---------------------------------------------------------
-    def test_1_414_an_unmatched_viewer_falls_back_to_the_canonical_url_verbatim(self) -> None:
+    # -- 1.636 ---------------------------------------------------------
+    def test_1_636_an_unmatched_viewer_falls_back_to_the_canonical_url_verbatim(self) -> None:
         """
-        Scenario 1.414: with no same-site dashboard, the canonical URL is used unchanged.
+        Scenario 1.636: with no same-site dashboard, the canonical URL is used unchanged.
         Given: a viewer on a host that matches no attached dashboard hostname, and
                separately a local run whose dashboard is http://localhost:8501
         When: the dashboard URL is resolved
@@ -452,10 +452,10 @@ class TestCluster01ay_SameSiteDashboard(SimpleTestCase):
                 msg="a local Reflex run keeps its scheme and port",
             )
 
-    # -- 1.431 ---------------------------------------------------------
-    def test_1_431_a_malformed_dashboard_url_does_not_crash_the_report(self) -> None:
+    # -- 1.653 ---------------------------------------------------------
+    def test_1_653_a_malformed_dashboard_url_does_not_crash_the_report(self) -> None:
         """
-        Scenario 1.431: a dashboard URL with an unusable port degrades, it does not raise.
+        Scenario 1.653: a dashboard URL with an unusable port degrades, it does not raise.
         Given: STREAMLIT_URL carrying a port outside 0-65535, or a non-numeric one
         When: the dashboard URL is resolved, as it is on every report render
         Then: the hostname comes back without the port, and nothing is raised.
@@ -481,10 +481,10 @@ class TestCluster01ay_SameSiteDashboard(SimpleTestCase):
                         msg=f"{malformed} must degrade to the host, not raise",
                     )
 
-    # -- 1.415 ---------------------------------------------------------
-    def test_1_415_the_middleware_makes_the_requests_host_the_default_viewer(self) -> None:
+    # -- 1.637 ---------------------------------------------------------
+    def test_1_637_the_middleware_makes_the_requests_host_the_default_viewer(self) -> None:
         """
-        Scenario 1.415: CurrentHostMiddleware supplies the viewer host, and clears it after.
+        Scenario 1.637: CurrentHostMiddleware supplies the viewer host, and clears it after.
         Given: a request arriving on app.customer.com
         When: a dashboard URL is resolved inside the request with no host argument
         Then: it is the customer's dashboard -- and outside the request, nothing is remembered.
@@ -520,10 +520,10 @@ class TestCluster01ay_SameSiteDashboard(SimpleTestCase):
                 msg="the host must not outlive the request that set it",
             )
 
-    # -- 1.416 ---------------------------------------------------------
-    def test_1_416_the_streamlit_report_frames_the_same_site_dashboard(self) -> None:
+    # -- 1.638 ---------------------------------------------------------
+    def test_1_638_the_streamlit_report_frames_the_same_site_dashboard(self) -> None:
         """
-        Scenario 1.416: the Streamlit HTMLReport's iframe points at the viewer's own domain.
+        Scenario 1.638: the Streamlit HTMLReport's iframe points at the viewer's own domain.
         Given: a request on app.customer.com, on an instance with the dashboard attached there
         When: the Streamlit report renders
         Then: its iframe src is the customer's dashboard, still carrying ?embed=true.
@@ -548,16 +548,16 @@ class TestCluster01ay_SameSiteDashboard(SimpleTestCase):
             msg=f"the report must frame the same-site dashboard; got {html}",
         )
 
-    # -- 1.426 ---------------------------------------------------------
-    def test_1_426_lex_view_frames_the_app_on_the_dashboards_own_domain(self) -> None:
+    # -- 1.648 ---------------------------------------------------------
+    def test_1_648_lex_view_frames_the_app_on_the_dashboards_own_domain(self) -> None:
         """
-        Scenario 1.426: the frame a dashboard draws around an app page is same-site too.
+        Scenario 1.648: the frame a dashboard draws around an app page is same-site too.
         Given: a dashboard whose canonical hostname is on the customer's domain
         When: `lex_view()` resolves where its frames point
         Then: the application hostname on that same domain, not the platform one --
               and an explicit REACT_APP_URL still wins.
 
-        This is the reverse direction of the iframe in 1.416, and it has the
+        This is the reverse direction of the iframe in 1.638, and it has the
         same constraint: a frame across registrable domains is a third-party
         context, so an app page framed inside a dashboard on
         `streamlit.app.customer.com` has to come from `app.customer.com`.
@@ -606,10 +606,10 @@ class TestCluster01ay_SameSiteDashboard(SimpleTestCase):
                 msg="a local run keeps the development shell, not https://localhost",
             )
 
-    # -- 1.417 ---------------------------------------------------------
-    def test_1_417_the_reflex_report_frames_the_same_site_dashboard(self) -> None:
+    # -- 1.639 ---------------------------------------------------------
+    def test_1_639_the_reflex_report_frames_the_same_site_dashboard(self) -> None:
         """
-        Scenario 1.417: the Reflex HTMLReport's iframe points at the viewer's own domain.
+        Scenario 1.639: the Reflex HTMLReport's iframe points at the viewer's own domain.
         Given: a request on app.customer.com, on an instance with Reflex attached there
         When: the Reflex report renders
         Then: its iframe src is the customer's dashboard, still carrying ?lex_embed=1.
@@ -638,13 +638,13 @@ class TestCluster01ay_SameSiteDashboard(SimpleTestCase):
 # ---------------------------------------------------------------------------
 # accepting the hostname: Django
 # ---------------------------------------------------------------------------
-class TestCluster01ay_DjangoAcceptsEveryAttachedHost(SimpleTestCase):
-    """Cluster 1ay: ALLOWED_HOSTS and CSRF cover every hostname the ingress routes."""
+class TestCluster01bm_DjangoAcceptsEveryAttachedHost(SimpleTestCase):
+    """Cluster 1bm: ALLOWED_HOSTS and CSRF cover every hostname the ingress routes."""
 
-    # -- 1.418 ---------------------------------------------------------
-    def test_1_418_every_attached_app_host_is_allowed_and_csrf_trusted(self) -> None:
+    # -- 1.640 ---------------------------------------------------------
+    def test_1_640_every_attached_app_host_is_allowed_and_csrf_trusted(self) -> None:
         """
-        Scenario 1.418: a deployed pod accepts its platform hostname and the customer's.
+        Scenario 1.640: a deployed pod accepts its platform hostname and the customer's.
         Given: LEX_APP_HOSTS naming both, as the terraform module writes it
         When: a fresh process imports the settings module
         Then: both are in ALLOWED_HOSTS and both have an https entry in CSRF_TRUSTED_ORIGINS.
@@ -677,10 +677,10 @@ class TestCluster01ay_DjangoAcceptsEveryAttachedHost(SimpleTestCase):
             msg="the middleware that records the request's host must be installed",
         )
 
-    # -- 1.419 ---------------------------------------------------------
-    def test_1_419_an_instance_without_custom_domains_keeps_the_hosts_it_always_had(self) -> None:
+    # -- 1.641 ---------------------------------------------------------
+    def test_1_641_an_instance_without_custom_domains_keeps_the_hosts_it_always_had(self) -> None:
         """
-        Scenario 1.419: with no host list, ALLOWED_HOSTS is the pre-existing set.
+        Scenario 1.641: with no host list, ALLOWED_HOSTS is the pre-existing set.
         Given: DOMAIN_HOSTED and no LEX_APP_HOSTS, as every instance without a custom domain has
         When: a fresh process imports the settings module
         Then: ALLOWED_HOSTS is exactly DOMAIN_HOSTED, 127.0.0.1, localhost and the pod IP.
@@ -699,10 +699,10 @@ class TestCluster01ay_DjangoAcceptsEveryAttachedHost(SimpleTestCase):
             msg="no custom domain must mean no additional accepted hostname",
         )
 
-    # -- 1.425 ---------------------------------------------------------
-    def test_1_425_a_hardened_instance_still_accepts_its_own_attached_domain(self) -> None:
+    # -- 1.647 ---------------------------------------------------------
+    def test_1_647_a_hardened_instance_still_accepts_its_own_attached_domain(self) -> None:
         """
-        Scenario 1.425: LEX_CORS_ALLOWED_ORIGINS does not exclude the instance's own hostnames.
+        Scenario 1.647: LEX_CORS_ALLOWED_ORIGINS does not exclude the instance's own hostnames.
         Given: an instance hardened with an explicit CORS allow-list, and a
                customer-owned domain attached afterwards
         When: a fresh process imports the settings module
@@ -738,13 +738,13 @@ class TestCluster01ay_DjangoAcceptsEveryAttachedHost(SimpleTestCase):
 # ---------------------------------------------------------------------------
 # accepting the hostname: the Streamlit proxy
 # ---------------------------------------------------------------------------
-class TestCluster01ay_StreamlitProxyFollowsItsHost(SimpleTestCase):
-    """Cluster 1ay: the proxy signs users in on the hostname they are actually on."""
+class TestCluster01bm_StreamlitProxyFollowsItsHost(SimpleTestCase):
+    """Cluster 1bm: the proxy signs users in on the hostname they are actually on."""
 
-    # -- 1.420 ---------------------------------------------------------
-    def test_1_420_the_oidc_callback_comes_back_to_the_host_the_user_is_on(self) -> None:
+    # -- 1.642 ---------------------------------------------------------
+    def test_1_642_the_oidc_callback_comes_back_to_the_host_the_user_is_on(self) -> None:
         """
-        Scenario 1.420: the callback URL is built from the request's own hostname.
+        Scenario 1.642: the callback URL is built from the request's own hostname.
         Given: a dashboard served on both its platform hostname and streamlit.app.customer.com
         When: a user arrives on either and the login round trip is prepared
         Then: the callback URL names the hostname that user actually used.
@@ -793,10 +793,10 @@ class TestCluster01ay_StreamlitProxyFollowsItsHost(SimpleTestCase):
             msg="`lex streamlit` serves a port, and the callback has to carry it",
         )
 
-    # -- 1.421 ---------------------------------------------------------
-    def test_1_421_a_host_header_we_do_not_serve_cannot_redirect_the_sign_in(self) -> None:
+    # -- 1.643 ---------------------------------------------------------
+    def test_1_643_a_host_header_we_do_not_serve_cannot_redirect_the_sign_in(self) -> None:
         """
-        Scenario 1.421: an unrecognised Host falls back to the canonical URL.
+        Scenario 1.643: an unrecognised Host falls back to the canonical URL.
         Given: a request carrying `Host: evil.example.net`, which this instance does not serve
         When: the callback URL is built
         Then: it names the canonical dashboard, never the header's value.
@@ -841,10 +841,10 @@ class TestCluster01ay_StreamlitProxyFollowsItsHost(SimpleTestCase):
                     msg=f"a Host carrying port {bad_port} must lose the port, not raise",
                 )
 
-    # -- 1.422 ---------------------------------------------------------
-    def test_1_422_a_shell_on_any_attached_host_may_renew_the_dashboards_token(self) -> None:
+    # -- 1.644 ---------------------------------------------------------
+    def test_1_644_a_shell_on_any_attached_host_may_renew_the_dashboards_token(self) -> None:
         """
-        Scenario 1.422: every attached app hostname is a trusted adoption origin.
+        Scenario 1.644: every attached app hostname is a trusted adoption origin.
         Given: the shell served on both the platform hostname and app.customer.com
         When: the proxy resolves which origins may hand it a renewed credential
         Then: both are trusted, the attached dashboard hostnames are too, and `*` is not.
@@ -882,13 +882,13 @@ class TestCluster01ay_StreamlitProxyFollowsItsHost(SimpleTestCase):
 # ---------------------------------------------------------------------------
 # accepting the hostname: Reflex
 # ---------------------------------------------------------------------------
-class TestCluster01ay_ReflexAcceptsEveryAttachedHost(SimpleTestCase):
-    """Cluster 1ay: the Reflex backend accepts a websocket from every attached hostname."""
+class TestCluster01bm_ReflexAcceptsEveryAttachedHost(SimpleTestCase):
+    """Cluster 1bm: the Reflex backend accepts a websocket from every attached hostname."""
 
-    # -- 1.423 ---------------------------------------------------------
-    def test_1_423_every_attached_reflex_host_is_an_allowed_websocket_origin(self) -> None:
+    # -- 1.645 ---------------------------------------------------------
+    def test_1_645_every_attached_reflex_host_is_an_allowed_websocket_origin(self) -> None:
         """
-        Scenario 1.423: the Reflex CORS origins list every hostname the dashboards serve.
+        Scenario 1.645: the Reflex CORS origins list every hostname the dashboards serve.
         Given: Reflex served on its platform hostname and on reflex.app.customer.com
         When: the origins for the backend's websocket are resolved
         Then: both appear as https origins, canonical first.
@@ -911,10 +911,10 @@ class TestCluster01ay_ReflexAcceptsEveryAttachedHost(SimpleTestCase):
                 msg="every hostname the dashboards answer on must be an allowed origin",
             )
 
-    # -- 1.424 ---------------------------------------------------------
-    def test_1_424_a_local_reflex_run_imposes_no_origin_allowlist(self) -> None:
+    # -- 1.646 ---------------------------------------------------------
+    def test_1_646_a_local_reflex_run_imposes_no_origin_allowlist(self) -> None:
         """
-        Scenario 1.424: with no deployed hostname, Reflex keeps its own default.
+        Scenario 1.646: with no deployed hostname, Reflex keeps its own default.
         Given: REFLEX_URL pointing at localhost, as `lex reflex` leaves it
         When: the origins are resolved
         Then: the list is empty, so the config sets no `cors_allowed_origins` at all.
@@ -940,8 +940,8 @@ class TestCluster01ay_ReflexAcceptsEveryAttachedHost(SimpleTestCase):
 # ---------------------------------------------------------------------------
 # the whole proxy app, on two hostnames at once
 # ---------------------------------------------------------------------------
-class TestCluster01ay_TheSignInRoundTripFollowsItsHost(SimpleTestCase):
-    """Cluster 1ay: /auth/login and /auth/adopt, driven through the ASGI app."""
+class TestCluster01bm_TheSignInRoundTripFollowsItsHost(SimpleTestCase):
+    """Cluster 1bm: /auth/login and /auth/adopt, driven through the ASGI app."""
 
     def _client_for(self, keycloak):
         module = _reimport_proxy_with(_env(ATTACHED_ENV, {
@@ -957,10 +957,10 @@ class TestCluster01ay_TheSignInRoundTripFollowsItsHost(SimpleTestCase):
         }))
         return module
 
-    # -- 1.427 ---------------------------------------------------------
-    def test_1_427_the_sign_in_redirect_comes_back_to_the_host_the_browser_used(self) -> None:
+    # -- 1.649 ---------------------------------------------------------
+    def test_1_649_the_sign_in_redirect_comes_back_to_the_host_the_browser_used(self) -> None:
         """
-        Scenario 1.427: the IdP is told to return to the hostname the user is on.
+        Scenario 1.649: the IdP is told to return to the hostname the user is on.
         Given: a dashboard served on its platform hostname and on an attached one
         When: a browser on either opens /auth/login, through the ingress's headers
         Then: the redirect to Keycloak carries a redirect_uri on that same hostname.
@@ -997,10 +997,10 @@ class TestCluster01ay_TheSignInRoundTripFollowsItsHost(SimpleTestCase):
                         msg=f"{host}: the IdP must return the user to the host they are on",
                     )
 
-    # -- 1.428 ---------------------------------------------------------
-    def test_1_428_a_forged_forwarded_host_never_reaches_the_idp(self) -> None:
+    # -- 1.650 ---------------------------------------------------------
+    def test_1_650_a_forged_forwarded_host_never_reaches_the_idp(self) -> None:
         """
-        Scenario 1.428: an unrecognised forwarded host cannot steer the redirect_uri.
+        Scenario 1.650: an unrecognised forwarded host cannot steer the redirect_uri.
         Given: a request carrying a hostname this instance does not serve
         When: /auth/login builds the redirect to Keycloak
         Then: the canonical callback is used, and the forged hostname appears nowhere.
@@ -1031,10 +1031,10 @@ class TestCluster01ay_TheSignInRoundTripFollowsItsHost(SimpleTestCase):
             msg="the forged hostname must appear nowhere in the IdP redirect",
         )
 
-    # -- 1.429 ---------------------------------------------------------
-    def test_1_429_renewal_is_accepted_from_the_shell_on_the_customers_domain(self) -> None:
+    # -- 1.651 ---------------------------------------------------------
+    def test_1_651_renewal_is_accepted_from_the_shell_on_the_customers_domain(self) -> None:
         """
-        Scenario 1.429: the token-renewal preflight passes from an attached app host.
+        Scenario 1.651: the token-renewal preflight passes from an attached app host.
         Given: the shell served on app.customer.com and the dashboard on the customer's domain
         When: the browser preflights the credentialed POST to /auth/adopt
         Then: it is allowed, named explicitly and with credentials -- and a
@@ -1083,13 +1083,13 @@ class TestCluster01ay_TheSignInRoundTripFollowsItsHost(SimpleTestCase):
 # ---------------------------------------------------------------------------
 # what Reflex itself resolves
 # ---------------------------------------------------------------------------
-class TestCluster01ay_ReflexResolvesARewritableBackend(SimpleTestCase):
-    """Cluster 1ay: the assumption the multi-host Reflex design rests on."""
+class TestCluster01bm_ReflexResolvesARewritableBackend(SimpleTestCase):
+    """Cluster 1bm: the assumption the multi-host Reflex design rests on."""
 
-    # -- 1.430 ---------------------------------------------------------
-    def test_1_430_the_compiled_backend_url_is_one_reflex_rewrites_per_browser(self) -> None:
+    # -- 1.652 ---------------------------------------------------------
+    def test_1_652_the_compiled_backend_url_is_one_reflex_rewrites_per_browser(self) -> None:
         """
-        Scenario 1.430: lex_config() leaves api_url on a host Reflex substitutes.
+        Scenario 1.652: lex_config() leaves api_url on a host Reflex substitutes.
         Given: a deployed instance with Reflex on two hostnames
         When: `lex_config()` resolves the configuration Reflex compiles from
         Then: `api_url` and the event URL are on a hostname listed in Reflex's own
@@ -1116,10 +1116,10 @@ class TestCluster01ay_ReflexResolvesARewritableBackend(SimpleTestCase):
         from lex.lex_app.reflex.config import lex_config
 
         with _Env(_env(ATTACHED_ENV, {
-            "PROJECT_ROOT": "/tmp/lex_1_430_project",
+            "PROJECT_ROOT": "/tmp/lex_1_652_project",
             "REFLEX_ACCESS_TOKEN": "unused-for-config",
         })):
-            os.makedirs("/tmp/lex_1_430_project", exist_ok=True)
+            os.makedirs("/tmp/lex_1_652_project", exist_ok=True)
             config = lex_config()
 
             from reflex_base.constants.event import Endpoint

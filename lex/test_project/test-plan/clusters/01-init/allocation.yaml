@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 431
+max_scenario: 653
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1303,9 +1303,9 @@ letters:
       model-structure payload types nodes Model / HTMLReport / Folder only, never Process (1.409).
       Each scenario checks the kept HTMLReport sibling too, so a broken registration cannot pass as
       a clean removal. The routes that served the feature are pinned by 10q.
-  ay:
+  bm:
     title: Custom domains -- every attached hostname is accepted, and a dashboard is framed same-site
-    scenarios: 1.410-1.431
+    scenarios: 1.632-1.653
     status: complete
     tests:
       pass: 22
@@ -1317,21 +1317,21 @@ letters:
       LEX_APP_HOSTS / LEX_STREAMLIT_HOSTS / LEX_REFLEX_HOSTS (written by the lex-instance
       terraform module only when a domain is attached) and falls back to DOMAIN_HOSTED /
       STREAMLIT_URL / REFLEX_URL, which is the whole behaviour for every other instance
-      (1.410-1.411, 1.419, 1.424). Those hostnames reach ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS,
-      read in a child process because both are resolved while settings.py imports (1.418); the
+      (1.632-1.633, 1.641, 1.646). Those hostnames reach ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS,
+      read in a child process because both are resolved while settings.py imports (1.640); the
       Streamlit proxy builds its OIDC callback from the request's own host, allow-listed so a
-      forged Host header cannot steer the redirect_uri (1.420-1.421), and trusts every attached
-      app host as a token-renewal origin (1.422); Reflex's websocket CORS lists every attached
-      reflex host (1.423), and an instance hardened with LEX_CORS_ALLOWED_ORIGINS keeps its own
-      hostnames in that list rather than refusing its own new domain (1.425). The same-site half -- registrable_domain, same_site_url and
-      CurrentHostMiddleware (1.412-1.415) -- is what keeps the dashboards' iframes first-party:
+      forged Host header cannot steer the redirect_uri (1.642-1.643), and trusts every attached
+      app host as a token-renewal origin (1.644); Reflex's websocket CORS lists every attached
+      reflex host (1.645), and an instance hardened with LEX_CORS_ALLOWED_ORIGINS keeps its own
+      hostnames in that list rather than refusing its own new domain (1.647). The same-site half -- registrable_domain, same_site_url and
+      CurrentHostMiddleware (1.634-1.637) -- is what keeps the dashboards' iframes first-party:
       a shell on app.customer.com frames streamlit.app.customer.com, not the platform host whose
-      cookies Safari would block (1.416-1.417), and lex_view()'s frame -- the reverse direction --
+      cookies Safari would block (1.638-1.639), and lex_view()'s frame -- the reverse direction --
       points back at the app host on that same domain instead of the localhost it used to fall
-      back to (1.426). 1.427-1.429 drive /auth/login and /auth/adopt through the whole proxy app
+      back to (1.648). 1.649-1.651 drive /auth/login and /auth/adopt through the whole proxy app
       behind the ingress's X-Forwarded-* headers, which is where the hostname actually reaches
-      the application; 1.430 reads reflex's own SAME_DOMAIN_HOSTNAMES off disk, since the whole
-      multi-host Reflex design rests on its frontend rewriting a localhost backend URL. 1.431
+      the application; 1.652 reads reflex's own SAME_DOMAIN_HOSTNAMES off disk, since the whole
+      multi-host Reflex design rests on its frontend rewriting a localhost backend URL. 1.653
       came out of fuzzing the module with degenerate hostnames: urlsplit(...).port raises for a
       port it cannot parse, and that runs on every report render, so a typo in one variable
       would have been a 500 naming neither the variable nor the value.

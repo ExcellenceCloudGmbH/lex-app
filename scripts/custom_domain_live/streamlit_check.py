@@ -3,7 +3,7 @@
 What this covers that the test suite does not: an instance with a
 customer-owned domain attached answers on more than one hostname, and the
 Streamlit proxy has to complete a sign-in on *whichever one the browser used*.
-The cluster tests (1ay) drive that through the ASGI app; this drives it through
+The cluster tests (1bm) drive that through the ASGI app; this drives it through
 real sockets, with Streamlit actually running behind the proxy and uvicorn
 honouring the `X-Forwarded-*` headers the ingress sets -- the layer the tests
 cannot reach.

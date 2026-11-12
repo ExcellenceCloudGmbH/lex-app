@@ -1814,46 +1814,46 @@ config each fail 1.404.
 
 ---
 
-### Batch 1ay — custom domains: every attached hostname accepted, dashboards framed same-site ✅
+### Batch 1bm — custom domains: every attached hostname accepted, dashboards framed same-site ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.410 – 1.431 |
+| Scenario range | 1.632 – 1.653 |
 | Type | U / I |
 | Files covered | `lex/hosts.py` (new: `public_hosts`, `canonical_url`, `registrable_domain`, `same_site_host`, `same_site_url`, `host_of`, `CurrentHostMiddleware`), `lex/lex_app/settings.py` (`ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `MIDDLEWARE`), `lex/proxy.py` (`PUBLIC_HOSTS`, `_requested_host`, `_external_base_url`, `_callback_url`, `_frontend_origins`), `lex/lex_app/streamlit/Streamlit.py`, `lex/lex_app/reflex/Reflex.py`, `lex/lex_app/streamlit/embed.py` (`_resolve_base_url`), `lex/lex_app/reflex/config.py` (`public_origins`, `cors_allowed_origins`), `scripts/check_custom_domain_live.py` |
-| Test file | `lex/test_project/tests/init/test_1ay_custom_domain_hosts.py` |
-| Test classes | `TestCluster01ay_PublicHostList` (1.410–1.412), `TestCluster01ay_SameSiteDashboard` (1.413–1.417, 1.426, 1.431), `TestCluster01ay_DjangoAcceptsEveryAttachedHost` (1.418–1.419, 1.425), `TestCluster01ay_StreamlitProxyFollowsItsHost` (1.420–1.422), `TestCluster01ay_ReflexAcceptsEveryAttachedHost` (1.423–1.424), `TestCluster01ay_TheSignInRoundTripFollowsItsHost` (1.427–1.429), `TestCluster01ay_ReflexResolvesARewritableBackend` (1.430) |
+| Test file | `lex/test_project/tests/init/test_1bm_custom_domain_hosts.py` |
+| Test classes | `TestCluster01bm_PublicHostList` (1.632–1.634), `TestCluster01bm_SameSiteDashboard` (1.635–1.639, 1.648, 1.653), `TestCluster01bm_DjangoAcceptsEveryAttachedHost` (1.640–1.641, 1.647), `TestCluster01bm_StreamlitProxyFollowsItsHost` (1.642–1.644), `TestCluster01bm_ReflexAcceptsEveryAttachedHost` (1.645–1.646), `TestCluster01bm_TheSignInRoundTripFollowsItsHost` (1.649–1.651), `TestCluster01bm_ReflexResolvesARewritableBackend` (1.652) |
 | Fixtures | `ATTACHED_ENV` / `PLAIN_ENV` — one instance as the Instance Controller leaves it with and without a customer domain attached; `_Env` (set/remove env vars), `_request` (a Starlette request carrying a real `Host`), `_reimport_proxy_with` (the proxy resolves its hosts at import), `_django_host_settings` (a child process, because `ALLOWED_HOSTS` is resolved while `settings.py` imports), `_FakeKeycloak` (an OIDC discovery document on loopback, so authlib builds a real redirect), `_ingress_headers` |
 | Tests landed | **22 pass / 0 fail** (21 pass / 1 skip where reflex is not installed) |
 | Status | ✅ Complete |
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.410 | no custom domain, no change | `public_hosts` returns the canonical host alone for all three roles |
-| 1.411 | lenient list parsing | spacing, scheme, case, duplicates and a trailing comma normalise away; canonical first |
-| 1.412 | registrable domain | plain, deep and `co.uk` names; a customer domain and the platform's are different sites |
-| 1.413 | same-site dashboard | the viewer's own registrable domain wins, for Streamlit and Reflex alike |
-| 1.414 | fallback is verbatim | an unmatched viewer gets the canonical URL; `http://localhost:8501` / `:8502` keep scheme and port |
-| 1.415 | `CurrentHostMiddleware` | the request's host is the default viewer, and `current_host()` is empty again afterwards |
-| 1.416 | `Streamlit.get_html` | `src="https://streamlit.app.customer.com/?embed=true"` |
-| 1.417 | `Reflex.get_html` | `src="https://reflex.app.customer.com/?lex_embed=1"` |
-| 1.418 | Django host settings | both hosts in `ALLOWED_HOSTS`, both as exact `https://` CSRF origins, middleware installed |
-| 1.419 | no widening | with no host list, `ALLOWED_HOSTS` is exactly `[DOMAIN_HOSTED, 127.0.0.1, localhost, POD_IP]` |
-| 1.420 | callback follows the host | `_external_base_url` and `_callback_url` name the hostname the request arrived on |
-| 1.421 | allow-list, not header trust | `Host: evil.example.net` falls back to the canonical URL; `_requested_host` is `""` |
-| 1.422 | renewal origins | both app hosts and both dashboard hosts are trusted; `*` is not |
-| 1.423 | Reflex CORS | every attached reflex host as an `https://` origin, canonical first |
-| 1.424 | local Reflex | `public_origins()` is empty, so no `cors_allowed_origins` is set at all |
-| 1.426 | `lex_view()`'s frame | the app host on the dashboard's own registrable domain; the platform host for an instance with no custom domain; an explicit `REACT_APP_URL` wins; a local run keeps `http://localhost:8000` |
-| 1.427 | the sign-in round trip | through `TestClient(proxy.app)` with `X-Forwarded-Host`: `redirect_uri` is `https://<that host>/auth/callback`, for the attached host and the canonical one |
-| 1.428 | forged forwarded host | the canonical callback is used; `evil.example.net` appears nowhere in the IdP redirect |
-| 1.429 | renewal preflight | 204 + explicit `Allow-Origin` + `Allow-Credentials` from `https://app.customer.com`; 403 from a foreign origin |
-| 1.430 | Reflex's own resolution | `lex_config().api_url` and `Endpoint.EVENT.get_url()` are on a host listed in the installed `state.js`'s `SAME_DOMAIN_HOSTNAMES`; `cors_allowed_origins` holds both hostnames |
-| 1.431 | malformed dashboard URL | a port outside 0-65535, a negative one and a non-numeric one all degrade to `https://dash.example.com` rather than raising |
-| 1.425 | hardened instance | `LEX_CORS_ALLOWED_ORIGINS` keeps the operator's entry and gains both of the instance's own origins; the permissive default stays closed |
+| 1.632 | no custom domain, no change | `public_hosts` returns the canonical host alone for all three roles |
+| 1.633 | lenient list parsing | spacing, scheme, case, duplicates and a trailing comma normalise away; canonical first |
+| 1.634 | registrable domain | plain, deep and `co.uk` names; a customer domain and the platform's are different sites |
+| 1.635 | same-site dashboard | the viewer's own registrable domain wins, for Streamlit and Reflex alike |
+| 1.636 | fallback is verbatim | an unmatched viewer gets the canonical URL; `http://localhost:8501` / `:8502` keep scheme and port |
+| 1.637 | `CurrentHostMiddleware` | the request's host is the default viewer, and `current_host()` is empty again afterwards |
+| 1.638 | `Streamlit.get_html` | `src="https://streamlit.app.customer.com/?embed=true"` |
+| 1.639 | `Reflex.get_html` | `src="https://reflex.app.customer.com/?lex_embed=1"` |
+| 1.640 | Django host settings | both hosts in `ALLOWED_HOSTS`, both as exact `https://` CSRF origins, middleware installed |
+| 1.641 | no widening | with no host list, `ALLOWED_HOSTS` is exactly `[DOMAIN_HOSTED, 127.0.0.1, localhost, POD_IP]` |
+| 1.642 | callback follows the host | `_external_base_url` and `_callback_url` name the hostname the request arrived on |
+| 1.643 | allow-list, not header trust | `Host: evil.example.net` falls back to the canonical URL; `_requested_host` is `""` |
+| 1.644 | renewal origins | both app hosts and both dashboard hosts are trusted; `*` is not |
+| 1.645 | Reflex CORS | every attached reflex host as an `https://` origin, canonical first |
+| 1.646 | local Reflex | `public_origins()` is empty, so no `cors_allowed_origins` is set at all |
+| 1.648 | `lex_view()`'s frame | the app host on the dashboard's own registrable domain; the platform host for an instance with no custom domain; an explicit `REACT_APP_URL` wins; a local run keeps `http://localhost:8000` |
+| 1.649 | the sign-in round trip | through `TestClient(proxy.app)` with `X-Forwarded-Host`: `redirect_uri` is `https://<that host>/auth/callback`, for the attached host and the canonical one |
+| 1.650 | forged forwarded host | the canonical callback is used; `evil.example.net` appears nowhere in the IdP redirect |
+| 1.651 | renewal preflight | 204 + explicit `Allow-Origin` + `Allow-Credentials` from `https://app.customer.com`; 403 from a foreign origin |
+| 1.652 | Reflex's own resolution | `lex_config().api_url` and `Endpoint.EVENT.get_url()` are on a host listed in the installed `state.js`'s `SAME_DOMAIN_HOSTNAMES`; `cors_allowed_origins` holds both hostnames |
+| 1.653 | malformed dashboard URL | a port outside 0-65535, a negative one and a non-numeric one all degrade to `https://dash.example.com` rather than raising |
+| 1.647 | hardened instance | `LEX_CORS_ALLOWED_ORIGINS` keeps the operator's entry and gains both of the instance's own origins; the permissive default stays closed |
 
 **Live check:** `scripts/check_custom_domain_live.py` runs a real Streamlit server behind the real proxy under uvicorn, over loopback sockets, with the `X-Forwarded-*` headers the ingress sets — the layer no test here reaches. 12 checks: Streamlit's own health proxied on both hostnames, the frame-breakout page, and the sign-in redirect. On the base commit three of them fail, and they are the bug in full: the breakout sends the top window to the PLATFORM host's sign-in and the `redirect_uri` is the platform callback, so the browser returns to the attached hostname with no cookie and signs in again.
 
-**Mutation check:** making `_requested_host` return `""` and deriving the renewal origins from `DOMAIN_HOSTED` alone — i.e. the code as it was — fails 1.420, 1.422, 1.427 and 1.429. The same four behaviours were also reproduced against the base commit by serving `lex/proxy.py` with uvicorn and reading the `Location` header: a browser on `streamlit.app.customer.com` was sent to the platform callback, and the renewal preflight from `https://app.customer.com` came back 403.
+**Mutation check:** making `_requested_host` return `""` and deriving the renewal origins from `DOMAIN_HOSTED` alone — i.e. the code as it was — fails 1.642, 1.644, 1.649 and 1.651. The same four behaviours were also reproduced against the base commit by serving `lex/proxy.py` with uvicorn and reading the `Location` header: a browser on `streamlit.app.customer.com` was sent to the platform callback, and the renewal preflight from `https://app.customer.com` came back 403.
 
-**Why a regression matters:** every failure here is silent and attributed to something else. A hostname absent from `ALLOWED_HOSTS` makes a correctly-delegated customer domain answer "400 Bad Request"; an OIDC callback built from the canonical host while the user is on another one loops the sign-in forever with every step succeeding; a dashboard framed across registrable domains is third-party and has never worked in Safari. The allow-list in 1.421 is the security edge: the request's host feeds the `redirect_uri`, so reading it straight off the header would let anyone able to set `Host` have Keycloak deliver an authorization code elsewhere.
+**Why a regression matters:** every failure here is silent and attributed to something else. A hostname absent from `ALLOWED_HOSTS` makes a correctly-delegated customer domain answer "400 Bad Request"; an OIDC callback built from the canonical host while the user is on another one loops the sign-in forever with every step succeeding; a dashboard framed across registrable domains is third-party and has never worked in Safari. The allow-list in 1.643 is the security edge: the request's host feeds the `redirect_uri`, so reading it straight off the header would let anyone able to set `Host` have Keycloak deliver an authorization code elsewhere.
