@@ -75,9 +75,32 @@ can ship its own Vite app in a folder of its repository, built and released with
 the backend, and an instance can serve that instead, on the same host and
 against the same API. See [[ship-and-operate/custom frontend|Custom frontend]].
 
+## Live updates and sign-in
+
+The live channels — `ws/calculations`, `ws/calculation_status_update`, `ws/calculation_logs/…`,
+`ws/model_data_update` and `ws/logs` — carry calculation results, log lines and record changes.
+From 2.5 they can be limited to signed-in users, with `LEX_WS_AUTH`:
+
+| Value | A socket without a sign-in |
+|---|---|
+| `off` | is served, as before 2.5 |
+| `log` (default) | is served, and the log names it once: `WebSocket <consumer> on <path> would be closed with <code> (<reason>); LEX_WS_AUTH=log serves it as before.` |
+| `enforce` | is accepted and closed: `4401` sign in again, `4403` not allowed, `4503` the sign-in cannot be checked right now |
+
+Roll it out in two steps. Deploy with the default `log`, and watch for `would be closed with`
+lines. When they show only what you expect, set `LEX_WS_AUTH=enforce`.
+
+Under `log` the check never breaks a socket: when it cannot be made — the database connection
+dropped, say — the socket is served and the log says so; under `enforce` that is `4503`. A
+signed-in socket follows its sign-in: it is closed with `4401` when the sign-in ends, and it is
+checked again every 5 minutes, which also closes it when the user's Keycloak session has run
+out, the user's session was ended another way (an admin logout, a deleted session) or the user
+was deactivated. It never renews a token itself. `ws/health` is always public.
+
 ## Related
 
 - [[ship-and-operate/configuration|Configuration]] — what these processes read
 - [[ship-and-operate/custom frontend|Custom frontend]] — your own interface in the frontend pod
 - [[calculations/celery and async calculations|Celery & async calculations]] — what the workers are for
 - [[reference/CLI Commands|CLI Commands]] — every command and flag
+- [[access-and-dashboards/sign-in and sessions|Sign-in & Sessions]] — how long a sign-in lasts, and what ends it
