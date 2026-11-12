@@ -2,7 +2,7 @@ from django.core.files.storage import default_storage
 from django.http import FileResponse
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
-from rest_framework_api_key.permissions import HasAPIKey
+from lex.api.utils.api_key_requests import HasAPIKey
 
 from lex.audit_logging.mixins.FileOperationAuditMixin import FileOperationAuditMixin
 from lex.audit_logging.utils.file_operation_audit import ACTION_DOWNLOAD
