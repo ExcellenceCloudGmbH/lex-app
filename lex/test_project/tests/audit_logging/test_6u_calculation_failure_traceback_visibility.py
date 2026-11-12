@@ -36,6 +36,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 
 from lex.audit_logging.models.AuditLog import AuditLog
+from lex.lex_app.tests.auth import create_sign_in
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.audit_logging.serializers.AuditLogSerializer import AuditLogDefaultSerializer
 from lex.core.models.CalculationModel import CalculationModel
@@ -80,10 +81,8 @@ class TestCluster06u_CalculationFailureTracebackVisibility(E2ETestCase):
     # -- helpers ---------------------------------------------------------
 
     def login(self, user):
-        self.client.force_login(user)
-        session = self.client.session
-        session["oidc_expires_at"] = (timezone.now() + timedelta(hours=1)).timestamp()
-        session.save()
+        # lex-app 2.5: a sign-in is a server-side OIDCSession, as for the main user (E2ETestCase).
+        create_sign_in(self.client, user)
 
     def rows(self, user, model_name="auditlog", **params):
         self.login(user)

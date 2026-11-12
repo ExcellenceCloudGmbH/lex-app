@@ -32,6 +32,7 @@ from django.utils import timezone
 from rest_framework import status
 
 from lex.core.models.CalculationModel import CalculationModel
+from lex.lex_app.tests.auth import create_sign_in
 from lex.scheduling.dispatch import run_due_jobs
 from lex.scheduling.models import ScheduledJob
 from lex.test_project.tests._scheduling_support import TARGET_LABEL, ScheduledJobTestCase
@@ -155,10 +156,8 @@ class TestCluster10ac_ScheduledJobsApi(ScheduledJobTestCase):
         job = ScheduledJob.objects.get(name="nightly")
 
         other = User.objects.create_user(username="second_editor", password="pw")
-        self.client.force_login(other)
-        session = self.client.session
-        session["oidc_expires_at"] = (timezone.now() + timedelta(hours=1)).timestamp()
-        session.save()
+        # lex-app 2.5: a sign-in is a server-side OIDCSession, as for the first editor (E2ETestCase).
+        create_sign_in(self.client, other)
 
         response = self._patch(job, cron="30 18 * * *")
         self.assertEqual(response.status_code, status.HTTP_200_OK, f"Edit must succeed: {response.data!r}")
