@@ -2,7 +2,7 @@ import logging
 import os
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from copy import deepcopy
 from typing import Optional
@@ -61,6 +61,39 @@ def calculation_execution_context():
         yield
     finally:
         _in_calculation_execution.reset(token)
+
+
+@contextmanager
+def child_calculation_context(instance):
+    """The context one generated row of a ``create()`` batch is calculated and saved in.
+
+    Every consumer that runs a batch — the streaming and materialising sync
+    paths and the Celery ``calc_and_save`` task — must use this, so that they
+    cannot drift apart again. It sets two independent things:
+
+    - ``calculation_execution_context()``: writes made while the row is
+      calculated belong to the calculation, so they leave ``edited_by`` and
+      ``edited_at`` alone.
+    - ``model_logging_context(instance)``: the row goes on top of the model
+      context stack, so what its ``calculate()`` logs is filed under the row
+      itself, with the calculation that called ``create()`` as its parent.
+
+    Pass the instance that is saved. For a combination that already exists,
+    ``delete_models_with_same_defining_fields()`` returns the stored row, not
+    the generated copy, and the log has to be keyed by the stored row's pk. A
+    new row is calculated before it has a pk; its log is linked to it once it
+    is saved, which is why the save happens inside this block.
+
+    An instance that already is the top frame is not pushed again: a
+    calculation dispatched through the generic Celery ``calc_and_save`` task
+    arrives with its own frame on the stack it was shipped with.
+    """
+    from lex.audit_logging.utils.ModelContext import _model_context, model_logging_context
+
+    stack = _model_context.get()['model_context']
+    frame = nullcontext() if stack.has_on_top(instance) else model_logging_context(instance)
+    with calculation_execution_context(), frame:
+        yield
 
 
 class CalculationModelException(APIException):
@@ -1108,8 +1141,8 @@ class CalculationModel(LexModel):
         func = self.lex_func()
 
         # Dispatch single model calculation to Celery with calculation_id
-        from lex.audit_logging.utils.ModelContext import _model_context
-        model_context = deepcopy(_model_context.get()['model_context'])
+        from lex.audit_logging.utils.ModelContext import copy_for_dispatch
+        model_context = copy_for_dispatch()
 
         if hasattr(func, 'delay'):
             # Method itself is a @lex_shared_task — dispatch it directly.

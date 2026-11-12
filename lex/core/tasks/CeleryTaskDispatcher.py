@@ -4,7 +4,7 @@ from copy import deepcopy
 from typing import List, Optional, Any, Dict
 
 from lex.api.utils import operation_context, OperationContext
-from lex.audit_logging.utils.ModelContext import _model_context
+from lex.audit_logging.utils.ModelContext import _model_context, copy_for_dispatch
 from lex.core.exceptions import CeleryDispatchError
 from lex.core.mixins.CalculatedModelMixin import calc_and_save_sync
 
@@ -211,7 +211,7 @@ class CeleryTaskDispatcher:
             request_obj = context['request_obj'] or {}
             request_obj_extracted = OperationContext.extract_info_request(request_obj)
             new_context = {**context, "request_obj": request_obj_extracted}
-            model_context = deepcopy(_model_context.get()['model_context'])
+            model_context = copy_for_dispatch(_model_context.get()['model_context'])
             task_result = calc_and_save.delay(group, group_index, *args, context=new_context, model_context=model_context)
             from lex.lex_app.celery_tasks import register_task_with_context
             register_task_with_context(task_result)
