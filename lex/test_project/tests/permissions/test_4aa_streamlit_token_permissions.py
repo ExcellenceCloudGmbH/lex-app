@@ -59,9 +59,15 @@ class TestCluster04aa_StreamlitTokenPermissions(TestCase):
         bob, bob_token = self._signed_in("bob", ["viewer"])
         self.assertNotEqual(alice_token, bob_token, "precondition: two distinct sign-ins")
 
-        with mock.patch(UMA_FETCH) as uma:
+        with mock.patch(UMA_FETCH, return_value=[]) as uma:
             answers = {name: client.post(TOKEN_URL) for name, client in (("alice", alice), ("bob", bob))}
-        uma.assert_not_called()
+        # The view asks Keycloak for nothing. Where a Keycloak authorization server is configured
+        # (KEYCLOAK_URL/KEYCLOAK_REALM/OIDC_RP_CLIENT_ID, as in the release gate), the permissions
+        # middleware asks for the caller's UMA permissions once per request -- with that caller's own
+        # token; with none configured it asks nothing at all.
+        self.assertLessEqual(uma.call_count, 2, "at most the middleware's one UMA call per request")
+        for call in uma.call_args_list:
+            self.assertIn(call.args[0], {alice_token, bob_token}, "only ever with a caller's own token")
 
         for name, expected, roles in (("alice", alice_token, ["fund-admin"]), ("bob", bob_token, ["viewer"])):
             with self.subTest(caller=name):
