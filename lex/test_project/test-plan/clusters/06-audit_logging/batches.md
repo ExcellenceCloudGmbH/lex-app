@@ -142,3 +142,27 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Tests landed | **5 pass / 0 fail**; 6.168–6.170 and 6.172 fail on v2.4.2 |
 | Also changed | 6.165 rewritten to the new rule (owner and superuser read the traceback, stranger sees no row); 6.145 now reads as a non-superuser |
 | Status | ✅ Complete. See [session note](../../progress/sessions/2026-11-10-lex-1555-calc-failure-traceback.md) |
+---
+
+### Batch 6v — The audit entry of a scheduled run ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 6.173 – 6.175 |
+| Type | E |
+| Files covered | `lex/scheduling/dispatch.py` (`fire`, `_open_run_audit`, `scheduled_run_request`), `lex/audit_logging/utils/calculation_audit.py` (`_keep_opener_keys`: the opener's `trigger` survives the terminal snapshot) |
+| Test file | `lex/test_project/tests/audit_logging/test_6v_scheduled_run_audit.py` |
+| Test classes | `TestCluster06v_ScheduledRunAudit` (6.173–6.175) |
+| Fixtures | `ScheduledJobTestCase` with `e2e_unpatch = {"ensure_terminal_calculation_audit"}` |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bn) |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 6.173 | audited as the run-as user | one `update` entry for the job; author = run-as user; `trigger.by = schedule`, `trigger.job`; click-shaped id; final snapshot present; status success |
+| 6.174 | a failed run | status failure with the traceback |
+| 6.175 | no run-as user | author `Scheduler`, never blank |
+
+**Why a regression matters:** Nightly jobs invisible in the audit log, attributed to nobody, or left pending forever.
+
+**Allocation note:** Allocated past the letters and scenario IDs that in-flight branches (feat/ext-*, feat/auth-long-sessions) already hold: the first letter absent from lex-app-v2 and every remote branch, and a range above the highest max_scenario on any branch, so neither side has to renumber on merge. Design: [`docs/superpowers/plans/2026-11-10-scheduled-jobs.md`](../../../../../docs/superpowers/plans/2026-11-10-scheduled-jobs.md).

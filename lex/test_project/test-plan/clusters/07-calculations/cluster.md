@@ -140,4 +140,26 @@ In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI proc
 
 **Scenario range:** 7.228 – 7.237. **Test file:** `lex/test_project/tests/calculations/test_7u_closed_calculations.py`. **Type:** E. **Status:** ✅ Complete. 7.228 no run, status kept; 7.229 the rest of the save written; 7.230 an open record calculates; 7.231 the parent skips its closed child and logs why; 7.232–7.234 closed batch rows kept on the streaming, materialized and Celery paths; 7.235 `True` closes; 7.236 closed beats `calculate_on_create`, with none of a run's side effects; 7.237 closed once SUCCESS runs once. Paired with 2l (the button's 409) and 12m (the greyed button).
 
+
 ---
+
+### 7x. A scheduled job's run is an ordinary calculation of its target ✅
+
+**What it tests:** Firing a job starts the job's own calculation the way the Calculate button does; the job's `calculate()` calculates its target record (the parent → child pattern), every record of a model, or calls a registered function.
+
+**Why a regression matters:** Scheduled work that fails silently, reports success for a failed target, rolls back a night's results because one record failed, or loses an edit made while it ran.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 7.269 | the target is the child | target calculated once and keeps its result; target and job SUCCESS; the job's log has `Scheduled job: <name>` |
+| 7.270 | a failing target fails the job | target and job ERROR; the job keeps the target's error |
+| 7.271 | every record, one bad | all three calculated; the good two keep SUCCESS and results; job ERROR with `1 of 3` and the record id |
+| 7.272 | closed records left alone | the closed record keeps its status; only the open one runs; job SUCCESS |
+| 7.273 | function target | the registered function is called once with the job's kwargs; job SUCCESS |
+| 7.274 | failing function | job ERROR keeping the function's error |
+| 7.275 | function removed from the code | job ERROR naming the missing function |
+| 7.276 | record deleted | job ERROR saying the record no longer exists |
+| 7.277 | success clears the old error | after a failed then a fixed run: SUCCESS and an empty error |
+| 7.278 | an edit during the run sticks | switching the job off mid-run starts no second run; after the run it is still off with no next slot |
+
+**Scenario range:** 7.269 – 7.278. **Test file:** `lex/test_project/tests/calculations/test_7x_scheduled_job_runs.py`. **Type:** E. **Status:** ✅ Complete (2026-11-10). Batch: [7x](batches.md).

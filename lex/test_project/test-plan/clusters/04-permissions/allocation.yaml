@@ -257,3 +257,20 @@ letters:
       It now uses lex.api.views.authentication.KeycloakManager (the per-request UMA client of 4x) and
       maps None to []. Mutation: with the relative import back, 4.163 fails. Letter aa and 4.163, not
       y/z or 4.148-4.162: those belong to open PRs #869 (4y) and #880 (4z).
+  z:
+    title: 'A schedule can do no more than the person who saved it'
+    scenarios: 4.159-4.162
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      A scheduled run has no request, so no Keycloak permissions to check when it fires; the
+      check happens when the schedule is saved — the same checks the Calculate button passes —
+      and the run then acts as that person. Schedules keep the framework's default permissions;
+      code is trusted. Allocated past the letters and scenario IDs that in-flight branches
+      (feat/ext-*, feat/auth-long-sessions) already hold: the first letter absent from
+      lex-app-v2 and every remote branch, and a range above the highest max_scenario on any branch,
+      so neither side has to renumber on merge. Design:
+      docs/superpowers/plans/2026-11-10-scheduled-jobs.md.

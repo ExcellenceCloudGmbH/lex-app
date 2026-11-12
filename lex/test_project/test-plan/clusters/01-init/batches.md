@@ -2054,3 +2054,36 @@ threads, now has to apply it itself.
 **Mutation check:** making `_requested_host` return `""` and deriving the renewal origins from `DOMAIN_HOSTED` alone — i.e. the code as it was — fails 1.642, 1.644, 1.649 and 1.651. The same four behaviours were also reproduced against the base commit by serving `lex/proxy.py` with uvicorn and reading the `Location` header: a browser on `streamlit.app.customer.com` was sent to the platform callback, and the renewal preflight from `https://app.customer.com` came back 403.
 
 **Why a regression matters:** every failure here is silent and attributed to something else. A hostname absent from `ALLOWED_HOSTS` makes a correctly-delegated customer domain answer "400 Bad Request"; an OIDC callback built from the canonical host while the user is on another one loops the sign-in forever with every step succeeding; a dashboard framed across registrable domains is third-party and has never worked in Safari. The allow-list in 1.643 is the security edge: the request's host feeds the `redirect_uri`, so reading it straight off the header would let anyone able to set `Host` have Keycloak deliver an authorization code elsewhere.
+
+---
+
+### Batch 1bn — Scheduler bootstrap — the clock in the served backend, code-declared schedules, `run_scheduler` ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.654 – 1.664 |
+| Type | U + E |
+| Files covered | `lex/scheduling/loop.py`, `lex/scheduling/registry.py` (`lex_job`, `sync_code_jobs`), `lex/scheduling/apps.py`, `lex/scheduling/management/commands/run_scheduler.py`, `lex/lex_app/settings.py` (`LEX_SCHEDULER_*`, `INSTALLED_APPS`), `lex/lex_app/asgi.py`, `lex/utilities/config/generic_app_config.py` (untracked history) |
+| Test file | `lex/test_project/tests/init/test_1bn_scheduler_bootstrap.py` |
+| Test classes | `TestCluster01bn_SchedulerClock` (U, 1.654–1.657), `TestCluster01bn_CodeDeclaredSchedules` (E, 1.658–1.664) |
+| Fixtures | `ScheduledJobTestCase`; jobs declared per test with `lex_job(...)` and removed with `unregister` |
+| Tests landed | **11 pass / 0 fail** |
+| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bn) |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.654 | only in the served backend | importing `lex_app.asgi` in a test run starts nothing; a served start starts one thread; a second start returns it; it stops |
+| 1.655 | off is said out loud | `LEX_SCHEDULER_ENABLED=false` → no clock and a WARNING that no scheduled job will run |
+| 1.656 | on by default | enabled, 30 s tick, one-hour grace without any `LEX_SCHEDULER_*` variable |
+| 1.657 | survives failing passes | two raising ticks are logged and the clock keeps ticking |
+| 1.658 | a declaration becomes a row | `managed_by_code`, function target, cron, zone, kwargs, enabled, scheduled, no run-as |
+| 1.659 | code owns the schedule, the user the switch | a changed cron is applied; a user's `enabled=false` is kept |
+| 1.660 | a removed declaration | switched off (not deleted) with a message; declared again, switched back on |
+| 1.661 | a person's schedule is never taken over | same name created in the app: unchanged, conflict reported |
+| 1.662 | one function per name | a second function is refused naming it; the same function again is fine; a never-firing schedule is refused |
+| 1.663 | `run_scheduler --once` | syncs declarations, starts the due job, waits for it (SUCCESS), reports `fired=[...]` |
+| 1.664 | registered, not history-tracked | in `processAdminSite.registered_models`; no `history` |
+
+**Why a regression matters:** Instances with no scheduler, clocks in the wrong processes, declared schedules drifting from the code, or a history table growing on every run.
+
+**Allocation note:** Allocated past the letters and scenario IDs that in-flight branches (feat/ext-*, feat/auth-long-sessions) already hold: the first letter absent from lex-app-v2 and every remote branch, and a range above the highest max_scenario on any branch, so neither side has to renumber on merge. Design: [`docs/superpowers/plans/2026-11-10-scheduled-jobs.md`](../../../../../docs/superpowers/plans/2026-11-10-scheduled-jobs.md).
