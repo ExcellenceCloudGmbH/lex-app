@@ -2,7 +2,7 @@ import logging
 import os
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from contextvars import ContextVar
 from copy import deepcopy
 from typing import Optional
@@ -65,18 +65,20 @@ def calculation_execution_context():
 
 @contextmanager
 def child_calculation_context(instance):
-    """The context one generated row of a ``create()`` batch is calculated and saved in.
+    """The context a model is calculated in, beneath the calculation that started it.
 
-    Every consumer that runs a batch — the streaming and materialising sync
-    paths and the Celery ``calc_and_save`` task — must use this, so that they
-    cannot drift apart again. It sets two independent things:
+    Every consumer that runs a ``create()`` batch — the streaming and
+    materialising sync paths and the Celery ``calc_and_save`` task — uses
+    this for each generated row, and ``calculate_hook`` uses it for a
+    ``CalculationModel`` it runs synchronously, so that they cannot drift
+    apart again. It sets two independent things:
 
-    - ``calculation_execution_context()``: writes made while the row is
+    - ``calculation_execution_context()``: writes made while the model is
       calculated belong to the calculation, so they leave ``edited_by`` and
       ``edited_at`` alone.
-    - ``model_logging_context(instance)``: the row goes on top of the model
-      context stack, so what its ``calculate()`` logs is filed under the row
-      itself, with the calculation that called ``create()`` as its parent.
+    - ``model_logging_context(instance)``: the model goes on top of the model
+      context stack, so what its ``calculate()`` logs is filed under the model
+      itself, with the calculation that started it as its parent.
 
     Pass the instance that is saved. For a combination that already exists,
     ``delete_models_with_same_defining_fields()`` returns the stored row, not
@@ -84,9 +86,11 @@ def child_calculation_context(instance):
     new row is calculated before it has a pk; its log is linked to it once it
     is saved, which is why the save happens inside this block.
 
-    An instance that already is the top frame is not pushed again: a
-    calculation dispatched through the generic Celery ``calc_and_save`` task
-    arrives with its own frame on the stack it was shipped with.
+    An instance that already is the top frame is not pushed again. The API
+    pushes the record a Calculate click runs, a caller may wrap a save in
+    ``model_logging_context`` as the docs show, and a calculation dispatched
+    through the generic Celery ``calc_and_save`` task arrives with its own
+    frame on the stack it was shipped with.
     """
     from lex.audit_logging.utils.ModelContext import _model_context, model_logging_context
 
@@ -1399,6 +1403,19 @@ class CalculationModel(LexModel):
         self._clear_terminal_state_persistence(self)
         self._queue_missing_in_progress_history(self)
         task_dispatched = False
+        # A run in this process puts this model on top of the model context
+        # stack, unless its caller already did (see child_calculation_context).
+        # The frame is opened in the synchronous branch below and closed in
+        # ``finally``, so it also covers the terminal bookkeeping in
+        # execute_calculation_sync and the failure handling in ``except``:
+        # both decide from the stack whether this run is the root. Without it,
+        # a CalculationModel saved inside another calculation filed its lines
+        # under the caller and, saved by the root, was taken for the root: it
+        # purged the run's live log and kept that log as its own. The frame is
+        # opened on the thread that runs the calculation; the API's background
+        # thread calls this hook inside its copy of the request context, on a
+        # stack that already holds the record.
+        own_frame = ExitStack()
         try:
             # ── Ensure this record is registered in the cache store ──
             # For child calculations (triggered from within a parent's
@@ -1486,6 +1503,7 @@ class CalculationModel(LexModel):
             else:
                 # Execute synchronously as fallback
                 logger.info(f"Executing calculation for {self} synchronously (Celery not available)")
+                own_frame.enter_context(child_calculation_context(self))
                 self._run_in_calculation_executor()
 
         except Exception as e:
@@ -1612,3 +1630,4 @@ class CalculationModel(LexModel):
             # Ensure the guard does not leak across future independent saves.
             if hasattr(self, "_calculation_hook_in_progress"):
                 delattr(self, "_calculation_hook_in_progress")
+            own_frame.close()

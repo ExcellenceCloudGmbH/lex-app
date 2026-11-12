@@ -162,3 +162,33 @@ so the id travels with the copy. Removing the guard fails 15.63 and 15.64; remov
 before the copy fails 15.64.
 
 ---
+
+### Batch 15o — A nested CalculationModel's synchronous run is not taken for the root ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 15.65 – 15.71 (and 15.19 – 15.21 of 15f, whose `@expectedFailure` markers are dropped) |
+| Type | I (15.70: E) |
+| Files covered | `lex/core/models/CalculationModel.py` (`calculate_hook` opens `child_calculation_context` in its synchronous branch and closes it in its `finally`; `execute_calculation_sync`'s terminal bookkeeping and the hook's failure handling now run inside that frame), `lex/api/views/model_entries/One.py` (`_calculate_in_background`, as the route 15.70 drives), `lex/lex_app/celery_tasks.py` (`calc_and_save`, unchanged, as the route 15.71 drives) |
+| Test file | `lex/test_project/tests/calculation_logging/test_15o_nested_calculation_run.py` |
+| Test classes | `TestCluster15o_NestedCalculationRun`: 15.65 the run's live log, read after a nested model finished, still holds the root's line; 15.66 a run that fails in a nested model keeps its log as one row on the root; 15.67 a nested failure the root handles leaves one root node, with no copy of the root's lines elsewhere; 15.68 a root saved with nothing on the stack gets one row keyed to its record; 15.69 such a root keeps its log when it fails; 15.70 Calculate through the REST API (PATCH `calculate=true`, background thread) gives the root one row and the nested model its own; 15.71 the same tree on the Celery route (eager) |
+| Fixtures | `_CalcLogTestCase` with the real live cache (`store_message`, `build_cache_key` unpatched, as in 15j); `_live_log_purged_like_redis()` answers `cleanup_calculation`'s key lookup with the run's keys, so a purge deletes them as on Redis (the test cache cannot match patterns); new `LogFailingInnerSavedCalc` (`NESTED_RUN_MODELS`, kept out of `ALL_MODELS`); `LogRootCalc` modes `calcmodel_then_read_live_log`, `failing_calcmodel`, `failing_calcmodel_caught`; `_celery_eager()` from cluster 8h with `LogInnerSavedCalc.dispatch_calculation_task` watched to confirm the Celery route |
+| Tests landed | **7 pass / 0 fail** (15f: 3 pass, was 3 xfail) |
+| Status | ✅ Complete — fixes [BUG-055](../../known-bugs.md); see [session note](../../progress/sessions/2026-11-09-sync-route-own-frame.md) |
+
+**Why the frame has to outlast the run.** The terminal bookkeeping in `execute_calculation_sync`
+(`finally`) and the failure handling in `calculate_hook` (`except`) both ask the stack whether this
+run is the root: `ContextResolver`'s `root_record == current_record`. Only the root may purge the
+run's live log (cluster 9c) or write it back when the run fails (15j). A model the root saved, with no
+frame of its own, found the root on top of the stack as well as at its bottom, and answered yes. The
+frame is therefore opened in the hook and closed in its `finally`, not around `calculate()` alone.
+The developer chose this scope over the narrower fix that 15f's docstring suggested.
+
+**Each scenario was checked to fail with its part of the fix undone.** Without any frame, 15.65 – 15.70
+and 15.19 – 15.21 fail. With a frame around `calculate()` only, 15.65, 15.66, 15.67 and 15.69 fail. With a
+frame that ends before the failure handling, 15.66 and 15.67 fail. With a frame pushed even when the
+model is already on top, 15.19 – 15.21, 15.67 and 15.70 fail. 15.71 passes without the fix as well:
+since the fix for BUG-052, the generic Celery task gives a nested model its own frame. It guards that
+the routes agree.
+
+---
