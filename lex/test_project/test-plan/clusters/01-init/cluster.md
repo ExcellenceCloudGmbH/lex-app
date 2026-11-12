@@ -380,7 +380,7 @@ does not remove user launch configurations.
 | 1.365 | the dispatch page | overriding hooks compiled in, broken hooks and structure modules refused loudly |
 | 1.366 | the compiled app | sign-in routes, guard before `resolve`, connection middleware, every dashboard |
 | 1.367 | registration | the `Reflex` report and sidebar entry only when enabled; discovery never imports the Reflex package twice |
-| 1.368 | granian's uvloop | `AppConfig.ready()` survives a loop `nest_asyncio` cannot patch |
+| 1.368 | granian's uvloop | Django setup on uvloop carries on and patches nothing, and `async_to_sync` works after it (rewritten for BUG-046; see 1bo below) |
 | 1.369 | `LexUser` | `username` and `display_name` from Keycloak's claims |
 
 **Scenario range:** 1.357 – 1.369. **Test file:** `lex/test_project/tests/init/test_1aq_reflex_dashboards.py`. **Type:** U + I. **Status:** ✅ Complete (2026-09-28). Batch: [1aq](batches.md). Permissions in Reflex dashboards are cluster [4n](../04-permissions/cluster.md); the search exclusion of the `Reflex` report is [10d](../10-api_layer/cluster.md).
@@ -506,6 +506,22 @@ does not remove user launch configurations.
 
 **Scenario range:** 1.406 – 1.409. **Test file:** `lex/test_project/tests/init/test_1ax_process_feature_removed.py`. **Type:** I. **Status:** ✅ Complete (2026-10-22). Batch: [1ax](batches.md).
 
+---
+
+### 1bo. A project's startup leaves asyncio unpatched and `async_to_sync` usable ✅
+
+**What it tests:** that setting up a downstream Lex project changes nothing about asyncio. Every process the project runs does this setup: the web server, a Celery worker, a management command, Streamlit. `asyncio.run` stays the standard library's, and synchronous code can call into async code with `async_to_sync` as often as it needs to, from any thread.
+
+**Why a regression matters:** `LexAppConfig.ready()` used to call `nest_asyncio.apply()`, and nest_asyncio's `asyncio.run` never closes its loop. The first `async_to_sync` with thread-sensitive work (Django's async ORM, the Reflex ORM bridge) left that open loop in the calling thread, and the second call blocked on it forever (BUG-046). A Celery task, a command or a dashboard would hang on its second call, without any error.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.665 | set up with no running loop | after `django.setup()` of a downstream project in a fresh interpreter, `asyncio.run` is the standard library's, and two `async_to_sync` calls with thread-sensitive work both return, on the calling thread |
+| 1.666 | set up inside the server's loop | the same when `lex_app.asgi` is imported inside a running asyncio loop, as uvicorn does |
+
+1.368 (1aq, granian's uvloop) was rewritten to the same contract: setup on uvloop carries on and patches nothing.
+
+**Scenario range:** 1.665 – 1.666. **Test file:** `lex/test_project/tests/init/test_1bo_bootstrap_leaves_asyncio_unpatched.py`. **Type:** U (fresh interpreter, no database). **Status:** ✅ Complete (2026-11-06). Batch: [1bo](batches.md). The startup reset's side of the same bug is cluster [8d](../08-celery_async/cluster.md).
 ### 1bc. Deployed secret key, session lifetime and PKCE ✅
 
 **What it tests:** the sign-in settings a deployed instance runs with. A pod with `DEPLOYMENT_ENVIRONMENT` set refuses to start without its own `DJANGO_SECRET_KEY`, or on the key published in this package. The Django session cookie lives `LEX_SESSION_COOKIE_AGE_DAYS` (default 31) days and the OIDC library's session clock 30 days, so Django no longer ends a sign-in before Keycloak's 30-day idle window. Both relying parties on the shared Keycloak client -- Django's `/oidc/authenticate` and the dashboard proxy's `/auth/login` -- send a PKCE S256 challenge and keep the verifier server-side.

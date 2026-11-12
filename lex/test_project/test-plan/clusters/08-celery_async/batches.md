@@ -195,3 +195,20 @@
 | Note | Two assertions had to be strengthened before they could detect the defect, and both are worth remembering. (1) `edited_by`: a worker resolves the same fallback actor the fixture already carried, so an identical overwrite was invisible — 8.147 now seeds a distinct sentinel via `queryset.update()`. (2) The failing calc is deliberately `is_atomic = False`: under `is_atomic = True` the raise rolls the whole calculation back and would hide any stamp. Fixture note — the decorated tasks require explicit Celery task names; Celery derives a default name from `module.func_name` and all three `calculate` methods share one fixture module, so without them the last registration silently wins and one model runs another's body. |
 
 ---
+
+### Batch 8d — The startup reset works on every route and leaves asyncio usable (BUG-046) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.154 – 8.156 |
+| Type | I |
+| Files covered | `lex/process_admin/utils/model_registration.py` (`register_models`, `_handle_calculation_model_reset`, new `_run_on_own_thread`) |
+| Test file | `lex/test_project/tests/celery_async/test_8d_startup_reset_event_loops.py` |
+| Test classes | `TestCluster08d_StartupResetLeavesAsyncioUsable`: 8.154 no running loop; 8.155 inside a running asyncio loop; 8.156 inside a running uvloop loop (skipped without uvloop) |
+| Fixtures | `CelerySyncCalc` (existing, `celery_async/models.py`). Each scenario starts a fresh interpreter from this checkout (`PYTHONPATH`), gives it the test database by name, and wraps its two `async_to_sync` calls in a `faulthandler` watchdog |
+| Tests landed | **3 pass / 0 fail**. On v2.4.2 all three fail. In 8.154 and 8.155 the watchdog fires (the second call is blocked in asgiref's `run_until_future`). 8.156 fails with `RuntimeError: Failed to register model CelerySyncCalc: Can't patch loop of type <class 'uvloop.Loop'>` |
+| Coverage gain | every route the startup reset can run by; `_run_on_own_thread` |
+| Status | ✅ Complete. BUG-046 resolved. |
+| Note | 8x's `tearDown` no longer calls `nest_asyncio.apply()`. It did so to close the connection that asgiref's shared executor thread kept open, and the reset's own thread now closes that connection. That tearDown is what left asyncio patched for the rest of a single-process run, which is how the bug surfaced (1aq 1.360 hung after 8x). Letter `d` is the first letter absent from `allocation.yaml`. That file does not list the existing `8aa`–`8ad`. |
+
+---
