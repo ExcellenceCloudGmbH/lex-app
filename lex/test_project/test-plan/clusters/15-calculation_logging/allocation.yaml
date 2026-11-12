@@ -1,7 +1,7 @@
 cluster: 15
 slug: calculation_logging
 title: Calculation Logging Surface
-max_scenario: 71
+max_scenario: 77
 letters:
   a:
     title: LexLogger builder API and content shape
@@ -220,3 +220,26 @@ letters:
       a frame around calculate() only fails 15.65, 15.66, 15.67 and 15.69; a frame that ends before
       the failure handling fails 15.66 and 15.67; a frame pushed when the model is already on top fails
       15.19-15.21, 15.67 and 15.70. 15.71 passes without the fix too: it guards the agreement of the routes.
+  p:
+    title: A CalculationModel dispatched to Celery runs in a frame of its own
+    scenarios: 15.72-15.77
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      BUG-056. Eager Celery, as in 15n. calculate_hook now opens child_calculation_context before it
+      either dispatches the run or runs it, and closes it in its finally, so the task is shipped a copy
+      of the stack with the model on top, and the hook's failure handling, which runs in the caller's
+      thread when the task failed, sees the model on top. Covers a nested model whose calculate() is a
+      @lex_shared_task, which gets its own node (15.72), and what it saves on the worker, which nests
+      under it (15.73); a decorated root saved with nothing on the stack, which gets a node keyed to its
+      record and closes its audit entry as a success (15.74); the generic task giving such a root the
+      same node (15.75); and a nested failure the root handles, which leaves the run's live log alone on
+      the generic task (15.76) and on the decorated route (15.77). Checked against the undone fix: no
+      frame on the Celery route fails 15.72-15.74, 15.76 and 15.77; a frame that ends before the
+      failure handling fails 15.76 and 15.77; the rejected alternative, a push of args[0] in the
+      lex_shared_task wrapper, fails 15.76 and 15.77; calc_and_save pushing a model already on top
+      fails 15.72, 15.73 and 15.75-15.77 (and 15.63, 15.64, 15.71). 15.75 passes without the fix: it
+      guards the agreement of the routes.

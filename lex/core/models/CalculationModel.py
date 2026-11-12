@@ -70,8 +70,8 @@ def child_calculation_context(instance):
     Every consumer that runs a ``create()`` batch — the streaming and
     materialising sync paths and the Celery ``calc_and_save`` task — uses
     this for each generated row, and ``calculate_hook`` uses it for a
-    ``CalculationModel`` it runs synchronously, so that they cannot drift
-    apart again. It sets two independent things:
+    ``CalculationModel`` it runs or dispatches to Celery, so that they cannot
+    drift apart again. It sets two independent things:
 
     - ``calculation_execution_context()``: writes made while the model is
       calculated belong to the calculation, so they leave ``edited_by`` and
@@ -88,9 +88,11 @@ def child_calculation_context(instance):
 
     An instance that already is the top frame is not pushed again. The API
     pushes the record a Calculate click runs, a caller may wrap a save in
-    ``model_logging_context`` as the docs show, and a calculation dispatched
-    through the generic Celery ``calc_and_save`` task arrives with its own
-    frame on the stack it was shipped with.
+    ``model_logging_context`` as the docs show, and a calculation that
+    ``calculate_hook`` dispatched to the generic Celery ``calc_and_save``
+    task arrives with its own frame on top of the stack it was shipped with.
+    A ``@lex_shared_task`` ``calculate()`` is not run through this helper on
+    the worker: the stack it is shipped with already has the model on top.
     """
     from lex.audit_logging.utils.ModelContext import _model_context, model_logging_context
 
@@ -1144,7 +1146,9 @@ class CalculationModel(LexModel):
         # For backward compatibility
         func = self.lex_func()
 
-        # Dispatch single model calculation to Celery with calculation_id
+        # Dispatch single model calculation to Celery with calculation_id.
+        # Called from calculate_hook, the stack already has this model on top,
+        # so either task files what the calculation logs under this model.
         from lex.audit_logging.utils.ModelContext import copy_for_dispatch
         model_context = copy_for_dispatch()
 
@@ -1403,18 +1407,25 @@ class CalculationModel(LexModel):
         self._clear_terminal_state_persistence(self)
         self._queue_missing_in_progress_history(self)
         task_dispatched = False
-        # A run in this process puts this model on top of the model context
-        # stack, unless its caller already did (see child_calculation_context).
-        # The frame is opened in the synchronous branch below and closed in
-        # ``finally``, so it also covers the terminal bookkeeping in
-        # execute_calculation_sync and the failure handling in ``except``:
-        # both decide from the stack whether this run is the root. Without it,
-        # a CalculationModel saved inside another calculation filed its lines
+        # The run puts this model on top of the model context stack, unless
+        # its caller already did (see child_calculation_context). The frame is
+        # opened before the run is either dispatched or run in this thread, and
+        # closed in ``finally``, so it covers both routes:
+        # - synchronously, the run itself and the terminal bookkeeping in
+        #   execute_calculation_sync;
+        # - on Celery, the dispatch: the task is shipped a copy of the stack
+        #   with this model on top. A ``@lex_shared_task`` calculate() runs on
+        #   that stack as it is, and the generic calc_and_save task finds the
+        #   model already on top and does not push it again;
+        # - on both, the failure handling in ``except``, which runs in this
+        #   thread when the task failed.
+        # The terminal bookkeeping and the failure handling decide from the
+        # stack whether this run is the root. Without the frame, a
+        # CalculationModel saved inside another calculation filed its lines
         # under the caller and, saved by the root, was taken for the root: it
-        # purged the run's live log and kept that log as its own. The frame is
-        # opened on the thread that runs the calculation; the API's background
-        # thread calls this hook inside its copy of the request context, on a
-        # stack that already holds the record.
+        # purged the run's live log and kept that log as its own. The API's
+        # background thread calls this hook inside its copy of the request
+        # context, on a stack that already holds the record.
         own_frame = ExitStack()
         try:
             # ── Ensure this record is registered in the cache store ──
@@ -1456,6 +1467,7 @@ class CalculationModel(LexModel):
                     exc_info=True,
                 )
 
+            own_frame.enter_context(child_calculation_context(self))
             if self.should_use_celery():
                 # Dispatch to Celery worker
                 logger.info(f"Dispatching calculation for {self} to Celery worker")
@@ -1503,7 +1515,6 @@ class CalculationModel(LexModel):
             else:
                 # Execute synchronously as fallback
                 logger.info(f"Executing calculation for {self} synchronously (Celery not available)")
-                own_frame.enter_context(child_calculation_context(self))
                 self._run_in_calculation_executor()
 
         except Exception as e:
