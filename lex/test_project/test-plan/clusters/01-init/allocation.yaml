@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 618
+max_scenario: 673
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1132,8 +1132,9 @@ letters:
       because Django's close() inside a transaction marks it rather than nulling it. It now pins
       closed_in_transaction, needs_rollback and a query in the same transaction. 1.366 compiles the
       real lex.reflex_app once per process in setUpClass -- the auth plugin binds itself to the process
-      and refuses a second compile -- and 1.368 runs in a subprocess because nest_asyncio patches
-      asyncio process-wide. Verified end to end outside the suite against a mock OIDC provider in a
+      and refuses a second compile -- and 1.368 runs in a subprocess because it checks process-wide
+      asyncio state (rewritten for BUG-046 with 1bo: ready() no longer applies nest_asyncio, so
+      1.368 now asserts that setup on uvloop patches nothing). Verified end to end outside the suite against a mock OIDC provider in a
       browser: login redirect and return, record/table/structure dashboards, embed mode, sign-out, and a
       cross-site frame signing in through the popup.
 
@@ -1303,6 +1304,118 @@ letters:
       model-structure payload types nodes Model / HTMLReport / Folder only, never Process (1.409).
       Each scenario checks the kept HTMLReport sibling too, so a broken registration cannot pass as
       a clean removal. The routes that served the feature are pinned by 10q.
+  bo:
+    title: A project's startup leaves asyncio unpatched and async_to_sync usable (BUG-046)
+    scenarios: 1.665-1.666
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      LexAppConfig.ready() no longer calls nest_asyncio.apply(), which replaced asyncio.run with one
+      that never closes its loop and so made the second async_to_sync in any thread of a downstream
+      process wait forever. A real downstream project (a temporary folder holding lex_config.py) is
+      set up in a fresh interpreter with no running loop (1.665), and by importing lex_app.asgi
+      inside a running asyncio loop as uvicorn does (1.666). asyncio.run stays the standard
+      library's, and two async_to_sync calls with thread-sensitive work both return. A watchdog in
+      the child turns a hang into a failure with every thread's stack. 1aq's 1.368 was rewritten to
+      the same contract on granian's uvloop. All three fail on v2.4.2.
+  bc:
+    title: A deployed pod refuses the published secret key; sign-ins outlive Keycloak's idle window; PKCE on both relying parties
+    scenarios: 1.481-1.489
+    status: complete
+    tests:
+      pass: 9
+      skip: 0
+      xfail: 0
+    note: >-
+      Deployed pods (DEPLOYMENT_ENVIRONMENT set) refuse to start without their own DJANGO_SECRET_KEY
+      or on the key published in this package (1.481-1.483, fresh interpreters). The session cookie
+      lives LEX_SESSION_COOKIE_AGE_DAYS (default 31) days and the OIDC library's clock 30 days, inside
+      it as the library requires, so Django no longer ends a sign-in before Keycloak's 30-day idle
+      window; unusable values stop startup (1.484-1.486). Django's /oidc/authenticate and the
+      dashboard proxy's /auth/login both send a PKCE S256 challenge and keep the verifier server-side;
+      the code exchange proves it and still sends the confidential client's secret (1.487-1.489).
+      Letter bc, not ay/az/ba/bb: those are held by in-flight branches (ay on
+      fix/streamlit-report-frames-unauthenticated and others, az/ba on release/2.1.x, ba/bb on
+      feat/fleet-metrics-calculation-events), which also claim scenarios up to 1.480. The same letter
+      and scenario IDs are used on lex-app-v2 and release/2.1.x, so a merge between the lines is a
+      no-op.
+  bp:
+    title: A frame another application put on screen does not get to move that tab
+    scenarios: 1.667-1.673
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      The amplifier behind the Streamlit sidebar report sending the whole browser tab to the
+      dashboard host. The proxy answers a framed 401 with the breakout page, whose first act was
+      an unconditional window.top navigation to its own login; with a live SSO session the round
+      trip completes instantly and the tab is parked on the dashboard origin. The automatic layer
+      now runs only when Sec-Fetch-Site says this origin is also the embedder (1.669), or when a
+      client names no embedder at all, which is the pre-existing behaviour scenario 1.214 already
+      pins (1.670). A sibling origin (1.667, the React shell) and an unrelated site (1.668) get the
+      same 401, the same lex-auth-required postMessage -- the channel the shell recovers through --
+      and the same target="_top" link, but no scripted navigation. 1.671 pins the header read.
+      The frame is never redirected to the IdP in any branch, so the "refused to connect" wall the
+      breakout exists for cannot return. Cluster 1z's six scenarios are unchanged and still pass.
+      1.672 and 1.673 are the join: the URL the real Streamlit report builds, loaded as a framed
+      document against the real proxy app. With a token the proxy banks it, redirects the frame
+      to the same place without it and serves the dashboard upstream -- the expected behaviour
+      in the ticket. Without one the frame still 401s, but the 401 moves no window, so the tab
+      stays on the instance.
+      Mutation: against the pre-fix source 1.672 and 1.673 both fail, reproducing the report;
+      restoring the unconditional navigation fails 1.667, 1.668 and 1.671.
+  az:
+    title: A machine endpoint on the dashboard origin cannot take over the user's tab
+    scenarios: 1.415-1.422
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      LEX-1477, reported against 2.1.11 as "clicking a model that has a streamlit embedding
+      sends the whole browser tab to the streamlit site". The frontend frames a hidden,
+      zero-sized /_lex/theme-relay; 2.1.11's proxy had no such route (added in 2.2.0 by
+      8780a119), so the frame fell into the authenticated catch-all, 401'd, and was answered
+      with the frame-breakout page - whose job is to send the TOP window to a login. Keycloak
+      had a live SSO session, so the callback came straight back and honoured
+      next=/_lex/theme-relay, parking the whole tab on a blank storage shim. The route exists
+      now, so these scenarios defend the consequence rather than the one cause. A utility path
+      is no longer a valid return target, on the way in or out of the OIDC round trip (1.415,
+      1.416, 1.417); a framed utility path gets a plain 401 instead of the breakout, so nothing
+      invisible can ask the shell to move the tab (1.418) while a framed dashboard still
+      recovers exactly as before (1.419); and a tab that reaches the relay anyway - bookmark,
+      history, an older proxy in the chain - is sent back to the configured frontend (1.420)
+      without inventing a localhost destination when none is configured (1.421), with the
+      framed relay itself unchanged (1.422). 1ay (1.410-1.414) is reserved by open PR #853,
+      hence az. Frontend twin is process-admin-general-client batch F12u, which sandboxes the
+      relay frame and makes the shell attribute a re-auth request to the dashboard frame
+      rather than to its origin.
+  ay:
+    title: ALLOWED_HOSTS accepts the instance's own backend Service name in the cluster
+    scenarios: 1.410-1.414
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: A lex instance is several pods sharing one database, and the non-backend pods reach
+      the backend by its Kubernetes Service name so the traffic stays inside the cluster, off the
+      ingress and off TLS. ALLOWED_HOSTS held only DOMAIN_HOSTED, the loopback pair and POD_IP,
+      so CommonMiddleware answered DisallowedHost before any view, permission class or model code
+      ran - measured on a customer instance 2026-10-25, where every service-to-service file write
+      failed on this alone with a valid registered API key and a correct route. The short Service
+      name (1.410) and the three longer Kubernetes DNS forms (1.411) are now accepted; a checkout
+      with no instance identifier gains nothing (1.412); an unreadable namespace degrades to the
+      short name (1.413); and the namespace file is read without raising off-cluster (1.414),
+      which matters because settings are imported before anything can catch an error. The
+      namespace comes from the mounted serviceaccount file, not an env var - POD_NAMESPACE is not
+      set in the platform's pods - so no new required variable is introduced.
   bj:
     title: The initial-data load at server start survives restarts and a second server process
     scenarios: 1.609-1.618
