@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 158
+max_scenario: 163
 letters:
   a:
     title: ''
@@ -273,3 +273,20 @@ letters:
       carries login_url too; OIDC_LOGIN_REQUIRED_EXEMPT_URL_PATTERNS), 4o 4.98 (eleven flags), 4q
       4.111 (the create refusal keeps message and adds detail and code permission_denied).
       Letter y: s-w are held by in-flight branches (see x).
+  aa:
+    title: The Streamlit token carries the caller's own Keycloak permissions
+    scenarios: 4.163-4.163
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      StreamlitTokenView imported KeycloakManager relative to lex/authentication/views, where no such
+      module exists; the ImportError was swallowed, so every Streamlit token carried no permissions.
+      It now uses lex.api.views.authentication.KeycloakManager (the per-request UMA client of 4x) and
+      maps None to []. Mutation: with the relative import back, 4.163 fails. Letter aa and 4.163, not
+      y/z or 4.148-4.162: those belong to open PRs #869 (4y) and #880 (4z).
+      Rewritten for lex-app 2.5 (#869), same intent: the view now hands out the caller's own
+      sign-in token, so 4.163 checks two signed-in callers each get exactly their own token with
+      their own client roles, and that the view asks Keycloak for nothing.

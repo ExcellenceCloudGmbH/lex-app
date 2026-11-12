@@ -30,6 +30,7 @@ import os
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 
+from lex import hosts as lex_hosts
 from lex.runtime_config import (
     derive_repo_name,
     resolve_local_sqlite_path,
@@ -213,6 +214,28 @@ if os.getenv("LEX_ENVIRONMENT_TAG", "envvar_not_existing") == "dev":
 else:
     DEBUG = False
 
+# LEX_EXTRA_ALLOWED_HOSTS (comma-separated) names FURTHER hostnames this
+# instance answers on, beyond the one canonical DOMAIN_HOSTED.
+#
+# DOMAIN_HOSTED is a single name, so until this existed ALLOWED_HOSTS held
+# exactly one real host. Every other hostname pointed at the same pod — a
+# customer domain attached but not yet promoted, a dashboard host, a vanity
+# host put in front of one public route — got a 400 from Django while the
+# ingress happily routed it. USE_X_FORWARDED_HOST is True below, so Django
+# judges the host the CLIENT asked for: an ingress-side rewrite (upstream-vhost
+# and friends) cannot paper over this, which is why the name has to be listed
+# here. See also asgi.py, where the public health WebSocket is deliberately
+# exempt from AllowedHostsOriginValidator for the same class of failure.
+#
+# Entries are hostnames, not origins: "sign.example.com", or Django's own
+# leading-dot wildcard ".example.com" for every subdomain. "*" is refused
+# below — an instance that accepts any Host accepts Host-header poisoning.
+_lex_extra_allowed_hosts = [
+    host.strip().strip("/")
+    for host in os.getenv("LEX_EXTRA_ALLOWED_HOSTS", "").split(",")
+    if host.strip()
+]
+
 #: Where Kubernetes mounts the pod's own namespace. Present in every pod with a service account,
 #: which is every pod the platform runs, and readable without any API call or new env var.
 K8S_NAMESPACE_FILE = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
@@ -279,16 +302,6 @@ def _cluster_service_hosts(instance: str, namespace: str) -> list:
     ]
 
 
-ALLOWED_HOSTS = [
-    os.getenv("DOMAIN_HOSTED", "localhost"),
-    "127.0.0.1",
-    "localhost",
-    os.environ.get("POD_IP", default="envvar_not_existing"),
-] + _cluster_service_hosts(
-    (os.getenv("INSTANCE_RESOURCE_IDENTIFIER") or "").strip(), _k8s_namespace()
-)
-
-
 def _instance_app_hosts(environ=None) -> list:
     """Hostnames (no port) of every app host in ``LEX_INSTANCE_HOSTS``: canonical, platform, extra.
 
@@ -307,13 +320,59 @@ def _instance_app_hosts(environ=None) -> list:
     return hosts
 
 
-ALLOWED_HOSTS += [host for host in _instance_app_hosts() if host not in ALLOWED_HOSTS]
+# Every hostname the instance ingress routes to this pod, canonical first: the
+# platform hostname and any customer-owned domain attached to the instance. An
+# attached domain reaches the very same pods as the platform one, so a hostname
+# missing here is a domain that resolves, routes, and is then answered with
+# "400 Bad Request" by Django -- and with a refused handshake by
+# AllowedHostsOriginValidator, which reads this same list.
+#
+# Written by the lex-instance terraform module only when a custom domain is
+# attached; `public_hosts` falls back to DOMAIN_HOSTED alone, which is what
+# every other instance has always had.
+_PUBLIC_APP_HOSTS = lex_hosts.public_hosts("app")
+
+# dict.fromkeys, not set(): DOMAIN_HOSTED is normally the first entry of
+# _PUBLIC_APP_HOSTS as well, and a duplicate in ALLOWED_HOSTS is only noise --
+# but an unordered list would make this setting differ between runs.
+ALLOWED_HOSTS = list(dict.fromkeys([
+    *_PUBLIC_APP_HOSTS,
+    os.getenv("DOMAIN_HOSTED", "localhost"),
+    "127.0.0.1",
+    "localhost",
+    os.environ.get("POD_IP", default="envvar_not_existing"),
+    *_lex_extra_allowed_hosts,
+    # Every app host in LEX_INSTANCE_HOSTS (canonical, platform, extra): the Streamlit
+    # hand-off sends the browser to <app host>/oidc/handoff on whichever one shares a
+    # site with the dashboard.
+    *_instance_app_hosts(),
+    *_cluster_service_hosts(
+        (os.getenv("INSTANCE_RESOURCE_IDENTIFIER") or "").strip(), _k8s_namespace()
+    ),
+]))
 
 LOGIN_REDIRECT_URL = "/process_admin/all"
 
+# The extra hosts are trusted for CSRF too: a host that serves the app at all
+# serves its forms, and a host listed in ALLOWED_HOSTS but missing here fails
+# every POST with "Origin checking failed" — a confusing half-working state.
+#
+# The two settings spell a wildcard differently. ALLOWED_HOSTS takes Django's
+# leading dot (".example.com" = the domain and every subdomain); an origin must
+# carry a scheme and spells it "https://*.example.com", which covers the
+# subdomains only. So ".example.com" becomes "https://*.example.com" and the
+# apex, if it serves the app, is listed in its own right.
 CSRF_TRUSTED_ORIGINS = [
     "https://*." + os.getenv("DOMAIN_HOSTED", "localhost"),
     "http://localhost:3000",
+    # Django matches CSRF origins exactly unless the entry starts with `*.`, so
+    # each host needs its own entry as well as the wildcard above -- a POST to
+    # `https://app.customer.com` carries that exact Origin, which
+    # `https://*.customer.com` does not match.
+    *[f"https://{host}" for host in _PUBLIC_APP_HOSTS if host and host != "localhost"],
+] + [
+    f"https://*{host}" if host.startswith(".") else f"https://{host}"
+    for host in _lex_extra_allowed_hosts
 ]
 
 # Fail fast on missing critical configuration when deployed, instead of silently
@@ -331,6 +390,15 @@ if os.getenv("DEPLOYMENT_ENVIRONMENT") is not None:
             "DOMAIN_HOSTED must be set when DEPLOYMENT_ENVIRONMENT is set; without "
             "it ALLOWED_HOSTS only matches 'localhost' and all WebSocket/CSRF "
             "checks reject the real instance hostname."
+        )
+
+    if "*" in _lex_extra_allowed_hosts:
+        raise ImproperlyConfigured(
+            "LEX_EXTRA_ALLOWED_HOSTS must name hostnames, never '*'. A deployed "
+            "instance that accepts any Host header accepts Host-header poisoning: "
+            "password-reset and other absolute links would be built from whatever "
+            "the caller sent. Name each host, or use Django's leading-dot wildcard "
+            "('.example.com') for one domain's subdomains."
         )
 
     # The secret key signs session data, password-reset and signing tokens and
@@ -493,6 +561,10 @@ MIDDLEWARE = [
     "simple_history.middleware.HistoryRequestMiddleware",
     # The library's LoginRequiredMiddleware, letting API-key requests through to DRF.
     "lex.authentication.middleware.ApiKeyAwareLoginRequiredMiddleware",
+    # Records the hostname each request arrived on, so an HTMLReport can frame
+    # its dashboard from a hostname on the same registrable domain -- see
+    # lex.hosts. Pure bookkeeping: it never rejects a request.
+    "lex.hosts.CurrentHostMiddleware",
     # Lazy request.user_permissions / userinfo / client_roles (see the module).
     "lex.api.middleware.keycloak_permissions.KeycloakPermissionsMiddleware",
 ]
@@ -1052,6 +1124,12 @@ def _cors_allowed_origins(environ=None, deployed=None) -> list:
     if domain:
         candidates.append(f"https://{domain}")
     candidates.extend(_instance_hosts(env).origins())
+    # Every hostname lex.hosts says the app is served on (LEX_APP_HOSTS: the canonical host
+    # and any customer-owned domain attached to it). A hardened instance must keep accepting
+    # its own newly attached domain, for CORS and as an OIDC next/fail target.
+    candidates.extend(
+        f"https://{host}" for host in _PUBLIC_APP_HOSTS if host and host != "localhost"
+    )
     candidates.extend(env.get("LEX_CORS_ALLOWED_ORIGINS", "").split(","))
     if not is_deployed:
         candidates.extend(_local_dev_origins)

@@ -96,7 +96,13 @@ FORWARDED_LIBRARY_COMMANDS = {
 }
 
 #: Words that follow "lex " in prose without being commands.
-NOT_A_COMMAND = {"command", "commands", "app", "apps", "framework", "cli", "test"}
+#:
+#: "looks" arrives with the CLI reference's own heading, "Where lex looks for
+#: the project". A heading is prose, and the regex below cannot tell prose from
+#: an instruction -- which is what this set is for. The risk it carries is the
+#: same one every entry here carries: a real command by that name would go
+#: unchecked. None of these will ever be one.
+NOT_A_COMMAND = {"command", "commands", "app", "apps", "framework", "cli", "test", "looks"}
 
 #: A line that says a command does not exist is documentation ABOUT its
 #: absence, not an instruction to run it. The CLI reference has one: it warns

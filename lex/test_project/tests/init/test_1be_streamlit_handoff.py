@@ -983,11 +983,15 @@ class TestCluster01be_Modes(_HandoffCase):
             legacy.cookies.set("session", _legacy_session_cookie(), domain=DASH_HOST)
             legacy.get(DASH_PATH, headers={**FRAME, **spoof})
             self.assertEqual(self.upstream.values("x-streamlit-user-id"), ["real-sub"])
-            self.assertEqual(self.upstream.values("x-streamlit-access-token"), ["proxy-token"])
+            # One copy of the token since LEX-898 (#879): `Authorization`, never the client's
+            # forged X-Streamlit-Access-Token.
+            self.assertEqual(self.upstream.values("x-streamlit-access-token"), [])
+            self.assertEqual(self.upstream.values("authorization"), ["Bearer proxy-token"])
             with legacy.websocket_connect(WS_URL, headers=spoof):
                 pass
             self.assertEqual(_FakeUpstreamWS.values("x-streamlit-user-id"), ["real-sub"])
-            self.assertEqual(_FakeUpstreamWS.values("x-streamlit-access-token"), ["proxy-token"])
+            self.assertEqual(_FakeUpstreamWS.values("x-streamlit-access-token"), [])
+            self.assertEqual(_FakeUpstreamWS.values("authorization"), ["Bearer proxy-token"])
 
         user, row, handle = self._signed_in_dashboard()
         self.dash.get(DASH_PATH, headers={**FRAME, **spoof})

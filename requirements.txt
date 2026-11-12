@@ -20,6 +20,13 @@ channels==4.3.2
 asyncio==4.0.0
 channels-redis==4.3.0
 uvicorn[standard]==0.54.0
+# Arrives through uvicorn[standard] anyway, which asks only for >=10.4. Named
+# here for the floor: WEBSOCKETS_MAX_LINE_LENGTH -- the header-line limit
+# lex/ws_header_limits.py sets so a long access token cannot hang the Streamlit
+# handshake (LEX-898) -- is only read from websockets 13. An older release
+# parses at a hard-coded 8192 and says nothing, which is the failure the
+# variable exists to prevent. `lex streamlit` warns if one is installed anyway.
+websockets>=13
 nest_asyncio==1.6.0
 Office365-REST-Python-Client==3.3.0
 streamlit==1.66.1

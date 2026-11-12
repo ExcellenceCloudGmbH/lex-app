@@ -193,3 +193,22 @@ must not open a check on the whole model.
 **Allocation note:** Letter y: s–w are held by in-flight branches (see [4x](#batch-4x--per-user-keycloak-calls-stay-with-their-user-forged-tokens-and-look-alike-paths-)).
 
 ---
+
+### Batch 4aa — the Streamlit token carries the caller's own Keycloak permissions ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.163 – 4.163 |
+| Type | E (U until lex-app 2.5) |
+| Files covered | `lex/authentication/views/token_views.py` (`StreamlitTokenView.post`; `_get_user_permissions` until lex-app 2.5) |
+| Test file | `lex/test_project/tests/permissions/test_4aa_streamlit_token_permissions.py` |
+| Test classes | `TestCluster04aa_StreamlitTokenPermissions` (4.163) |
+| Fixtures | two sign-ins through `lex.lex_app.tests.auth.sign_in` (different client roles); the UMA fetch patched to prove the view asks for nothing |
+| Tests landed | **1 pass / 0 fail** — Mutation: with the old relative import, 4.163 fails |
+| Also changed | lex-app 2.5 (#869): the view no longer mints a token with embedded permissions; it hands out the caller's own sign-in token. 4.163 was rewritten to the same intent: each caller gets exactly their own token, with their own roles, and the view asks Keycloak for nothing |
+| Status | ✅ Complete |
+
+**Allocation note:** Letter aa and 4.163: 4y (4.148–4.158) is lex-app #869's and 4z (to 4.162) is #880's.
+
+---
+

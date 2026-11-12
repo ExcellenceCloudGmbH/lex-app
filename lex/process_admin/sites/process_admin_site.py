@@ -7,6 +7,11 @@ from lex.api.views.LexLoggerView.LexLoggerView import LexLoggerView
 from lex.api.views.calculations.CleanCalculations import CleanCalculations
 from lex.api.views.calculations.DownloadMarkdownPdf import DownloadMarkdownPdf
 from lex.api.views.calculations.InitCalculationLogs import InitCalculationLogs
+from lex.api.views.file_operations.ChunkedUpload import (
+    ChunkedUploadChunkView,
+    ChunkedUploadDetailView,
+    ChunkedUploadStartView,
+)
 from lex.api.views.file_operations.FileDownload import FileDownloadView
 from lex.api.views.file_operations.ModelExport import ModelExportView
 from lex.api.views.global_search_for_models.Search import Search
@@ -167,6 +172,23 @@ class ProcessAdminSite:
                 "api/<model:model_container>/file-download",
                 FileDownloadView.as_view(model_collection=self.model_collection),
                 name="file-download",
+            ),
+            # Files above the ~100 MB request-body limits of Cloudflare, the
+            # Ingress and ModSecurity are uploaded in pieces first.
+            path(
+                "api/chunked-uploads/",
+                ChunkedUploadStartView.as_view(),
+                name="chunked-upload-start",
+            ),
+            path(
+                "api/chunked-uploads/<str:upload_id>",
+                ChunkedUploadDetailView.as_view(),
+                name="chunked-upload-detail",
+            ),
+            path(
+                "api/chunked-uploads/<str:upload_id>/chunks/<int:index>",
+                ChunkedUploadChunkView.as_view(),
+                name="chunked-upload-chunk",
             ),
             path(
                 "api/<model:model_container>/export",

@@ -127,7 +127,7 @@
 | --- | --- |
 | Scenario range | 10.152 – 10.166 |
 | Type | E |
-| Files covered | `lex/authentication/drf_exceptions.py` (new: `exception_handler`, `refusal_response`), `lex/authentication/authentication_backends/BearerMiddlewareAuthentication.py` (`authenticate_header`, bearer contexts only), `lex/authentication/identity.py` (new), `lex/authentication/views/user_api.py`, `lex/authentication/views/session_views.py` (new), `lex/authentication/capabilities.py` (new), `lex/authentication/views/token_views.py`, `lex/api/views/model_entries/One.py` and `mixins/DestroyOneWithPayloadMixin.py` (refusal bodies), `lex/lex_app/settings.py` (`REST_FRAMEWORK`), `lex/contracts/auth/v2/fixtures/http/*.json` (read) |
+| Files covered | `lex/authentication/drf_exceptions.py` (new: `exception_handler`, `refusal_response`), `lex/authentication/authentication_backends/BearerMiddlewareAuthentication.py` (`authenticate_header`, bearer contexts only), `lex/authentication/identity.py` (new), `lex/authentication/views/user_api.py` (10.156 also pins `api/user/` to it), `lex/api/views/authentication/UserAPIView.py` (removed: the unrouted duplicate that called userinfo with a session token), `lex/authentication/views/session_views.py` (new), `lex/authentication/capabilities.py` (new), `lex/authentication/views/token_views.py`, `lex/api/views/model_entries/One.py` and `mixins/DestroyOneWithPayloadMixin.py` (refusal bodies), `lex/lex_app/settings.py` (`REST_FRAMEWORK`), `lex/contracts/auth/v2/fixtures/http/*.json` (read) |
 | Test file | `lex/test_project/tests/api_layer/test_10aa_auth_contract_v2.py` |
 | Test classes | `TestCluster10aa_NotAuthenticated` (10.152–10.154), `TestCluster10aa_Refusals` (10.155), `TestCluster10aa_CurrentUser` (10.156–10.157), `TestCluster10aa_SessionEndpoints` (10.158–10.161), `TestCluster10aa_ContractFixtures` (10.162–10.166) |
 | Fixtures | `create_oidc_session` sign-ins; django-oauth2-codeflow's `FakeOP` (bearer tokens, scripted refresh answers, the authorization round trip); `ContractItem` (new in `api_layer/models.py`: only superusers create/delete); the UMA call patched; outgoing HTTP refused in 10.156 |
@@ -172,3 +172,56 @@
 **Why a regression matters:** see [cluster.md § 10ab](cluster.md). The proxy's half of the hand-off is [01-init batch 1be](../01-init/batches.md).
 
 **Allocation note:** Letter ab, from 10.167: r–z are held by in-flight branches (see [10aa](#batch-10aa--lexs-rest-surface-speaks-the-http-auth-contract-v2-)).
+
+### Batch 10r — `api/htmlreport/<name>` hands a report the request, and the Streamlit frame a credential ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.100 – 10.102 |
+| Type | E (10.102 also U) |
+| Files covered | `lex/process_admin/views/model_relation_views.py` (`Overview`, `render_html_report`), `lex/lex_app/streamlit/Streamlit.py` (`get_html`) |
+| Test file | `lex/test_project/tests/api_layer/test_10r_html_report_request_and_streamlit_frame.py` |
+| Test classes | `TestCluster10r_StreamlitFrameCredential` (10.100–10.102), `TestCluster10r_RenderDispatch` (10.102, unit half) |
+| Fixtures | the real `Streamlit` report and two probe `HTMLReport` subclasses registered on `processAdminSite.html_reports` for the test; `E2ETestCase`'s session-authenticated `APIClient`, with `oidc_access_token` set and cleared on the session |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.100 | the sidebar entry frames a dashboard that can let the user in | the frame's URL is on `STREAMLIT_URL` and carries the session's access token as `auth_token`, and the response carrying it answers `Cache-Control: no-store` |
+| 10.101 | nothing to hand it means nothing handed | no OIDC token on the session → the host is still framed, with no `auth_token` key at all |
+| 10.102 | the published `get_html(self, user)` is unchanged | a report declaring only `(self, user)` renders through the route untouched; one declaring a second parameter receives the request; a `TypeError` raised *inside* a report is not mistaken for a signature |
+
+**Why a regression matters:** the customer-visible failure was not a broken page — it was the whole browser tab leaving the instance. Clicking **Streamlit** framed the dashboard host with no credential, the proxy 401'd the frame, and the framed-401 page moved the top window to that host's login, where a live SSO session completed the round trip before anyone could read it. 10.101 is the half that keeps the fix honest: an absent credential must stay absent rather than become a placeholder the proxy has to parse and reject. 10.102 is the blast radius — this route renders *every* report in a project, so a signature change here breaks every project report at once.
+
+---
+
+### Batch 10ad — `model_info` ships the project's per-column display options ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.184 – 10.187 |
+| Type | U |
+| Files covered | `lex/api/views/model_info/Fields.py` (`create_list_ui_info`), `lex/api/serializers/list_ui_columns.py` |
+| Test file | `lex/test_project/tests/api_layer/test_10ad_list_ui_column_options.py` |
+| Test classes | `TestCluster10ad_ListUiColumnOptions` (10.184–10.187) |
+| Fixtures | none — hand-rolled `model._meta` / serializer stand-ins, as 10i does |
+| Tests landed | **5 pass / 0 fail** |
+| Also changed | 10.25 and 12.35 no longer assert that `list_ui` has nothing else in it — their claims (the `hide_actions_column` flag is reflected, and survives wrapping) are unchanged |
+| Status | ✅ Complete — LEX-1556; paired with [12p](../12-serializers/batches.md) and frontend F03p/F03q |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.184 | the declaration reaches the frontend | `list_ui.columns` keyed by field name with the declared options; `hide_actions_column` still answered |
+| 10.185 | a plain DRF serializer gets the same contract | a non-`LexSerializer` class answers identically, flag and columns |
+| 10.186 | a model declaring nothing answers the key | `columns: {}` |
+| 10.187 | a malformed declaration never breaks the endpoint | the response arrives; the one usable declaration survives; a non-mapping declaration is simply absent |
+
+**Why a regression matters:** this payload is fetched before the frontend can draw a table
+at all. An exception raised while describing a **display preference** would take down every
+list view of that model — catastrophically out of proportion to the mistake that caused it.
+That is why 10.187 exists and why the normaliser validates rather than passes through.
+
+10.185 is the surface most likely to be missed: the endpoint serves both `LexSerializer`
+subclasses and a project's own hand-written DRF class, and it is the hand-written kind that
+a project reaching for column options is most likely to have.

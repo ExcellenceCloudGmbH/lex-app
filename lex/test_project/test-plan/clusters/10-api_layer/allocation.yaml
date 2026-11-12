@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 174
+max_scenario: 187
 letters:
   a:
     title: ''
@@ -239,3 +239,46 @@ letters:
       dual and handoff (10.172); handoff mode answers old frontends a placeholder token (10.173);
       only the exact path is login- and session-exempt (10.174). Four mutations each fail their
       scenario. Letter ab, from 10.167: r-z are held by in-flight branches (see aa).
+  r:
+    title: api/htmlreport/<name> hands a report the request, and the Streamlit frame a credential
+    scenarios: 10.100-10.102
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      The Streamlit sidebar entry framed its dashboard host with no credential at all. A
+      cross-origin frame cannot authenticate itself -- the proxy would have to redirect it to
+      Keycloak, which forbids being framed -- so the frame 401'd and the framed-401 page took the
+      browser tab to the dashboard host. The report now carries the session's own OIDC access
+      token as the bootstrap auth_token (10.100), the same handshake the React shell's embed has
+      always used, and carries none at all when the session has none (10.101) rather than a
+      placeholder the proxy must reject. The route answers Cache-Control: no-store now that its
+      body can hold a credential (10.100). HTMLReport's published get_html(self, user) is untouched:
+      the request reaches only a report that declares a second parameter, decided by reading the
+      signature rather than catching a TypeError that could have come from inside the report
+      (10.102). Mutation: the pre-fix report fails 10.100.
+  ad:
+    title: "model_info ships the project's per-column display options"
+    scenarios: "10.184-10.187"
+    tier: U
+    status: complete
+    tests: {pass: 5, skip: 0, xfail: 0}
+    note: >-
+      LEX-1556. A customer reported the grid's ID column is too wide, and the framework had no
+      way for a project to say anything about a COLUMN: ``list_ui`` carried one flag
+      (``hide_actions_column``). ``Meta.lex_column_options`` is the missing developer layer -
+      width / min_width / max_width / pinned / hidden per field - and this batch covers the
+      half a frontend actually reads: ``/api/<model>/fields/`` returning it.
+      10.184 the declaration arrives keyed by field name. 10.185 a project's own PLAIN DRF
+      serializer gets the identical contract, because the endpoint serves both kinds and a
+      frontend that had to tell them apart would need two code paths for one payload - and the
+      hand-written kind is the one that would be missed. 10.186 every response answers the key,
+      so "declared nothing" and "declared an empty thing" cannot diverge between readers.
+      10.187 a malformed declaration costs the project that option and not the grid: this
+      payload is fetched before any table can be drawn, so an exception raised while describing
+      a DISPLAY PREFERENCE would take down every list view of the model.
+      Paired with cluster 12p (the serializer-side contract and its validation) and frontend
+      clusters F03p/F03q.
+

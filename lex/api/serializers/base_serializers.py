@@ -14,6 +14,8 @@ from rest_framework import serializers, viewsets
 
 logger = logging.getLogger(__name__)
 
+from lex.api.serializers.list_ui_columns import build_column_options
+
 # Field-names that React-Admin expects
 from lex.api.serializers.sensitive_fields import (
     filter_sensitive_field_names,
@@ -293,6 +295,22 @@ class LexClearableFileField(serializers.FileField):
             if self.required:
                 self.fail("required")
             return ""
+        # A file too large for one request body arrives in pieces first and
+        # is referred to here by its upload token (see ChunkedUpload.py).
+        from lex.api.views.file_operations.ChunkedUpload import (
+            ChunkedUploadError,
+            is_upload_token,
+            resolve_upload_token,
+        )
+
+        if is_upload_token(data):
+            request = self.context.get("request")
+            if request is None:
+                raise serializers.ValidationError("A chunked upload needs a request context.")
+            try:
+                data = resolve_upload_token(data, request)
+            except ChunkedUploadError as exc:
+                raise serializers.ValidationError(str(exc)) from exc
         return super().to_internal_value(data)
 
 
@@ -392,10 +410,20 @@ class LexSerializer(serializers.ModelSerializer):
 
     @classmethod
     def get_list_ui_options(cls) -> dict:
-        """Expose serializer-level frontend list options via ``Meta``."""
+        """
+        Expose serializer-level frontend list options via ``Meta``.
+
+        ``columns`` carries the per-column display defaults a project declares
+        in ``Meta.lex_column_options`` -- the developer layer of the three that
+        decide how a table looks (the user's own Settings panel and a saved
+        view are the other two). See
+        ``lex.api.serializers.list_ui_columns`` for the options and why
+        an invalid one is dropped rather than raised.
+        """
         meta = getattr(cls, "Meta", None)
         return {
             "hide_actions_column": bool(getattr(meta, "hide_actions_column", False)),
+            "columns": build_column_options(meta),
         }
 
     # ------------------------------------------------------------------
@@ -825,8 +853,21 @@ class LexSerializer(serializers.ModelSerializer):
         visible_fields = None
 
         # 0. Already decided for this request (the list filter asked first; BUG-011)
+        #
+        # ``has_can_read`` is asked FIRST, and that order is the fix (LEX-1555):
+        # ``type(...).can_read`` on a model that declares none raises
+        # ``AttributeError``, and this branch runs before the two below that do
+        # guard themselves. Not every model served through ``model_entries`` is a
+        # ``LexModel`` — ``CalculationLog`` is a plain ``django.db.models.Model`` —
+        # so every read of the calculation-log table, by id, by ids and through
+        # the grid, answered 500 and the frontend's log tree, its Details tab and
+        # the table page all broke at once.
         remembered = None
-        if request is not None and type(target_instance).can_read is _lex_model_can_read():
+        if (
+            request is not None
+            and target_caps['has_can_read']
+            and type(target_instance).can_read is _lex_model_can_read()
+        ):
             from lex.api.security import recalled
 
             remembered = recalled(request, "read", target_instance)

@@ -21,7 +21,8 @@ Covers: lex/authentication/dashboards/embed.py (issue_embed_ticket, EmbedTicketM
         _without_ticket), lex/authentication/dashboards/handoff.py (aud="embed", holder_handle),
         lex/authentication/dashboards/broker.py, lex/authentication/dashboards/sites.py (local_path),
         lex/mcp_server/tools/embed.py (_embed_view_inner, _issue_embed_ticket, the widget's metaUrl),
-        lex/lex_app/settings.py (MIDDLEWARE).
+        lex/lex_app/settings.py (MIDDLEWARE), lex/core/middleware/embed_token_auth.py (removed: the
+        pre-2.5 ``?auth_token=`` / ``Referer`` bootstrap no longer signs anyone in, 1.546).
 Run: python -m lex pytest lex/test_project/tests/init/test_1bf_mcp_embed_ticket.py -v
 """
 
@@ -353,15 +354,30 @@ class TestCluster01bf_TheCookie(_EmbedCase):
         Given: an embed whose ticket was redeemed
         When: the frame asks who it is, and reads a login-protected endpoint
         Then: api/auth/session is that user with the roles of the token; the protected read is
-              served (without the cookie it is the contract's 401).
+              served (without the cookie it is the contract's 401) -- also when the token itself
+              rides on an ``embed=true`` URL as ``auth_token`` or in its ``Referer``, which is how
+              the removed pre-2.5 ``EmbedTokenAuthMiddleware`` signed a frame in.
         """
-        self._embedded(roles=("viewer", "fund-reader"))
+        token = self._embedded(roles=("viewer", "fund-reader"))
         session = self.get("/api/auth/session")
         self.assertEqual(session.status_code, 200)
         self.assertEqual(session.json()["user"]["email"], "mcp.user@example.com")
         self.assertEqual(session.json()["user"]["client_roles"], ["viewer", "fund-reader"])
         self.assertEqual(self.get("/api/model-structure").status_code, 200)
         self.assertEqual(Client().get("/api/model-structure", HTTP_HOST=APP_HOST, secure=True).status_code, 401)
+        # lex/core/middleware/embed_token_auth.py is gone: a valid token in the URL, or in the
+        # Referer of an embed page, signs nobody in -- only the single-use ticket does.
+        stranger = Client()
+        self.assertEqual(
+            stranger.get(f"/api/model-structure?embed=true&auth_token={token}", HTTP_HOST=APP_HOST,
+                         secure=True).status_code, 401,
+            "a bearer token in ?auth_token= must not sign an embed in",
+        )
+        self.assertEqual(
+            stranger.get("/api/model-structure", HTTP_HOST=APP_HOST, secure=True,
+                         HTTP_REFERER=f"{APP}/fund?embed=true&auth_token={token}").status_code, 401,
+            "a bearer token in the Referer of an embed page must not sign a request in",
+        )
 
     # -- 1.547 ---------------------------------------------------------
     def test_1_547_the_cookie_never_writes(self) -> None:

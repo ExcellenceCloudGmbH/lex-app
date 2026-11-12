@@ -144,3 +144,41 @@ cluster-2 models are too shallow; we need a model with one of every
 | 12.65 | superusers and opt-out | delete true, edit includes `x` and `valid_from` |
 
 **Scenario range:** 12.64 – 12.65. **Test file:** `lex/test_project/tests/serializers/test_12o_history_row_scopes.py`. **Type:** E. **Status:** ✅ Complete (2026-10-18). Batch: [12o](batches.md).
+
+### 12p — A project declares how its columns look, once, on the serializer
+
+**What it tests:** `Meta.lex_column_options` → validated `list_ui.columns`. The validation
+is the point: this runs while answering `model_info`, which the whole frontend blocks on,
+so a project that mistypes an option must get that option ignored — never a grid that will
+not load.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 12.66 | declared options reach the frontend unchanged | `width` / `min_width` / `max_width` / `pinned` / `hidden` survive exactly as written |
+| 12.67 | a serializer that declares nothing adds nothing | `{}` for no declaration, for no `Meta`, and for a declaration of the wrong shape |
+| 12.68 | one bad option does not cost the good ones | the unusable keys are dropped, the valid neighbour stays |
+| 12.69 | a boolean is never read as a width | `{"width": True}` is a typo, not a one-pixel column (`bool` is an `int` subclass) |
+| 12.70 | a contradictory width pair is refused, not guessed | `min_width > max_width` drops both; a consistent pair is kept |
+| 12.71 | the contract carries both `list_ui` answers | `get_list_ui_options()` always reports `hide_actions_column` *and* `columns` |
+| 12.72 | options survive the wrapping of a custom serializer | a hand-written `ModelSerializer` registered as `api_serializers["default"]` is wrapped before use; the declaration must come through |
+
+**Scenario range:** 12.66 – 12.72. **Test file:** `lex/test_project/tests/serializers/test_12p_list_ui_column_options.py`. **Type:** U. **Status:** ✅ Complete (2026-11-10). Batch: [12p](batches.md). Paired with [10ad](../10-api_layer/cluster.md).
+
+### 12q. Files larger than one request body are uploaded in pieces ✅
+
+**What it tests:** a file larger than the ~100 MB every request body is capped at before it reaches Django is uploaded in pieces to `api/chunked-uploads/`, and the create or update request sends `lex-chunked-upload:<id>` as the file field's value; `LexClearableFileField` joins the pieces and the record saves as if the file had come in directly.
+
+**Why a regression matters:** above the cap this is the only way a file reaches the instance; without it the browser fails with "Failed to fetch" and nothing reaches the backend. The ownership and size checks keep the shared piece store from exposing or corrupting another user's upload.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 12.73 | create with a chunked upload | pieces sent out of order become the record's file, bytes and name intact |
+| 12.74 | update with a chunked upload | the update path, which validates more than once, gets the file intact |
+| 12.75 | an incomplete upload is refused | 400 naming the gap; no record created |
+| 12.76 | an upload belongs to its user | another user gets 404 on every route and cannot use the token |
+| 12.77 | piece size and index are checked | wrong length or out-of-range index is 400 |
+| 12.78 | size cap and bad ids | above the cap is 413; a path-like id is 404 |
+| 12.79 | delete removes the pieces | 204, then 404; the manifest is gone |
+| 12.80 | expired uploads are swept | an upload past the TTL is removed when the next one starts |
+
+**Scenario range:** 12.73 – 12.80. **Test file:** `lex/test_project/tests/serializers/test_12q_chunked_upload.py`. **Type:** E. **Status:** ✅ Complete. Batch: [12q](batches.md).

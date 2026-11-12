@@ -26,7 +26,9 @@ silent re-authentication round trip, the embedded-dashboard token endpoint, and 
 Cluster 10aa -- scenarios 10.152-10.166. Type: E.
 Covers: lex/authentication/drf_exceptions.py, lex/authentication/authentication_backends/
 BearerMiddlewareAuthentication.py, lex/authentication/identity.py,
-lex/authentication/views/user_api.py, lex/authentication/views/session_views.py,
+lex/authentication/views/user_api.py (api/user/; its unrouted duplicate
+lex/api/views/authentication/UserAPIView.py, which called userinfo with a session token, is
+removed -- 10.156 pins the route to user_api), lex/authentication/views/session_views.py,
 lex/authentication/capabilities.py, lex/authentication/views/token_views.py,
 lex/api/views/model_entries/One.py and .../mixins/DestroyOneWithPayloadMixin.py (refusals),
 lex/lex_app/settings.py (REST_FRAMEWORK), lex/contracts/auth/v2/fixtures/http/*.json.
@@ -35,6 +37,7 @@ Run: python -m lex pytest lex/test_project/tests/api_layer/test_10aa_auth_contra
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
@@ -242,6 +245,15 @@ class TestCluster10aa_CurrentUser(_ContractMixin, TestCase):
         bearer = op.issue_tokens("kc-machine", email="machine@example.com", client_roles=["viewer"])["access_token"]
         django_only = APIClient()
         django_only.force_login(self.make_user("admin"), backend="django.contrib.auth.backends.ModelBackend")
+
+        from django.urls import resolve
+
+        from lex.authentication.views.user_api import CurrentUser
+
+        self.assertIs(resolve("/api/user/").func.view_class, CurrentUser,
+                      "api/user/ is user_api.CurrentUser (UserAPIView.py, its userinfo-calling twin, is gone)")
+        with self.assertRaises(ImportError):
+            importlib.import_module("lex.api.views.authentication.UserAPIView")
 
         with mock.patch("requests.sessions.Session.request", side_effect=AssertionError("no HTTP call")) as http:
             browser = self.client.get("/api/user/")

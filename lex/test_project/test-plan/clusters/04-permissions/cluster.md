@@ -177,3 +177,14 @@
 | 4.158 | fail-closed sites | 503/401 instead of a denial or a grant |
 
 **Scenario range:** 4.148 – 4.158. **Test file:** `lex/test_project/tests/permissions/test_4y_permission_lookup.py`. **Type:** U (4.148–4.151, 4.155–4.157), E (4.152–4.154, 4.158). **Status:** ✅ Complete (2026-11-06). Batch: [4y](batches.md).
+
+### 4aa. The Streamlit token carries the caller's own Keycloak permissions ✅
+
+**Gap:** `StreamlitTokenView` imported `KeycloakManager` from a module that does not exist; the error was swallowed and every Streamlit token carried no permissions.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.163 | the token view asks Keycloak with the caller's token | since lex-app 2.5: two signed-in callers each get exactly their own sign-in's access token, with their own client roles in it, and the view asks Keycloak for no permissions (before 2.5: the caller's bearer token reached `get_uma_permissions`) |
+
+**Scenario range:** 4.163 – 4.163. **Test file:** `lex/test_project/tests/permissions/test_4aa_streamlit_token_permissions.py`. **Type:** E. **Status:** ✅ Complete (2026-11-12). Batch: [4aa](batches.md).
+

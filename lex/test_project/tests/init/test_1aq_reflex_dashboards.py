@@ -33,7 +33,7 @@ Covers: lex/lex_app/reflex/ (config.py, auth.py ``LexKeycloakAuthState`` and
 ``LexUser``, django_orm.py, dashboards.py, app.py, Reflex.py,
 examples/_reflex_structure.py), lex/reflex_app.py,
 lex/utilities/config/generic_app_config.py, lex/lex_app/apps.py
-(``_apply_nest_asyncio``, ``register_models``),
+(``ready()``, ``register_models``),
 lex/process_admin/utils/model_structure_builder.py, lex/core/models/LexModel.py
 (``reflex_main`` / ``reflex_class_main``).
 Run: python -m lex pytest lex/test_project/tests/init/test_1aq_reflex_dashboards.py -v
@@ -43,7 +43,9 @@ from __future__ import annotations
 
 import contextlib
 import importlib
+import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -804,40 +806,59 @@ class TestCluster01aq_EventLoops(TestCase):
     """Django setup survives the event loop the Reflex server runs."""
 
     # -- 1.368 ---------------------------------------------------------
-    def test_1_368_nest_asyncio_is_skipped_on_a_loop_it_cannot_patch(self) -> None:
+    def test_1_368_django_setup_on_granians_uvloop_patches_nothing(self) -> None:
         """
         Scenario 1.368: ``AppConfig.ready()`` does not fail on granian's uvloop loop.
-        Given: a process whose current loop is uvloop's -- what granian installs
-               before Django is set up -- then one on a plain asyncio loop.
-        When:  ``_apply_nest_asyncio`` runs on each.
-        Then:  on uvloop, where ``nest_asyncio.apply()`` raises, setup carries
-               on; on asyncio's own loop the patch is still applied.
+        Given: a downstream project in a fresh process whose current loop is
+               uvloop's, which granian installs before Django is set up.
+        When:  Django is set up (``LexAppConfig.ready()`` runs the project's
+               startup), and the main thread then calls ``async_to_sync``
+               twice, each time with thread-sensitive work.
+        Then:  setup carries on, ``asyncio.run`` is still the standard
+               library's, and both calls return.
 
-        In a subprocess: ``nest_asyncio.apply()`` patches asyncio for the
-        whole process, which must not leak into the rest of the suite.
+        Rewritten for BUG-046. ``ready()`` used to call ``nest_asyncio.apply()``
+        and skip it only where uvloop refused the patch. Now it patches nothing
+        on any loop (1bo, scenarios 1.665-1.666).
+
+        It runs in a subprocess because what is under test is process-wide
+        state. ``PYTHONPATH`` points the child at this checkout. Without it, a
+        checkout that is not pip-installed cannot import lex there.
         """
+        project = Path(tempfile.mkdtemp(prefix="cluster1aq_")).resolve()
+        self.addCleanup(shutil.rmtree, project, ignore_errors=True)
+        (project / "__init__.py").write_text("")
+        (project / "lex_config.py").write_text(f'PROJECT_GROUPS = ["{project.name}"]\n')
         code = (
-            "import asyncio, nest_asyncio, uvloop\n"
-            "from lex.lex_app.apps import _apply_nest_asyncio\n"
+            "import asyncio, faulthandler, json, threading, uvloop\n"
+            "import lex.bin.lex\n"
             "loop = uvloop.new_event_loop(); asyncio.set_event_loop(loop)\n"
-            "try:\n"
-            "    nest_asyncio.apply(loop)\n"
-            "except ValueError:\n"
-            "    print('precondition: refused')\n"
-            "_apply_nest_asyncio()\n"
-            "print('uvloop:', getattr(loop, '_nest_patched', False))\n"
-            "asyncio.set_event_loop(None); loop.close()\n"
-            "loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)\n"
-            "_apply_nest_asyncio()\n"
-            "print('asyncio:', getattr(loop, '_nest_patched', False))\n"
+            "import django\n"
+            "django.setup()\n"
+            "from asgiref.sync import async_to_sync, sync_to_async\n"
+            "from lex.lex_app.settings import repo_name\n"
+            "async def calling_thread():\n"
+            "    return await sync_to_async(threading.get_ident, thread_sensitive=True)()\n"
+            "faulthandler.dump_traceback_later(60, exit=True)\n"
+            "calls = [async_to_sync(calling_thread)() == threading.get_ident() for _ in range(2)]\n"
+            "faulthandler.cancel_dump_traceback_later()\n"
+            "print(json.dumps({'project': repo_name, 'asyncio.run': asyncio.run.__module__, 'calls': calls}))\n"
         )
+        cleared = ("DJANGO_SETTINGS_MODULE", "PROJECT_ROOT", "PYTHONPATH", "CALLED_FROM_START_COMMAND")
+        env = {key: value for key, value in os.environ.items() if key not in cleared}
+        env["PYTHONPATH"] = Path(__file__).resolve().parents[4].as_posix()
         result = subprocess.run(
             [sys.executable, "-c", code], capture_output=True, text=True, timeout=300,
-            cwd=tempfile.gettempdir(),
-            env=_child_env(),
+            cwd=project, env=env,
         )
-        self.assertEqual(result.returncode, 0, msg=f"setup must carry on on uvloop:\n{result.stderr[-2000:]}")
-        lines = result.stdout.splitlines()
-        self.assertIn("precondition: refused", lines, "nest_asyncio itself must refuse uvloop")
-        self.assertIn("uvloop: False", lines)
-        self.assertIn("asyncio: True", lines, "a patchable loop must still be patched")
+        self.assertEqual(
+            result.returncode, 0,
+            msg=f"setup must carry on on uvloop, and no call may hang:\n{result.stderr[-3000:]}",
+        )
+        report = json.loads(result.stdout.strip().splitlines()[-1])
+        self.assertEqual(report["project"], project.name, "precondition: the downstream project is the one set up")
+        self.assertEqual(
+            report["asyncio.run"], "asyncio.runners",
+            "setup on uvloop must leave asyncio.run as the standard library's",
+        )
+        self.assertEqual(report["calls"], [True, True], "both async_to_sync calls must return after setup")
