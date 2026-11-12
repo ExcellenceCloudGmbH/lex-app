@@ -74,7 +74,7 @@ This is the main functional release gate. The PyPI release also waits for `celer
 ### Inputs
 
 * `clusters` (string) — comma-separated selector consumed by `.github/scripts/run_showcase_suite.py --only`. Each entry is either `<cluster_key>` (whole cluster) or `<cluster_key>:<test_suffix>` (single test).
-* Default selector: `init,crud_api,api_layer,calculations,validation_hooks,permissions,queries` — seven clusters considered release-blessed.
+* Default selector: `init,crud_api,api_layer,calculations,validation_hooks,celery_async,history,audit_logging,permissions,signals_ws,serializers,exports,queries,calculation_logging` — the fourteen clusters considered release-blessed. The same list is repeated in `pip_publish.yml` and `prerelease_gate.yml`; change all of them together. A cluster missing from it runs in no CI job at all: `calculation_logging` was missing until 2026-11-06, and nine of its tests failed unnoticed from 2026-05-14 (BUG-052).
 * The job **refuses to run** if `clusters` is empty. There is no implicit "run everything".
 
 ### Why release events are **not** a direct trigger
