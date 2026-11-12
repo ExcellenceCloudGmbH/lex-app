@@ -118,3 +118,26 @@
 **Why a regression matters:** `run_step` was a second write path into every model, carrying its own copy of the permission checks the generic CRUD endpoints apply. A route that comes back by accident is a write surface nobody audits any more. And the removal had to be surgical — it ran through the one url list the whole frontend is served from, so 10.99 is the half that proves nothing else went with it.
 
 **Allocation note:** first written as 10p/10.91–10.94. [10p](#batch-10p--file-download-endpoints-write-an-audit-entry-) (#840) landed that letter and range on `lex-app-v2` while this branch was open, so the batch re-took the next free pair when the base was merged in. Letters are never renumbered; this one moved before it ever landed.
+
+---
+
+### Batch 10r — `api/htmlreport/<name>` hands a report the request, and the Streamlit frame a credential ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.100 – 10.102 |
+| Type | E (10.102 also U) |
+| Files covered | `lex/process_admin/views/model_relation_views.py` (`Overview`, `render_html_report`), `lex/lex_app/streamlit/Streamlit.py` (`get_html`) |
+| Test file | `lex/test_project/tests/api_layer/test_10r_html_report_request_and_streamlit_frame.py` |
+| Test classes | `TestCluster10r_StreamlitFrameCredential` (10.100–10.102), `TestCluster10r_RenderDispatch` (10.102, unit half) |
+| Fixtures | the real `Streamlit` report and two probe `HTMLReport` subclasses registered on `processAdminSite.html_reports` for the test; `E2ETestCase`'s session-authenticated `APIClient`, with `oidc_access_token` set and cleared on the session |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.100 | the sidebar entry frames a dashboard that can let the user in | the frame's URL is on `STREAMLIT_URL` and carries the session's access token as `auth_token`, and the response carrying it answers `Cache-Control: no-store` |
+| 10.101 | nothing to hand it means nothing handed | no OIDC token on the session → the host is still framed, with no `auth_token` key at all |
+| 10.102 | the published `get_html(self, user)` is unchanged | a report declaring only `(self, user)` renders through the route untouched; one declaring a second parameter receives the request; a `TypeError` raised *inside* a report is not mistaken for a signature |
+
+**Why a regression matters:** the customer-visible failure was not a broken page — it was the whole browser tab leaving the instance. Clicking **Streamlit** framed the dashboard host with no credential, the proxy 401'd the frame, and the framed-401 page moved the top window to that host's login, where a live SSO session completed the round trip before anyone could read it. 10.101 is the half that keeps the fix honest: an absent credential must stay absent rather than become a placeholder the proxy has to parse and reject. 10.102 is the blast radius — this route renders *every* report in a project, so a signature change here breaks every project report at once.
