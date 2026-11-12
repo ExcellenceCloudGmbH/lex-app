@@ -19,6 +19,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/3.0/ref/settings/
 """
 
+import logging
 import os
 from .celery import app as celery_app, app
 
@@ -116,9 +117,41 @@ if os.getenv("STORAGE_TYPE") == "GCS":
         }
     }
     GS_BUCKET_NAME = os.getenv("GS_BUCKET_NAME")
-    GS_CREDENTIALS = service_account.Credentials.from_service_account_file(
-        os.path.join(NEW_BASE_DIR, 'django-storages', 'gcpCredentials.json'),
+
+    # Reach GCS through Workload Identity when there is no key file.
+    #
+    # Every instance already has Workload Identity bound to the same service
+    # account this key belongs to, so the key is redundant -- and it is a
+    # long-lived credential that nothing rotates. In production there were 63 of
+    # them, one per instance, in Secrets in the shared namespace, issued with
+    # validBeforeTime 9999-12-31; the oldest dated from June 2025. A leaked one
+    # outlives the pod, the namespace and the cluster.
+    #
+    # Leaving GS_CREDENTIALS unset makes google-cloud-storage fall back to
+    # Application Default Credentials, which on GKE is the pod's Workload
+    # Identity. The file is still honoured when it is there, so an instance that
+    # has not been migrated keeps working and this rolls out per instance.
+    #
+    # The Terraform side is `use_workload_identity_for_storage` in
+    # LEX_TERRAFORM_MODULES/modules/lex-instance, which stops issuing the key.
+    # Release this first; flip that second.
+    _gcp_credentials_file = os.path.join(
+        NEW_BASE_DIR, 'django-storages', 'gcpCredentials.json'
     )
+    if os.path.exists(_gcp_credentials_file):
+        GS_CREDENTIALS = service_account.Credentials.from_service_account_file(
+            _gcp_credentials_file,
+        )
+    else:
+        # Deliberately not set to None: django-storages reads it with
+        # getattr(settings, "GS_CREDENTIALS", None) either way, and leaving it
+        # absent is what tells a reader this is the Workload Identity path.
+        logging.getLogger(__name__).info(
+            "GCS: no key file at %s; using Application Default Credentials "
+            "(Workload Identity).",
+            _gcp_credentials_file,
+        )
+
     MEDIA_ROOT = "uploads/"
 
 # Quick-start development settings - unsuitable for production
