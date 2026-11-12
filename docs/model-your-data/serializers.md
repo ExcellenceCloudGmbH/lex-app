@@ -293,6 +293,60 @@ With this setting, the framework-generated serializer is additionally registered
 > [!tip] History tables pick up your default override automatically
 > When you override `api_serializers["default"]`, the framework also registers the auto-generated serializer under the same alias on the model's history and meta-history tables. You don't need to configure anything on `HistoricalInvestorCashflow` or `MetaHistoricalInvestorCashflow`—history-endpoint and snapshot lookups stay consistent for free.
 
+## Column display defaults
+
+How wide a grid column is, whether it is pinned, and whether it appears at all are decided by three parties:
+
+| Who | Where they say it | Who it affects |
+| --- | --- | --- |
+| The individual user | the table's **Settings** (gear) panel | their browser only |
+| A saved view | the view they saved or were given | everyone using that view |
+| **You, the project** | `Meta.lex_column_options` | every user of that model, as the default |
+
+Reach for `lex_column_options` when the answer is the same for everybody and nobody should have to set it up by hand:
+
+```python title="serializers.py"
+class FundSerializer(LexSerializer):
+    class Meta:
+        model = Fund
+        fields = "__all__"
+        lex_column_options = {
+            "id": {"max_width": 90},           # cap how wide it may grow on its own
+            "internal_ref": {"hidden": True},  # never show this column
+            "name": {"width": 320, "pinned": "left"},
+        }
+```
+
+### Options
+
+| Option | Type | Meaning |
+| --- | --- | --- |
+| `width` | int > 0 | The column's starting width in pixels. Automatic sizing leaves it alone. |
+| `min_width` | int > 0 | The narrowest the column may ever be. |
+| `max_width` | int > 0 | How wide **automatic sizing** may make it. A user can still drag it wider. |
+| `pinned` | `"left"` / `"right"` | Keep the column at one edge while the grid scrolls sideways. |
+| `hidden` | bool | Leave the column out of the grid entirely — it is not in the Columns panel either. |
+
+`max_width` caps measurement, not the person. The grid sizes a column to its content, and content is not always a good guide to how much screen it deserves — a long composite identifier measures very wide and is rarely read in full. Capping it keeps the default sensible while leaving anyone who does need to read one able to widen the column. Use `width` when you want a fixed size rather than a ceiling.
+
+### What this is not
+
+These are display defaults, not permissions. A `hidden` column is still in the record payload and still exported. To withhold a field from a user, use `permission_read`; to leave it out of the API entirely, leave it out of `Meta.fields`.
+
+### If an option seems to be ignored
+
+An option that is not usable is dropped, and the rest of the declaration still applies — the grid has to keep loading whatever a serializer says. The usual causes:
+
+- a value that is not a positive whole number (`"90"`, `0`, `-5`, `True`);
+- a `pinned` that is not `"left"` or `"right"`;
+- a `min_width` larger than the `max_width` beside it — both are dropped, because there is no correct way to guess which you meant;
+- a key that is not one of the five above.
+
+The symptom is simply that the column does not change, so check the spelling and the types first.
+
+> [!tip] Custom serializers keep their column options
+> A hand-written `ModelSerializer` registered as `api_serializers["default"]` is wrapped by the framework before use. Your `lex_column_options` comes through the wrapping unchanged.
+
 ## Where to Put Serializers
 
 We recommend **one `serializers.py` file per folder**, containing all serializers for the models in that folder:

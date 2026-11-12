@@ -35,6 +35,14 @@ If the log shows nothing at all for the failed request, that is itself the findi
 
 The known cause is a pooled upstream connection the Streamlit server had already closed, which surfaced as an unhandled exception rather than a status. Answered as a 502 since 2.1.10, with one retry for requests that had not yet sent a byte.
 
+## A large file fails to upload with "Failed to fetch"
+
+The request never reached the backend, so the log shows nothing. Cloudflare, the Ingress and the web application firewall each stop a request body above about 100 MB, and no setting lifts all three.
+
+From 2.5 the interface sends a file of 32 MiB or more in pieces instead (see [[ship-and-operate/custom frontend#Large files|Custom frontend → Large files]]). That needs both halves: the 2.5 backend and an interface release that does the chunking. An instance with only one of them still fails. Check the interface version first.
+
+The backend joins the pieces into one temporary file before it saves the record, so its pod needs local disk space for the whole file. If the save itself takes longer than 100 seconds, Cloudflare answers `524` even though the backend finishes the job.
+
 ## `lex init` fails against Keycloak
 
 `lex init` synchronises models and permissions with Keycloak, so it needs the client configuration to exist and to be reachable.

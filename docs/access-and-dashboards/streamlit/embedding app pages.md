@@ -7,7 +7,7 @@ aliases:
 
 `lex_view()` puts a real Lex App page — a table, a form, a record — inside a [Streamlit](https://docs.streamlit.io/) script.
 
-**Four pages of [Northwind Analytics](https://github.com/ExcellenceCloudGmbH/DemoNorthwindAnalytics) run everything below against real data:** *A route, embedded*, *Narrowing with a serializer*, *Reacting to events* — which prints the live envelope beside the table — and *Chaining forms with Flow*.
+**Four pages of [Northwind Analytics](https://github.com/ExcellenceCloudGmbH/DemoNorthwindAnalytics) run everything below against real data:** _A route, embedded_, _Narrowing with a serializer_, _Reacting to events_ — which prints the live envelope beside the table — and _Chaining forms with Flow_.
 
 ![lex_view embedding the application's own table inside a Streamlit page](images/streamlit/lex-view.png)
 
@@ -15,11 +15,11 @@ That is the application's grid, not a copy of it: the same saved views, the same
 
 There are three levels to this, and you can stop after the first:
 
-| Level | What you write | What you get |
-|---|---|---|
-| **Embed** | `lex_view("investor")` | A plain iframe. Returns `None`. |
+| Level     | What you write                         | What you get                                      |
+| --------- | -------------------------------------- | ------------------------------------------------- |
+| **Embed** | `lex_view("investor")`                 | A plain iframe. Returns `None`.                   |
 | **React** | `lex_view("investor", on_select=True)` | The user's actions come back to Python as events. |
-| **Chain** | `lex_view("investor", flow=…)` | The user is routed from one form to the next. |
+| **Chain** | `lex_view("investor", flow=…)`         | The user is routed from one form to the next.     |
 
 ```python
 from lex.lex_app.streamlit import lex_view
@@ -45,18 +45,18 @@ When at least one callback flag is set, `lex_view()` switches from a plain ifram
 
 Turn on only what you need:
 
-| Flag | `type` | `payload` | Fires when… |
-|---|---|---|---|
-| `on_create` | `"create"` | `resource`, `id`, `data` | A create form saves |
-| `on_update` | `"update"` | `resource`, `id`, `data` | An edit form saves |
-| `on_delete` | `"delete"` | `resource`, `id` | A record is deleted from the edit toolbar |
-| `on_select` | `"select"` | `resource`, `ids` | The grid selection changes (debounced 150 ms) |
-| `on_navigate` | `"navigate"` | `from`, `to` | The embedded app routes somewhere else |
-| `on_flow_step` | — | — | Nothing is emitted for this type — see below |
+| Flag           | `type`       | `payload`                | Fires when…                                   |
+| -------------- | ------------ | ------------------------ | --------------------------------------------- |
+| `on_create`    | `"create"`   | `resource`, `id`, `data` | A create form saves                           |
+| `on_update`    | `"update"`   | `resource`, `id`, `data` | An edit form saves                            |
+| `on_delete`    | `"delete"`   | `resource`, `id`         | A record is deleted from the edit toolbar     |
+| `on_select`    | `"select"`   | `resource`, `ids`        | The grid selection changes (debounced 150 ms) |
+| `on_navigate`  | `"navigate"` | `from`, `to`             | The embedded app routes somewhere else        |
+| `on_flow_step` | —            | —                        | Nothing is emitted for this type — see below  |
 
 `data` on a create or update is the **whole saved record** as the API returned it, not just the id.
 
-`on_select` is opt-in for a reason: it drives a Streamlit re-run on *every* grid selection change, which is expensive. The framework only wires the grid's selection callback when you explicitly ask for it.
+`on_select` is opt-in for a reason: it drives a Streamlit re-run on _every_ grid selection change, which is expensive. The framework only wires the grid's selection callback when you explicitly ask for it.
 
 > [!warning] `on_flow_step` does not deliver an event today
 > The flag is accepted and forwarded as `?emit_flow_step=true`, and the
@@ -120,14 +120,14 @@ in the embedded table, and the envelope that came back for them.
 
 Every event the embedded page sends back is a dict with a stable shape:
 
-| Key | Meaning |
-|---|---|
-| `type` | The event kind — `"create"`, `"update"`, `"delete"`, `"select"` or `"navigate"` |
+| Key       | Meaning                                                                                                                                                 |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`    | The event kind — `"create"`, `"update"`, `"delete"`, `"select"` or `"navigate"`                                                                         |
 | `payload` | Type-specific data; the table under [[access-and-dashboards/streamlit/embedding app pages#Callback flags\|Callback flags]] gives the keys for each type |
-| `id` | A unique event ID, used to de-duplicate re-runs so your handler doesn't fire twice for the same event |
-| `ts` | Milliseconds since the epoch, set in the browser when the event was raised |
-| `source` | Always `"lex-app"` |
-| `version` | The bridge protocol version |
+| `id`      | A unique event ID, used to de-duplicate re-runs so your handler doesn't fire twice for the same event                                                   |
+| `ts`      | Milliseconds since the epoch, set in the browser when the event was raised                                                                              |
+| `source`  | Always `"lex-app"`                                                                                                                                      |
+| `version` | The bridge protocol version                                                                                                                             |
 
 A create event, in full:
 
@@ -188,7 +188,7 @@ from lex.lex_app.streamlit import STAY, Flow
 flow = Flow().after_update("cashflow", STAY)
 ```
 
-`STAY` means *don't navigate; stay on this form and clear it*. It exists as a constant
+`STAY` means _don't navigate; stay on this form and clear it_. It exists as a constant
 rather than a bare string so a typo is an error where you wrote it, instead of a redirect
 that quietly never happens.
 
@@ -233,16 +233,16 @@ flow = (
 lex_view("investor", on_create=True, flow=flow)
 ```
 
-| Method | | What it opens |
-|---|---|---|
-| `.create(resource, *, as_=None)` | step | the create form |
-| `.update(resource, id=None, *, as_=None)` | step | the edit form for one record |
-| `.goto(path)` | step | any route; `{id}` and `{resource}` interpolate |
-| `.table(resource=None)` | ending | the table — defaults to the last step's resource |
-| `.show(resource=None, id=None)` | ending | one record's detail page |
-| `.end_goto(path)` | ending | any route |
-| `.loop()` | ending | start again from the first step |
-| `.loop_last()` | ending | repeat the final step |
+| Method                                    |        | What it opens                                    |
+| ----------------------------------------- | ------ | ------------------------------------------------ |
+| `.create(resource, *, as_=None)`          | step   | the create form                                  |
+| `.update(resource, id=None, *, as_=None)` | step   | the edit form for one record                     |
+| `.goto(path)`                             | step   | any route; `{id}` and `{resource}` interpolate   |
+| `.table(resource=None)`                   | ending | the table — defaults to the last step's resource |
+| `.show(resource=None, id=None)`           | ending | one record's detail page                         |
+| `.end_goto(path)`                         | ending | any route                                        |
+| `.loop()`                                 | ending | start again from the first step                  |
+| `.loop_last()`                            | ending | repeat the final step                            |
 
 #### Which record a step edits
 
@@ -289,19 +289,19 @@ working unchanged.
 Every one of these raises `FlowError` on the line that wrote it, not when a user
 reaches the step:
 
-| Mistake | Example |
-|---|---|
-| A rule key that is not `"<resource>/<operation>"`, or has no resource before the `/` | `"investor"`, `"/create"` |
-| An operation other than `create` or `update` | `"investor/archive"`, `"investor/delete"` |
-| An empty target | `Flow().after_create("investor", "")` |
-| A step resource that is empty, or looks like a rule key | `.create("investor/create")` |
-| An `as_` name that is empty or already used | two steps with `as_="inv"` |
-| An `update` or `show` with no id, where no record was saved just before it — it comes first, or right after a `goto` | `Flow().update("investor")` |
-| An id that is blank, or not a string, an integer or `ref(...)` | `id=True`, `id=" "` |
-| A `ref(...)` to a name no earlier step declared | `ref("inv")` written before the step with `as_="inv"` |
-| A `goto` or `end_goto` with an empty path | `.goto("")` |
-| An ending with no step before it, or no resource to fall back on | `Flow().table("investor")`, `Flow().goto("/x").table()` |
-| Anything added after an ending, or the two forms mixed | see the warning above |
+| Mistake                                                                                                              | Example                                                 |
+| -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| A rule key that is not `"<resource>/<operation>"`, or has no resource before the `/`                                 | `"investor"`, `"/create"`                               |
+| An operation other than `create` or `update`                                                                         | `"investor/archive"`, `"investor/delete"`               |
+| An empty target                                                                                                      | `Flow().after_create("investor", "")`                   |
+| A step resource that is empty, or looks like a rule key                                                              | `.create("investor/create")`                            |
+| An `as_` name that is empty or already used                                                                          | two steps with `as_="inv"`                              |
+| An `update` or `show` with no id, where no record was saved just before it — it comes first, or right after a `goto` | `Flow().update("investor")`                             |
+| An id that is blank, or not a string, an integer or `ref(...)`                                                       | `id=True`, `id=" "`                                     |
+| A `ref(...)` to a name no earlier step declared                                                                      | `ref("inv")` written before the step with `as_="inv"`   |
+| A `goto` or `end_goto` with an empty path                                                                            | `.goto("")`                                             |
+| An ending with no step before it, or no resource to fall back on                                                     | `Flow().table("investor")`, `Flow().goto("/x").table()` |
+| Anything added after an ending, or the two forms mixed                                                               | see the warning above                                   |
 
 ## Choosing a serializer
 
@@ -319,10 +319,10 @@ All the layout and routing options you already use remain available alongside th
 
 ### Hiding the toolbar and the row actions
 
-| Option | What it hides |
-|---|---|
+| Option              | What it hides                                                                                              |
+| ------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `hide_toolbar=True` | The whole toolbar above the grid: saved views, history, export, table settings — and the **Create** button |
-| `hide_actions=True` | Each row's Actions column: Show, Edit and Delete, plus Calculate on a calculation model |
+| `hide_actions=True` | Each row's Actions column: Show, Edit and Delete, plus Calculate on a calculation model                    |
 
 Use both for a frame that should offer the data and nothing else. If the
 dashboard creates records its own way — through a [flow](#redirect-flows-flow),
@@ -352,10 +352,21 @@ lex_view("investor", extra_params={"my_flag": "true"})
 ### Where the frame points
 
 The frame's address starts from `base_url` when you pass one, and otherwise from
-the `REACT_APP_URL` environment variable, then `LEX_FRONTEND_URL`, and finally
-`http://localhost:8000`. On a deployed dashboard, set one of them. Give a full
-origin with its scheme — `https://app.example.com` — because a bare host ends up
-as a relative address.
+the `REACT_APP_URL` environment variable, then `LEX_FRONTEND_URL`, then the
+application's own hostname, and finally `http://localhost:8000`.
+
+That third step is what a deployed dashboard normally uses, and it is not simply
+`DOMAIN_HOSTED`: it is the application hostname on the **same registrable domain
+as the dashboard you are in**. A dashboard served at
+`streamlit.app.customer.com` frames `app.customer.com`, not the platform
+hostname — a frame whose origin is on a different registrable domain from the
+page around it is a third-party context, and the browser withholds its cookies,
+so the framed page cannot stay signed in. See
+[[ship-and-operate/custom domains|Custom domains]].
+
+Set `REACT_APP_URL` or `LEX_FRONTEND_URL` only when the shell is on neither
+host. Give a full origin with its scheme — `https://app.example.com` — because a
+bare host ends up as a relative address.
 
 With an `on_*` flag, that same origin is the only one whose messages are let
 through. If the frame is actually served from another — `http` against

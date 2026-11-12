@@ -8,7 +8,7 @@ What a Lex App installation runs, and what each process needs. How you schedule 
 
 | Process | Command | Needed when |
 |---|---|---|
-| **Web** | `lex start --loop asyncio lex_app.asgi:application --host 0.0.0.0 --port 8000` | Always |
+| **Web** | `lex start --loop asyncio --host 0.0.0.0 --port 8000 lex_app.asgi:application` | Always |
 | **Celery workers** | `lex celery-workers --count N` | The application has calculations that dispatch asynchronously |
 | **Streamlit** | `lex streamlit` | The application has dashboards |
 | **Reflex** | `lex reflex run --env prod` | The application has [[access-and-dashboards/reflex/index\|Reflex dashboards]] — see [[access-and-dashboards/reflex/running and deploying\|Running & Deploying]] for what production mode needs |
@@ -17,6 +17,8 @@ What a Lex App installation runs, and what each process needs. How you schedule 
 | **Flower** | `lex flower` | Optional; a web view of the Celery queues |
 
 Drop `--reload` for anything that is not a developer's laptop.
+
+Keep `lex_app.asgi:application` the **last** argument of the web command. The web process loads initial data and starts the [[calculations/scheduled jobs|scheduled-jobs]] clock only when it is; with flags after it, neither happens. There is no separate scheduler process to deploy. `lex run_scheduler` exists for setups that need one.
 
 `lex celery` passes its arguments straight through to Celery, for the cases the wrapper does not cover.
 
