@@ -294,11 +294,14 @@ class _FakeManager:
 
     def __init__(self):
         type(self).instances += 1
-        self.oidc = mock.MagicMock()
-        self.oidc.userinfo.return_value = {"client_roles": ["analyst"]}
 
     def get_uma_permissions(self, token):
         return [{"rsname": "app.Model", "resource_set_id": None, "scopes": ["read"]}]
+
+    def get_userinfo(self, token):
+        # The middleware asks the manager's per-call userinfo (batch 4x), not the
+        # shared python-keycloak connection it used to reach through ``oidc``.
+        return {"client_roles": ["analyst"]}
 
 
 class TestCluster10o_KeycloakManagerPerProcess(SimpleTestCase):

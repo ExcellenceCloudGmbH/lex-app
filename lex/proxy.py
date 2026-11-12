@@ -10,7 +10,7 @@ import time
 from contextlib import asynccontextmanager, suppress
 from inspect import signature
 from typing import Any, Dict, Optional, Tuple, List
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 import jwt  # PyJWT
@@ -30,6 +30,11 @@ from starlette.responses import (
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
+# The hostnames this instance is served on, per role. Deliberately a top-level
+# `lex` module: it imports no Django and triggers no package side effects, so
+# it is safe in this standalone proxy, which runs in its own uvicorn thread.
+from lex import hosts as lex_hosts
+
 # Respect X-Forwarded-* when behind ingress/LB
 try:
     from starlette.middleware.proxy_headers import ProxyHeadersMiddleware  # type: ignore
@@ -44,6 +49,14 @@ try:
     import redis.asyncio as redis  # type: ignore
 except Exception:  # pragma: no cover
     redis = None  # type: ignore
+
+# Must precede the `websockets` import below -- the library reads its
+# header-line limit from the environment as `websockets.http11` is imported, and
+# the access token this proxy forwards upstream is one header line. `lex
+# streamlit` already applies this before it starts the server; this covers a
+# deployment that runs `proxy:app` under its own uvicorn. See
+# lex/ws_header_limits.py.
+from lex import ws_header_limits  # noqa: F401  (imported for its side effect)
 
 try:
     from websockets.asyncio.client import connect as ws_connect  # websockets >= 12
@@ -259,7 +272,11 @@ oauth.register(
     client_id=os.getenv("OIDC_RP_CLIENT_ID"),
     client_secret=os.getenv("OIDC_RP_CLIENT_SECRET"),
     server_metadata_url=f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration",
-    client_kwargs={"scope": "openid email profile", "verify": OIDC_VERIFY_SSL},
+    # PKCE (S256) on top of the client secret: a stolen authorization code is
+    # useless without the verifier kept in this browser's session, and every
+    # relying party on the shared Keycloak client sends PKCE, so the client can
+    # later be set to require it.
+    client_kwargs={"scope": "openid email profile", "verify": OIDC_VERIFY_SSL, "code_challenge_method": "S256"},
 )
 
 # -----------------------------------------------------------------------------
@@ -745,8 +762,37 @@ _NEXT_SESSION_KEY = "lex_post_login_next"
 STRIP_AUTH_TOKEN_FROM_URL = _env_bool("STRIP_AUTH_TOKEN_FROM_URL", True)
 
 
+#: Paths that exist for machinery, never for a person to look at.
+#:
+#: Every one of them is fetched by script or loaded into a hidden frame: the
+#: theme relay is framed invisibly and zero-sized, ``/auth/token`` and
+#: ``/auth/adopt`` are ``fetch`` targets, ``/_stcore/*`` is Streamlit's own
+#: bootstrap. None renders anything a user could act on.
+#:
+#: They are listed because returning a *browser* to one of them is how a
+#: utility request turns into a dead end. That is LEX-1477: the frontend's
+#: hidden ``/_lex/theme-relay`` frame reached a proxy that did not yet serve
+#: that route, fell into the authenticated catch-all, and got the frame
+#: breakout -- whose job is to send the TOP window to a login. The OIDC round
+#: trip then honoured ``next=/_lex/theme-relay``, so the whole tab finished on
+#: a blank storage shim with no way back to the app.
+#:
+#: The route exists now, so that particular 401 cannot happen again. This is
+#: the guard that makes the *consequence* impossible regardless: whatever
+#: 401s, a browser is never sent somewhere it has nothing to do.
+_NON_LANDING_PREFIXES = ("/_lex/", "/_stcore/")
+_NON_LANDING_PATHS = frozenset({"/auth/token", "/auth/adopt"})
+
+
+def _is_landing_path(path: str) -> bool:
+    """Whether *path* is somewhere a browser can usefully be returned to."""
+    if path in _NON_LANDING_PATHS:
+        return False
+    return not path.startswith(_NON_LANDING_PREFIXES)
+
+
 def _safe_next_path(raw: Optional[str]) -> Optional[str]:
-    """A same-origin, path-only redirect target, or ``None``.
+    """A same-origin, path-only, *human-visitable* redirect target, or ``None``.
 
     Deliberately strict: only a single-leading-slash path (plus query and
     fragment) survives. Anything carrying a scheme, an authority, or a
@@ -754,6 +800,13 @@ def _safe_next_path(raw: Optional[str]) -> Optional[str]:
     up in a ``Location`` header after an OIDC round trip -- exactly the shape
     of an open redirect, and a login flow is the most valuable place to have
     one.
+
+    Same-origin is not sufficient on its own, though. ``/_lex/theme-relay`` is
+    as same-origin as it gets and still the wrong place to leave a browser --
+    see :data:`_NON_LANDING_PREFIXES`. Rejecting here covers ``login``'s
+    ``?next=`` on the way in *and* ``auth_callback``'s re-validation on the way
+    out, so a value that was stashed by an older build, or by a frame that had
+    no business asking, cannot strand the tab either.
     """
     if not raw:
         return None
@@ -763,6 +816,8 @@ def _safe_next_path(raw: Optional[str]) -> Optional[str]:
     # Backslashes are treated as slashes by some browsers, so "/\evil.com" and
     # "/\\evil.com" would escape the origin.
     if candidate[1:2] == "\\" or "\\" in candidate[:2]:
+        return None
+    if not _is_landing_path(urlparse(candidate).path):
         return None
     return candidate
 
@@ -783,7 +838,62 @@ def _query_without_auth_token(request: Request) -> str:
     return urlencode(kept)
 
 
+#: Every hostname this dashboard is served on, from the environment the
+#: lex-instance terraform module writes: the canonical one first, then any
+#: customer-owned domain attached to the instance. Falls back to the canonical
+#: host alone, which is what an instance with no custom domain has.
+#:
+#: This is an ALLOW-LIST, and must stay one. `_external_base_url` builds the
+#: OIDC `redirect_uri` and the post-logout URL from the request's own host, so
+#: trusting the `Host` header as it arrives would let anyone who can set it
+#: have Keycloak redirect to a host of their choosing, carrying the
+#: authorization code with it.
+PUBLIC_HOSTS = frozenset(lex_hosts.public_hosts("streamlit"))
+
+
+def _requested_host(request: Request) -> str:
+    """The hostname the browser used, if it is one we are served on.
+
+    `request.url` already reflects `X-Forwarded-Host`/`X-Forwarded-Proto` where
+    ProxyHeadersMiddleware is installed, and the ingress sets both.
+    """
+    host = (request.url.hostname or "").strip().lower()
+    return host if host in PUBLIC_HOSTS else ""
+
+
 def _external_base_url(request: Request) -> str:
+    """The origin to build absolute URLs back to this proxy with.
+
+    The request's own host wins over the canonical ``STREAMLIT_URL`` whenever
+    we recognise it. An instance with a customer-owned domain attached serves
+    its dashboard on several hostnames at once, and a user who arrives on one
+    of the others must come back to *that* one: the session cookie this proxy
+    sets is host-only, so completing the sign-in on the canonical host would
+    leave the host the user is actually on with no cookie at all -- and a
+    sign-in loop that never terminates.
+    """
+    host = _requested_host(request)
+    if host:
+        # Only the HOST comes from the request. The scheme and port come from
+        # the canonical URL, because every hostname a role is served on shares
+        # them -- and because the request's own scheme is only trustworthy
+        # where ProxyHeadersMiddleware could be imported. Reading it anyway
+        # would put `http://` into the OIDC redirect_uri the moment that import
+        # failed, which Keycloak refuses and which no log here would explain.
+        scheme = PUBLIC_URL_OBJ.scheme if PUBLIC_URL_OBJ else (request.url.scheme or "https")
+        try:
+            port = PUBLIC_URL_OBJ.port if PUBLIC_URL_OBJ else request.url.port
+        except ValueError:
+            # Reading a port out of the REQUEST parses whatever the Host header
+            # carried, and that header is attacker-influenced. `h:99999` and
+            # `h:-1` both raise, which would be a 500 on the sign-in path --
+            # from input the allow-list above has otherwise already accepted,
+            # since it compares hostnames and never looks at the port.
+            port = None
+        # `lex streamlit` serves http://localhost:8501, so a non-default port
+        # is kept; httpx reports None for the scheme's own default.
+        netloc = f"{host}:{port}" if port else host
+        return f"{scheme}://{netloc}"
     if PUBLIC_URL:
         return PUBLIC_URL
     return str(request.base_url).rstrip("/")
@@ -841,12 +951,46 @@ def _is_document_request(request: Request) -> bool:
     return "text/html" in request.headers.get("accept", "")
 
 
+def _frame_may_move_the_tab(request: Request) -> bool:
+    """Whether a framed request may navigate the top window by itself.
+
+    Not when another application put the frame on screen. ``Sec-Fetch-Site``
+    describes the relation between the document that *started* the navigation
+    and its target, so on a framed document load it names the embedder:
+    ``same-site`` is lex-app's shell on the instance hostname framing the
+    dashboard host beside it, ``cross-site`` is anyone else. In both cases the
+    top window is showing someone else's page -- the one the user was actually
+    reading -- and a frame does not get to decide that page is over.
+
+    That is the whole of the reported fault. A sidebar entry framed the
+    dashboard with no credential, the frame 401'd, and this page moved the tab
+    to the dashboard host's login; the user clicked something inside their
+    instance and ended up on ``https://<instance>-streamlit.<domain>/``.
+
+    Withheld here, the response is still the breakout page: it still posts
+    ``lex-auth-required``, which is the channel the React shell listens on and
+    recovers the dashboard through, and still offers the ``target="_top"``
+    link, which is a user gesture and always permitted. The frame is never
+    redirected to Keycloak, so the "refused to connect" wall the breakout was
+    written for cannot come back either way.
+
+    ``same-origin`` -- the proxy framing its own page -- keeps the automatic
+    navigation: the window it would move is one this response already owns. So
+    does a request with no ``Sec-Fetch-Site`` at all, which is the convention
+    the rest of this routing follows (see scenario 1.214): an absent
+    ``Sec-Fetch-*`` means a client too old or too synthetic to be the browser
+    tab this guard is about, and gets the pre-existing behaviour.
+    """
+    site = request.headers.get("sec-fetch-site", "").strip().lower()
+    return site not in {"same-site", "cross-site"}
+
+
 def _frame_breakout_response(request: Request) -> Response:
     """A 401 that escapes the iframe to a full-page login instead of framing the IdP.
 
     Three layered mechanisms, most-reliable last:
-      1. best-effort automatic top-level navigation (works when the browser allows
-         the frame to navigate the top window);
+      1. an automatic top-level navigation, withheld when another application is
+         the one framing this -- see :func:`_frame_may_move_the_tab`;
       2. a ``postMessage`` so a cooperating parent shell can drive re-auth;
       3. a user-clickable ``target="_top"`` link, which is always permitted because
          it is a user gesture.
@@ -854,12 +998,17 @@ def _frame_breakout_response(request: Request) -> Response:
     login = _login_url(request, _current_relative_path(request))
     login_js = json.dumps(login)  # safe JS string literal
     login_attr = html.escape(login, quote=True)
+    takeover = (
+        "try{if(window.top!==window.self){window.top.location.href=u;}"
+        "else{window.location.href=u;}}catch(e){}"
+        if _frame_may_move_the_tab(request)
+        else ""
+    )
     body = (
         "<!doctype html><html><head><meta charset=\"utf-8\">"
         "<title>Session expired</title></head><body>"
         "<script>(function(){var u=" + login_js + ";"
-        "try{if(window.top!==window.self){window.top.location.href=u;}"
-        "else{window.location.href=u;}}catch(e){}"
+        + takeover +
         "try{window.parent.postMessage({type:'lex-auth-required',login:u},'*');}catch(e){}"
         "})();</script>"
         "<div style=\"font:16px system-ui,Arial,sans-serif;padding:24px;text-align:center\">"
@@ -873,12 +1022,22 @@ def _frame_breakout_response(request: Request) -> Response:
 def _unauthenticated_response(request: Request) -> Response:
     """Response to send when no valid identity is present.
 
-    - iframe/frame document load -> break out to a top-level login (never frame the IdP)
+    - iframe/frame document load of a *page* -> break out to a top-level login
+      (never frame the IdP)
+    - iframe/frame document load of a utility path -> 401 JSON, no breakout
     - other top-level HTML navigation -> normal redirect to login
     - XHR / fetch / API call -> 401 JSON
     """
     accepts_html = "text/html" in request.headers.get("accept", "")
     if accepts_html and _is_iframe_document_request(request):
+        # A framed *page* is a dashboard the user is looking at, so recovering
+        # it is worth taking over the tab for. A framed utility path is not:
+        # it is a hidden shim nobody can see, and the breakout would move the
+        # whole window on behalf of a frame the user does not know exists.
+        # That is the mechanism behind LEX-1477 -- see _NON_LANDING_PREFIXES.
+        # 401 instead, which the shim's own code can deal with or ignore.
+        if not _is_landing_path(request.url.path):
+            return JSONResponse({"error": "Authentication required"}, status_code=401)
         return _frame_breakout_response(request)
     if accepts_html:
         return RedirectResponse(url=_login_path(request, _current_relative_path(request)))
@@ -1184,10 +1343,14 @@ async def ws_proxy(websocket: WebSocket):
     fwd.append(("X-Streamlit-Auth-Method", auth_method))
     fwd.append(("X-Forwarded-User", user_payload.get("email") or ""))
 
+    # One copy of the access token, not three. `bearer_from_headers` in
+    # lex/streamlit_app.py reads `Authorization` and always has, so nothing
+    # upstream loses the credential; `X-Forwarded-Access-Token` and
+    # `X-Streamlit-Access-Token` repeated the same bytes for no reader. The
+    # handshake is where that mattered: three copies of a pre-LEX-898 token were
+    # ~25 KB of headers on the one request that opens a connection for hours.
     if user_payload.get("access_token"):
         fwd.append(("Authorization", f"Bearer {user_payload['access_token']}"))
-        fwd.append(("X-Forwarded-Access-Token", user_payload["access_token"]))
-        fwd.append(("X-Streamlit-Access-Token", user_payload["access_token"]))
     if user_payload.get("id_token"):
         fwd.append(("X-Forwarded-Id-Token", user_payload["id_token"]))
     if user_payload.get("refresh_token"):
@@ -1706,11 +1869,19 @@ async def proxy(request: Request):
     fwd_headers["X-Streamlit-Auth-Method"] = auth_method
     fwd_headers["X-Forwarded-User"] = user_payload.get("email") or ""
 
-    # Forward access token if present (either from JWT auth or session)
+    # Forward the access token if present (either from JWT auth or session), in
+    # one header -- see the WebSocket path above for why three became one.
+    #
+    # Nothing has to clear the caller's own `Authorization` first: `_HOP_BY_HOP`
+    # already drops it, as the WebSocket path's `excluded` does. That was
+    # housekeeping while a third header outranked `Authorization` in the
+    # upstream's reader; now that this is the only copy of the credential it is
+    # what keeps a caller from sending a second one alongside it -- Starlette
+    # hands header names lower-cased, so the two would be different dict keys
+    # and both would go, reaching the upstream joined by a comma into a value
+    # that parses as neither.
     if user_payload.get("access_token"):
         fwd_headers["Authorization"] = f"Bearer {user_payload['access_token']}"
-        fwd_headers["X-Forwarded-Access-Token"] = user_payload["access_token"]
-        fwd_headers["X-Streamlit-Access-Token"] = user_payload["access_token"]
 
     if user_payload.get("id_token"):
         fwd_headers["X-Forwarded-Id-Token"] = user_payload["id_token"]
@@ -1819,14 +1990,22 @@ def _frontend_origins() -> frozenset:
         # Accept a bare host here too, so the two spellings behave alike.
         origins.add(override if "://" in override else f"https://{override}")
 
-    # DOMAIN_HOSTED is a bare hostname, matching how settings.py consumes it.
-    domain_hosted = (os.getenv("DOMAIN_HOSTED") or "").strip().strip("/")
-    if domain_hosted and not domain_hosted.startswith("localhost"):
-        origins.add(f"https://{domain_hosted}")
+    # Every hostname the shell is served on, not just DOMAIN_HOSTED: once a
+    # customer-owned domain is attached, the same shell answers on the platform
+    # hostname AND on the customer's, and a dashboard framed by the one that is
+    # not DOMAIN_HOSTED would be refused its renewed token -- which looks like
+    # a dashboard that works for five minutes and then quietly stops.
+    # `public_hosts` is DOMAIN_HOSTED alone when nothing else is configured,
+    # which is the behaviour this replaces.
+    for app_host in lex_hosts.public_hosts("app"):
+        if app_host and not app_host.startswith("localhost"):
+            origins.add(f"https://{app_host}")
 
     # The standalone (non-embedded) dashboard talking to itself needs no entry.
     if PUBLIC_URL:
         origins.add(PUBLIC_URL)
+    # ...and neither does one reached on an attached hostname of its own.
+    origins |= {f"https://{host}" for host in PUBLIC_HOSTS if not host.startswith("localhost")}
 
     # Development: DOMAIN_HOSTED is absent or "localhost" while the shell runs
     # on another port, which is a different *origin* and so still needs CORS.
@@ -2160,12 +2339,17 @@ def _warn_if_upstream_is_not_colocated() -> None:
 #: stdlib, so importing it here costs nothing.
 from lex.streamlit_theme import THEME_STORAGE_KEY  # noqa: E402
 
-#: Origins allowed to drive this relay. The lex-app frontend, wherever it lives.
-_THEME_RELAY_ALLOWED = [
+#: Frontend origins this deployment was actually told about. Empty when nobody
+#: configured one, which is a different situation from "configured as
+#: localhost" and has to stay distinguishable -- see :func:`theme_relay`.
+_THEME_RELAY_CONFIGURED = [
     o.rstrip("/")
     for o in (os.getenv("REACT_APP_URL"), os.getenv("LEX_FRONTEND_URL"))
     if o
-] or ["http://localhost:8000"]
+]
+
+#: Origins allowed to drive this relay. The lex-app frontend, wherever it lives.
+_THEME_RELAY_ALLOWED = _THEME_RELAY_CONFIGURED or ["http://localhost:8000"]
 
 _THEME_RELAY_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><title>lex theme relay</title></head>
@@ -2215,12 +2399,39 @@ _THEME_RELAY_HTML = """<!doctype html>
 """
 
 
+def _is_top_level_document_request(request: Request) -> bool:
+    """True only for a navigation of the top-level window.
+
+    ``Sec-Fetch-Dest: document`` is sent for the top-level document and never
+    for a framed one (that is ``iframe``/``frame``). A client that sends no
+    ``Sec-Fetch-*`` at all reads as False, so an older browser keeps whatever
+    the caller's default branch does rather than being guessed about.
+    """
+    return request.headers.get("sec-fetch-dest", "").strip().lower() == "document"
+
+
 async def theme_relay(request: Request) -> Response:
     """Serve the cross-origin theme relay.
 
     Framed by the lex-app frontend so it can write THIS origin's storage. See
     the comment inside the document for why that indirection is necessary.
+
+    A top-level navigation here is always a mistake -- the document has no UI,
+    so the tab shows a blank page with no way back to the app. It is also a
+    mistake that has reached a customer (LEX-1477, by the route described on
+    :data:`_NON_LANDING_PREFIXES`), and the guards upstream of here only stop
+    this proxy from causing it; a bookmark, a history entry, or an older proxy
+    still in the chain can land a browser here anyway. So when the deployment
+    has told us where the frontend lives, send them back to it instead of
+    leaving them stranded.
+
+    Only when it was actually configured: the framing allow-list falls back to
+    ``http://localhost:8000``, and bouncing a production tab to localhost is
+    worse than the blank page it replaces.
     """
+    if _is_top_level_document_request(request) and _THEME_RELAY_CONFIGURED:
+        return RedirectResponse(url=_THEME_RELAY_CONFIGURED[0], status_code=303)
+
     body = _THEME_RELAY_HTML.replace("__KEY__", THEME_STORAGE_KEY).replace(
         "__ALLOWED__", json.dumps(_THEME_RELAY_ALLOWED)
     )

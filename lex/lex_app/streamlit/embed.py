@@ -474,13 +474,33 @@ def _resolve_base_url() -> str:
     Priority:
     1. ``REACT_APP_URL`` environment variable (explicit override)
     2. ``LEX_FRONTEND_URL`` environment variable (framework convention)
-    3. Falls back to ``http://localhost:8000``
+    3. The application hostname on the same registrable domain as the hostname
+       this dashboard is canonically served on
+    4. Falls back to ``http://localhost:8000``
+
+    Step 3 is what makes this work on a deployed instance without anything
+    being set, and what keeps it working once a customer-owned domain is
+    attached. This frame is the *reverse* of the one lex-app draws around a
+    dashboard, and it has the same constraint: a frame whose origin is on a
+    different registrable domain from the page around it is a third-party
+    context, so a dashboard on ``streamlit.app.customer.com`` must frame
+    ``app.customer.com`` and not the platform hostname.
     """
-    return (
-        os.getenv("REACT_APP_URL")
-        or os.getenv("LEX_FRONTEND_URL")
-        or "http://localhost:8000"
-    ).rstrip("/")
+    from lex import hosts as lex_hosts
+
+    explicit = (os.getenv("REACT_APP_URL") or os.getenv("LEX_FRONTEND_URL") or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+
+    # The dashboard's own canonical hostname names the site this process serves;
+    # there is no request here to read one from, and every hostname a dashboard
+    # answers on is under the application host by construction.
+    dashboard_host = lex_hosts.host_of(lex_hosts.canonical_url("streamlit"))
+    app_url = lex_hosts.same_site_url("app", dashboard_host) if dashboard_host else ""
+    if app_url and not lex_hosts.host_of(app_url).startswith("localhost"):
+        return app_url.rstrip("/")
+
+    return "http://localhost:8000"
 
 
 def lex_view(

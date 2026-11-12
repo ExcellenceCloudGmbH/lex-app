@@ -195,3 +195,34 @@
 | Note | Two assertions had to be strengthened before they could detect the defect, and both are worth remembering. (1) `edited_by`: a worker resolves the same fallback actor the fixture already carried, so an identical overwrite was invisible — 8.147 now seeds a distinct sentinel via `queryset.update()`. (2) The failing calc is deliberately `is_atomic = False`: under `is_atomic = True` the raise rolls the whole calculation back and would hide any stamp. Fixture note — the decorated tasks require explicit Celery task names; Celery derives a default name from `module.func_name` and all three `calculate` methods share one fixture module, so without them the last registration silently wins and one model runs another's body. |
 
 ---
+
+### Batch 8e — `create(*args)` reach `calculate()` on every route, Celery included (BUG-054) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.157 – 8.163 |
+| Type | I |
+| Files covered | `lex/lex_app/celery_tasks.py` (`calc_and_save` names the `group_index` slot of its message and calls `model.lex_func()(*args)`); `lex/core/tasks/CeleryTaskDispatcher.py` (`_dispatch_single_group` documents the message it sends, `(group, group_index, *args)`, unchanged); `lex/core/mixins/CalculatedModelMixin.py` (`create` and both sync consumers, unchanged); `lex/core/models/CalculationModel.py` (`dispatch_calculation_task`, the task's other sender, unchanged) |
+| Test file | `lex/test_project/tests/celery_async/test_8e_create_args_reach_calculate.py` |
+| Test classes | `TestCluster08e_CreateArgsReachCalculate`: 8.157 Celery route, three groups, `create("Q4", 7)`; 8.158 Celery route with a `calculate(self)` that takes no arguments; 8.159 a worker running a group message in the shape v2.4.2 queued; 8.160 the message `dispatch_calculation_task` sends; 8.161 sync streaming; 8.162 sync materialising; 8.163 Celery with the fallback after a failed task |
+| Fixtures | `CreateArgsBatch` (writes the arguments its `calculate()` received onto the row, logs every call, can fail once per region) and `NoArgBatch` (`calculate(self)`): both `@lex_shared_task` with explicit task names, one Celery group per region, listed in `CREATE_ARGS_MODELS` rather than `ALL_MODELS`; `CelerySyncCalc` (existing). The module runs each eager task with the empty dispatch scopes a worker process starts with (`task_prerun` / `task_postrun`) and records the executed tasks from `task_prerun` |
+| Tests landed | **7 pass / 0 fail** (8.157–8.163). On v2.4.2, 8.157, 8.159 and 8.163 fail: every `calculate()` a task called received no arguments. Mutation-checked: passing the index on as well fails 8.157–8.159 and 8.163; moving the index to a keyword on both sides fails 8.159. Regression: `celery_async` 156 pass / 7 skip (the opt-in Redis broker and recovery-beat tests) and `calculations` 218 pass, 0 fail, 31 subtests, 4 min 55 s |
+| Coverage gain | `calc_and_save` with arguments, run by a worker and reached through `create()`; the message contract on both sides; every route `create()` can take |
+| Status | ✅ Complete. BUG-054 resolved. |
+| Note | Without the per-task dispatch scopes, eager mode shows a task the dispatcher's own `WaitForTasks` scope, which is open in the same thread. The task then sends `calculate()` off as one more message, Celery pickles it even in eager mode, and the row is saved without the result: a decorated batch's results never persist under plain `_celery_eager()`. A worker process has no such scope. Letter `d` and 8.154–8.156 belong to PR #865, so 8e starts at 8.157. The per-group retry in `_handle_task_results` and the per-group fallback after a `CeleryDispatchError` are not covered separately (see cluster.md). |
+### Batch 8d — The startup reset works on every route and leaves asyncio usable (BUG-046) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.154 – 8.156 |
+| Type | I |
+| Files covered | `lex/process_admin/utils/model_registration.py` (`register_models`, `_handle_calculation_model_reset`, new `_run_on_own_thread`) |
+| Test file | `lex/test_project/tests/celery_async/test_8d_startup_reset_event_loops.py` |
+| Test classes | `TestCluster08d_StartupResetLeavesAsyncioUsable`: 8.154 no running loop; 8.155 inside a running asyncio loop; 8.156 inside a running uvloop loop (skipped without uvloop) |
+| Fixtures | `CelerySyncCalc` (existing, `celery_async/models.py`). Each scenario starts a fresh interpreter from this checkout (`PYTHONPATH`), gives it the test database by name, and wraps its two `async_to_sync` calls in a `faulthandler` watchdog |
+| Tests landed | **3 pass / 0 fail**. On v2.4.2 all three fail. In 8.154 and 8.155 the watchdog fires (the second call is blocked in asgiref's `run_until_future`). 8.156 fails with `RuntimeError: Failed to register model CelerySyncCalc: Can't patch loop of type <class 'uvloop.Loop'>` |
+| Coverage gain | every route the startup reset can run by; `_run_on_own_thread` |
+| Status | ✅ Complete. BUG-046 resolved. |
+| Note | 8x's `tearDown` no longer calls `nest_asyncio.apply()`. It did so to close the connection that asgiref's shared executor thread kept open, and the reset's own thread now closes that connection. That tearDown is what left asyncio patched for the rest of a single-process run, which is how the bug surfaced (1aq 1.360 hung after 8x). Letter `d` is the first letter absent from `allocation.yaml`. That file does not list the existing `8aa`–`8ad`. |
+
+---

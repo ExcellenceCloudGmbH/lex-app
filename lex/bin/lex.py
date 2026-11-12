@@ -12,6 +12,18 @@ import time
 from pathlib import Path
 import shutil
 
+# Ahead of every third-party import, because this one has to beat `websockets`
+# to the environment: the library fixes its header-line limit as
+# `websockets.http11` is imported and never re-reads it, and an access token is
+# one header line on the Streamlit handshake (see lex/ws_header_limits.py).
+# uvicorn only imports the library when a server actually starts, so there is
+# room to spare -- but an ordering no later edit can get wrong is worth the
+# odd-looking import.
+#
+# Bound by name rather than as `lex.ws_header_limits`: the Click group below is
+# itself called `lex` and would shadow the package.
+from lex import ws_header_limits  # noqa: F401  (imported for its side effect)
+
 import click
 import uvicorn
 from lex._version import __version__ as _LEX_APP_VERSION
@@ -572,15 +584,17 @@ def _warn_if_sessions_are_not_durable() -> None:
 @lex.command(name="streamlit", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context
 def streamlit(ctx):
-    # ── uvloop / nest_asyncio fix ──────────────────────────────────────
+    # ── uvloop guard ───────────────────────────────────────────────────
     # uvloop (pulled in by `uv` or `uvicorn[standard]`) sets itself as
-    # the global event-loop policy.  Streamlit imports nest_asyncio which
-    # patches asyncio.run at import time, capturing the *current* policy.
-    # If uvloop is still active at that moment, nest_asyncio's patched
-    # asyncio.run will later call uvloop's get_event_loop(), which raises:
+    # the global event-loop policy. The failure this guards against came
+    # from nest_asyncio: its patched asyncio.run called uvloop's
+    # get_event_loop(), which raises
     #   RuntimeError: There is no current event loop in thread 'MainThread'
+    # lex no longer applies nest_asyncio (BUG-046), and Streamlit itself
+    # never did. The guard stays, so Streamlit keeps running on asyncio's
+    # own loop here, as it always has.
     #
-    # Fix: reset the policy and create a main-thread loop BEFORE importing
+    # Reset the policy and create a main-thread loop BEFORE importing
     # streamlit, and prevent uvloop from re-installing itself.
     asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
     asyncio.set_event_loop(asyncio.new_event_loop())
@@ -613,6 +627,19 @@ def streamlit(ctx):
         if _shortfall:
             logging.getLogger(__name__).warning("%s", _shortfall)
             print(f"\n  !  {_shortfall}\n", file=sys.stderr)
+    except Exception:
+        pass   # never let a diagnostic stop a launch
+
+    # Same bargain for the header-line ceiling installed at import time: it is
+    # only honoured from websockets 13, and an older one parses at a hard-coded
+    # 8192 while reporting nothing. That is how LEX-894 presented -- a dashboard
+    # that never loaded, an open socket, and no log line anywhere naming a
+    # header. Say so once at startup rather than leave it to be rediscovered.
+    try:
+        _ws_shortfall = ws_header_limits.websockets_line_limit_shortfall()
+        if _ws_shortfall:
+            logging.getLogger(__name__).warning("%s", _ws_shortfall)
+            print(f"\n  !  {_ws_shortfall}\n", file=sys.stderr)
     except Exception:
         pass   # never let a diagnostic stop a launch
 

@@ -34,12 +34,10 @@ class AuditLogStatus(LexModel):
     # ------------------------------------------------------------------
     def permission_read(self, user_context):
         # Which rows a caller sees follows their audit-log entry
-        # (UserReadRestrictionFilterBackend); the traceback is server
-        # internals and stays with superusers (LEX_SEC_READ_SURFACES).
-        from lex.core.security_flags import strict
-
-        if strict("READ_SURFACES") and not user_context.is_superuser:
-            return PermissionResult.allow_all_except({"error_traceback"}, "Traceback is superuser-only")
+        # (UserReadRestrictionFilterBackend, LEX_SEC_READ_SURFACES). A row
+        # the caller may see is shown whole, traceback included: it says why
+        # the operation failed, to the people allowed to see that it failed
+        # (LEX-1555).
         return PermissionResult.allow_all("AuditLogStatus is Keycloak-excluded")
 
     def permission_list(self, user_context):
