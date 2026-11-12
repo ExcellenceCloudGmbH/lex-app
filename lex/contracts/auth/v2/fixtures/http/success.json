@@ -1,0 +1,105 @@
+{
+  "contract": 2,
+  "cases": [
+    {
+      "id": "ok-200",
+      "server": "any",
+      "server_case": null,
+      "description": "Success.",
+      "request": {
+        "method": "GET",
+        "path": "api/user/"
+      },
+      "response": {
+        "status": 200,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "email": "a@example.com"
+        }
+      },
+      "expect": {
+        "kind": "ok",
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    },
+    {
+      "id": "ok-201",
+      "server": "any",
+      "server_case": null,
+      "description": "Created.",
+      "request": {
+        "method": "POST",
+        "path": "api/model_entries/fund/0/one"
+      },
+      "response": {
+        "status": 201,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "id": 1
+        }
+      },
+      "expect": {
+        "kind": "ok",
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    },
+    {
+      "id": "ok-204",
+      "server": "any",
+      "server_case": null,
+      "description": "No content.",
+      "request": {
+        "method": "DELETE",
+        "path": "api/model_entries/fund/1/one"
+      },
+      "response": {
+        "status": 204,
+        "type": "basic",
+        "headers": {},
+        "body": null
+      },
+      "expect": {
+        "kind": "ok",
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    },
+    {
+      "id": "ok-304",
+      "server": "any",
+      "server_case": null,
+      "description": "Not modified is not an error.",
+      "request": {
+        "method": "GET",
+        "path": "api/model_entries/fund/list"
+      },
+      "response": {
+        "status": 304,
+        "type": "basic",
+        "headers": {},
+        "body": null
+      },
+      "expect": {
+        "kind": "ok",
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    }
+  ]
+}

@@ -73,15 +73,17 @@ class TestCluster04q_CreateOnFilledRecord(E2ETestCase):
         Scenario 4.111: a create the hook refuses once the parent is set answers 403.
         Given: permission_create allows the blank record, refuses a closed parent
         When: a child is created under the closed and under the open parent
-        Then: closed -> 403 with the create refusal's {message}, nothing stored and
-              no audit entry; open -> 201 and stored.
+        Then: closed -> 403 with the create refusal's {message} (since 2.5 also the auth
+              contract's detail and code permission_denied), nothing stored and no audit
+              entry; open -> 201 and stored.
         """
         audit_before = self.created_audit_entries()
         response = self.create(name="child", parent=self.closed_parent.pk)
         self.assertEqual(response.status_code, 403, response.content[:300])
+        refusal = "You are not authorized to create a record in ScopedCreateItem"
         self.assertEqual(
             response.json(),
-            {"message": "You are not authorized to create a record in ScopedCreateItem"},
+            {"message": refusal, "detail": refusal, "code": "permission_denied"},
         )
         self.assertFalse(ScopedCreateItem.objects.exists())
         self.assertEqual(self.created_audit_entries(), audit_before)

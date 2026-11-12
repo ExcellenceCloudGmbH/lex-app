@@ -484,6 +484,32 @@ CLUSTERS: tuple[Cluster, ...] = (
         test_descriptions=QUERIES_TESTS,
     ),
     Cluster(
+        key="calculation_logging",
+        label="Calculation log",
+        short_description=(
+            "Every calculation leaves a readable log, and each line is "
+            "filed under the record that wrote it."
+        ),
+        what_it_proves=(
+            "LexLogger lines are stored per run as a tree that follows the "
+            "calculation: every child calculation and generated row gets "
+            "its own node under the one that triggered it, whether the work "
+            "runs in-process or in Celery workers. A failed run keeps what "
+            "it logged, the row opens its latest run, and the log exports "
+            "to PDF."
+        ),
+        what_it_means_if_broken=(
+            "Lines pile up on the root record or land on the wrong one, "
+            "disappear when a run fails, or cannot be found from the grid. "
+            "Nobody can tell which record a line belongs to."
+        ),
+        why_it_matters=(
+            "The calculation log is how customers check a result and show "
+            "how it was reached; a line filed under the wrong record is "
+            "misleading evidence."
+        ),
+    ),
+    Cluster(
         # CI self-test cluster — NOT a product feature. It is registered
         # here only so the runner will execute it when explicitly selected
         # (`run_showcase_suite.py --only ...,gate_selftest`); it is left

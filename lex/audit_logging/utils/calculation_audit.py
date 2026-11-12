@@ -164,6 +164,19 @@ def _build_payload(instance, *, error_message=None, stack_trace=None):
     return payload
 
 
+#: Payload keys the code that opened a run's entry records, and that the terminal
+#: snapshot of the record must not erase: ``trigger`` says what started the run
+#: (e.g. ``{"by": "schedule", "job": "nightly", ...}`` for a scheduled run).
+_OPENER_PAYLOAD_KEYS = ("trigger",)
+
+
+def _keep_opener_keys(previous, payload):
+    if not isinstance(previous, dict) or not isinstance(payload, dict):
+        return payload
+    kept = {key: previous[key] for key in _OPENER_PAYLOAD_KEYS if key in previous}
+    return {**payload, **kept} if kept else payload
+
+
 def _update_operation_context_audit_log(audit_log):
     try:
         context_data = operation_context.get()
@@ -243,7 +256,7 @@ def ensure_terminal_calculation_audit(
                 audit_log.calculation_id = calculation_id
             audit_log.content_type = safe_get_content_type(instance.__class__)
             audit_log.object_id = instance.pk
-            audit_log.payload = payload
+            audit_log.payload = _keep_opener_keys(audit_log.payload, payload)
             audit_log.save()
 
         updated_rows = AuditLogStatus.objects.filter(audit_log=audit_log).update(

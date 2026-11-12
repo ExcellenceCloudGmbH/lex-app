@@ -6,6 +6,12 @@ aliases:
 
 Click any row in the grid, and you're taken to its full story. The record detail page is where a single entry goes from a line of data to a living document — with its current state, embedded analytics, visual history, and a complete audit trail.
 
+> [!tip] A quicker look from the grid
+> The **View** button in a grid row opens the record in a side panel first, with its
+> files and fields. **Open full view** in that panel brings you to this page. To open this
+> page directly, ⌘-click or Ctrl-click **View**. See
+> [[using-the-app/the-grid/index#Viewing a Record|Viewing a Record]].
+
 ## The Five Tabs
 
 Every record detail page has up to five tabs, each offering a different perspective on the same data:

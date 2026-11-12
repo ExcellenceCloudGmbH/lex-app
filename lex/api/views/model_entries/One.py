@@ -4,7 +4,6 @@ import traceback
 from contextlib import nullcontext
 from datetime import date, datetime
 from typing import Iterable, cast
-from uuid import uuid4
 
 from django.core.exceptions import FieldDoesNotExist
 from django.core.files.base import File
@@ -19,10 +18,14 @@ from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import (
 )
 from lex.api.views.permissions.UserPermission import UserPermission
 from lex.audit_logging.mixins.AuditLogMixin import AuditLogMixin
-from lex.audit_logging.utils.CacheManager import CacheManager
 from lex.audit_logging.utils.ModelContext import model_logging_context
-from lex.audit_logging.utils.WebSocketNotifier import WebSocketNotifier
 from lex.core.calculation_closing import calculation_closed_reason
+from lex.core.calculation_start import (
+    calculate_in_background,
+    calculation_record_id,
+    mark_calculation_started,
+    new_calculation_id,
+)
 from lex.api.security import (
     ask_create,
     edit_denial,
@@ -32,6 +35,8 @@ from lex.api.security import (
     write_denial,
 )
 from lex.core.security_flags import strict
+from lex.api.security import is_auth_outage
+from lex.authentication.drf_exceptions import refusal_response
 from lex.core.exceptions import resolve_exception_detail, resolve_exception_traceback
 from lex.core.models.CalculationModel import (
     CalculationModel,
@@ -95,45 +100,11 @@ class OneModelEntry(
         """Put a record into IN_PROGRESS and announce its run, before it starts.
 
         The first half of starting a calculation off the request thread,
-        shared by the Calculate button (``update`` with ``calculate=true``)
-        and by a create on a ``calculate_on_create`` model.
+        shared by the Calculate button (``update`` with ``calculate=true``),
+        by a create on a ``calculate_on_create`` model, and by a scheduled
+        job firing (see :mod:`lex.core.calculation_start`).
         """
-        from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
-
-        CalculationModel._clear_terminal_state_persistence(instance)
-        instance.is_calculated = CalculationModel.IN_PROGRESS
-        instance.save(skip_hooks=True)
-        # ── Early registration ──────────────────────────────
-        # Register the calculation in the authoritative cache
-        # store and broadcast IN_PROGRESS **before** entering
-        # the atomic transaction.  This guarantees that:
-        #   a) A page-refresh during the calculation will see
-        #      the IN_PROGRESS entry in the reconciliation
-        #      snapshot (no DB read needed).
-        #   b) Other users/tabs receive the IN_PROGRESS
-        #      WebSocket message immediately.
-        ActiveCalculationStateStore.mark_in_progress(
-            record_id=calculation_record,
-            calculation_id=calculation_id,
-            record=str(instance),
-            model_name=instance._meta.object_name,
-            model_label=instance._meta.label_lower,
-            record_pk=instance.pk,
-        )
-
-        # Notify the "calculations" group (GenericSocket) so
-        # the triggering client can pair its temp ID with the
-        # server-side calculation_id.
-        WebSocketNotifier.send_calculation_update(
-            calculation_id=calculation_id,
-            calculation_record=calculation_record,
-        )
-
-        cache_key = CacheManager.build_cache_key(
-            calculation_record,
-            calculation_id,
-        )
-        CacheManager.store_message(cache_key, "")
+        mark_calculation_started(instance, calculation_record, calculation_id)
 
     def _calculate_in_background(self, instance, calculation_record):
         """Run ``instance``'s calculation on the calculation thread pool.
@@ -142,77 +113,9 @@ class OneModelEntry(
         the current operation context (its ``calculation_id`` and audit entry),
         and dispatches to Celery when Celery is on, as for a Calculate click.
         """
-        from contextvars import copy_context
-        from lex.audit_logging.utils.ModelContext import (
-            _model_context,
-            ModelContext,
+        calculate_in_background(
+            instance, calculation_record, executor=_calculation_executor
         )
-        from django.db import close_old_connections
-
-        ctx = copy_context()
-
-        def _invoke_calculate_hook():
-            # Runs inside ``ctx.run(...)`` below so the
-            # request's ``operation_context`` (with
-            # ``calculation_id``) is visible to both the
-            # hook and the terminal-audit finalizer.
-            #
-            # Install a FRESH model context for the
-            # background thread.  ``copy_context()``
-            # captures a reference to the same mutable
-            # ``ModelContext`` object that the request
-            # thread's ``model_logging_context`` will
-            # pop upon returning the response.  By
-            # the time this thread starts, the shared
-            # stack is empty → ContextResolver.resolve()
-            # cannot determine ``current_record`` →
-            # WebSocket log delivery and cache routing
-            # break.  Setting a new ModelContext here
-            # (inside ``ctx.run``) scopes it to this
-            # execution without affecting the request
-            # thread.
-            _model_context.set(
-                {"model_context": ModelContext([instance])}
-            )
-            instance._defer_calculate_hook = False
-            try:
-                instance.calculate_hook()
-            except Exception:
-                # The terminal failure audit is normally
-                # flushed by ``LexModel.save``'s except
-                # block (see
-                # ``_finalize_pending_terminal_audit``).
-                # In the async path we invoke
-                # ``calculate_hook`` directly — outside
-                # any ``save()`` — so we own that flush
-                # here.  Without it, the pending audit
-                # dict that ``calculate_hook`` set on
-                # the instance never becomes a row and
-                # the operator sees a 'success' audit
-                # for a calc that actually failed.
-                try:
-                    instance._finalize_pending_terminal_audit()
-                except Exception:
-                    logger.exception(
-                        "Failed to finalize terminal failure "
-                        "audit for %s after background "
-                        "calculation raised",
-                        calculation_record,
-                    )
-                raise
-
-        def _background_calculate():
-            try:
-                ctx.run(_invoke_calculate_hook)
-            except Exception as exc:
-                logger.error(
-                    "Background calculation failed for %s: %s",
-                    calculation_record, exc, exc_info=True,
-                )
-            finally:
-                close_old_connections()
-
-        _calculation_executor.submit(_background_calculate)
 
     @staticmethod
     def _calculates_on_create(instance):
@@ -244,8 +147,8 @@ class OneModelEntry(
                     closed_reason,
                 )
                 return
-            calculation_record = f"{instance._meta.model_name}_{instance.pk}"
-            calculation_id = f"{calculation_record}_update_{uuid4()}"
+            calculation_record = calculation_record_id(instance)
+            calculation_id = new_calculation_id(instance)
             with OperationContext(self.request, calculation_id):
                 self.log_calculation(instance, calculation_id)
                 with model_logging_context(instance):
@@ -278,6 +181,7 @@ class OneModelEntry(
     def _should_reset_is_calculated_for_update(self, instance):
         return (
             isinstance(instance, CalculationModel)
+            and getattr(instance, "reset_calculation_on_edit", True)
             and not getattr(self, "_calculate_requested", False)
         )
 
@@ -568,6 +472,8 @@ class OneModelEntry(
         try:
             allowed = ask_create(request, filled_record(model_class, serializer.validated_data))
         except Exception as exc:
+            if is_auth_outage(exc):
+                raise  # 503/401 per the auth contract, never "the check failed"
             if strict("FAIL_CLOSED"):
                 raise _CreateCheckRaised() from exc
             logger.warning(
@@ -589,19 +495,10 @@ class OneModelEntry(
         # (auto-redirect to login on 401, "permission denied"
         # banner on 403); collapsing both into 400 breaks
         # both code paths.
-        is_anonymous = not bool(
-            getattr(getattr(request, "user", None), "is_authenticated", False)
-        )
-        deny_status = (
-            status.HTTP_401_UNAUTHORIZED
-            if is_anonymous
-            else status.HTTP_403_FORBIDDEN
-        )
-        return Response(
-            {
-                "message": f"You are not authorized to create a record in {model_class.__name__}"
-            },
-            status=deny_status,
+        # The body keeps the documented ``message`` and adds the auth contract's keys
+        # (403 ``code: permission_denied`` / 401 ``not_authenticated``).
+        return refusal_response(
+            request, f"You are not authorized to create a record in {model_class.__name__}"
         )
 
     @staticmethod
@@ -643,6 +540,8 @@ class OneModelEntry(
             if not can_create:
                 return self._create_refused(request, model_container.model_class)
         except Exception as exc:
+            if is_auth_outage(exc):
+                raise  # 503/401 per the auth contract, never a denial
             if strict("FAIL_CLOSED"):
                 self._create_check_failed(model_container.model_class, exc)
             # Legacy (LEX_SEC_FAIL_CLOSED=false): allow by default on permission check error

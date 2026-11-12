@@ -14,6 +14,8 @@ from rest_framework import serializers, viewsets
 
 logger = logging.getLogger(__name__)
 
+from lex.api.serializers.list_ui_columns import build_column_options
+
 # Field-names that React-Admin expects
 from lex.api.serializers.sensitive_fields import (
     filter_sensitive_field_names,
@@ -99,6 +101,13 @@ def _fail_closed() -> bool:
     from lex.core.security_flags import strict
 
     return strict("FAIL_CLOSED")
+
+
+def _auth_outage(exc: BaseException) -> bool:
+    """An auth outage (503/401) is re-raised, never turned into a withheld record."""
+    from lex.api.security import is_auth_outage
+
+    return is_auth_outage(exc)
 
 
 def _lex_model_can_read():
@@ -296,6 +305,22 @@ class LexClearableFileField(serializers.FileField):
             if self.required:
                 self.fail("required")
             return ""
+        # A file too large for one request body arrives in pieces first and
+        # is referred to here by its upload token (see ChunkedUpload.py).
+        from lex.api.views.file_operations.ChunkedUpload import (
+            ChunkedUploadError,
+            is_upload_token,
+            resolve_upload_token,
+        )
+
+        if is_upload_token(data):
+            request = self.context.get("request")
+            if request is None:
+                raise serializers.ValidationError("A chunked upload needs a request context.")
+            try:
+                data = resolve_upload_token(data, request)
+            except ChunkedUploadError as exc:
+                raise serializers.ValidationError(str(exc)) from exc
         return super().to_internal_value(data)
 
 
@@ -395,10 +420,20 @@ class LexSerializer(serializers.ModelSerializer):
 
     @classmethod
     def get_list_ui_options(cls) -> dict:
-        """Expose serializer-level frontend list options via ``Meta``."""
+        """
+        Expose serializer-level frontend list options via ``Meta``.
+
+        ``columns`` carries the per-column display defaults a project declares
+        in ``Meta.lex_column_options`` -- the developer layer of the three that
+        decide how a table looks (the user's own Settings panel and a saved
+        view are the other two). See
+        ``lex.api.serializers.list_ui_columns`` for the options and why
+        an invalid one is dropped rather than raised.
+        """
         meta = getattr(cls, "Meta", None)
         return {
             "hide_actions_column": bool(getattr(meta, "hide_actions_column", False)),
+            "columns": build_column_options(meta),
         }
 
     # ------------------------------------------------------------------
@@ -655,7 +690,9 @@ class LexSerializer(serializers.ModelSerializer):
                     allowed = len(readable_fields) > 0
                 else:
                     allowed = bool(readable_fields)
-        except Exception:
+        except Exception as exc:
+            if _auth_outage(exc):
+                raise
             if _fail_closed():
                 logger.exception(
                     "permission_read of %s raised on an audit-log payload reference; reference withheld",
@@ -855,8 +892,21 @@ class LexSerializer(serializers.ModelSerializer):
         visible_fields = None
 
         # 0. Already decided for this request (the list filter asked first; BUG-011)
+        #
+        # ``has_can_read`` is asked FIRST, and that order is the fix (LEX-1555):
+        # ``type(...).can_read`` on a model that declares none raises
+        # ``AttributeError``, and this branch runs before the two below that do
+        # guard themselves. Not every model served through ``model_entries`` is a
+        # ``LexModel`` — ``CalculationLog`` is a plain ``django.db.models.Model`` —
+        # so every read of the calculation-log table, by id, by ids and through
+        # the grid, answered 500 and the frontend's log tree, its Details tab and
+        # the table page all broke at once.
         remembered = None
-        if request is not None and _keeps_lex_model_can_read(target_instance):
+        if (
+            request is not None
+            and target_caps['has_can_read']
+            and _keeps_lex_model_can_read(target_instance)
+        ):
             from lex.api.security import recalled
 
             remembered = recalled(request, "read", target_instance)
@@ -878,7 +928,9 @@ class LexSerializer(serializers.ModelSerializer):
                     raw_visible_fields = result.get_fields(target_instance._get_all_field_names())
                 else:
                     raw_visible_fields = target_instance.can_read(request)
-            except Exception:
+            except Exception as exc:
+                if _auth_outage(exc):
+                    raise
                 if _fail_closed():
                     logger.exception("can_read raised for %s; record withheld", type(target_instance).__name__)
                     return target_instance, set()
@@ -895,7 +947,9 @@ class LexSerializer(serializers.ModelSerializer):
             user_context = self._get_user_context(request, target_instance)
             try:
                 result = target_instance.permission_read(user_context)
-            except Exception:
+            except Exception as exc:
+                if _auth_outage(exc):
+                    raise
                 if _fail_closed():
                     logger.exception("permission_read raised for %s; record withheld", type(target_instance).__name__)
                     return target_instance, set()
@@ -998,7 +1052,9 @@ class LexSerializer(serializers.ModelSerializer):
                             representation['payload'] = pruned
                         else:
                             representation['payload'] = filtered_payload
-        except Exception:
+        except Exception as exc:
+            if _auth_outage(exc):
+                raise
             if _fail_closed():
                 # The payload could not be judged: withhold it rather than show it unfiltered.
                 logger.exception("Filtering the audit-log payload raised; payload withheld")

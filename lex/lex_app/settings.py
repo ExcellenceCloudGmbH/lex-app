@@ -30,6 +30,7 @@ import os
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 
+from lex import hosts as lex_hosts
 from lex.runtime_config import (
     derive_repo_name,
     embed_origins_configured,
@@ -129,6 +130,30 @@ else:
         },
     }
 
+
+# --- LEX_WS_AUTH (lex-surfaces-reflex-ws) -------------------------------------
+def _ws_auth_mode() -> str:
+    """``LEX_WS_AUTH``: what the authenticated WebSocket routes do with a socket without a sign-in.
+
+    ``off`` serves every socket, as before 2.5. ``log`` (the default) still serves every socket
+    and logs, once per socket, each one ``enforce`` would close. ``enforce`` accepts such a
+    socket and closes it with 4401 (not signed in / sign-in ended), 4403 (refused) or 4503 (the
+    sign-in could not be checked); only then does ``api/auth/session`` advertise
+    ``ws_close_codes``. See ``lex.api.consumers.auth``.
+    """
+    raw = (os.getenv("LEX_WS_AUTH") or "log").strip().lower()
+    if raw not in ("off", "log", "enforce"):
+        from django.core.exceptions import ImproperlyConfigured
+
+        raise ImproperlyConfigured(
+            f"LEX_WS_AUTH must be one of off, log, enforce (got {os.getenv('LEX_WS_AUTH')!r})."
+        )
+    return raw
+
+
+LEX_WS_AUTH = _ws_auth_mode()
+# --- end LEX_WS_AUTH ------------------------------------------------------------
+
 STORAGES = {
     "default": {
         "BACKEND": "lex.utilities.storage.custom_storage.CustomDefaultStorage",
@@ -178,9 +203,11 @@ if os.getenv("STORAGE_TYPE") == "GCS":
 # See https://docs.djangoproject.com/en/3.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv(
-    "DJANGO_SECRET_KEY", default="pjlulvaa77lteno-_y6!oxb%63xqiaw4%n%1or&77a!x9@nkd+"
-)
+#: The development fallback. It is published with this package, so it signs
+#: nothing a deployed instance can trust; deployed pods refuse to start on it
+#: (see the DEPLOYMENT_ENVIRONMENT checks below).
+PUBLISHED_DEFAULT_SECRET_KEY = "pjlulvaa77lteno-_y6!oxb%63xqiaw4%n%1or&77a!x9@nkd+"
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", default=PUBLISHED_DEFAULT_SECRET_KEY)
 QUACKBACK_WIDGET_SECRET = os.getenv("QUACKBACK_WIDGET_SECRET", "")
 
 # SECURITY WARNING: don't run with debug turned on in production!
@@ -189,18 +216,165 @@ if os.getenv("LEX_ENVIRONMENT_TAG", "envvar_not_existing") == "dev":
 else:
     DEBUG = False
 
-ALLOWED_HOSTS = [
+# LEX_EXTRA_ALLOWED_HOSTS (comma-separated) names FURTHER hostnames this
+# instance answers on, beyond the one canonical DOMAIN_HOSTED.
+#
+# DOMAIN_HOSTED is a single name, so until this existed ALLOWED_HOSTS held
+# exactly one real host. Every other hostname pointed at the same pod — a
+# customer domain attached but not yet promoted, a dashboard host, a vanity
+# host put in front of one public route — got a 400 from Django while the
+# ingress happily routed it. USE_X_FORWARDED_HOST is True below, so Django
+# judges the host the CLIENT asked for: an ingress-side rewrite (upstream-vhost
+# and friends) cannot paper over this, which is why the name has to be listed
+# here. See also asgi.py, where the public health WebSocket is deliberately
+# exempt from AllowedHostsOriginValidator for the same class of failure.
+#
+# Entries are hostnames, not origins: "sign.example.com", or Django's own
+# leading-dot wildcard ".example.com" for every subdomain. "*" is refused
+# below — an instance that accepts any Host accepts Host-header poisoning.
+_lex_extra_allowed_hosts = [
+    host.strip().strip("/")
+    for host in os.getenv("LEX_EXTRA_ALLOWED_HOSTS", "").split(",")
+    if host.strip()
+]
+
+#: Where Kubernetes mounts the pod's own namespace. Present in every pod with a service account,
+#: which is every pod the platform runs, and readable without any API call or new env var.
+K8S_NAMESPACE_FILE = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
+#: How the platform names an instance's backend Service: this prefix plus the instance identifier.
+BACKEND_SERVICE_PREFIX = "lex-backend-"
+
+
+def _k8s_namespace(path: str = K8S_NAMESPACE_FILE) -> str:
+    """This pod's namespace, or `""` outside a cluster.
+
+    Read from the mounted file rather than an environment variable because there is no namespace
+    variable to rely on - `POD_NAMESPACE` is NOT set in the platform's pods (measured). Any read
+    error means "not in a cluster", which is the correct answer on a developer's machine.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+def _cluster_service_hosts(instance: str, namespace: str) -> list:
+    """The DNS names this pod's own backend Service answers to from inside the cluster.
+
+    WHY THIS EXISTS. A lex instance is several pods sharing one database, and the ones that are not
+    the backend reach it by its Kubernetes Service name - `lex-backend-<instance>:7000` - because
+    that keeps the traffic inside the cluster, off the ingress and off TLS. Django then sees that
+    Service name in `Host:`, and until this function existed `ALLOWED_HOSTS` held only
+    `DOMAIN_HOSTED`, the loopback pair and `POD_IP`, so `CommonMiddleware` refused the request
+    before any view, permission class or model code ran:
+
+        django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header:
+        'lex-backend-<instance>:7000'. You may need to add 'lex-backend-<instance>'
+        to ALLOWED_HOSTS.
+
+    Measured on a customer instance on 2026-10-25: every service-to-service file write failed on
+    this and nothing else - the API key was registered and valid, and the route was correct.
+
+    `POD_IP` does not cover it. It is the address of whichever pod is reading these settings, so it
+    lets a caller reach THAT pod by IP; it says nothing about how other pods address the backend by
+    name, and a caller in another pod has no way to learn it.
+
+    Args:
+        instance: `INSTANCE_RESOURCE_IDENTIFIER`, or `""` outside a deployment.
+        namespace: the pod's namespace, or `""` when it could not be read.
+
+    Returns:
+        The short Service name plus the three longer Kubernetes DNS forms, or `[]` when there is no
+        instance identifier - which is a developer's machine, where nothing should be added.
+    """
+    if not instance:
+        return []
+    short = f"{BACKEND_SERVICE_PREFIX}{instance}"
+    if not namespace:
+        # In a cluster the namespace file is always there; without it the short name is still
+        # correct for a same-namespace caller, which is the only one that can use a short name.
+        return [short]
+    return [
+        short,
+        f"{short}.{namespace}",
+        f"{short}.{namespace}.svc",
+        f"{short}.{namespace}.svc.cluster.local",
+    ]
+
+
+def _instance_app_hosts(environ=None) -> list:
+    """Hostnames (no port) of every app host in ``LEX_INSTANCE_HOSTS``: canonical, platform, extra.
+
+    The Streamlit hand-off sends the browser to ``<app host>/oidc/handoff`` on whichever app host
+    shares a site with the dashboard -- a custom domain attached to the app as often as not -- so
+    Django has to answer on all of them, not only on ``DOMAIN_HOSTED``.
+    """
+    from lex.authentication.dashboards.sites import split_host
+    from lex.core.instance_hosts import instance_hosts
+
+    hosts = []
+    for host in instance_hosts(os.environ if environ is None else environ).hosts("app"):
+        name = split_host(host)[0]
+        if name and name not in hosts:
+            hosts.append(name)
+    return hosts
+
+
+# Every hostname the instance ingress routes to this pod, canonical first: the
+# platform hostname and any customer-owned domain attached to the instance. An
+# attached domain reaches the very same pods as the platform one, so a hostname
+# missing here is a domain that resolves, routes, and is then answered with
+# "400 Bad Request" by Django -- and with a refused handshake by
+# AllowedHostsOriginValidator, which reads this same list.
+#
+# Written by the lex-instance terraform module only when a custom domain is
+# attached; `public_hosts` falls back to DOMAIN_HOSTED alone, which is what
+# every other instance has always had.
+_PUBLIC_APP_HOSTS = lex_hosts.public_hosts("app")
+
+# dict.fromkeys, not set(): DOMAIN_HOSTED is normally the first entry of
+# _PUBLIC_APP_HOSTS as well, and a duplicate in ALLOWED_HOSTS is only noise --
+# but an unordered list would make this setting differ between runs.
+ALLOWED_HOSTS = list(dict.fromkeys([
+    *_PUBLIC_APP_HOSTS,
     os.getenv("DOMAIN_HOSTED", "localhost"),
     "127.0.0.1",
     "localhost",
     os.environ.get("POD_IP", default="envvar_not_existing"),
-]
+    *_lex_extra_allowed_hosts,
+    # Every app host in LEX_INSTANCE_HOSTS (canonical, platform, extra): the Streamlit
+    # hand-off sends the browser to <app host>/oidc/handoff on whichever one shares a
+    # site with the dashboard.
+    *_instance_app_hosts(),
+    *_cluster_service_hosts(
+        (os.getenv("INSTANCE_RESOURCE_IDENTIFIER") or "").strip(), _k8s_namespace()
+    ),
+]))
 
 LOGIN_REDIRECT_URL = "/process_admin/all"
 
+# The extra hosts are trusted for CSRF too: a host that serves the app at all
+# serves its forms, and a host listed in ALLOWED_HOSTS but missing here fails
+# every POST with "Origin checking failed" — a confusing half-working state.
+#
+# The two settings spell a wildcard differently. ALLOWED_HOSTS takes Django's
+# leading dot (".example.com" = the domain and every subdomain); an origin must
+# carry a scheme and spells it "https://*.example.com", which covers the
+# subdomains only. So ".example.com" becomes "https://*.example.com" and the
+# apex, if it serves the app, is listed in its own right.
 CSRF_TRUSTED_ORIGINS = [
     "https://*." + os.getenv("DOMAIN_HOSTED", "localhost"),
     "http://localhost:3000",
+    # Django matches CSRF origins exactly unless the entry starts with `*.`, so
+    # each host needs its own entry as well as the wildcard above -- a POST to
+    # `https://app.customer.com` carries that exact Origin, which
+    # `https://*.customer.com` does not match.
+    *[f"https://{host}" for host in _PUBLIC_APP_HOSTS if host and host != "localhost"],
+] + [
+    f"https://*{host}" if host.startswith(".") else f"https://{host}"
+    for host in _lex_extra_allowed_hosts
 ]
 
 # Sites allowed to embed lex-app in a frame/iframe and use its embed filter
@@ -241,6 +415,28 @@ if os.getenv("DEPLOYMENT_ENVIRONMENT") is not None:
             "DOMAIN_HOSTED must be set when DEPLOYMENT_ENVIRONMENT is set; without "
             "it ALLOWED_HOSTS only matches 'localhost' and all WebSocket/CSRF "
             "checks reject the real instance hostname."
+        )
+
+    if "*" in _lex_extra_allowed_hosts:
+        raise ImproperlyConfigured(
+            "LEX_EXTRA_ALLOWED_HOSTS must name hostnames, never '*'. A deployed "
+            "instance that accepts any Host header accepts Host-header poisoning: "
+            "password-reset and other absolute links would be built from whatever "
+            "the caller sent. Name each host, or use Django's leading-dot wildcard "
+            "('.example.com') for one domain's subdomains."
+        )
+
+    # The secret key signs session data, password-reset and signing tokens and
+    # derives the dashboard proxy's cookie key. The fallback above is public, so
+    # a deployed pod running on it (or on nothing) hands every signature to
+    # anyone who has read this package. Every deployed instance gets its own
+    # key from Terraform; refuse to start without one.
+    _deployed_secret_key = (os.getenv("DJANGO_SECRET_KEY") or "").strip()
+    if not _deployed_secret_key or _deployed_secret_key == PUBLISHED_DEFAULT_SECRET_KEY:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY must be set to a private value when DEPLOYMENT_ENVIRONMENT "
+            "is set; the built-in development key is public and must not sign anything "
+            "on a deployed instance."
         )
 
     if _use_redis_channel_layer:
@@ -324,6 +520,7 @@ INSTALLED_APPS = [
     "lex.core.apps.CoreConfig",
     "lex.authentication.apps.AuthenticationConfig",
     "lex.audit_logging.apps.LoggingConfig",
+    "lex.scheduling.apps.SchedulingConfig",
     "lex.api.apps.ApiConfig",
     "lex.process_admin.apps.ProcessAdminConfig",
     "lex.lex_app.apps.LexAppConfig",
@@ -376,13 +573,25 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # django-oauth2-codeflow 3: a bearer access token authenticates the request without a
+    # session; then the session's sign-in is loaded, kept fresh and exposed as request.oidc.
+    # Both answer the HTTP auth contract v2 (401 / 503 JSON for API requests) themselves.
     "oauth2_authcodeflow.middleware.BearerAuthMiddleware",
+    "oauth2_authcodeflow.middleware.OIDCSessionMiddleware",
+    # MCP embeds: redeems ?lex_embed_ticket= into the read-only __Host-lex_embed cookie and signs
+    # its requests in (GET/HEAD/OPTIONS only). After the sign-in middlewares (a real sign-in
+    # wins), before the login requirement and the permissions lookup.
+    "lex.authentication.dashboards.embed.EmbedTicketMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
+    # The library's LoginRequiredMiddleware, letting API-key requests through to DRF.
     "lex.authentication.middleware.ApiKeyAwareLoginRequiredMiddleware",
-    "oauth2_authcodeflow.middleware.RefreshSessionMiddleware",
-    "oauth2_authcodeflow.middleware.RefreshAccessTokenMiddleware",
+    # Records the hostname each request arrived on, so an HTMLReport can frame
+    # its dashboard from a hostname on the same registrable domain -- see
+    # lex.hosts. Pure bookkeeping: it never rejects a request.
+    "lex.hosts.CurrentHostMiddleware",
+    # Lazy request.user_permissions / userinfo / client_roles (see the module).
     "lex.api.middleware.keycloak_permissions.KeycloakPermissionsMiddleware",
 ]
 
@@ -609,6 +818,23 @@ except Exception as e:
 celery_active = CELERY_ACTIVE
 
 # ---------------------------------------------------------------------------
+# Scheduled jobs (see docs/superpowers/plans/2026-11-10-scheduled-jobs.md)
+#
+# ScheduledJob rows are fired by a clock thread in the served backend
+# (lex.scheduling.loop), started from lex_app/asgi.py. ON by default: a clock
+# that is silently off looks exactly like one with nothing to do, so turning it
+# off is an explicit choice that the backend logs at WARNING.
+#   LEX_SCHEDULER_TICK_SECONDS          — how often due jobs are looked for.
+#   LEX_SCHEDULER_MISFIRE_GRACE_SECONDS — how late a slot may be and still run
+#     (after a restart or downtime); later slots are recorded as missed.
+# ---------------------------------------------------------------------------
+LEX_SCHEDULER_ENABLED = os.getenv("LEX_SCHEDULER_ENABLED", "true").strip().lower() == "true"
+LEX_SCHEDULER_TICK_SECONDS = int(os.getenv("LEX_SCHEDULER_TICK_SECONDS", "30"))
+LEX_SCHEDULER_MISFIRE_GRACE_SECONDS = int(
+    os.getenv("LEX_SCHEDULER_MISFIRE_GRACE_SECONDS", "3600")
+)
+
+# ---------------------------------------------------------------------------
 # Celery worker-recovery knobs (see docs/celery-worker-recovery/plan.md)
 #
 # These drive the heartbeat + supervisor system that detects dead workers and
@@ -703,21 +929,31 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-CORS_ORIGIN_ALLOW_ALL = True
-
 DATA_UPLOAD_MAX_NUMBER_FIELDS = None
 KEYCLOAK_URL = os.getenv("KEYCLOAK_URL")
+#: Optional in-cluster URL of the same Keycloak (e.g. http://keycloak-http.keycloak.svc:8080).
+#: Server-to-server calls -- discovery, token refresh, JWKS, UMA -- use it and so stay off the
+#: public ingress and Cloudflare; browsers and token issuers keep KEYCLOAK_URL. Keycloak must
+#: run with hostname v2 and --hostname-backchannel-dynamic, so its discovery document still
+#: names the public issuer (check with `lex oidc_check`). An issuer mismatch answers 503 and
+#: signs nobody out; unset the variable to go back.
+KEYCLOAK_INTERNAL_URL = os.getenv("KEYCLOAK_INTERNAL_URL")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM")
 OIDC_RP_CLIENT_ID = os.getenv("OIDC_RP_CLIENT_ID")
 OIDC_RP_CLIENT_SECRET = os.getenv("OIDC_RP_CLIENT_SECRET")
 OIDC_RP_CLIENT_UUID = os.getenv("OIDC_RP_CLIENT_UUID")
+_keycloak_public_base = (KEYCLOAK_URL or "").strip().rstrip("/")
+_keycloak_backchannel_base = (KEYCLOAK_INTERNAL_URL or "").strip().rstrip("/") or _keycloak_public_base
 if OIDC_ENABLED:
     OIDC_OP_USER_ENDPOINT = (
-        f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/userinfo"
+        f"{_keycloak_public_base}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/userinfo"
     )
+    # Discovery (and with it the token, JWKS and userinfo endpoints) may be internal; the
+    # issuer every token must carry is always the public one.
     OIDC_OP_DISCOVERY_DOCUMENT_URL = (
-        f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration"
+        f"{_keycloak_backchannel_base}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration"
     )
+    OIDC_OP_ISSUER = f"{_keycloak_public_base}/realms/{KEYCLOAK_REALM}"
     AUTHENTICATION_BACKENDS = (
         "oauth2_authcodeflow.auth.AuthenticationBackend",
         "django.contrib.auth.backends.ModelBackend",
@@ -725,14 +961,42 @@ if OIDC_ENABLED:
 else:
     OIDC_OP_USER_ENDPOINT = ""
     OIDC_OP_DISCOVERY_DOCUMENT_URL = ""
+    OIDC_OP_ISSUER = None
     AUTHENTICATION_BACKENDS = ("django.contrib.auth.backends.ModelBackend",)
 
+
+def _env_tls_verify(name: str, default: bool):
+    """A TLS ``verify`` value from the environment: a boolean word, or a CA-bundle path."""
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    lowered = raw.lower()
+    if lowered in ("1", "true", "yes", "on"):
+        return True
+    if lowered in ("0", "false", "no", "off"):
+        return False
+    return raw  # a CA bundle (requests' verify=<path>)
+
+
+#: TLS verification of lex's own Keycloak calls (UMA, admin API, management commands).
+#: Verified by default on every deployed instance; local runs keep the old default (off).
+#: KEYCLOAK_VERIFY_SSL=true|false|<CA bundle path> decides explicitly.
+KEYCLOAK_VERIFY_SSL = _env_tls_verify(
+    "KEYCLOAK_VERIFY_SSL", default=os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
+)
+
 OIDC_RP_SCOPES = ["openid", "email", "profile"]
+# Keycloak signs ID tokens with RS256. The library's default list also accepts
+# HS256/384/512 with the *client secret* as the key, and the secret sits in every
+# instance's environment: anyone holding it could mint a token for any e-mail and
+# be accepted as that user by the bearer path. Accept only Keycloak's algorithm.
+OIDC_RP_SIGN_ALGOS_ALLOWED = ["RS256"]
 _django_base_path = os.getenv("DJANGO_BASE_PATH", "").strip().strip("/")
 _admin_exempt_patterns = [
     r"^/admin(?:/|$)",
     r"^/static-django/admin(?:/|$)",
 ]
+_contract_exempt_patterns = []  # api/auth/session and oidc/auth-complete under DJANGO_BASE_PATH
 if _django_base_path:
     _escaped_base_path = re.escape(_django_base_path)
     _admin_exempt_patterns.extend(
@@ -741,41 +1005,92 @@ if _django_base_path:
             rf"^/{_escaped_base_path}/static-django/admin(?:/|$)",
         ]
     )
+    _contract_exempt_patterns = [
+        rf"^/{_escaped_base_path}/api/auth/session/?$",
+        rf"^/{_escaped_base_path}/oidc/auth-complete/?$",
+    ]
 
-OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS = [
-    "/manifest.json",
-    "manifest.json",
-    "/health",
-    "/favicon.ico",
-    "api/user/",
-    "/api/user",
-    "api/health",
-    "api/active-calculations",
-    "/api/active-calculations",
-    "api/favicon.ico",
-    "api/api/user/",
-    "api/api/user",
-    "api/api/active-calculations",
-    "/api/api/active-calculations",
-] + _admin_exempt_patterns
+# Paths that may be requested without a signed-in user. The library tests them
+# with re.search, so every pattern is anchored at both ends: an unanchored
+# "/health" or "api/user" also exempted any path *containing* it -- e.g.
+# /api/user_permissions/ or /api/model_entries/healthx/list -- from the login
+# requirement. The optional "api/" prefix keeps the /api/api/... form the
+# ingress produces for the frontend's apiHost. The library's own /oidc/ views
+# (authenticate, callback, logout, total_logout, backchannel-logout) are always
+# exempt; oidc/auth-complete reports a failed silent sign-in, so it must be too,
+# and api/auth/session answers its own contract 401.
+OIDC_LOGIN_REQUIRED_EXEMPT_URL_PATTERNS = [
+    r"^/manifest\.json$",
+    r"^/favicon\.ico$",
+    r"^/api/favicon\.ico$",
+    r"^/health/?$",
+    r"^/(?:api/)?api/health/?$",
+    r"^/(?:api/)?api/user/?$",
+    r"^/(?:api/)?api/active-calculations/?$",
+    r"^/(?:api/)?api/auth/session/?$",
+    r"^/oidc/auth-complete/?$",
+] + _contract_exempt_patterns + _admin_exempt_patterns
 
-OIDC_MIDDLEWARE_NO_REFRESH_URL_PATTERNS = [
+# Paths the session middleware does not touch at all (no session load, no refresh).
+OIDC_SESSION_EXEMPT_URL_PATTERNS = [
     r"^/health$",
     r"^/favicon\.ico$",
 ] + _admin_exempt_patterns
-OIDC_RP_USE_PKCE = False
+
+# The Streamlit dashboard hand-off (lex.authentication.views.handoff_views) answers a missing or
+# ended sign-in itself -- back to the dashboard with error=login_required inside a frame, never a
+# sign-in page there -- so neither the login requirement nor the session middleware may answer
+# for it first. It loads and refreshes the sign-in with the library's own functions.
+OIDC_LOGIN_REQUIRED_EXEMPT_URL_PATTERNS.append(r"^/oidc/handoff/?$")
+OIDC_SESSION_EXEMPT_URL_PATTERNS.append(r"^/oidc/handoff/?$")
+# PKCE (S256) on every sign-in. The client is confidential, so the secret is
+# still sent with the code exchange; PKCE adds a per-login verifier, which makes
+# an intercepted code useless.
+OIDC_RP_USE_PKCE = True
+OIDC_RP_CLIENT_AUTH_METHOD = "client_secret_post"
+
+
+def _session_cookie_age_days() -> int:
+    """``LEX_SESSION_COOKIE_AGE_DAYS`` (default 31): how long an idle sign-in survives."""
+    raw = os.getenv("LEX_SESSION_COOKIE_AGE_DAYS", "31").strip()
+    try:
+        days = int(raw)
+    except ValueError:
+        from django.core.exceptions import ImproperlyConfigured
+
+        raise ImproperlyConfigured(
+            f"LEX_SESSION_COOKIE_AGE_DAYS must be a whole number of days, got {raw!r}."
+        ) from None
+    if days < 2:
+        from django.core.exceptions import ImproperlyConfigured
+
+        raise ImproperlyConfigured(
+            f"LEX_SESSION_COOKIE_AGE_DAYS must be at least 2 (got {days}); a sign-in must "
+            "outlive a day without activity."
+        )
+    return days
+
+
+# Session lifetime. Keycloak decides how long a sign-in lasts (app realms: 30 days
+# idle / 90 days max): django-oauth2-codeflow 3 has no clock of its own and ends a
+# sign-in only when Keycloak refuses a refresh (invalid_grant), a logout or a
+# back-channel logout. Django must not end it earlier: the session cookie lives
+# LEX_SESSION_COOKIE_AGE_DAYS (31) days and slides -- the library renews it at most
+# hourly while the user is active.
+SESSION_COOKIE_AGE = _session_cookie_age_days() * 86400
+# The sign-in's tokens are stored encrypted (OIDCSession rows). OIDC_TOKEN_ENCRYPTION_KEYS
+# is a comma-separated list of Fernet keys, newest first (rotate: prepend a key, run
+# `lex oidc_rotate_keys`, drop the old one later). Unset, the keys are derived from
+# DJANGO_SECRET_KEY (and SECRET_KEY_FALLBACKS), which works but couples the two secrets
+# (system check oauth2_authcodeflow.W001).
+OIDC_TOKEN_ENCRYPTION_KEYS = [
+    key.strip() for key in os.getenv("OIDC_TOKEN_ENCRYPTION_KEYS", "").split(",") if key.strip()
+] or None
 SESSION_COOKIE_SECURE = os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
 CSRF_COOKIE_SECURE = os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
 OIDC_UNUSABLE_PASSWORD = False
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:8000",
-    "*"
-    # add any other hosts your front-end uses
-]
 
 
 # JWT_SECRET_KEY = SECRET_KEY
@@ -786,11 +1101,15 @@ CORS_ALLOWED_ORIGINS = [
 
 
 REST_FRAMEWORK = {
+    # Both classes answer authenticate_header(), so DRF answers "not authenticated" with
+    # 401 + WWW-Authenticate (never 403), as the HTTP auth contract v2 requires.
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "lex.authentication.authentication_backends.BearerMiddlewareAuthentication.BearerMiddlewareAuthentication",
-        "rest_framework.authentication.SessionAuthentication",
-        # other authentication classes, if needed
+        "oauth2_authcodeflow.contrib.drf.OIDCSessionAuthentication",
     ],
+    # 401/403 bodies carry a code (not_authenticated, permission_denied, csrf_failed);
+    # an unreachable auth backend answers 503 auth_unavailable, never a denial.
+    "EXCEPTION_HANDLER": "lex.authentication.drf_exceptions.exception_handler",
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "TEST_REQUEST_DEFAULT_FORMAT": "json",
     # FIXME: maybe use this at some point (for giving individual access rights):
@@ -811,27 +1130,80 @@ SENDGRID_ECHO_TO_STDOUT = True
 # ################## END AUTH ######################
 # ##################################################
 
-CORS_ORIGIN_WHITELIST = [
-    "https://" + os.getenv("DOMAIN_HOSTED", "localhost:3000"),
+# ---------------------------------------------------------------------------
+# CORS and redirect targets (security flag CORS, on by default)
+#
+# A credentialed cross-origin request is accepted only from the instance's own
+# origins: https://<DOMAIN_HOSTED>, every host in LEX_INSTANCE_HOSTS (app,
+# Streamlit, Reflex; canonical, extra and platform), and the comma-separated
+# LEX_CORS_ALLOWED_ORIGINS. Local runs also accept the dev servers on
+# localhost. No "*" anywhere: with credentials it would let any site act as
+# the signed-in user. LEX_SEC_CORS=false (or LEX_LEGACY_SECURITY=true)
+# restores the old "any origin" behaviour while a project migrates.
+#
+# The same list feeds the redirect allowlists: OidcRedirectGuardMiddleware
+# reads CORS_ALLOWED_ORIGINS / CSRF_TRUSTED_ORIGINS, and the library checks
+# next/fail against OIDC_ALLOWED_REDIRECT_HOSTS (exact hosts; it has no
+# wildcards).
+# ---------------------------------------------------------------------------
+from lex.core.instance_hosts import instance_hosts as _instance_hosts  # noqa: E402
+from lex.core.security_flags import strict as _security_flag  # noqa: E402
+
+_deployed = os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
+_local_dev_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:8000",
-    "*",
+    "http://127.0.0.1:8000",
 ]
 
-# LEX_CORS_ALLOWED_ORIGINS (comma-separated) replaces the permissive defaults
-# above: only the listed origins may make (credentialed) cross-origin requests.
-# These origins are also accepted as OIDC next/fail targets.
-_lex_cors_origins = [
-    origin.strip().rstrip("/")
-    for origin in os.getenv("LEX_CORS_ALLOWED_ORIGINS", "").split(",")
-    if origin.strip()
-]
-if _lex_cors_origins:
-    CORS_ORIGIN_ALLOW_ALL = False
-    CORS_ALLOW_ALL_ORIGINS = False
-    CORS_ALLOWED_ORIGINS = _lex_cors_origins
-    CORS_ORIGIN_WHITELIST = _lex_cors_origins
+
+def _cors_allowed_origins(environ=None, deployed=None) -> list:
+    """The origins that may send credentialed cross-origin requests, each once."""
+    env = os.environ if environ is None else environ
+    is_deployed = _deployed if deployed is None else deployed
+    candidates = []
+    domain = (env.get("DOMAIN_HOSTED") or "").strip()
+    if domain:
+        candidates.append(f"https://{domain}")
+    candidates.extend(_instance_hosts(env).origins())
+    # Every hostname lex.hosts says the app is served on (LEX_APP_HOSTS: the canonical host
+    # and any customer-owned domain attached to it). A hardened instance must keep accepting
+    # its own newly attached domain, for CORS and as an OIDC next/fail target.
+    candidates.extend(
+        f"https://{host}" for host in _PUBLIC_APP_HOSTS if host and host != "localhost"
+    )
+    candidates.extend(env.get("LEX_CORS_ALLOWED_ORIGINS", "").split(","))
+    if not is_deployed:
+        candidates.extend(_local_dev_origins)
+    origins = []
+    for origin in candidates:
+        origin = origin.strip().rstrip("/")
+        if not origin or "*" in origin or "://" not in origin or origin in origins:
+            continue
+        origins.append(origin)
+    return origins
+
+
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = _cors_allowed_origins()
+# Off only through the documented opt-out; the allowlist above still feeds the
+# redirect checks in that case.
+CORS_ALLOW_ALL_ORIGINS = not _security_flag("CORS")
+
+
+def _redirect_hosts(origins) -> list:
+    """``host[:port]`` of every concrete origin (wildcards cannot be listed exactly)."""
+    hosts = []
+    for origin in origins:
+        _, _, netloc = str(origin).partition("://")
+        netloc = netloc.strip().rstrip("/").lower()
+        if netloc and "*" not in netloc and netloc not in hosts:
+            hosts.append(netloc)
+    return hosts
+
+
+OIDC_ALLOWED_REDIRECT_HOSTS = _redirect_hosts(CSRF_TRUSTED_ORIGINS + CORS_ALLOWED_ORIGINS)
 
 LANGUAGE_CODE = "en-us"
 
@@ -906,8 +1278,12 @@ IS_DEPLOYED = os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
 # Override locally with LOG_LEVEL=DEBUG if you need third-party debug output.
 CONSOLE_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
-# oauth2_authcodeflow: keep quiet unless explicitly requested
-OAUTH2_LEVEL = "INFO" if IS_DEPLOYED else os.getenv("LOG_LEVEL", "INFO").upper()
+# oauth2_authcodeflow: always at least INFO, on its own stdout handler, so the
+# library's structured events (event=oidc.session.started/refreshed/ended,
+# oidc.circuit.opened, ...) reach the container log whatever LOG_LEVEL says --
+# the log-based metrics and alerts on forced sign-outs are built on them. They
+# never contain a token. LOG_LEVEL=DEBUG still makes the library verbose.
+OAUTH2_LEVEL = "DEBUG" if os.getenv("LOG_LEVEL", "INFO").upper() == "DEBUG" and not IS_DEPLOYED else "INFO"
 
 # Root logger level: respect LOG_LEVEL env var, default to INFO.
 # This prevents django-lifecycle, OpenTelemetry, OIDC middleware etc.
@@ -946,6 +1322,12 @@ LOGGING = {
             "level": "DEBUG",
             "formatter": "ws_md",
         },
+        "oidc_console": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+            "formatter": "default",
+            "level": OAUTH2_LEVEL,
+        },
     },
     "loggers": {
         # Framework namespace: LEX_LOG_LEVEL=DEBUG surfaces lex.* debug logs only.
@@ -961,7 +1343,7 @@ LOGGING = {
             "propagate": False,
         },
         "oauth2_authcodeflow": {
-            "handlers": ["console"],
+            "handlers": ["oidc_console"],
             "level": OAUTH2_LEVEL,
             "propagate": False,
         },

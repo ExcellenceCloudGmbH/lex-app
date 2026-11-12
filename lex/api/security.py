@@ -10,7 +10,11 @@ One place for the checks that every endpoint applies the same way:
   may not edit (BUG-010), or ``None``.
 * :func:`refusal` – the 400 body ``{code, detail, error}`` every refusal uses.
 * :func:`guarded` – runs a permission hook; an exception denies when
-  ``LEX_SEC_FAIL_CLOSED`` is on (the default) and allows as before when off.
+  ``LEX_SEC_FAIL_CLOSED`` is on (the default) and allows as before when off --
+  except an auth outage (:func:`is_auth_outage`), which is re-raised either way.
+* :func:`is_auth_outage` – whether an exception means "the auth backend could
+  not answer" or "the sign-in is gone" (503 / 401), which no fail-closed or
+  fail-open branch may turn into a denial or a grant.
 * :func:`write_denial` – the 400 answer when a non-superuser writes to a
   history table (``LEX_SEC_HISTORY_WRITE``) or to Django's users and groups
   (``LEX_SEC_INTERNAL``), or ``None``.
@@ -84,11 +88,38 @@ def recalled(request, kind: str, instance):
     return _memo(request).get(key)
 
 
+def is_auth_outage(exc: BaseException) -> bool:
+    """Whether ``exc`` is an auth outcome, not a failed permission check.
+
+    Keycloak or the token endpoint could not answer (503 ``auth_unavailable``), or the
+    sign-in is no longer accepted (401). Both have their own answer in the HTTP auth
+    contract; turning them into a denial would show a signed-in user "permission denied"
+    during a Keycloak blip, and turning them into a grant would open records to whoever
+    asks while Keycloak is down. Every ``except Exception`` that decides access re-raises
+    these first.
+    """
+    from oauth2_authcodeflow.exceptions import OIDCAuthUnavailable, OIDCSessionEnded
+
+    from lex.api.keycloak.uma_client import KeycloakUnauthorized, KeycloakUnavailable
+    from lex.authentication.drf_exceptions import AuthUnavailable, SessionRejected
+
+    return isinstance(
+        exc,
+        (AuthUnavailable, SessionRejected, OIDCAuthUnavailable, OIDCSessionEnded, KeycloakUnavailable, KeycloakUnauthorized),
+    )
+
+
 def guarded(hook: Callable[..., Any], *args, deny: Any, allow: Any, what: str):
-    """Call a permission hook; on an exception deny (fail closed) or allow (legacy)."""
+    """Call a permission hook; on an exception deny (fail closed) or allow (legacy).
+
+    An auth outage (:func:`is_auth_outage`) is neither: it propagates to the contract's
+    401/503 answer.
+    """
     try:
         return hook(*args)
-    except Exception:
+    except Exception as exc:
+        if is_auth_outage(exc):
+            raise
         if strict("FAIL_CLOSED"):
             logger.exception("Permission check %s raised; access denied (LEX_SEC_FAIL_CLOSED).", what)
             return deny

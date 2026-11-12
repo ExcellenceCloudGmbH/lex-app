@@ -59,6 +59,21 @@ from starlette.testclient import TestClient
 
 from lex.lex_app.reflex.config import lex_auth_plugin
 
+
+def _child_env() -> dict:
+    """The environment for a child interpreter that must import the lex under test.
+
+    The child runs elsewhere (a temporary directory), so the checkout the parent imported
+    ``lex`` from is not on its path unless lex-app is installed (as in CI): put it there.
+    """
+    import lex
+
+    env = dict(os.environ)
+    checkout = str(Path(lex.__file__).resolve().parent.parent)
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (checkout, env.get("PYTHONPATH")) if p)
+    return env
+
+
 pytestmark = pytest.mark.init
 
 #: Variables that would change the configuration under test, cleared so the host's own cannot leak in.
@@ -166,6 +181,7 @@ class TestCluster01at_SinglePortProxy(TestCase):
                 result = subprocess.run(
                     [sys.executable, "-c", _LOAD_CONFIG], capture_output=True, text=True,
                     timeout=300, cwd=tmp,
+                    env=_child_env(),
                 )
                 self.assertEqual(result.returncode, 0, msg=result.stderr[-2000:])
                 app_name, loaded_module, repaired = result.stdout.strip().splitlines()[-1].split()

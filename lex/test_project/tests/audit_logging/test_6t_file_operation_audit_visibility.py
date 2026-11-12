@@ -13,8 +13,9 @@ Intent (from docs/history-and-audit/audit logs.md, "Who sees an entry"):
     * a model-wide export is readable by whoever may export the model;
     * a superuser reads every entry;
     * the payload comes back whole to whoever may read the entry;
-    * an ``AuditLogStatus`` row is as visible as its entry, and its
-      traceback is for superusers only.
+    * an ``AuditLogStatus`` row is as visible as its entry, and so is
+      its traceback (LEX-1555: superuser-only hid it from every
+      Keycloak user).
 
 All of it sits behind ``LEX_SEC_READ_SURFACES`` (on by default).
 
@@ -24,15 +25,13 @@ Scenarios 6.160 – 6.167.
 from __future__ import annotations
 
 import os
-from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
-from django.utils import timezone
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
-from lex.test_project.tests._e2e_test_case import _MockContainer, E2ETestCase
+from lex.test_project.tests._e2e_test_case import _MockContainer, E2ETestCase, sign_in
 
 from .models import AUDIT_GUARDED, GUARDED_FILE_MODELS, AuditGuardedFile
 
@@ -73,10 +72,7 @@ class TestCluster06t_FileOperationAuditVisibility(E2ETestCase):
     # -- helpers ---------------------------------------------------------
 
     def login(self, user):
-        self.client.force_login(user)
-        session = self.client.session
-        session["oidc_expires_at"] = (timezone.now() + timedelta(hours=1)).timestamp()
-        session.save()
+        sign_in(self.client, user)
 
     def download_as_owner(self):
         self.login(self.owner)
@@ -203,16 +199,18 @@ class TestCluster06t_FileOperationAuditVisibility(E2ETestCase):
         self.assertIn(status_pk, {r["id"] for r in self.rows(self.root, "auditlogstatus")})
 
     # -- 6.165 ---------------------------------------------------------
-    def test_6_165_traceback_is_for_superusers(self) -> None:
+    def test_6_165_traceback_follows_the_entry(self) -> None:
         """
-        Scenario 6.165: a failure's traceback is server internals.
+        Scenario 6.165: a failure's traceback is as visible as its entry.
 
         Given: a download that crashed, leaving a ``failure`` entry with a
                traceback.
-        When: the owner (who may read the entry) and a superuser list both
-              ``auditlog`` and ``auditlogstatus``.
-        Then: the owner sees the entry and its ``failure`` status but no
-              traceback; the superuser sees the traceback.
+        When: the owner (who may read the entry), a stranger (who may not)
+              and a superuser list both ``auditlog`` and ``auditlogstatus``.
+        Then: the owner and the superuser see the ``failure`` and its
+              traceback; the stranger sees neither row. (Until LEX-1555 the
+              traceback was superuser-only, which in a Keycloak deployment
+              meant nobody saw it.)
         """
         self.login(self.owner)
         with patch(
@@ -223,16 +221,21 @@ class TestCluster06t_FileOperationAuditVisibility(E2ETestCase):
                 self.client.get(self.download_url, {"pk": self.document.pk, "field": "attachment"})
         entry = AuditLog.objects.get(action="download")
 
-        owner_row = next(r for r in self.rows(self.owner) if r["id"] == entry.pk)
-        self.assertEqual(owner_row["status"], "failure")
-        self.assertFalse(owner_row.get("error_traceback"), "Only a superuser reads a traceback.")
-        owner_status = next(r for r in self.rows(self.owner, "auditlogstatus") if r["audit_log"] == entry.pk)
-        self.assertFalse(owner_status.get("error_traceback"), "Only a superuser reads a traceback.")
+        for reader in (self.owner, self.root):
+            row = next(r for r in self.rows(reader) if r["id"] == entry.pk)
+            self.assertEqual(row["status"], "failure")
+            self.assertIn(
+                "storage exploded", row.get("error_traceback") or "",
+                f"{reader.username} may read the entry, so reads its traceback.",
+            )
+            status_row = next(r for r in self.rows(reader, "auditlogstatus") if r["audit_log"] == entry.pk)
+            self.assertIn("storage exploded", status_row.get("error_traceback") or "")
 
-        root_row = next(r for r in self.rows(self.root) if r["id"] == entry.pk)
-        self.assertIn("storage exploded", root_row.get("error_traceback") or "")
-        root_status = next(r for r in self.rows(self.root, "auditlogstatus") if r["audit_log"] == entry.pk)
-        self.assertIn("storage exploded", root_status.get("error_traceback") or "")
+        self.assertNotIn(entry.pk, {r["id"] for r in self.rows(self.stranger)})
+        self.assertFalse(
+            [r for r in self.rows(self.stranger, "auditlogstatus") if r["audit_log"] == entry.pk],
+            "A caller who may not read the entry gets neither its status nor its traceback.",
+        )
 
     # -- 6.166 ---------------------------------------------------------
     def test_6_166_legacy_switch_keeps_the_payload_check(self) -> None:

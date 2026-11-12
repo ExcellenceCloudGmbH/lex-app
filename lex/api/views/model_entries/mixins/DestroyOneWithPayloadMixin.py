@@ -111,6 +111,10 @@ class DestroyOneWithPayloadMixin:
                 # No permission method found even after unwrapping — deny
                 can_delete = False
         except Exception as exc:
+            from lex.api.security import is_auth_outage
+
+            if is_auth_outage(exc):
+                raise  # 503/401 per the auth contract, never a refused delete
             logger.error(
                 "Permission check failed during delete of %s (pk=%s): %s",
                 instance.__class__.__name__,
@@ -123,17 +127,11 @@ class DestroyOneWithPayloadMixin:
         if not can_delete:
             # BUG-008 fix: authz failures must surface as 401/403,
             # not 400. See the matching fix in OneModelEntry.create.
-            is_anonymous = not bool(
-                getattr(getattr(request, "user", None), "is_authenticated", False)
+            from lex.authentication.drf_exceptions import refusal_response
+
+            return refusal_response(
+                request, f"You are not authorized to delete this record in {instance.__class__.__name__}"
             )
-            deny_status = (
-                status.HTTP_401_UNAUTHORIZED
-                if is_anonymous
-                else status.HTTP_403_FORBIDDEN
-            )
-            return response.Response({
-                "message": f"You are not authorized to delete this record in {instance.__class__.__name__}"
-            }, status=deny_status)
 
         serializer = self.get_serializer(instance)
         super().destroy(*args, **kwargs)

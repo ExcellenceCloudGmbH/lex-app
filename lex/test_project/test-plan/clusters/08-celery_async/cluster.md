@@ -140,4 +140,63 @@
 
 **Scenario range:** 8.142 – 8.144. **Test file:** `lex/test_project/tests/celery_async/test_8ad_dispatched_task_cancel_marker.py`. **Type:** U. **Status:** ✅ Complete (Session 91 — July 2). Allocated `8ad` (next free letter after `8ac`); 8.142 picks up after cluster-8 scenario max 8.141. Source: `lex/lex_app/celery_tasks.py` (`lex_shared_task` wrapper). 8.142 dispatched run + marker set ⇒ raises `CalculationCancelled` before the wrapped function runs; 8.143 dispatched run + no marker ⇒ marker consulted, function runs normally; 8.144 synchronous run (no context) ⇒ cancel index never consulted, function runs. 3 pass / 0 fail.
 
+
 ---
+
+### Cluster 8e — `create(*args)` reach `calculate()` on every route, Celery included (BUG-054)
+
+**Gap:** `CalculatedModelMixin.create(*args)` passes its positional arguments to every generated row's `calculate()`. Both sync consumers did, and `CeleryTaskDispatcher` sent them in each group message, `(group, group_index, *args)`, but the generic Celery task `calc_and_save` called `model.lex_func()()`. Turning Celery on changed what a calculation computed. **Fix:** the task names the index slot, `calc_and_save(models, group_index=None, *args)`, and passes `args` on. The message keeps its shape, so a message queued, redelivered or requeued by worker recovery across an upgrade is read the same way by an old and a new worker.
+
+The eager harness runs each task with the empty dispatch scopes a worker process starts with. Otherwise a task would see the dispatcher's own `WaitForTasks` scope, which is open in the same thread, and send `calculate()` off as one more message. Celery pickles a message even in eager mode, so `calculate()` would run on a copy and the task would save the row without its result, which never happens on a worker.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.157 | Celery route, `create("Q4", 7)`, three region groups | three `calc_and_save` messages run, and every row's `calculate()` receives exactly `("Q4", 7)`: not nothing, and not the group index |
+| 8.158 | Celery route, `create()` with a `calculate(self)` that takes no arguments | every row is calculated and saved; the group index is never handed to `calculate()` |
+| 8.159 | A worker runs a group message `(group, 2, "Q4", 7)`, the shape v2.4.2 queued too | `calculate()` is called inside the task with `("Q4", 7)` only, the row is saved with it, and no further task starts |
+| 8.160 | The task's other sender: a `CalculationModel` saved `IN_PROGRESS` dispatches `calc_and_save([row])` | the task runs once, `calculate()` runs with no arguments, and `CallbackTask` finds the row in the first argument and flips it to SUCCESS |
+| 8.161 | Sync streaming route (default) | no task runs; every row receives `("Q4", 7)` |
+| 8.162 | Sync materialising route (`LEX_SYNC_STREAMING_EXPANSION=false`) | no task runs; every row receives `("Q4", 7)` |
+| 8.163 | Celery route where one row's `calculate()` fails once | the dispatcher's synchronous fallback calculates it again, every row ends with `("Q4", 7)`, and every call, in a task or in the fallback, received `("Q4", 7)` |
+
+**Scenario range:** 8.157 – 8.163. **Test file:** `lex/test_project/tests/celery_async/test_8e_create_args_reach_calculate.py`. **Type:** I (real rows; Celery in eager mode). **Status:** ✅ Complete (2026-11-09). Batch: [8e](batches.md). Not covered separately: the per-group retry in `CeleryTaskDispatcher._handle_task_results` and the per-group fallback after a `CeleryDispatchError` from `.delay`. Neither changed, both already passed `*args` to `calc_and_save_sync`, and with the dispatcher's own `WaitForTasks` scope a failed task reaches the whole-batch fallback of 8.163 first.
+### Cluster 8d — The startup reset works on every route and leaves asyncio usable (BUG-046)
+
+**Gap:** the startup reset (`ModelRegistration.register_models` → `_handle_calculation_model_reset`, under `CALLED_FROM_START_COMMAND`) ran its ORM work through `nest_asyncio`: `nest_asyncio.apply()`, then `run_until_complete` on the current loop. That patched asyncio for the whole process. The patched `asyncio.run` never closes its loop, so after one `async_to_sync` with thread-sensitive work, asgiref found that open, stopped loop in the calling thread, and the next call blocked on it forever. Inside a running uvloop loop, which uvicorn uses by default whenever uvloop is installed, the patch raised `Can't patch loop of type uvloop.Loop` and stopped startup. **Fix:** the reset runs on a short-lived thread of its own (`_run_on_own_thread`). That thread has no event loop, whatever the caller's thread has, and it closes its database connection before it ends. Nothing in the process is patched.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.154 | No running loop (a command, a Celery worker) | a fresh process registers its models under `lex start`. The stuck row is ABORTED, `asyncio.run` is still the standard library's, and two `async_to_sync` calls from the main thread, each with thread-sensitive ORM work, both return the row count |
+| 8.155 | Inside a running asyncio loop (`lex start --loop asyncio`) | the same, with the models registered inside a running asyncio loop, where uvicorn sets Django up. No `SynchronousOnlyOperation`, no "loop is already running" |
+| 8.156 | Inside a running uvloop loop (plain `lex start`) | the same inside a running uvloop loop. Startup carries on (it used to fail with "Can't patch loop of type uvloop.Loop"), the row is ABORTED, and both calls return. Skipped where uvloop is not installed (Windows) |
+
+**Scenario range:** 8.154 – 8.156. **Test file:** `lex/test_project/tests/celery_async/test_8d_startup_reset_event_loops.py`. **Type:** I (a real `CalculationModel` row, reset by a fresh interpreter on this test's database). **Status:** ✅ Complete (2026-11-06). Batch: [8d](batches.md). The same bug in `LexAppConfig.ready()`, which applied the patch to every downstream process, is covered by cluster [1bo](../01-init/cluster.md).
+
+---
+
+### 8f. Scheduled dispatch — cron in a time zone, exactly-once claim, overlap, missed slots, one-off, the Celery route ✅
+
+**What it tests:** The scheduler's clock calls `run_due_jobs(now)`; this pins what a cron expression means in a time zone and what a due slot does: it is claimed by exactly one clock, skipped while the previous run is still going, collapsed into one run when recently missed, recorded as missed beyond the grace window, run once for a one-off job, and sent to a Celery worker when Celery is on.
+
+**Why a regression matters:** Double runs, runs at the wrong hour twice a year, a pile-up of runs after an outage, or jobs that silently never run.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 8.167 | weekday schedule skips the weekend | `0 6 * * 1-5` after Friday 07:00 Berlin fires Mon–Thu 06:00 CET |
+| 8.168 | classic cron syntax | steps, range steps, lists, month/weekday names, `@hourly`/`@monthly`; `7` = `0` = Sunday |
+| 8.169 | day fields OR rule | both restricted → a day matching either fires; one `*` → only the other counts |
+| 8.170 | unusable expressions refused | empty, 4 or 6 fields, out of range, backwards range, zero step, never fires, `@reboot`, unknown macro or name — each with its reason |
+| 8.171 | spring-forward | a skipped 02:30 fires once at 03:00 CEST; a half-hourly schedule collapses the gap into one run |
+| 8.172 | fall-back | a repeated 02:30 fires once; a half-hourly schedule does not rerun the repeated hour |
+| 8.173 | unknown time zone refused | the message names a valid example |
+| 8.174 | a due job runs and moves on | only the due job starts; `last_run_at` = now; next slot = next 06:00; a job not due is untouched |
+| 8.175 | a disabled job never runs | no next slot; forced due, still ignored |
+| 8.176 | two clocks, one run | two threads with their own connections tick at once; one starts the slot; the target runs once |
+| 8.177 | runs never stack | a slot due mid-run is skipped with its reason and moves on; the run's own end-of-run save keeps the note and the moved slot |
+| 8.178 | recent misses collapse | five missed 10-minute slots inside the grace window cost one run; next slot = next mark after now |
+| 8.179 | old misses are recorded | a slot two hours late (grace one hour) does not run; the message names it; next slot = tomorrow |
+| 8.180 | one-off runs once | next slot = `run_at`; it runs once; afterwards no next slot and no second run |
+| 8.181 | the Celery route | with Celery on, `calc_and_save.delay` receives the job; nothing is calculated in the backend |
+| 8.182 | an old copy cannot bring a slot back | a copy loaded before the clock ran the slot, renamed and saved after: name stored, slot and status kept, nothing runs again |
+
+**Scenario range:** 8.167 – 8.182. **Test file:** `lex/test_project/tests/celery_async/test_8f_scheduled_dispatch.py`. **Type:** U + E. **Status:** ✅ Complete (2026-11-10). Batch: [8f](batches.md).

@@ -87,3 +87,42 @@ from a failed create both point at it — so nothing that relied on it has chang
 >   <source src="../../videos/grid-inline-editing.mp4" type="video/mp4">
 > </video>
 > Double-click a cell, edit a value, see an inline validation error, then correct it.
+
+## Viewing a Record
+
+The **View** button (the eye icon) in a row opens the record in a panel on the right,
+the same panel **Edit** uses. The grid stays where it was, with your filters and your
+scroll position.
+
+The panel shows the record's **Files** first: each file field with its file name and a
+download. The record's other fields follow below. At the bottom of the panel:
+
+- **Open full view** takes you to the [[using-the-app/record-detail/index|record page]],
+  with its Analytics, Timeline, History and Audit Log tabs.
+- **Edit** switches the panel to the edit form. It is there only when you may edit the
+  record.
+
+Only one panel is open at a time. Opening **Edit** closes the view, and the other way
+round. On a wide screen, the icon in the panel's header widens it to the full window;
+the panel remembers that choice the next time you open it.
+
+To go straight to the record page, hold ⌘ (Mac) or Ctrl (Windows) while you click
+**View**, or click it with the middle mouse button. The page opens in a new tab.
+
+## The ID Column
+
+The grid sizes its columns to their content, but it no longer lets the ID column grow
+wider than about 160 pixels on its own. A long ID is cut off with `…`, so the columns
+you came to read stay on screen.
+
+- **Copy an ID.** Point at an ID cell, or move to it with the keyboard, and a copy icon
+  appears. Click it to copy the whole ID, not just the part you can see. A tick and
+  *Copied* confirm it. Copying does not select the row or start an edit.
+- **See more of it.** Drag the column's edge to make it wider. A width saved in a
+  [[using-the-app/the-grid/saved views|view]] is kept.
+- **Hide it.** Turn on **Hide ID column** in the
+  [[using-the-app/the-grid/table settings|table settings]]. It applies to you only and
+  stays hidden after a reload.
+
+Your team can also set a different default width for a table, or hide the column for
+everyone. See [[model-your-data/serializers|Serializers]].

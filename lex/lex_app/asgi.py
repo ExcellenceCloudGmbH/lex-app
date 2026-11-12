@@ -21,6 +21,7 @@ from asgiref.sync import async_to_sync, SyncToAsync
 from channels.auth import AuthMiddlewareStack
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.security.websocket import AllowedHostsOriginValidator
+from oauth2_authcodeflow.contrib.channels import OIDCSessionASGIMiddleware
 
 # Increase the thread-sensitive executor from 1 → 3 workers so that
 # long-running sync operations (e.g. calculations) don't starve other
@@ -68,10 +69,16 @@ application = ProtocolTypeRouter(
         "websocket": URLRouter(
             routing.public_websocket_urlpatterns()
             + [
-                # All other WS routes require origin validation + authentication
+                # All other WS routes require origin validation + authentication.
+                # OIDCSessionASGIMiddleware (inside the auth stack, which loads the
+                # session and user) resolves the socket's active sign-in into
+                # scope["oidc_session"]; the consumers' LexSocketAuthMixin closes
+                # sockets without one per LEX_WS_AUTH (lex.api.consumers.auth).
                 re_path(r"", AllowedHostsOriginValidator(
                     AuthMiddlewareStack(
-                        URLRouter(routing.authenticated_websocket_urlpatterns())
+                        OIDCSessionASGIMiddleware(
+                            URLRouter(routing.authenticated_websocket_urlpatterns())
+                        )
                     )
                 )),
             ]
@@ -95,3 +102,11 @@ def on_server_shutdown(*args, **kwargs):
 
 
 atexit.register(on_server_shutdown)
+
+
+# The scheduler's clock runs in the process that serves this application — the
+# only process that imports this module (not the uvicorn reloader's parent, not
+# Celery workers, not management commands). See lex.scheduling.loop.
+from lex.scheduling.loop import start_scheduler_for_served_backend  # noqa: E402
+
+start_scheduler_for_served_backend()

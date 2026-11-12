@@ -96,11 +96,35 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 
 ### 6t. Who reads export & download entries ✅
 
-**What it tests:** the read side of 6s. An export or download payload names no field of the record, so the entry is judged by the record it names (download) or by the right to export the model (export), not by a record rebuilt from the payload. The payload is returned whole; status rows and the detail endpoint follow the same rule; tracebacks are superuser-only.
+**What it tests:** the read side of 6s. An export or download payload names no field of the record, so the entry is judged by the record it names (download) or by the right to export the model (export), not by a record rebuilt from the payload. The payload is returned whole; status rows and the detail endpoint follow the same rule; tracebacks follow their entry (superuser-only until LEX-1555, see 6u).
 
 **Why a regression matters:** judged by the payload, these entries were hidden from everyone (a blank record is readable by nobody) or shown to everyone (a model lenient on a blank record), and `auditlogstatus/list` showed every status row on the platform. Either way the trail answers "who took this" to the wrong people.
 
 **Scenario range:** 6.160 – 6.167. **Test file:** `lex/test_project/tests/audit_logging/test_6t_file_operation_audit_visibility.py`. **Type:** E. **Status:** ✅ Complete (2026-10-22). Batch: [6t](batches.md).
 
+
 ---
 
+### 6u. Who reads a failed calculation's traceback ✅
+
+**What it tests:** LEX-1555. A failed run's traceback follows its audit entry. Whoever may read the record, and so the entry, reads the traceback on `auditlog` and `auditlogstatus`, in the lists and by id. Whoever may not read the record sees neither row. Both trigger routes are covered: the Calculate button (`PATCH ?calculate=true`) and a run started by its own create (`calculate_on_create`).
+
+**Why a regression matters:** a run accepted with HTTP 202 fails after the request has been answered, so the audit entry is the only lasting record of why it failed. From 2.4.0 the traceback was superuser-only, and Keycloak users are never Django superusers, so in a deployed app nobody could read it and the audit log's traceback button stayed disabled.
+
+**Scenario range:** 6.168 – 6.172. **Test file:** `lex/test_project/tests/audit_logging/test_6u_calculation_failure_traceback_visibility.py`. **Type:** E. **Status:** ✅ Complete (2026-11-10). Batch: [6u](batches.md).
+
+---
+
+### 6v. The audit entry of a scheduled run ✅
+
+**What it tests:** A scheduled run opens the same kind of audit entry a Calculate click opens — an `update` of the job under the run's click-shaped calculation id — authored by the run-as user (or `Scheduler`), carrying `trigger: {by: schedule, job, schedule}`, and is finalised like any run.
+
+**Why a regression matters:** Nightly jobs invisible in the audit log, attributed to nobody, or left pending forever.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 6.173 | audited as the run-as user | one `update` entry for the job; author = run-as user; `trigger.by = schedule`, `trigger.job`; click-shaped id; final snapshot present; status success |
+| 6.174 | a failed run | status failure with the traceback |
+| 6.175 | no run-as user | author `Scheduler`, never blank |
+
+**Scenario range:** 6.173 – 6.175. **Test file:** `lex/test_project/tests/audit_logging/test_6v_scheduled_run_audit.py`. **Type:** E. **Status:** ✅ Complete (2026-11-10). Batch: [6v](batches.md).

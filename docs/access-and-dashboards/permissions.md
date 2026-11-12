@@ -19,7 +19,13 @@ class UserContext:
     is_superuser: bool     # Is user a superuser?
     groups: Set[str]       # Group names, e.g. {'admin', 'finance'}
     keycloak_scopes: Set[str]  # Keycloak permission scopes
+    user_permissions: tuple    # Keycloak UMA permissions of this request
+    client_roles: FrozenSet[str]  # Roles on the app's Keycloak client, e.g. {'admin'}
 ```
+
+`client_roles` come from the access token of the user's sign-in. A role granted or revoked in Keycloak shows up here
+within one access-token lifetime (5 minutes), without signing in again. See
+[[access-and-dashboards/sign-in and sessions#Roles and permission changes|Roles and permission changes]].
 
 ## Basic Example
 
@@ -61,9 +67,7 @@ class MyModel(LexModel):
 | `permission_list(user_context)`   | Can this user list instances of this model? |
 
 > [!note]
-> When `permission_create` returns `False`, the API responds with **401 Unauthorized** for unauthenticated requests and **403 Forbidden** for authenticated-but-denied requests — not a generic 400. Frontends and API clients can use these status codes to redirect to login (401) or show a "permission denied" message (403).
->
-> `POST …/create` asks `permission_create` twice: first on a blank record ("may this user create one at all" — what a UI asks before it offers a form), then on the record filled with the request's values, foreign keys set, before `pre_validation` and before anything is stored. Decide parent- or value-dependent rules in `permission_create` itself and let the blank record pass where the answer depends on values it does not have yet; there is no need to re-check creation in `pre_validation`. Both refusals answer the same 401/403 `{"message": …}`. `LEX_SEC_CREATE=false` keeps the blank check only.
+> When `permission_create` returns `False`, the API responds with **401 Unauthorized** for unauthenticated requests and **403 Forbidden** for authenticated-but-denied requests — not a generic 400. A 401 means "sign in" (`{"error": "not_authenticated" | "session_expired"}`), a 403 means "not allowed" (`{"code": "permission_denied"}`) and never ends the sign-in, and a 503 `auth_unavailable` means Keycloak could not be reached: retry. See [[access-and-dashboards/sign-in and sessions#For frontends and API clients|For frontends and API clients]].
 
 ### `PermissionResult` Factory Methods
 
@@ -155,7 +159,7 @@ def permission_read(self, user_context: UserContext) -> PermissionResult:
 
 ## Authentication Architecture
 
-Lex App uses [Keycloak](https://www.keycloak.org/documentation) as its identity provider. Users authenticate once via OIDC (OpenID Connect), and the session is shared across the entire application — including embedded [[access-and-dashboards/streamlit/index|Streamlit dashboards]].
+Lex App uses [Keycloak](https://www.keycloak.org/documentation) as its identity provider. Users authenticate once via OIDC (OpenID Connect), and the session is shared across the entire application — including embedded [[access-and-dashboards/streamlit/index|Streamlit dashboards]]. How long a sign-in lasts, and what ends it, is on [[access-and-dashboards/sign-in and sessions|Sign-in & Sessions]].
 
 The frontend authentication flow:
 
@@ -180,7 +184,7 @@ sequenceDiagram
 
 The `SessionAuthGate` component handles this transparently — including redirect-loop protection, automatic retries, and a clear unauthorized page for users without assigned roles.
 
-For non-browser clients (for example scripts, integrations, or dashboards calling the API directly), you can authenticate with an `Authorization: Bearer <token>` header. Lex App will resolve roles and scopes from that token even when there is no browser session.
+For non-browser clients (for example scripts, integrations, or dashboards calling the API directly), you can authenticate with an `Authorization: Bearer <access token>` header. Lex App will resolve roles and scopes from that token even when there is no browser session. Only access tokens are accepted; an ID token is refused.
 
 For the embedded Quackback feedback widget, Lex App exposes `POST /api/quackback-widget-token` for logged-in users. It returns a short-lived (5-minute) `ssoToken` carrying the user's id, email, and name, signed with `QUACKBACK_WIDGET_SECRET`, so the widget can identify the user without a second login. The frontend wires this up automatically — you only need to set the secret.
 

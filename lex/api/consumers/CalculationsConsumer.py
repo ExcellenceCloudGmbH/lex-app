@@ -2,17 +2,26 @@ import json
 
 from channels.generic.websocket import AsyncWebsocketConsumer
 
+from lex.api.consumers.auth import LexSocketAuthMixin
 
-class CalculationsConsumer(AsyncWebsocketConsumer):
+
+class CalculationsConsumer(LexSocketAuthMixin, AsyncWebsocketConsumer):
+    """``ws/calculations``: calculation ids and notifications, for signed-in users (see ``auth``)."""
+
     active_consumers = set()
+
     async def connect(self):
+        if not await self.lex_socket_connect():
+            return
         await self.accept()
         await self.channel_layer.group_add(
             "calculations",
             self.channel_name
         )
         self.active_consumers.add(self)
+
     async def disconnect(self, close_code):
+        await self.lex_socket_disconnect()
         await self.channel_layer.group_discard(
             "calculations",
             self.channel_name

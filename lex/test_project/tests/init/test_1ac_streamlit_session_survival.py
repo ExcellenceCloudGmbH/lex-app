@@ -285,7 +285,7 @@ class TestCluster01ac_ProxyRenewalChannel(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         forwarded = _CapturingUpstream.last_headers
         self.assertEqual(forwarded.get("x-streamlit-auth-method"), "jwt")
-        self.assertEqual(forwarded.get("x-streamlit-access-token"), handoff)
+        self.assertEqual(forwarded.get("authorization"), f"Bearer {handoff}")
 
     def test_1_246_the_websocket_handshake_carries_the_renewable_credential(self):
         """
@@ -385,43 +385,55 @@ class TestCluster01ac_StreamlitTokenLifecycle(SimpleTestCase):
             self.assertEqual(headers["Cookie"], "session=abc")
             return httpx.Response(200, json={"access_token": pulled, "expires_at": _epoch(600)})
 
-        def _must_not_refresh(_rt):
+        def _must_not_refresh(*_args, **_kwargs):
             self.fail("Streamlit must not spend the refresh token while the proxy answers.")
 
+        # lex-app 2.5 (plan §6.3.5) deleted Streamlit's own refresh (`_post_refresh`); the
+        # observable boundary it would cross -- a POST to Keycloak's token endpoint -- is
+        # what is guarded now.
         with patch.object(sa.st, "session_state", state), \
              patch.dict(os.environ, {"LEX_INTERNAL_AUTH_SECRET": "s3cret"}), \
              patch.object(sa, "_live_headers", lambda: {"cookie": "session=abc"}), \
              patch.object(sa.requests, "get", _fake_get), \
-             patch.object(sa, "_post_refresh", _must_not_refresh):
+             patch.object(sa.requests, "post", _must_not_refresh):
             self.assertTrue(sa.renew_access_token())
 
         self.assertEqual(state["access_token"], pulled)
         self.assertEqual(state["refresh_token"], "rt-original")
 
-    def test_1_239_renewal_falls_back_to_the_refresh_token_when_no_proxy_answers(self):
+    def test_1_239_no_proxy_answering_is_an_outage_never_a_refresh_of_our_own(self):
         """
-        Scenario 1.239: a deployment without the proxy still renews.
-        Given: an expired token, an unreachable proxy, and a refresh token
+        Scenario 1.239: with the proxy silent, Streamlit waits -- it never refreshes itself.
+        Given: an expired token, an unreachable proxy, and a refresh token left in session state
         When: renewal runs
-        Then: the refresh token is spent and a new token stored — with the proxy
-              silent there is no second writer to race, and `streamlit run`
-              without the proxy must not be left with a dead session
+        Then: renewal reports failure, no request goes to Keycloak, the refresh token is not
+              touched, and the outcome is recorded as an outage (not as an ended sign-in) --
+              lex-app 2.5 makes the app's sign-in (or the proxy) the only refresh-token
+              holder (plan §6.3.5 deleted `_post_refresh`), so a silent proxy is a blip the
+              refresher retries, and a second holder spending the token is exactly the
+              rotation race the pull channel exists to avoid.
+
+        Replaces the pre-2.5 scenario ("a deployment without the proxy still renews" by
+        spending the refresh token), whose behaviour the plan removes.
         """
-        refreshed = _token(_epoch(600))
         state = _FakeState(access_token=_token(_epoch(-60)), token_exp=_epoch(-60), refresh_token="rt-original")
 
         def _unreachable(*a, **kw):
             raise ConnectionError("proxy down")
 
+        def _must_not_reach_keycloak(*_args, **_kwargs):
+            self.fail("Streamlit must never refresh a token itself.")
+
         with patch.object(sa.st, "session_state", state), \
              patch.dict(os.environ, {"LEX_INTERNAL_AUTH_SECRET": "s3cret"}), \
              patch.object(sa, "_live_headers", lambda: {"cookie": "session=abc"}), \
              patch.object(sa.requests, "get", _unreachable), \
-             patch.object(sa, "_post_refresh", lambda rt: {"access_token": refreshed, "refresh_token": "rt-next"}):
-            self.assertTrue(sa.renew_access_token())
+             patch.object(sa.requests, "post", _must_not_reach_keycloak):
+            self.assertFalse(sa.renew_access_token(), "Nothing renewed the token, so renewal must say so.")
 
-        self.assertEqual(state["access_token"], refreshed)
-        self.assertEqual(state["refresh_token"], "rt-next")
+        self.assertEqual(state["refresh_token"], "rt-original", "The refresh token must be left alone.")
+        self.assertTrue(state["token_auth_unavailable"], "An unreachable proxy is an outage...")
+        self.assertFalse(state["token_session_ended"], "...not an ended sign-in.")
 
     def test_1_240_identity_survives_a_token_that_cannot_be_renewed(self):
         """

@@ -42,6 +42,7 @@ Three row heights — **Compact**, **Standard** and **Comfortable**. See
 | Setting | What it does |
 |---|---|
 | **Column filter button** | Shows the filter control in each column header. On by default — filtering is always available from the column menu, but a control nobody can see is a control nobody uses |
+| **Hide ID column** | Leaves the record's ID column out of this table. Off by default. To copy an ID instead, see [[using-the-app/the-grid/index#The ID Column\|The ID Column]] |
 | **Row-index column** | Adds a narrow numbered column at the far left. Off by default |
 | **Pin selection column** | Keeps the row-selection checkboxes pinned to the left edge while you scroll sideways. On by default |
 | **Pin calculation status** | Keeps the calculation status pill pinned to the left. On by default, and only appears for models that run calculations |

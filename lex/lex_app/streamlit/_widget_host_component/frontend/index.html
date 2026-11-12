@@ -29,8 +29,10 @@
   <!-- loading="eager" is explicit rather than relied upon: the HTML default is
        eager, but browsers ship lazy heuristics for offscreen frames and a widget
        that only loads once scrolled to is the complaint this states away. -->
+  <!-- allow-popups-to-escape-sandbox: a window the embedded app opens (its sign-in popup, a
+       file, an external link) is a normal window, not one bound by this frame's sandbox. -->
   <iframe id="frame" loading="eager"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"></iframe>
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"></iframe>
 
   <script>
     // ── Streamlit bridge shim (the public postMessage protocol) ──────────

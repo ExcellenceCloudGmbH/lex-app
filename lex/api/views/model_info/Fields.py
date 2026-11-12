@@ -12,6 +12,7 @@ from django.db.models import (
     JSONField
 )
 from lex.api.serializers import ID_FIELD_NAME, SHORT_DESCR_NAME
+from lex.api.serializers.list_ui_columns import build_column_options
 from lex.api.utils.filterable_fields import value_list_field
 from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import resolve_serializer_class
 from lex.api.views.permissions.UserPermission import UserPermission
@@ -154,9 +155,13 @@ def create_list_ui_info(serializer):
     if callable(getter):
         return getter()
 
+    # A serializer that is not a ``LexSerializer`` (a project's own plain DRF
+    # class) still gets the same contract, read straight off its ``Meta`` —
+    # the frontend must never have to care which kind it is talking to.
     meta = getattr(serializer_class, "Meta", None)
     return {
         "hide_actions_column": bool(getattr(meta, "hide_actions_column", False)),
+        "columns": build_column_options(meta),
     }
 
 

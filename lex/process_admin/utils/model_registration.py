@@ -1,15 +1,47 @@
-import asyncio
+import contextvars
 import logging
 import os
-from typing import List, Type, Optional
+from concurrent.futures import ThreadPoolExecutor
+from typing import Callable, List, Type, Optional
 
-import nest_asyncio
-from asgiref.sync import sync_to_async
 from django.contrib import admin
-from django.db import models
+from django.db import connections, models
 from lex.lex_app.simple_history_config import get_model_exclusion_reason
 
 logger = logging.getLogger(__name__)
+
+
+def _run_on_own_thread(work: Callable[[], None], *, name: str) -> None:
+    """Run ``work()`` on a short-lived thread of its own and wait for it.
+
+    The startup reset is synchronous ORM work, but it runs inside
+    ``AppConfig.ready()``, and uvicorn sets Django up inside its own running
+    event loop. Django refuses ORM calls from a thread with a running loop
+    (``SynchronousOnlyOperation``). A new thread has no loop, whether the
+    caller is in asyncio's loop, uvloop's, or none at all (a management command
+    or a Celery worker), so the work runs the same way for every caller.
+
+    The reset used to run through ``nest_asyncio`` instead. That patched asyncio
+    for the whole process, so ``asyncio.run`` stopped closing its loop. A later
+    thread that called ``async_to_sync`` twice, with thread-sensitive work in
+    between, then waited forever on a loop nobody ran (BUG-046). On uvloop the
+    patch failed outright and stopped startup.
+
+    The work runs in a copy of the caller's context variables, as it did under
+    ``sync_to_async``. The thread's database connection is closed before it
+    ends. Otherwise a server session would stay open after the work is done.
+    An exception raised by ``work`` reaches the caller unchanged.
+    """
+
+    def work_then_close_connections() -> None:
+        try:
+            work()
+        finally:
+            connections.close_all()
+
+    context = contextvars.copy_context()
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix=name) as pool:
+        pool.submit(context.run, work_then_close_connections).result()
 
 
 class ModelRegistration:
@@ -396,6 +428,10 @@ class ModelRegistration:
         django-simple-history records an ABORTED history row for each
         affected record, and creates the corresponding AuditLog /
         AuditLogStatus entries for a complete audit trail.
+
+        The rows are reset on a thread of their own (``_run_on_own_thread``),
+        so the reset works the same with or without a running event loop in the
+        caller's thread, and changes nothing about asyncio in this process.
         """
         from lex.core.models.CalculationModel import CalculationModel
 
@@ -410,7 +446,6 @@ class ModelRegistration:
 
         model_label = model._meta.label_lower
 
-        @sync_to_async
         def reset_instances_with_aborted_calculations():
             from lex.audit_logging.utils.calculation_audit import (
                 ensure_terminal_calculation_audit,
@@ -446,9 +481,9 @@ class ModelRegistration:
                         exc_info=True,
                     )
 
-        nest_asyncio.apply()
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(reset_instances_with_aborted_calculations())
+        _run_on_own_thread(
+            reset_instances_with_aborted_calculations, name="lex-startup-reset",
+        )
 
     @classmethod
     def register_model_structure(

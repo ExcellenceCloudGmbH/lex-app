@@ -380,7 +380,7 @@ does not remove user launch configurations.
 | 1.365 | the dispatch page | overriding hooks compiled in, broken hooks and structure modules refused loudly |
 | 1.366 | the compiled app | sign-in routes, guard before `resolve`, connection middleware, every dashboard |
 | 1.367 | registration | the `Reflex` report and sidebar entry only when enabled; discovery never imports the Reflex package twice |
-| 1.368 | granian's uvloop | `AppConfig.ready()` survives a loop `nest_asyncio` cannot patch |
+| 1.368 | granian's uvloop | Django setup on uvloop carries on and patches nothing, and `async_to_sync` works after it (rewritten for BUG-046; see 1bo below) |
 | 1.369 | `LexUser` | `username` and `display_name` from Keycloak's claims |
 
 **Scenario range:** 1.357 – 1.369. **Test file:** `lex/test_project/tests/init/test_1aq_reflex_dashboards.py`. **Type:** U + I. **Status:** ✅ Complete (2026-09-28). Batch: [1aq](batches.md). Permissions in Reflex dashboards are cluster [4n](../04-permissions/cluster.md); the search exclusion of the `Reflex` report is [10d](../10-api_layer/cluster.md).
@@ -506,25 +506,381 @@ does not remove user launch configurations.
 
 **Scenario range:** 1.406 – 1.409. **Test file:** `lex/test_project/tests/init/test_1ax_process_feature_removed.py`. **Type:** I. **Status:** ✅ Complete (2026-10-22). Batch: [1ax](batches.md).
 
+### 1bo. A project's startup leaves asyncio unpatched and `async_to_sync` usable ✅
+
+**What it tests:** that setting up a downstream Lex project changes nothing about asyncio. Every process the project runs does this setup: the web server, a Celery worker, a management command, Streamlit. `asyncio.run` stays the standard library's, and synchronous code can call into async code with `async_to_sync` as often as it needs to, from any thread.
+
+**Why a regression matters:** `LexAppConfig.ready()` used to call `nest_asyncio.apply()`, and nest_asyncio's `asyncio.run` never closes its loop. The first `async_to_sync` with thread-sensitive work (Django's async ORM, the Reflex ORM bridge) left that open loop in the calling thread, and the second call blocked on it forever (BUG-046). A Celery task, a command or a dashboard would hang on its second call, without any error.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.665 | set up with no running loop | after `django.setup()` of a downstream project in a fresh interpreter, `asyncio.run` is the standard library's, and two `async_to_sync` calls with thread-sensitive work both return, on the calling thread |
+| 1.666 | set up inside the server's loop | the same when `lex_app.asgi` is imported inside a running asyncio loop, as uvicorn does |
+
+1.368 (1aq, granian's uvloop) was rewritten to the same contract: setup on uvloop carries on and patches nothing.
+
+**Scenario range:** 1.665 – 1.666. **Test file:** `lex/test_project/tests/init/test_1bo_bootstrap_leaves_asyncio_unpatched.py`. **Type:** U (fresh interpreter, no database). **Status:** ✅ Complete (2026-11-06). Batch: [1bo](batches.md). The startup reset's side of the same bug is cluster [8d](../08-celery_async/cluster.md).
+### 1bc. Deployed secret key, session lifetime and PKCE ✅
+
+**What it tests:** the sign-in settings a deployed instance runs with. A pod with `DEPLOYMENT_ENVIRONMENT` set refuses to start without its own `DJANGO_SECRET_KEY`, or on the key published in this package. The Django session cookie lives `LEX_SESSION_COOKIE_AGE_DAYS` (default 31) days and the OIDC library's session clock 30 days, so Django no longer ends a sign-in before Keycloak's 30-day idle window. Both relying parties on the shared Keycloak client -- Django's `/oidc/authenticate` and the dashboard proxy's `/auth/login` -- send a PKCE S256 challenge and keep the verifier server-side.
+
+**Why a regression matters:** a pod on the public key signs with a value anyone can read; a Django session shorter than Keycloak's logs people out early; one relying party without PKCE blocks requiring PKCE on the client.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.481 | deployed, no key | `ImproperlyConfigured` naming `DJANGO_SECRET_KEY` |
+| 1.482 | deployed, published key | `ImproperlyConfigured` |
+| 1.483 | private key, local run | the deployed pod signs with its key; a local run keeps the development key |
+| 1.484 | lifetime defaults | cookie 31 d, library clock 30 d (inside the cookie), RS256 only, PKCE with the client secret |
+| 1.485 | lifetime from the environment | 45 → 45 d / 30 d; 10 → 10 d / 9 d; `abc` and `1` refuse to start |
+| 1.486 | the library accepts the lifetimes | `RefreshSessionMiddleware` constructs with the defaults and the 2-day minimum |
+| 1.487 | sign-in redirect | `code_challenge_method=S256`, challenge = S256(session verifier), no verifier in the URL |
+| 1.488 | code exchange | the token request carries `code_verifier` and the client secret; the user is signed in and sent to `next` |
+| 1.489 | proxy sign-in | `/auth/login` redirects with an S256 challenge and no verifier |
+
+**Scenario range:** 1.481 – 1.489. **Test file:** `lex/test_project/tests/init/test_1bc_auth_settings_hardening.py`. **Type:** U (1.481–1.486, 1.489), I (1.487–1.488). **Status:** ✅ Complete (2026-11-06). Batch: [1bc](batches.md).
+
+### 1bd. lex-app 2.5 on django-oauth2-codeflow 3.0: settings, routes and bootstrap ✅
+
+**What it tests:** the settings and bootstrap half of the long-lived sessions plan (P4). The OIDC middlewares run in the library's order; server-to-server Keycloak traffic can use `KEYCLOAK_INTERNAL_URL` while tokens keep the public issuer; TLS to Keycloak is verified on deployed instances; CORS is strict by default (security flag `CORS`); `LEX_INSTANCE_HOSTS` is parsed in one place; the library's sign-out events reach stdout; the contract endpoints are routed and public; `lex init` keeps the client's sign-in hardening and writes no migration into the library.
+
+**Why a regression matters:** wrong order or issuer → spurious sign-outs; permissive CORS → any site acts as the user; invisible sign-out events → no alert.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.490 | middleware order | auth middlewares in the plan's order, no 2.x aliases, library E001 passes |
+| 1.491 | internal discovery, public issuer | discovery may be internal, `OIDC_OP_ISSUER` stays public; PKCE + `client_secret_post` |
+| 1.492 | TLS and encryption keys | `KEYCLOAK_VERIFY_SSL` on when deployed; `OIDC_TOKEN_ENCRYPTION_KEYS` parsed |
+| 1.493 | strict CORS | instance origins only, no `*`, no localhost when deployed; `LEX_SEC_CORS=false` opt-out |
+| 1.494 | CORS on the wire | foreign origin gets no CORS grant; allowed origin gets credentials |
+| 1.495 | redirect targets | sign-in follows `next` only to instance hosts |
+| 1.496 | `LEX_INSTANCE_HOSTS` | JSON, fallback, bad input |
+| 1.497 | sign-out events visible | `event=oidc.session.*` on stdout at INFO |
+| 1.498 | contract routes | `api/auth/session`, `oidc/auth-complete` routed, public |
+| 1.499 | `lex init` keeps hardening | `attributes` merged, `frontchannelLogout` restored |
+| 1.500 | no library migration drift | nothing planned for `oauth2_authcodeflow` |
+
+**Scenario range:** 1.490 – 1.500. **Test file:** `lex/test_project/tests/init/test_1bd_auth_core_settings.py`. **Type:** U (1.490–1.493, 1.496–1.497, 1.499–1.500), I (1.494–1.495, 1.498). **Status:** ✅ Complete (2026-11-06). Batch: [1bd](batches.md).
+
+### 1be. Streamlit dashboards sign in through the app (the Django-anchored hand-off) ✅
+
+**What it tests:** plan "long-lived sessions" §6.3. A dashboard holds no Keycloak token of its own: with no `__Host-lex_dash` handle, its proxy sends the frame to the same-site app host's `oidc/handoff`; the app mints a single-use code for the browser's sign-in (or answers `login_required` -- never Keycloak in a frame); the proxy redeems it in-process into a `DashboardBinding` on the user's `OIDCSession`; every request and socket then gets a fresh token of that sign-in from the broker, and only that token and identity headers reach Streamlit. `LEX_STREAMLIT_AUTH` (legacy / dual / handoff) switches it, with legacy untouched.
+
+**Why a regression matters:** dashboards that log out every five minutes, refresh tokens in customer code, Keycloak pages that cannot render in a frame, redirect loops when cookies are blocked, or a user who can name someone else's identity to Streamlit.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.501 | a framed dashboard hands off | 303 to `<app>/oidc/handoff?aud=streamlit&return&state`; nonce cookie `__Host-lex_dash_hs` with the plan's attributes; `lex_hs=1` on the return URL |
+| 1.502 | the app host the user signed in on | framed: the frontend's own listed origin (`lex_app_origin`; Django's session cookie is host-only); standalone: the listed app host same-site with the dashboard; unlisted `lex_app_origin` ignored; an unlisted Host is a 400, never a redirect |
+| 1.503 | the round trip | through the real `oidc/handoff`: handle cookie (HttpOnly; Secure; SameSite=None; Partitioned; Path=/; 30 d), nonce cleared, back on the requested view, binding on the user's sign-in |
+| 1.504 | only token + identity upstream | marker stripped first; `Authorization` = the sign-in's current token; no refresh/id/other token headers |
+| 1.505 | state binding, single use | foreign state never redeemed; a replay is refused and revokes the first binding |
+| 1.506 | 60-second code | an older code signs nothing in; the frame gets the `required` page |
+| 1.507 | ended sign-in | binding revoked at its next use; document → fresh hand-off, handle cleared; XHR → 401 `session_expired` |
+| 1.508 | Keycloak down | still-valid token kept; then identity only + `X-Lex-Auth-Degraded`; never a 401; `/auth/token` 503 |
+| 1.509 | WebSockets | token + identity only; no handle / ended → accept, then close 4401 |
+| 1.510 | `/auth/token` | 200 for the frozen cookie (either name); 403 without the secret; 401 only without a handle or once ended |
+| 1.511 | logout, sign_out | binding revoked; signed-out page; `sign_out` → app `oidc/total_logout`, foreign `rd` replaced |
+| 1.512 | blocked cookies | a code without its nonce is never redeemed; second attempt → storage-access / new-tab page, no loop |
+| 1.513 | `login_required` | v2 `required` message posted to the listed `lex_app_origin` only; never `*`, no token |
+| 1.514 | `/auth/required` | the Streamlit recovery target posts `session_ended`; 404 in legacy |
+| 1.515 | concurrent hand-offs | two frames both complete; at most five nonces kept |
+| 1.516 | daily cookie re-set | no churn the same day; re-set for 30 days after a day; the handle never changes |
+| 1.517 | dual mode | handle wins over a legacy session; legacy still works; no credential → hand-off, not `/auth/login` |
+| 1.518 | handoff mode | `auth_token` ignored and dropped; `/auth/adopt` no-op 200; `/auth/login` → hand-off; `/auth/callback` 404 |
+| 1.519 | legacy mode | `/auth/handoff`, `/auth/required` 404; a handle cookie is ignored |
+| 1.520 | proxy-owned headers (BUG-037) | client copies of identity/token headers never reach Streamlit, HTTP and WS, legacy and hand-off |
+| 1.521 | the flag at the proxy | unset → legacy; case-insensitive; a typo refuses to start; handoff keeps no token store |
+| 1.522 | `lex streamlit` pre-flight | typo, missing app host, missing dashboard host refused; replicas without Redis fine in handoff, refused in dual; http warns |
+| 1.523 | Streamlit: 401 vs 503 | 401 → recovery at once; 503 / unreachable → never; legacy keeps its grace window |
+| 1.524 | Streamlit recovery | the dashboard document goes to `/auth/required` (embedded only), navigated by itself -- a sandboxed component frame may not navigate its parent (run under node against that rule); legacy message unchanged |
+| 1.525 | no refresh token in Streamlit | header sync takes the access token only; hand-off sign-out → `/oauth2/sign_out` |
+| 1.526 | Streamlit signs in a hand-off | identity and token from the proxy's headers, auth method `handoff` |
+| 1.527 | component sandboxes | `allow-popups-to-escape-sandbox` in both; no `allow-top-navigation` |
+| 1.528 | `lex_view` base | validated `lex_app_origin` is the base and event origin; foreign/malformed ignored; loopback only locally |
+| 1.529 | `prune_dashboard_sessions` | deletes expired codes and revoked/ended/expired/unused bindings; keeps live ones; dry run; CASCADE |
+| 1.530 | digests only | no code, state or handle in clear in the database |
+| 1.531 | ALLOWED_HOSTS | every app host of `LEX_INSTANCE_HOSTS` (no port) is allowed; the custom domain reaches the hand-off |
+| 1.532 | migration | nothing planned for `authentication` |
+| 1.533 | cross-site WebSocket (BUG-039) | a socket from another origin or `null` → 4403 before any credential, after accept() with the hand-off, in the handshake in legacy; nothing upstream; own origin and no Origin relayed |
+| 1.534 | dual: dead handle | falls through to the legacy session; the legacy answer clears the handle; `/auth/token` renews through legacy; socket relayed as legacy; dead handle alone → 401 |
+| 1.535 | no off-origin target (BUG-040) | `/%2Fhost/`, `/%5Chost/`: marker redirect, hand-off `return`, cookie-blocked page targets, 503 refresh, legacy `auth_token` strip all stay on the dashboard origin |
+| 1.536 | redeem lock | the one locking read is `FOR UPDATE OF` the code table; the sign-in row is read, never locked |
+| 1.537 | daily re-set claimed only where it can be set | `/auth/token` and a WebSocket handshake leave `cookie_set_at`; the page re-sets for 30 days |
+| 1.538 | pull cookie name | https proxy (`STREAMLIT_URL` or `SESSION_HTTPS_ONLY`): unprefixed `lex_dash` ignored, `__Host-lex_dash` works; plain http: unprefixed works |
+| 1.539 | sign-in watcher | `/auth/status` 200 / 401 `session_expired` (binding revoked) / 401 `not_authenticated`, no-store, no cookie, 404 in legacy; every hand-off page carries the watcher, which runs in the dashboard document once, asks every minute while visible and on becoming visible, and on 401 goes to `/auth/required` (run under node) |
+| 1.540 | deactivated user | binding revoked `user_inactive`; pull 401; socket 4401; status 401; document → fresh hand-off, handle cleared; nothing upstream |
+
+**Scenario range:** 1.501 – 1.540. **Test file:** `lex/test_project/tests/init/test_1be_streamlit_handoff.py`. **Type:** U and I (transactional where the proxy's worker threads must see the rows). **Status:** ✅ Complete (2026-11-06). Batch: [1be](batches.md).
+
+### 1bf. MCP embeds sign in with a single-use ticket, into a read-only cookie ✅
+
+**What it tests:** plan "long-lived sessions" §6.5 (MCP embed). `lex_embed_view` used to put the MCP client's access token in the frame URL (`auth_token`). Now the URL carries `lex_embed_ticket` (single-use, 60 s); the token stays server-side in a refresh-less `OIDCSession`; a middleware redeems the ticket into `__Host-lex_embed`, which lives no longer than the token and may only read.
+
+**Why a regression matters:** a bearer token back in URLs (history, logs, `Referer`), a replayed ticket signing someone in, or a `SameSite=None` cookie that can write -- a cross-site request forgery channel.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.541 | a ticket for a valid token | opaque ticket; token kept encrypted in a refresh-less sign-in; digest, `aud=embed`, frontend origin, 60 s |
+| 1.542 | redeem | 302 to the URL without the ticket (other parameters kept); cookie attributes; Max-Age ≤ the token's life |
+| 1.543 | once | a used ticket sets nothing; the replay ends the first embed |
+| 1.544 | 60 seconds | an older ticket sets nothing |
+| 1.545 | its own frontend | another host gets nothing; the ticket is spent |
+| 1.546 | reads as the MCP user | `api/auth/session` with the token's roles; a login-protected read is served |
+| 1.547 | never writes | POST/PUT/PATCH/DELETE → 403 `permission_denied` before the view; OPTIONS passes |
+| 1.548 | dies with the token | 401 and the cookie removed |
+| 1.549 | a real sign-in wins | the session user, not read-only |
+| 1.550 | no ticket for bad tokens | forged, wrong audience/issuer, expiring, missing → nothing stored |
+| 1.551 | the MCP tool | ticketed URL only in the result's `_meta` (the widget's); content, structured content and narration carry the clean `view_url`, no ticket, no token; caller `auth_token` dropped |
+| 1.552 | back-channel logout | ends the embed |
+| 1.553 | no redeem by a write | a POST never spends the ticket |
+| 1.554 | ticket redirect stays on origin | paths decoding to `//host` or `\host` redirect to a path on the app origin, other parameters kept |
+| 1.555 | the holder may render again | the frame holding the ticket's embed presents it again → ticket stripped, no new cookie, embed kept; anyone else's replay revokes |
+| 1.556 | HEAD never redeems | no cookie, ticket unused, no binding; the GET then redeems |
+
+**Scenario range:** 1.541 – 1.556. **Test file:** `lex/test_project/tests/init/test_1bf_mcp_embed_ticket.py`. **Type:** I (transactional). **Status:** ✅ Complete (2026-11-06). Batch: [1bf](batches.md).
+
+### 1bg. Reflex dashboards stay signed in as long as Keycloak keeps the session ✅
+
+**What it tests:** `LexKeycloakAuthState`, the Reflex Enterprise provider that keeps a dashboard's own Keycloak tokens (decision D5), hardened per plan "long-lived sessions" §6.4: the `at_hash` an ID token is checked against (where the tab checks one) comes from the access token the tab holds now; only `invalid_grant` signs the dashboard out (configuration errors keep the tokens with an ERROR, outages keep them and back off, and every refresh that keeps them re-arms the browser's timer; a userinfo 401 gets one refresh, a userinfo outage serves the same user's cached profile while the access token is valid); once the access token has expired and cannot be renewed, nobody is served -- no profile, permissions or token, `/login` says sign-in is temporarily unavailable -- yet the user is not signed out (the Reflex equivalent of the HTTP 503); Keycloak's answer is verified before it is stored (30 s leeway, one key-set refetch for an unknown `kid`); one refresh per refresh token across tabs (process memory, swept and capped) and replicas (Redis lock `lex:rx:refresh:{sha256(rt)}`, kept alive while its leader works; Fernet-encrypted set at `lex:rx:refreshed:{sha256(old rt)}` for 120 s, sealed for that refresh token and adopted only by the same user and Keycloak session); a second refresh within 30 s is suppressed (a clock that stepped back suppresses nothing); cookies last 30 days; Keycloak's back-channel logout signs the dashboard out through `lex:kc_sid_ended:{sid}`, audited once.
+
+**Why a regression matters:** dashboards sign users out during a Keycloak blip, a misconfiguration, a clock skew or a key rotation, two tabs refresh each other's tokens once a second all day (armira, 2026-10-28), every tab hammers Keycloak, a dashboard stays signed in after the user was signed out everywhere else, or a dashboard serves an identity Keycloak no longer vouches for -- or another user's.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.561 | another tab's refresh is accepted | the plugin alone rejects B's refreshed pair (`at_hash`); lex accepts it and resolves the profile; one token call in all |
+| 1.562 | a mismatched pair fails, no check invented | ID token of one exchange + access token of another fails (the plugin alone accepted it); a cookie-only tab keeps no at_hash |
+| 1.563 | `invalid_grant` signs out | the scheduled refresh tells the browser `reset_auth`; INFO names `invalid_grant`; no back-off |
+| 1.564 | configuration errors keep the tokens | `invalid_client`, `unauthorized_client`, `invalid_scope`, `invalid_request`, issuer `invalid_grant`: cookies unchanged, ERROR naming the client settings, no call within 300 s, a call after |
+| 1.565 | outages keep the tokens and back off | 503 page, 502 `temporarily_unavailable`, 429, connect timeout, refused: tokens kept, WARNING, no call within the back-off, 5 s then 10 s, recovery clears it; never a sign-out |
+| 1.566 | expired, Keycloak cannot renew (revised in review) | unreachable or `invalid_client`: no permissions (not even the grant cached for the expired token; `has_permission` refuses), no access token, no profile; cookies kept, no sign-out, `sign_in_unavailable`, refresh re-armed; Keycloak back → the same user, no new sign-in |
+| 1.567 | userinfo 401 | exactly one refresh (the tab's refresh token), one retry with the new access token |
+| 1.568 | userinfo outage | cached profile; a new tab gets its verified ID token's claims; no refresh, no sign-out |
+| 1.569 | tabs refreshing at once | one token call; one `refreshed`, the others `adopted` the same new token through `_set_tokens` |
+| 1.570 | the published set lives 120 s | a stale tab adopts it at 100 s without a call; at 130 s a stale tab asks Keycloak |
+| 1.571 | the refreshing tab fails | the waiting tab keeps its tokens (`lock_wait`), then backs off with the failed refresh token; one call |
+| 1.572 | cooldown | a second refresh 10 s later is `suppressed` (current token returned, no call, no sign-out); 31 s later it refreshes |
+| 1.573 | 30-day cookies | lex's four cookies 30 d; the plugin's provider and module keep 7 d; the post-import check accepts lex's class, ERRORs on a short one |
+| 1.574 | supported plugin release | 0.9.7 passes and is what `requirements.txt` pins; 0.9.8 logs a WARNING naming both and the module |
+| 1.575 | Redis configured but down | tabs still share one refresh per round (process memory); one WARNING, not one per operation |
+| 1.576 | across replicas (real Redis, opt-in) | one call; the set is in Redis under the frozen key, PTTL ≤ 120 s, a Fernet token with no token in clear; lock released; another replica adopts it |
+| 1.577 | back-channel logout | the POST records `lex:kc_sid_ended:{sid}` (no Django sign-in matched); that session's tabs are signed out at validation and at the scheduled refresh without a Keycloak call; another session untouched |
+| 1.578 | no stale-marker loop | tokens issued after the logout validate; a logout without `sid` records nothing |
+| 1.579 | the marker in Redis (opt-in) | another Redis client reads it, TTL 90 d, value = the logout time |
+| 1.580 | the profile cache is not a sign-in (review) | lex's per-event middleware keeps a valid profile, drops it once the access token expired; the next read renews silently: same user, one refresh, no new sign-in |
+| 1.581 | `/login` waits for the renewal (review) | the page shows "Sign-in is temporarily unavailable. Retrying"; `start_login` re-arms the refresh, no Keycloak redirect, no button; on success the browser returns to `redirect_to` (`/fund`) |
+| 1.582 | never another user's profile (review) | Ada's cached profile + Bob's tokens in the jar + userinfo 503: Bob's verified ID-token claims, Ada's profile no longer cached |
+| 1.583 | clock skew (review, BUG-050) | Keycloak 2 s ahead: stored, signed in; 600 s ahead: refused before storing, tokens kept, ERROR names the clock, back-off, no sign-out |
+| 1.584 | key rotation (review, BUG-051) | a new key published beside the old: one more key-set fetch, refresh stored, a new sign-in valid; an unpublished key: refused before storing, tokens kept, no second fetch within the minute |
+| 1.585 | a kept refresh is retried (review) | 503, `invalid_client`, back-off and cooldown each send `trigger_access_token_refresh` |
+| 1.586 | the lock outlives a slow leader (review) | lock 0.2 s, Keycloak 0.6 s, second tab at 0.3 s: one call; `refreshed` + `adopted`; no sign-out |
+| 1.587 | planted sets are not adopted (review) | another user's set, a set sealed for another refresh token, another Keycloak session's set: Keycloak is asked, still Bob in `s-bob` |
+| 1.588 | process memory is bounded (review) | 500 expired sets + one write → 1 entry; a store capped at 3 keeps the 3 expiring last |
+| 1.589 | a clock stepped back (review) | refreshed, clock −1 h: the next refresh is made, not suppressed |
+| 1.590 | one audit entry (review) | back-channel sign-out at the scheduled refresh: one `session_expired` (`backchannel_logout`), no token call |
+| 1.591 | the Redis lock outlives a slow leader (review, opt-in Redis) | lock 0.2 s in Redis, still there at 0.45 s; one call; the other replica adopts; released afterwards |
+
+**Scenario range:** 1.561 – 1.591 (1.592 – 1.600 unused). **Test file:** `lex/test_project/tests/init/test_1bg_reflex_session_hardening.py`. **Type:** U (1.561–1.576, 1.580–1.591), I (1.577–1.579). **Status:** ✅ Complete (2026-11-06; review fixes the same day). Batch: [1bg](batches.md).
+
+### 1bh. The shipped sign-in helper for tests (`lex.lex_app.tests.auth`) ✅
+
+**What it tests:** `sign_in(test_case, client, user, client_roles=..., uma_permissions=...)`, the supported way for lex's and downstream projects' tests to sign in under lex-app 2.5, where roles come only from the OIDC sign-in and a signed-in write asks Keycloak for UMA permissions before the view runs.
+
+**Why a regression matters:** every downstream suite breaks on upgrade, or sends test tokens to the developer's real Keycloak.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.601 | roles reach lex | `api/user/` answers exactly the given client roles and the e-mail |
+| 1.602 | writes never reach Keycloak | a signed-in POST reaches its view (405), the UMA stub answered once with the session's own token, no 401/503 |
+| 1.603 | stubbed UMA is lex's answer | `api/user_permissions/` returns the given permissions in ra-rbac form |
+| 1.604 | nothing outlives the test | after the cleanups: real UMA function, original `AUTHENTICATION_BACKENDS`, empty UMA cache |
+| 1.605 | why it exists | `force_login` + old `session["oidc_userinfo"]` carries no roles in 2.5 |
+| 1.606 | a method's own `@override_settings` does not leak | after a test whose method is decorated with `@override_settings` and calls `sign_in`: neither the method's setting nor the sign-in backend remains |
+
+**Scenario range:** 1.601 – 1.606. **Test file:** `lex/test_project/tests/init/test_1bh_test_sign_in_helper.py`. **Type:** I. **Status:** ✅ Complete (2026-11-06).
+
+### 1bi. The lex CLI answers a failing management command like manage.py ✅
+
+**What it tests:** `lex <command>` for a forwarded Django management command that raises `CommandError` (`lex oidc_check` finding a problem, a missing argument).
+
+**Why a regression matters:** operators run `lex oidc_check`, `lex oidc_cleanup` and friends from the sign-in docs and from the daily maintenance job; an expected answer must read as one line with an exit code, not as a crash.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.607 | one line and its exit code | `lex oidc_urls` without its host exits 1, stderr has `CommandError: Error: the following arguments are required: host`, no traceback |
+| 1.608 | `--traceback` keeps the exception | `lex oidc_urls --traceback` lets the `CommandError` reach the caller |
+
+**Scenario range:** 1.607 – 1.608. **Test file:** `lex/test_project/tests/init/test_1bi_cli_command_errors.py`. **Type:** I. **Status:** ✅ Complete (2026-11-06). Batch: [1bi](batches.md).
+
 ---
 
-### 1ay. lex_view filters
+### 1bp. A frame another application put on screen does not get to move that tab ✅
+
+**What it tests:** who the proxy's framed-401 page is allowed to navigate. The breakout exists because Keycloak refuses to be framed, so an unauthenticated frame must not be redirected to the IdP; it answers with a 401 page carrying three layers — an automatic top-level navigation, a `lex-auth-required` `postMessage`, and a `target="_top"` link. The automatic layer now runs only when `Sec-Fetch-Site` says this origin is also the one framing it (or when a client names no embedder, the pre-existing behaviour 1.214 pins). A frame on someone else's page keeps the 401, the message and the link, and takes nothing.
+
+**Why a regression matters:** the top window belongs to the page the user is reading. A frame that cannot authenticate has learned something about itself, not about that page — and moving the window anyway is how a sidebar click inside an instance ended up parked on the dashboard host with an SSO round trip already completed. Narrowing it too far is the opposite failure: 1.669 and 1.670 are the counterweight, because withholding the navigation from everything strands the dashboard's own recovery.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.667 | the shell's frame leaves the shell's tab alone | `same-site` → no `window.top.location`; still 401, `lex-auth-required`, `target="_top"` |
+| 1.668 | an unrelated embedder has no more claim | `cross-site` → the same |
+| 1.669 | this origin's own frame still recovers | `same-origin` → the automatic navigation is kept |
+| 1.670 | a client that names no embedder is unchanged | absent `Sec-Fetch-Site` → pre-existing behaviour |
+| 1.671 | the embedder check is a header read | casing cannot defeat it |
+| 1.672 | the frame the report builds is let in | the URL the real `Streamlit` report produces, loaded as a framed document against the real proxy app, banks the token, is redirected without it and ends on the dashboard's own bytes |
+| 1.673 | the fault and the amplifier, observed together | the URL the report produces with no session token still 401s, and that 401 moves no window |
+
+**Scenario range:** 1.667 – 1.673. **Test file:** `lex/test_project/tests/init/test_1bp_frame_does_not_take_the_tab.py`. **Type:** U. **Status:** ✅ Complete (2026-11-03). Batch: [1bp](batches.md).
+### 1az — a machine endpoint on the dashboard origin cannot take over the user's tab
+
+**What it tests:** the Streamlit proxy serves pages a person looks at and endpoints that exist only for code, on one host. Its re-auth machinery — whose purpose is to move the *top* window and then return the browser to whatever 401'd — may now only be reached by the first kind.
+
+**Why a regression matters:** LEX-1477. A hidden, zero-sized `/_lex/theme-relay` frame 401'd on a proxy that did not serve that route yet, got the frame-breakout page, and sent the whole tab to `/auth/login?next=/_lex/theme-relay`; the OIDC round trip then parked it on a blank storage document. Intermittent, silent, and unconnectable to a theme shim by anyone looking at it.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.415 | a utility path is never a return target | `_safe_next_path` rejects `/_lex/*`, `/_stcore/*`, `/auth/token`, `/auth/adopt`; pages with query and fragment survive |
+| 1.416 | a stashed utility path lands on `/` | `auth_callback` re-validates and falls back rather than honouring it |
+| 1.417 | no return target for a top-level utility visit | the login redirect carries no `next` |
+| 1.418 | a hidden utility frame gets a 401, not a breakout | JSON 401, no `window.top.location` anywhere in it |
+| 1.419 | a framed dashboard still breaks out | the 401 HTML breakout, still carrying the view as `next` |
+| 1.420 | a top-level visit is sent back to the frontend | 303 to the configured frontend origin |
+| 1.421 | an unconfigured deployment does not bounce to localhost | the relay is served instead |
+| 1.422 | the framed relay is untouched | 200, the shared key, `frame-ancestors <frontend>` |
+
+**Scenario range:** 1.415 – 1.422. **Test file:** `lex/test_project/tests/init/test_1az_proxy_tab_takeover.py`. **Type:** U. **Status:** ✅ Complete (2026-10-26). Batch: [1az](batches.md). Frontend twin: `process-admin-general-client` batch F12u.
+### 1ay — `ALLOWED_HOSTS` accepts the instance's own backend Service name
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.410 | short Service name accepted | `lex-backend-<instance>` is among the derived hosts |
+| 1.411 | the three longer DNS forms accepted | `.<ns>`, `.<ns>.svc` and `.<ns>.svc.cluster.local` are all present |
+| 1.412 | nothing added off-cluster | no instance identifier yields `[]`, whatever the namespace says |
+| 1.413 | unreadable namespace degrades | an empty namespace yields exactly the short name, and does not raise |
+| 1.414 | the namespace file is read safely | `_k8s_namespace` on a missing path returns `""` rather than raising |
+
+**Scenario range:** 1.410 – 1.414. **Test file:** `lex/test_project/tests/init/test_1ay_allowed_hosts_in_cluster.py`. **Type:** U. **Status:** ✅ Complete (2026-10-25). Batch: [1ay](batches.md).
+
+---
+
+### 1bj. The initial-data load survives restarts and a second server process ✅
+
+**What it tests:** the load `lex start` runs when every seed model is empty ends in one of two states, the whole seed or a clear report, however many server processes come and go during it. It runs in a non-daemon thread (a stopped process waits for it), one process decides at a time under a PostgreSQL advisory lock, and `lex_initial_data_load_state` records whether the last load finished.
+
+**Why a regression matters:** a load cut off mid-write leaves rows the "models are empty" gate reads as existing data, and the seed is never loaded again, silently.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.609 | not a daemon | the load thread started from `lex-async-ready` has `daemon=False` and loads the seed |
+| 1.610 | the second process waits | it decides only after the other load ended, and never loads a second copy |
+| 1.611 | a killed load is reported | `interrupted` + ERROR, no load over partial rows |
+| 1.612 | a stopping process gives up waiting | `abandoned` |
+| 1.613 | MQ/Worker | inside `WaitForTasks` |
+| 1.614 | the process waits for the load | a real interpreter exits only after the load |
+| 1.615 | a failed load | recorded and reported at the next start |
+| 1.616 | died before writing | loaded again |
+| 1.617 | lock released | free after a load |
+| 1.618 | existing data | the ordinary skip |
+
+**Scenario range:** 1.609 – 1.618. **Test file:** `lex/test_project/tests/init/test_1bj_initial_data_load_restart.py`. **Type:** I. **Status:** ✅ Complete (2026-11-10). Batch: [1bj](batches.md).
+
+---
+
+### 1bk. The Streamlit handshake stays inside everyone's header budget ✅
+
+**What it tests:** the auth proxy hands Streamlit the user's Keycloak access token in headers, so the token *is* a header line — and used to be three of them. Two limits sit on that line: `websockets` refuses one over `WEBSOCKETS_MAX_LINE_LENGTH` (8192 by default), and the ingress one over 16 KB. This batch covers the ceiling (`lex/ws_header_limits.py`, applied before anything can import `websockets`, reported when the installed release ignores it) and the single copy of the credential that now crosses to Streamlit.
+
+**Why a regression matters:** the failure is silent. uvicorn's `websockets-sansio` handler neither answers the handshake nor closes the socket when the parse fails, so lex-1483 showed a dashboard that never loaded, an open connection, and no log line naming a header (LEX-894). The ceiling only works if it is installed before the library's first import, which nothing observable at runtime would reveal, and only if the installed library reads the variable at all — it has existed since websockets 13. Every one of these scenarios passes trivially with a small token and the old code, which is why they assert the mechanism rather than a size.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.619 | the ceiling is the default | importing `lex.ws_header_limits` with the variable unset leaves it at `65536`, well above the library's own 8192 |
+| 1.620 | an operator's value wins | a configured `WEBSOCKETS_MAX_LINE_LENGTH` is never overwritten |
+| 1.621 | applied in time | `lex/bin/lex.py` imports it before `uvicorn`, `lex/proxy.py` before `websockets` — asserted on the import statements, not on a mention |
+| 1.622 | one copy, HTTP | a proxied request carries the token as `Authorization` only; `X-Forwarded-Access-Token` and `X-Streamlit-Access-Token` are gone |
+| 1.623 | not two Authorizations | a caller's own `Authorization` never travels beside the proxy's |
+| 1.624 | one copy, handshake | the WebSocket handshake carries it once, and `bearer_from_headers` still reads it |
+| 1.625 | a ceiling not in force says so | a websockets release parsing below the configured limit produces a warning naming both numbers |
+
+**Scenario range:** 1.619 – 1.625. **Test file:** `lex/test_project/tests/init/test_1bk_streamlit_header_budget.py`. **Type:** U. **Status:** ✅ Complete (2026-11-10). Batch: [1bk](batches.md).
+
+### 1bm. Custom domains — every attached hostname is accepted, and a dashboard is framed same-site ✅
+
+**What it tests:** an instance with a customer-owned domain attached answers on more than one hostname per role, and the pods behind the ingress have to agree. `lex/hosts.py` is the single place that knows which hostnames those are — read from `LEX_APP_HOSTS` / `LEX_STREAMLIT_HOSTS` / `LEX_REFLEX_HOSTS`, falling back to `DOMAIN_HOSTED` / `STREAMLIT_URL` / `REFLEX_URL` when nothing is configured. From there they reach Django's `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS`, the Streamlit proxy's OIDC callback and token-renewal allow-list, and Reflex's websocket CORS. The second half is which hostname a dashboard is *framed* from: the one sharing a registrable domain with the page embedding it.
+
+**Why a regression matters:** both halves fail silently and look like something else. A hostname missing from `ALLOWED_HOSTS` makes the customer's own domain answer "400 Bad Request" although DNS, Cloudflare and the ingress are all correct. A callback built from the canonical host while the user is on another one sets a host-only session cookie on a host the browser then leaves — an endless sign-in loop with every individual step succeeding. And a dashboard framed across registrable domains is a third-party iframe: it works in Chrome today and has never worked in Safari, which reads as "Streamlit is broken for this one customer".
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.632 | no custom domain, no change | each role reports its canonical host alone when no `LEX_*_HOSTS` is set |
+| 1.633 | the list is parsed leniently | spacing, scheme, case and duplicates normalise away; the canonical host stays first |
+| 1.634 | registrable domain | `customer.com`, a deep subdomain and `customer.co.uk` all reduce correctly |
+| 1.635 | same-site dashboard | a viewer on `app.customer.com` gets `streamlit.`/`reflex.app.customer.com`; one on the platform host keeps the platform dashboard |
+| 1.636 | fallback keeps scheme and port | an unmatched viewer gets the canonical URL; a local run keeps `http://localhost:8501/8502` |
+| 1.637 | the middleware supplies the viewer | the request's host is the default, and does not outlive the request |
+| 1.638 | the Streamlit report | iframe src is the same-site dashboard, still `?embed=true` |
+| 1.639 | the Reflex report | iframe src is the same-site dashboard, still `?lex_embed=1` |
+| 1.640 | Django accepts both hosts | both reach `ALLOWED_HOSTS`; both get an exact `https://` CSRF entry; the middleware is installed |
+| 1.641 | nothing new is accepted | with no host list, `ALLOWED_HOSTS` is exactly what it has always been |
+| 1.642 | the callback follows the user | `_external_base_url` / `_callback_url` name the hostname the request arrived on |
+| 1.643 | a forged Host cannot steer it | an unrecognised `Host` falls back to the canonical URL |
+| 1.644 | renewal from any attached host | every attached app and dashboard origin is trusted; `*` never is |
+| 1.645 | Reflex websocket origins | every attached reflex host is an allowed origin, canonical first |
+| 1.646 | a local Reflex run | no origins resolved, so Reflex keeps its own default |
+| 1.647 | a hardened instance | `LEX_CORS_ALLOWED_ORIGINS` keeps the operator's list AND the instance's own hostnames |
+| 1.648 | `lex_view()`'s frame | points at the app host on the dashboard's own domain; an explicit `REACT_APP_URL` still wins |
+| 1.649 | the sign-in round trip | `/auth/login` through the whole app: the IdP redirect's `redirect_uri` is on the hostname the browser used |
+| 1.650 | a forged `X-Forwarded-Host` | falls back to the canonical callback; the forged name appears nowhere in the IdP redirect |
+| 1.651 | the renewal preflight | allowed and named from an attached app origin, with credentials; a foreign origin gets 403 |
+| 1.652 | what Reflex resolves | `api_url` and the event URL stay on a host in Reflex's own `SAME_DOMAIN_HOSTNAMES`; CORS lists both hostnames |
+| 1.653 | a malformed dashboard URL | an unparsable port degrades to the bare host instead of raising on every render |
+
+**Scenario range:** 1.632 – 1.653. **Test file:** `lex/test_project/tests/init/test_1bm_custom_domain_hosts.py`. **Type:** U / I. **Status:** ✅ Complete (2026-11-10). Batch: [1bm](batches.md).
+
+---
+
+### 1bn. Scheduler bootstrap — the clock in the served backend, code-declared schedules, `run_scheduler` ✅
+
+**What it tests:** Every instance gets a scheduler with no configuration and no extra pod: the clock starts only in the process serving the app, is on by default (off is a WARNING), survives failing passes; `@lex_job(schedule=...)` declarations become schedule rows kept in step with the code; `lex run_scheduler --once` does the same on demand; `ScheduledJob` is registered like any model and kept out of history.
+
+**Why a regression matters:** Instances with no scheduler, clocks in the wrong processes, declared schedules drifting from the code, or a history table growing on every run.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.654 | only in the served backend | importing `lex_app.asgi` in a test run starts nothing; a served start starts one thread; a second start returns it; it stops |
+| 1.655 | off is said out loud | `LEX_SCHEDULER_ENABLED=false` → no clock and a WARNING that no scheduled job will run |
+| 1.656 | on by default | enabled, 30 s tick, one-hour grace without any `LEX_SCHEDULER_*` variable |
+| 1.657 | survives failing passes | two raising ticks are logged and the clock keeps ticking |
+| 1.658 | a declaration becomes a row | `managed_by_code`, function target, cron, zone, kwargs, enabled, scheduled, no run-as |
+| 1.659 | code owns the schedule, the user the switch | a changed cron is applied; a user's `enabled=false` is kept |
+| 1.660 | a removed declaration | switched off (not deleted) with a message; declared again, switched back on |
+| 1.661 | a person's schedule is never taken over | same name created in the app: unchanged, conflict reported |
+| 1.662 | one function per name | a second function is refused naming it; the same function again is fine; a never-firing schedule is refused |
+| 1.663 | `run_scheduler --once` | syncs declarations, starts the due job, waits for it (SUCCESS), reports `fired=[...]` |
+| 1.664 | registered, not history-tracked | in `processAdminSite.registered_models`; no `history` |
+
+**Scenario range:** 1.654 – 1.664. **Test file:** `lex/test_project/tests/init/test_1bn_scheduler_bootstrap.py`. **Type:** U + E. **Status:** ✅ Complete (2026-11-10). Batch: [1bn](batches.md).
+
+
+---
+
+### 1br. lex_view filters
 
 | # | Scenario | What We Assert | Status |
 |---|----------|----------------|--------|
-| 1.411 | Filters reach the component | Not in the URL; normalised dict and matching token as arguments | ✅ |
-| 1.412 | Filters select the component | No plain iframe when `filters` is given | ✅ |
-| 1.413 | No filter_bar (spec Amendment 18) | Passing `filter_bar` is a TypeError, as for any unknown keyword; nothing renders | ✅ |
-| 1.414 | on_filter | `emit_filter=true` | ✅ |
-| 1.415 | Malformed arguments | TypeError at the call | ✅ |
-| 1.416 | A filter change is not a new frame | Same URL, different token | ✅ |
-| 1.417 | When the shim posts | Loaded, named and changed only; index.html uses the function | ✅ |
-| 1.418 | A long filters token | Over 2,000 characters it stays out of the URL and is posted after load; at 2,000 it rides the URL | ✅ |
-| 1.419 | Every load resets the frame | After a new load, host filters that differ from the URL's are posted again; equal ones are not | ✅ |
+| 1.681 | Filters reach the component | Not in the URL; normalised dict and matching token as arguments | ✅ |
+| 1.682 | Filters select the component | No plain iframe when `filters` is given | ✅ |
+| 1.683 | No filter_bar (spec Amendment 18) | Passing `filter_bar` is a TypeError, as for any unknown keyword; nothing renders | ✅ |
+| 1.684 | on_filter | `emit_filter=true` | ✅ |
+| 1.685 | Malformed arguments | TypeError at the call | ✅ |
+| 1.686 | A filter change is not a new frame | Same URL, different token | ✅ |
+| 1.687 | When the shim posts | Loaded, named and changed only; index.html uses the function | ✅ |
+| 1.688 | A long filters token | Over 2,000 characters it stays out of the URL and is posted after load; at 2,000 it rides the URL | ✅ |
+| 1.689 | Every load resets the frame | After a new load, host filters that differ from the URL's are posted again; equal ones are not | ✅ |
 
 ---
 
-### 1az. `LEX_EMBED_ALLOWED_ORIGINS` — named sites only may embed lex-app and use its filter bridge ✅
+### 1bs. `LEX_EMBED_ALLOWED_ORIGINS` — named sites only may embed lex-app and use its filter bridge ✅
 
 **What it tests:** that embedding lex-app in a frame/iframe, and reading its filter bridge events, can be restricted to an operator-named list of sites. Amendment 14 of the multi-value-filters design adds `LEX_EMBED_ALLOWED_ORIGINS`, a comma-separated list of origins that becomes a validated Django setting (`parse_embed_allowed_origins` in `lex/runtime_config.py`), a `Content-Security-Policy: frame-ancestors` directive, and a `window.REACT_APP_EMBED_ALLOWED_ORIGINS` value the frontend reads from `config.js`. The directive is applied in two places: `EmbedXFrameOptionsMiddleware` (for a deployment that registers it) and, since `serve_react` is `@xframe_options_exempt` and therefore never covered by Django's own `XFrameOptionsMiddleware` at all, `serve_react` itself — on its SPA-fallback and other real `.html` document responses, which is what actually restricts who may frame lex-app as this repo ships today.
 
@@ -532,10 +888,10 @@ does not remove user launch configurations.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.420 | CSP added on every exempt path (middleware) | An `embed=true`, an OIDC-path and a cookie-marked response each carry `frame-ancestors 'self' <origins>`; a non-exempt response gets no CSP; an existing CSP header keeps its other directives, and a stale `frame-ancestors` directive is replaced rather than duplicated; configured but nothing valid still gets exactly `frame-ancestors 'self'` (fail closed, not wide open) |
-| 1.421 | Unset/empty is a no-op (middleware) | With `LEX_EMBED_ALLOWED_ORIGINS == []` and `LEX_EMBED_ORIGINS_CONFIGURED == False`, no CSP is ever added, and the pre-existing behaviour holds: `X-Frame-Options` is stripped and the session/CSRF cookies are still patched to `SameSite=None; Secure` |
-| 1.422 | `config.js` exposes the list | `window.REACT_APP_EMBED_ALLOWED_ORIGINS` is the comma-joined, `json.dumps`-escaped list, or `""` when empty; a build whose `config.js` predates the placeholder is served unchanged |
-| 1.423 | Validation, normalisation, the real setting, and the fail-closed boundary | A path, a wildcard, a non-http scheme, credentials, a query string, a fragment and garbage are all dropped with one WARNING naming them; so are a bracketed/IPv6-shaped host, the `[v1.x https:]` CSP-injection shape, and hosts carrying `;`, a space, a quote, a backslash or `%`; an internationalised domain is accepted as IDNA punycode; `:443`/`:80` normalise away and a lone trailing `/` is accepted; valid origins are case-normalised and de-duplicated (including duplicates port-normalisation reveals); a stray/trailing comma is skipped quietly; a wildcard-only value fails closed with its own WARNING; `lex.lex_app.settings.LEX_EMBED_ALLOWED_ORIGINS`/`LEX_EMBED_ORIGINS_CONFIGURED` are exactly what `parse_embed_allowed_origins`/`embed_origins_configured` compute, verified through a real settings-module reload |
-| 1.424 | The SPA document itself carries `frame-ancestors` | `serve_react`'s SPA fallback (`index.html`) and a literal non-fallback `.html`/`.htm` file (`embed.html`, case-insensitively) both carry `frame-ancestors 'self' <origins>`; merging keeps an existing CSP header's other directives; a hashed asset and `config.js` get none; unset leaves the SPA fallback unchanged; configured but nothing valid still gets exactly `frame-ancestors 'self'` |
+| 1.690 | CSP added on every exempt path (middleware) | An `embed=true`, an OIDC-path and a cookie-marked response each carry `frame-ancestors 'self' <origins>`; a non-exempt response gets no CSP; an existing CSP header keeps its other directives, and a stale `frame-ancestors` directive is replaced rather than duplicated; configured but nothing valid still gets exactly `frame-ancestors 'self'` (fail closed, not wide open) |
+| 1.691 | Unset/empty is a no-op (middleware) | With `LEX_EMBED_ALLOWED_ORIGINS == []` and `LEX_EMBED_ORIGINS_CONFIGURED == False`, no CSP is ever added, and the pre-existing behaviour holds: `X-Frame-Options` is stripped and the session/CSRF cookies are still patched to `SameSite=None; Secure` |
+| 1.692 | `config.js` exposes the list | `window.REACT_APP_EMBED_ALLOWED_ORIGINS` is the comma-joined, `json.dumps`-escaped list, or `""` when empty; a build whose `config.js` predates the placeholder is served unchanged |
+| 1.693 | Validation, normalisation, the real setting, and the fail-closed boundary | A path, a wildcard, a non-http scheme, credentials, a query string, a fragment and garbage are all dropped with one WARNING naming them; so are a bracketed/IPv6-shaped host, the `[v1.x https:]` CSP-injection shape, and hosts carrying `;`, a space, a quote, a backslash or `%`; an internationalised domain is accepted as IDNA punycode; `:443`/`:80` normalise away and a lone trailing `/` is accepted; valid origins are case-normalised and de-duplicated (including duplicates port-normalisation reveals); a stray/trailing comma is skipped quietly; a wildcard-only value fails closed with its own WARNING; `lex.lex_app.settings.LEX_EMBED_ALLOWED_ORIGINS`/`LEX_EMBED_ORIGINS_CONFIGURED` are exactly what `parse_embed_allowed_origins`/`embed_origins_configured` compute, verified through a real settings-module reload |
+| 1.694 | The SPA document itself carries `frame-ancestors` | `serve_react`'s SPA fallback (`index.html`) and a literal non-fallback `.html`/`.htm` file (`embed.html`, case-insensitively) both carry `frame-ancestors 'self' <origins>`; merging keeps an existing CSP header's other directives; a hashed asset and `config.js` get none; unset leaves the SPA fallback unchanged; configured but nothing valid still gets exactly `frame-ancestors 'self'` |
 
-**Scenario range:** 1.420 – 1.424. **Test file:** `lex/test_project/tests/init/test_1az_embed_allowed_origins.py`. **Type:** U. **Status:** ✅ Complete (2026-10-17). Batch: [1az](batches.md).
+**Scenario range:** 1.690 – 1.694. **Test file:** `lex/test_project/tests/init/test_1bs_embed_allowed_origins.py`. **Type:** U. **Status:** ✅ Complete (2026-10-17). Batch: [1bs](batches.md).

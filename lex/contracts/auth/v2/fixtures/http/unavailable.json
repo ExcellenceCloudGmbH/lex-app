@@ -1,0 +1,196 @@
+{
+  "contract": 2,
+  "cases": [
+    {
+      "id": "v2-503-auth-unavailable-header",
+      "server": "v2",
+      "server_case": "auth_unavailable",
+      "description": "Keycloak unreachable during refresh/UMA: retry, any method.",
+      "request": {
+        "method": "POST",
+        "path": "api/model_entries/fund/1/one"
+      },
+      "response": {
+        "status": 503,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json",
+          "retry-after": "7",
+          "cache-control": "no-store"
+        },
+        "body": {
+          "error": "auth_unavailable",
+          "retry_after": 7
+        }
+      },
+      "expect": {
+        "kind": "auth_unavailable",
+        "retryAfterMs": 7000,
+        "retry": {
+          "GET": true,
+          "POST": true
+        }
+      }
+    },
+    {
+      "id": "v2-503-auth-unavailable-body-only",
+      "server": "v2",
+      "server_case": null,
+      "description": "retry_after in the body when the header is missing.",
+      "request": {
+        "method": "GET",
+        "path": "api/user/"
+      },
+      "response": {
+        "status": 503,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "error": "auth_unavailable",
+          "retry_after": 3
+        }
+      },
+      "expect": {
+        "kind": "auth_unavailable",
+        "retryAfterMs": 3000,
+        "retry": {
+          "GET": true,
+          "POST": true
+        }
+      }
+    },
+    {
+      "id": "v2-503-auth-unavailable-default",
+      "server": "v2",
+      "server_case": null,
+      "description": "No Retry-After at all: the client's default wait.",
+      "request": {
+        "method": "GET",
+        "path": "api/user/"
+      },
+      "response": {
+        "status": 503,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "error": "auth_unavailable"
+        }
+      },
+      "expect": {
+        "kind": "auth_unavailable",
+        "retryAfterMs": 2000,
+        "retry": {
+          "GET": true,
+          "POST": true
+        }
+      }
+    },
+    {
+      "id": "plain-503",
+      "server": "any",
+      "server_case": null,
+      "description": "Server overloaded/restarting (no contract body): safe methods retry, unsafe do not.",
+      "request": {
+        "method": "POST",
+        "path": "api/model_entries/fund/1/one"
+      },
+      "response": {
+        "status": 503,
+        "type": "basic",
+        "headers": {
+          "content-type": "text/plain"
+        },
+        "body": "Service Unavailable"
+      },
+      "expect": {
+        "kind": "unavailable",
+        "retryAfterMs": null,
+        "retry": {
+          "GET": true,
+          "POST": false
+        }
+      }
+    },
+    {
+      "id": "cloudflare-502-html",
+      "server": "any",
+      "server_case": null,
+      "description": "Proxy error page.",
+      "request": {
+        "method": "GET",
+        "path": "api/model_entries/fund/list"
+      },
+      "response": {
+        "status": 502,
+        "type": "basic",
+        "headers": {
+          "content-type": "text/html"
+        },
+        "body": "<html><title>502 Bad Gateway</title></html>"
+      },
+      "expect": {
+        "kind": "unavailable",
+        "retryAfterMs": null,
+        "retry": {
+          "GET": true,
+          "POST": false
+        }
+      }
+    },
+    {
+      "id": "gateway-504",
+      "server": "any",
+      "server_case": null,
+      "description": "Gateway timeout.",
+      "request": {
+        "method": "GET",
+        "path": "api/model_entries/fund/list"
+      },
+      "response": {
+        "status": 504,
+        "type": "basic",
+        "headers": {},
+        "body": null
+      },
+      "expect": {
+        "kind": "unavailable",
+        "retryAfterMs": null,
+        "retry": {
+          "GET": true,
+          "POST": false
+        }
+      }
+    },
+    {
+      "id": "plain-500",
+      "server": "any",
+      "server_case": null,
+      "description": "A server bug is not an auth event and is not retried.",
+      "request": {
+        "method": "GET",
+        "path": "api/model_entries/fund/list"
+      },
+      "response": {
+        "status": 500,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "error": "boom"
+        }
+      },
+      "expect": {
+        "kind": "error",
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    }
+  ]
+}

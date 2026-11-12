@@ -98,13 +98,113 @@ branches again per ``STORAGE_TYPE``. Each is recorded as an ``AuditLog`` row wit
 
 **Scenario range:** 10.97 – 10.99. **Test file:** `lex/test_project/tests/api_layer/test_10q_process_routes_removed.py`. **Type:** U. **Status:** ✅ Complete (2026-10-23). Batch: [10q](batches.md).
 
-### 10r. The fields endpoint's value_list flag, and no filter bar
+### 10aa. lex's REST surface speaks the HTTP auth contract v2 ✅
+
+**What it tests:** what a client sees when authentication or authorization is the problem — 401 (session gone: re-authenticate), 403 with a code (refused or CSRF: stay signed in), 503 `auth_unavailable` (retry) — on lex's real routes: DRF's answers, `api/user/` from the validated sign-in, `api/auth/session`, `oidc/auth-complete`, the silent re-authentication round trip, the embedded-dashboard token, and every server case of the contract's shared fixtures.
+
+**Why a regression matters:** frontends route on these answers; a wrong one signs users out or strands them.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.152 | anonymous DRF → 401 | 401 + `WWW-Authenticate`, `code: not_authenticated` |
+| 10.153 | rejected bearer | `Bearer error="invalid_token"` |
+| 10.154 | CSRF stays on | a bearer header never switches CSRF off for a session |
+| 10.155 | refusals | 403 `permission_denied` / `csrf_failed` |
+| 10.156 | `api/user/` from the sign-in | profile + roles, no Keycloak call |
+| 10.157 | `api/user/` when unusable | 401 `session_expired` / 503 `auth_unavailable` |
+| 10.158 | `api/auth/session` | status + capabilities, 401 when signed out |
+| 10.159 | `oidc/auth-complete` | same-origin result message, no token |
+| 10.160 | silent re-auth round trip | `prompt=none` failure and success |
+| 10.161 | dashboard token | renewed before expiry; 401 after the end |
+| 10.162 | fixture `session_missing` | matches the contract |
+| 10.163 | fixture `session_expired` | matches the contract |
+| 10.164 | fixture `auth_unavailable` | matches, through refresh and UMA |
+| 10.165 | fixture `permission_denied` | matches the contract |
+| 10.166 | fixture `csrf_failed` | matches the contract |
+
+**Scenario range:** 10.152 – 10.166. **Test file:** `lex/test_project/tests/api_layer/test_10aa_auth_contract_v2.py`. **Type:** E. **Status:** ✅ Complete (2026-11-06). Batch: [10aa](batches.md).
+
+### 10ab. The app's half of the Streamlit hand-off ✅
+
+**What it tests:** `GET oidc/handoff` (plan "long-lived sessions" §6.3, item 2) -- a signed-in browser gets a single-use, 60-second code bound to its sign-in, the audience, the dashboard origin and the dashboard's `state`; without a sign-in a frame goes back with `error=login_required` (Keycloak never renders in a frame) and a page signs in first; only dashboard origins the instance lists are ever redirected to. And what `api/auth/*` says about it: `dashboard_handoff: ["streamlit"]` exactly while `LEX_STREAMLIT_AUTH` is `dual` or `handoff`, and a placeholder from `api/auth/streamlit-token/` in `handoff` mode.
+
+**Why a regression matters:** an open redirect on the sign-in path, a code sent to the wrong host, a Keycloak page in a frame, or a frontend choosing a path the server does not serve.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.167 | a bound single-use code | 302 to `<dashboard>/auth/handoff?code&state&next`; no-store, no-referrer; 60 s; refused for any other audience, origin or state |
+| 10.168 | no sign-in | frame → `error=login_required`; page → `oidc/authenticate?next=<hand-off>`; background → 401; no code |
+| 10.169 | ended sign-in | `login_required` in the frame (not the middleware's sign-in page); Django session signed out |
+| 10.170 | no open redirect | unlisted/relative return, bad state, other aud → 400 without Location; legacy → 404; loopback only locally |
+| 10.171 | Keycloak down | 503 `auth_unavailable` + Retry-After; no code; sign-in kept |
+| 10.172 | the capability | legacy → `[]`; dual, handoff → `["streamlit"]`; a typo → `[]` |
+| 10.173 | the placeholder | handoff → not-a-JWT placeholder, an hour, `dashboard_handoff: true`, no-store, no credential; dual → the real token; anonymous → 401 |
+| 10.174 | exact exemption | `/oidc/handoff[/]` answered by the view; `/oidc/handoffx`, `/api/oidc/handoff` → 401 |
+
+**Scenario range:** 10.167 – 10.174. **Test file:** `lex/test_project/tests/api_layer/test_10ab_dashboard_handoff_endpoint.py`. **Type:** E. **Status:** ✅ Complete (2026-11-06). Batch: [10ab](batches.md).
+
+---
+
+### 10r. `api/htmlreport/<name>` hands a report the request, and the Streamlit frame a credential ✅
+
+**What it tests:** the route every `HTMLReport` in a project is rendered through, and the one report the framework ships. The `Streamlit` report frames the project's dashboard, which lives on its own host behind the auth proxy; a cross-origin frame cannot authenticate itself, so the embedding page must hand it the bootstrap `auth_token` the proxy exchanges for a session cookie. The route supplies the request that makes this possible — but only to a report that declares a second parameter, so `HTMLReport`'s published `get_html(self, user)` is unchanged for every project that subclasses it.
+
+**Why a regression matters:** framed without a credential, the dashboard 401s, and a framed 401 is answered with a page that moves the *top* window to the dashboard host's login — so clicking **Streamlit** inside an instance took the whole browser tab out of it. And this route renders every report a project has, so widening the call signature for all of them would break them all at once.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.100 | the sidebar entry frames a dashboard that can let the user in | the frame is on `STREAMLIT_URL` carrying the session's access token as `auth_token`; the response answers `Cache-Control: no-store` |
+| 10.101 | nothing to hand it means nothing handed | no OIDC token on the session → no `auth_token` key at all, not an empty or placeholder one |
+| 10.102 | the published `get_html(self, user)` is unchanged | the one-parameter report renders untouched; the two-parameter one gets the request; a `TypeError` from inside a report is not read as a signature |
+
+**Scenario range:** 10.100 – 10.102. **Test file:** `lex/test_project/tests/api_layer/test_10r_html_report_request_and_streamlit_frame.py`. **Type:** E (10.102 also U). **Status:** ✅ Complete (2026-11-03). Batch: [10r](batches.md).
+
+### 10ad — `model_info` ships the project's per-column display options
+
+**What it tests:** a project writes how its own columns should look on its serializer
+(`Meta.lex_column_options`), and the endpoint the frontend blocks on before drawing any
+table carries it. LEX-1556: a customer asked for a narrower ID column, and `list_ui` could
+say exactly one thing (`hide_actions_column`) and nothing about a column.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.184 | the declaration reaches the frontend | `list_ui.columns` keyed by field name, carrying the declared options; `hide_actions_column` untouched |
+| 10.185 | a plain DRF serializer gets the same contract | a project's own non-`LexSerializer` class answers identically — one payload, one reader, no second code path |
+| 10.186 | a model declaring nothing answers the key | `columns: {}`, so "declared nothing" and "declared an empty thing" cannot diverge between readers |
+| 10.187 | a malformed declaration never breaks the endpoint | the response still arrives and the one usable declaration survives; a typo costs that option, not every list view of the model |
+
+**Scenario range:** 10.184 – 10.187. **Test file:** `lex/test_project/tests/api_layer/test_10ad_list_ui_column_options.py`. **Type:** U. **Status:** ✅ Complete (2026-11-10). Batch: [10ad](batches.md). Paired with [12p](../12-serializers/cluster.md) and frontend clusters F03p/F03q.
+
+---
+
+### 10ac. Scheduled jobs through the REST API ✅
+
+**What it tests:** Schedules are created, edited, switched off and run through the generic API and UI: every definition mistake answers 400 naming the field, a save records who the job runs as and moves its next slot, the ▶ button runs it now, a schedule declared in code can be switched off but not rewritten, and an edit never resets a scheduled job's status.
+
+**Why a regression matters:** Stored schedules that can never run, a job running as someone who never saved it, the UI and the code fighting over a declared schedule, or an edit hiding a running job from the overlap check.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.175 | create sets next slot and run-as | 201; next slot = next 06:00 UTC; `run_as` = the creator; enabled |
+| 10.176 | mistakes answer 400 naming the field | bad cron, seconds field, no / both schedules, past `run_at`, unknown zone, unknown / non-calculation / self model, missing record, unknown function; nothing stored |
+| 10.177 | an edit moves the slot and the run-as | a second person's cron edit moves the slot and becomes `run_as`; off → no slot; on → a future slot |
+| 10.178 | ▶ runs now | PATCH `calculate=true` runs the target; job SUCCESS; next slot unchanged |
+| 10.179 | code-declared schedules | a cron edit answers 400 pointing at `@lex_job`; `enabled=false` works |
+| 10.180 | bare model names | `scheduledtargetcalc` is stored as `lex_app.ScheduledTargetCalc` |
+| 10.181 | in the sidebar | `api/model-structure` lists `scheduledjob` |
+| 10.182 | an edit during a run | the edit is stored; the job stays IN_PROGRESS; a due slot is skipped; one run |
+| 10.183 | `reset_calculation_on_edit` | a model setting it `False` keeps SUCCESS through an edit (and says so); an ordinary model is still reset |
+
+**Scenario range:** 10.175 – 10.183. **Test file:** `lex/test_project/tests/api_layer/test_10ac_scheduled_jobs_api.py`. **Type:** E. **Status:** ✅ Complete (2026-11-10). Batch: [10ac](batches.md).
+
+
+### 10ae. The fields endpoint's value_list flag, and no filter bar
 
 | # | Scenario | What We Assert | Status |
 |---|----------|----------------|--------|
-| 10.100 | `value_list` on the fields endpoint | True for char, integer, boolean, date, FK and choice columns; false for TextField, decimal, JSON, credential-shaped, write-only and renamed fields, and for every column of an opted-out model | ✅ |
-| 10.101 | No filter bar (spec Amendment 18) | `list_ui` has no `filter_bar` key, though the model and the serializer declare one; every field still carries `value_list` | ✅ |
+| 10.188 | `value_list` on the fields endpoint | True for char, integer, boolean, date, FK and choice columns; false for TextField, decimal, JSON, credential-shaped, write-only and renamed fields, and for every column of an opted-out model | ✅ |
+| 10.189 | No filter bar (spec Amendment 18) | `list_ui` has no `filter_bar` key, though the model and the serializer declare one; every field still carries `value_list` | ✅ |
 
-**Scenario range:** 10.100-10.101. **Test file:** `lex/test_project/tests/api_layer/test_10r_fields_value_list_flag.py`. **Type:** U. **Status:** ✅ Complete (2026-10-16; the filter bar withdrawn 2026-10-20). Covers `lex/api/views/model_info/Fields.py` (`Fields.get`'s `value_list` and `list_ui`, `create_list_ui_info`), `lex/api/serializers/base_serializers.py` (`get_list_ui_options`), `lex/api/utils/filterable_fields.py` (`value_list_field`). Batch: [10r](batches.md).
+**Scenario range:** 10.188-10.189. **Test file:** `lex/test_project/tests/api_layer/test_10ae_fields_value_list_flag.py`. **Type:** U. **Status:** ✅ Complete (2026-10-16; the filter bar withdrawn 2026-10-20). Covers `lex/api/views/model_info/Fields.py` (`Fields.get`'s `value_list` and `list_ui`, `create_list_ui_info`), `lex/api/serializers/base_serializers.py` (`get_list_ui_options`), `lex/api/utils/filterable_fields.py` (`value_list_field`). Batch: [10ae](batches.md).
 
 ---

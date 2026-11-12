@@ -139,34 +139,102 @@
 
 **Scenario range:** 4.111 – 4.115. **Test file:** `lex/test_project/tests/permissions/test_4q_create_on_filled_record.py`. **Type:** E. **Status:** ✅ Complete (2026-10-23). Batch: [4q](batches.md).
 
-### 4s. filter_values and read permissions
+### 4x. Per-user Keycloak calls stay with their user; forged tokens and look-alike paths get no access ✅
 
-| # | Scenario | What We Assert | Status |
-|---|----------|----------------|--------|
-| 4.121 | Field hidden on some rows | Counted only on rows that allow it | ✅ |
-| 4.122 | Rows hidden by permission_read | Never counted, in any column | ✅ |
-| 4.123 | Field readable on no row the other filters leave | 200 with an empty list | ✅ |
-| 4.124 | Field the serializer does not expose | 400 "is not filterable" | ✅ |
-| 4.125 | Write-only field (`extra_kwargs`, `HiddenField`) | 400 "is not filterable"; no stored value in the response | ✅ |
-| 4.126 | Field class with its own `to_representation` or `get_attribute`; a nested serializer on an FK column | 400 for each; a class that only inherits DRF's methods is still listed | ✅ |
-| 4.127 | Serializer class that rewrites its rows | No column listed through it; the default serializer still lists them | ✅ |
-| 4.128 | Record-level read grant, database path | Only the granted row is counted; other rows' values never appear | ✅ |
-
-**Scenario range:** 4.121 – 4.128. **Test file:** `lex/test_project/tests/permissions/test_4s_filter_values_permissions.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/views/model_entries/FilterValues.py`, `lex/api/utils/filterable_fields.py`, `lex/api/views/model_entries/filter_backends.py`. Batch: [4s](batches.md).
-
----
-
----
-
-### 4t. filter_values under lex-app-v2's secure defaults ✅
+**Gap:** three ways the permission layer could hand access to the wrong party. (1) python-keycloak's `uma_permissions()`/`userinfo()` put the caller's token on the process-wide connection before sending, so concurrent requests could receive another user's permissions and profile (BUG-038). (2) The bearer path accepted HS256 signed with the OIDC client secret, which every instance holds (BUG-035). (3) Login exemptions were unanchored regular expressions, so `/api/user_permissions/` and any path containing `/health` skipped sign-in (BUG-036). Per-user calls now go through `lex/api/keycloak/uma_client.py` with the token on that one request; `OIDC_RP_SIGN_ALGOS_ALLOWED = ["RS256"]`; every exemption is anchored.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 4.129 | raising `permission_read`, per row | the row is in neither the list nor the counts; `LEX_SEC_FAIL_CLOSED=false` still leaves it out of the counts |
-| 4.130 | raising `can_read`, per row | the serializer withholds the record from the list and the counts |
-| 4.131 | raising `permission_read`, database count | the read filter withholds the row from both; `LEX_SEC_FAIL_CLOSED=false` lists and counts it |
-| 4.132 | field withheld on every record | 400 "is not filterable", no value in the body; `LEX_SEC_FILTERS=false` or `LEX_LEGACY_SECURITY=true` 200 empty; an hr member gets the values |
-| 4.133 | fields endpoint | `value_list` false for the column; legacy and hr get it back |
-| 4.134 | `permission_list` false | `filter_values` 404 like the list; `LEX_SEC_NOT_FOUND=false` or `LEX_LEGACY_SECURITY=true` 200 |
+| 4.138 | the middleware under concurrency | 240 concurrent requests for 12 users: each carries only its own permissions, profile and roles |
+| 4.139 | `KeycloakManager` under concurrency | 250 concurrent `get_uma_permissions` calls (the Reflex, Streamlit and token-view path): each its own answer |
+| 4.140 | `access_denied` | `[]` on the request and from `get_uma_permissions`; `set()` from `get_user_permissions` |
+| 4.141 | token rejected | the request continues with `[]`/`{}`; `get_uma_permissions` → `None`; userinfo → `KeycloakUnauthorized` |
+| 4.142 | Keycloak down | 502 HTML and unreachable: the request continues with the defaults; `KeycloakUnavailable`; no token in the logs |
+| 4.143 | TLS and timeouts | `KEYCLOAK_VERIFY_SSL` (True, False, a CA path) and `(3.05, 10)` reach every call, with the caller's token on it |
+| 4.144 | forged bearer token | HS256 signed with the client secret: no access and no user; RS256 from the IdP key: 200 |
+| 4.145 | public endpoints | health, current user, active calculations, manifest and favicon (incl. `/api/api/...`) are not refused |
+| 4.146 | look-alike paths | `/api/user_permissions/`, `/api/users/`, `.../healthx/...`, `.../health` are refused by the login middleware |
+| 4.147 | anchors | every `OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS` entry starts with `^` and ends with `$` or `(?:/\|$)` |
 
-**Scenario range:** 4.129 – 4.134. **Test file:** `lex/test_project/tests/permissions/test_4t_filter_values_secure_defaults.py`. **Type:** E. **Status:** ✅ Complete (2026-10-19). Batch: [4t](batches.md).
+**Scenario range:** 4.138 – 4.147. **Test file:** `lex/test_project/tests/permissions/test_4x_keycloak_call_isolation.py`. **Type:** U (4.138–4.143), I (4.144–4.147). **Status:** ✅ Complete (2026-11-06). Batch: [4x](batches.md).
+
+### 4y. The permission lookup is lazy, cached per token, single-flight and never a silent deny ✅
+
+**Gap:** every request made two or more synchronous Keycloak calls (UMA + userinfo), and any failure became `[]` — a signed-in user saw "permission denied" during a Keycloak blip. Now `request.user_permissions` / `userinfo` / `client_roles` are lazy; profile and roles come from the sign-in (`request.oidc`, the access token's `resource_access`); UMA answers are cached per token digest (≤ min(60 s, token lifetime)), single-flight, behind their own breaker; `access_denied` is `[]`, a rejected token 401, an outage 503 — and every fail-closed site passes those through.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.148 | lazy | no UMA call until read; one then |
+| 4.149 | cached per token | one call per token, never across users |
+| 4.150 | TTL | ≤ min(60 s, token lifetime) |
+| 4.151 | single flight | one call for concurrent requests, outcome shared |
+| 4.152 | `access_denied` | `[]`, 403 `permission_denied`, still signed in |
+| 4.153 | token rejected | 401 `session_expired`, before the view for writes |
+| 4.154 | Keycloak down | 503 `auth_unavailable`, before the view for writes |
+| 4.155 | UMA breaker | opens, blocks, recovers; issuer mismatch = config outage |
+| 4.156 | roles from the sign-in | token roles, claims profile, no userinfo call |
+| 4.157 | `guarded()` | auth outcomes re-raised in both modes |
+| 4.158 | fail-closed sites | 503/401 instead of a denial or a grant |
+
+**Scenario range:** 4.148 – 4.158. **Test file:** `lex/test_project/tests/permissions/test_4y_permission_lookup.py`. **Type:** U (4.148–4.151, 4.155–4.157), E (4.152–4.154, 4.158). **Status:** ✅ Complete (2026-11-06). Batch: [4y](batches.md).
+
+### 4aa. The Streamlit token carries the caller's own Keycloak permissions ✅
+
+**Gap:** `StreamlitTokenView` imported `KeycloakManager` from a module that does not exist; the error was swallowed and every Streamlit token carried no permissions.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.163 | the token view asks Keycloak with the caller's token | since lex-app 2.5: two signed-in callers each get exactly their own sign-in's access token, with their own client roles in it, and the view asks Keycloak for no permissions (before 2.5: the caller's bearer token reached `get_uma_permissions`) |
+
+**Scenario range:** 4.163 – 4.163. **Test file:** `lex/test_project/tests/permissions/test_4aa_streamlit_token_permissions.py`. **Type:** E. **Status:** ✅ Complete (2026-11-12). Batch: [4aa](batches.md).
+
+
+---
+
+### 4z. A schedule can do no more than the person who saved it ✅
+
+**What it tests:** A scheduled run has no request, so no Keycloak permissions to check when it fires; the check happens when the schedule is saved — the same checks the Calculate button passes — and the run then acts as that person. Schedules keep the framework's default permissions; code is trusted.
+
+**Why a regression matters:** Anyone with access to schedules could calculate records they could never calculate themselves.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.159 | a forbidden record | 400 on `target_model` saying the caller may not calculate it; nothing stored |
+| 4.160 | every record of a forbidden model | 400 on `target_model`; nothing stored |
+| 4.161 | code is trusted | a schedule created without a request for the same model is stored and scheduled |
+| 4.162 | no access to schedules | creating one without the grant is refused (401/403); nothing stored |
+
+**Scenario range:** 4.159 – 4.162. **Test file:** `lex/test_project/tests/permissions/test_4z_scheduled_job_permissions.py`. **Type:** E. **Status:** ✅ Complete (2026-11-10). Batch: [4z](batches.md).
+
+
+### 4ab. filter_values and read permissions
+
+| # | Scenario | What We Assert | Status |
+|---|----------|----------------|--------|
+| 4.164 | Field hidden on some rows | Counted only on rows that allow it | ✅ |
+| 4.165 | Rows hidden by permission_read | Never counted, in any column | ✅ |
+| 4.166 | Field readable on no row the other filters leave | 200 with an empty list | ✅ |
+| 4.167 | Field the serializer does not expose | 400 "is not filterable" | ✅ |
+| 4.168 | Write-only field (`extra_kwargs`, `HiddenField`) | 400 "is not filterable"; no stored value in the response | ✅ |
+| 4.169 | Field class with its own `to_representation` or `get_attribute`; a nested serializer on an FK column | 400 for each; a class that only inherits DRF's methods is still listed | ✅ |
+| 4.170 | Serializer class that rewrites its rows | No column listed through it; the default serializer still lists them | ✅ |
+| 4.171 | Record-level read grant, database path | Only the granted row is counted; other rows' values never appear | ✅ |
+
+**Scenario range:** 4.164 – 4.171. **Test file:** `lex/test_project/tests/permissions/test_4ab_filter_values_permissions.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/views/model_entries/FilterValues.py`, `lex/api/utils/filterable_fields.py`, `lex/api/views/model_entries/filter_backends.py`. Batch: [4ab](batches.md).
+
+---
+
+---
+
+### 4ac. filter_values under lex-app-v2's secure defaults ✅
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.172 | raising `permission_read`, per row | the row is in neither the list nor the counts; `LEX_SEC_FAIL_CLOSED=false` still leaves it out of the counts |
+| 4.173 | raising `can_read`, per row | the serializer withholds the record from the list and the counts |
+| 4.174 | raising `permission_read`, database count | the read filter withholds the row from both; `LEX_SEC_FAIL_CLOSED=false` lists and counts it |
+| 4.175 | field withheld on every record | 400 "is not filterable", no value in the body; `LEX_SEC_FILTERS=false` or `LEX_LEGACY_SECURITY=true` 200 empty; an hr member gets the values |
+| 4.176 | fields endpoint | `value_list` false for the column; legacy and hr get it back |
+| 4.177 | `permission_list` false | `filter_values` 404 like the list; `LEX_SEC_NOT_FOUND=false` or `LEX_LEGACY_SECURITY=true` 200 |
+
+**Scenario range:** 4.172 – 4.177. **Test file:** `lex/test_project/tests/permissions/test_4ac_filter_values_secure_defaults.py`. **Type:** E. **Status:** ✅ Complete (2026-10-19). Batch: [4ac](batches.md).

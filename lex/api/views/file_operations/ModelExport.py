@@ -161,9 +161,12 @@ class ModelExportView(FileOperationAuditMixin, GenericAPIView):
             else:
                 # Default to all fields if no permission method
                 exportable_fields = {f.name for f in obj._meta.fields}
-        except Exception:
+        except Exception as exc:
+            from lex.api.security import is_auth_outage
             from lex.core.security_flags import strict
 
+            if is_auth_outage(exc):
+                raise  # 503/401: an outage must not quietly empty the export
             if strict("FAIL_CLOSED"):
                 # A raising export check withholds the row (no identifying fields either).
                 logger.exception(

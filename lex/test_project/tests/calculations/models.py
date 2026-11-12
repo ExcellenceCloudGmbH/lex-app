@@ -1290,3 +1290,87 @@ CLOSED_BY_TRUE = "closedbytruecalc"
 CLOSING_PARENT = "closingparentcalc"
 CLOSED_ON_CREATE = "closedoncreatecalc"
 CLOSABLE_NARROW_READ = "closablenarrowreadcalc"
+
+
+# ── Scheduled job targets (cluster 7x; reused by 8f, 10ac, 6v, 4z, 1bn) ──────
+
+
+@_permissive
+class ScheduledTargetCalc(CalculationModel):
+    """What a scheduled job calculates. Counts its runs; can fail or be held open."""
+
+    name = models.CharField(max_length=200)
+    should_fail = models.BooleanField(default=False)
+    runs = models.IntegerField(default=0)
+    closed = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    # Test controls, reset by every test that uses them. ``gate`` holds
+    # calculate() open, so a test can observe a run while it is still going.
+    gate = None
+    calls = 0
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculation_closed_reason(self):
+        return "Closed for scheduling tests." if self.closed else None
+
+    def calculate(self):
+        type(self).calls += 1
+        if type(self).gate is not None:
+            type(self).gate.wait(timeout=10)
+        if self.should_fail:
+            raise RuntimeError(f"ScheduledTargetCalc({self.name!r}) failing on purpose")
+        self.runs = (self.runs or 0) + 1
+
+
+class ScheduledDeniedCalc(CalculationModel):
+    """A target the caller may read but not edit, so may not calculate."""
+
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 4z: readable")
+
+    def permission_edit(self, uc):
+        return PermissionResult.deny("cluster 4z: nobody may edit (so calculate) this")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def calculate(self):
+        pass
+
+
+SCHEDULE_TARGET_MODELS = [ScheduledTargetCalc, ScheduledDeniedCalc]
+
+
+@_permissive
+class KeepsStatusOnEditCalc(CalculationModel):
+    """Opts out of "an edit resets the status" (cluster 10ac, 10.183)."""
+
+    name = models.CharField(max_length=200)
+
+    reset_calculation_on_edit = False
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        pass

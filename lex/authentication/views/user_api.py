@@ -1,37 +1,29 @@
-import requests
-from lex.lex_app import settings
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from lex.authentication.identity import user_payload
+
 
 class CurrentUser(APIView):
+    """``GET api/user/``: who the signed-in user is.
+
+    Answered from the validated sign-in (``request.oidc``: the ID token's profile claims and the
+    access token's client roles) -- no Keycloak call, so a page load costs nothing upstream and a
+    Keycloak hiccup cannot fail it. The shape is the one Keycloak's userinfo answered before
+    (``sub``, ``email``, ``name``, ``preferred_username``, ``given_name``, ``family_name``, ...)
+    plus ``client_roles``.
+
+    Per the HTTP auth contract v2: no sign-in answers 401 (``not_authenticated``, with
+    ``WWW-Authenticate``), an ended sign-in 401 ``session_expired``, and an auth backend that
+    cannot refresh the sign-in 503 ``auth_unavailable`` -- the last two from the OIDC session
+    middleware, before this view runs.
+    """
+
     permission_classes = [IsAuthenticated]
 
     def get(self, request, format=None):
-        token = request.session.get("oidc_access_token")
-        if not token:
-            print("CurrentUser: No access token found in session.")
-            return Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
-
-        # call the OIDC userinfo endpoint
-        user_response = requests.get(
-            settings.OIDC_OP_USER_ENDPOINT,
-            headers={"Authorization": f"Bearer {token}"},
-            verify=getattr(settings, "OIDC_VERIFY_SSL", True),
-            timeout=getattr(settings, "OIDC_TIMEOUT", None),
-            proxies=getattr(settings, "OIDC_PROXY", None),
-        )
-
-        # if the upstream returned any error (401, 403, 500, ...)
-        if not user_response.ok:
-            # try to parse JSON error payload, or fall back to text
-            try:
-                data = user_response.json()
-            except ValueError:
-                data = {"detail": user_response.text}
-            return Response(data, status=user_response.status_code)
-
-        # otherwise, return the successful payload
-        return Response(user_response.json(), status=status.HTTP_200_OK)
+        response = Response(user_payload(request), status=status.HTTP_200_OK)
+        response["Cache-Control"] = "no-store"
+        return response

@@ -1,7 +1,7 @@
 cluster: 9
 slug: signals_ws
 title: Signals & WebSocket
-max_scenario: 43
+max_scenario: 73
 letters:
   a:
     title: ''
@@ -76,3 +76,21 @@ letters:
       a day later, but both names stayed in `__all__`; a star import binds every name there, so it failed
       and took the calculation-signal API with it. Both names are dropped. 9.43 runs the star import and
       requires the three re-exported functions to be CalculationSignals' own.
+  j:
+    title: A WebSocket serves only a live sign-in and closes with the auth contract's codes (4401/4403/4503), behind LEX_WS_AUTH
+    scenarios: 9.53-9.73
+    status: complete
+    tests:
+      pass: 21
+      skip: 0
+      xfail: 0
+    note: >-
+      Plan "long-lived sessions" section 6.5 (workstream lex-surfaces-reflex-ws). LexSocketAuthMixin on the five
+      authenticated consumers, OIDCSessionASGIMiddleware in asgi.py, LEX_WS_AUTH off/log/enforce (default log),
+      ws_close_codes() true only under enforce. Driven through lex.lex_app.asgi.application (or the same stack
+      around a project consumer). Letters h and i are skipped: the in-flight branch integration/lex-3-extensions
+      holds them (9.44-9.52), so 9j starts at 9.53. Closes BUG-047 under enforce. Security review 2026-11-06
+      (9.68-9.73): a dropped database connection is 4503 under enforce and never breaks a socket under log (9.68); a
+      sign-in that ends while the socket joins its group is closed at once (9.69); re-validation also closes on a
+      Django session that is gone, a deactivated user and an expired refresh token (9.70-9.72), and reaches the
+      synchronous consumers through the channel layer (9.73).

@@ -227,7 +227,7 @@ class OwnedItem(LexModel):
 
 
 class RowFieldItem(LexModel):
-    """Cluster 4s fixture: a field hidden on some rows, and some rows hidden entirely."""
+    """Cluster 4ab fixture: a field hidden on some rows, and some rows hidden entirely."""
 
     title = models.CharField(max_length=200)
     region = models.CharField(max_length=64, blank=True, default="")
@@ -241,15 +241,15 @@ class RowFieldItem(LexModel):
 
     def permission_read(self, uc):
         if self.title.startswith("hidden"):
-            return PermissionResult.deny("cluster 4s: hidden row")
+            return PermissionResult.deny("cluster 4ab: hidden row")
         if self.is_private:
             return PermissionResult.allow_all_except(
-                {"region"}, "cluster 4s: a private row hides its region",
+                {"region"}, "cluster 4ab: a private row hides its region",
             )
-        return PermissionResult.allow_all("cluster 4s: open row")
+        return PermissionResult.allow_all("cluster 4ab: open row")
 
     def permission_edit(self, uc):
-        return PermissionResult.allow_all("cluster 4s: edit-open")
+        return PermissionResult.allow_all("cluster 4ab: edit-open")
 
     def permission_create(self, uc):
         return True
@@ -262,7 +262,7 @@ class RowFieldItem(LexModel):
 
 
 class ReadCheckRaisesItem(LexModel):
-    """Cluster 4t fixture: ``can_read`` raises for the row named "boom".
+    """Cluster 4ac fixture: ``can_read`` raises for the row named "boom".
 
     ``permission_read`` admits every row, so the read filter -- which asks
     ``permission_read`` -- keeps "boom"; only the serializer's own read
@@ -279,14 +279,14 @@ class ReadCheckRaisesItem(LexModel):
 
     def can_read(self, request):
         if self.name == "boom":
-            raise RuntimeError("cluster 4t: can_read failed on purpose")
+            raise RuntimeError("cluster 4ac: can_read failed on purpose")
         return True
 
     def permission_read(self, uc):
-        return PermissionResult.allow_all("cluster 4t: every row admitted")
+        return PermissionResult.allow_all("cluster 4ac: every row admitted")
 
     def permission_edit(self, uc):
-        return PermissionResult.allow_all("cluster 4t")
+        return PermissionResult.allow_all("cluster 4ac")
 
     def permission_create(self, uc):
         return True
@@ -491,3 +491,53 @@ RAISING_CHILD = "raisingchild"
 RAISING_EXPORT = "raisingexportitem"
 CREATE_MODELS = [CreateParent, ScopedCreateItem]
 SCOPED_CREATE = "scopedcreateitem"
+
+
+class OutageItem(LexModel):
+    """Cluster 4y: permission hooks that need the auth backend while it is down.
+
+    While the class attribute ``outage`` holds an exception, every permission hook raises it
+    -- what a hook does when it needs the sign-in's token or Keycloak and cannot get them.
+    Otherwise everything is allowed.
+    """
+
+    name = models.CharField(max_length=200)
+
+    #: Raised by every permission hook while set.
+    outage = None
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def _check(self):
+        if type(self).outage is not None:
+            raise type(self).outage
+
+    def permission_read(self, uc):
+        self._check()
+        return PermissionResult.allow_all("cluster 4y")
+
+    def permission_list(self, uc):
+        return True
+
+    def permission_edit(self, uc):
+        self._check()
+        return PermissionResult.allow_all("cluster 4y")
+
+    def permission_export(self, uc):
+        self._check()
+        return PermissionResult.allow_all("cluster 4y")
+
+    def permission_create(self, uc):
+        self._check()
+        return True
+
+    def permission_delete(self, uc):
+        self._check()
+        return True
+
+
+OUTAGE = "outageitem"

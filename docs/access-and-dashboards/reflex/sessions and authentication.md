@@ -70,7 +70,14 @@ The callback is built from the address in the browser, so every origin people ac
 
 Access tokens are short-lived, and the dashboard renews its own before it expires — in the background, coordinated across the tabs a user has open, without reloading the page. The tokens live in HTTP-only cookies, which the page's JavaScript never sees. The Reflex backend holds them too, with each user's page state, and reads them back from the cookies whenever it has none. (That page state is why more than one backend replica needs a shared Redis — see [[access-and-dashboards/reflex/running and deploying|Running & Deploying]].)
 
-A dashboard session is bound to the user's **Keycloak session**, exactly like a Lex App or Streamlit session. Signing out of Lex App, an administrator ending the session, or the realm's maximum session lifetime ends the dashboard's session too: its next renewal fails, and the user is signed out.
+A dashboard session is bound to the user's **Keycloak session**, exactly like a Lex App or Streamlit session, and lasts as long as Keycloak keeps it: the sign-in cookies live 30 days and are renewed with every token renewal. Only Keycloak saying the session is over signs the dashboard out — signing out of Lex App, an administrator ending the session, or the realm's maximum session lifetime. Signing out of Lex App reaches the dashboard through Keycloak's back-channel logout: it is signed out at its next token check, within minutes; without a shared Redis, at its next renewal.
+
+Nothing else signs it out:
+
+- **Keycloak unreachable, or answering with an error.** The user is not signed out, and the dashboard keeps trying to renew the tokens — about once a minute, with a growing pause between the attempts that reach Keycloak. Until the access token expires, the dashboard works as before and the page keeps the profile of the user it belongs to. Once the access token has expired and Keycloak still cannot renew it, the dashboard serves no one: no user, no permissions, no token for the Lex App API, and `/login` shows "Sign-in is temporarily unavailable. Retrying…" instead of a sign-in. The first renewal that succeeds restores the session — the same user, without signing in again — and `/login` returns to the page that was asked for.
+- **Keycloak rejecting the dashboard's client** (a wrong client secret, say). The user is not signed out, and the log says why at ERROR, once per attempt (every 5 minutes), so the misconfiguration is found rather than felt. Once the access token has expired, nothing is served until it is fixed, as above.
+- **Keycloak's clock a few seconds off, or its signing keys rotated.** Neither signs anyone out: the dashboard allows 30 seconds of clock difference, and fetches Keycloak's keys again when a token is signed with a new one. Tokens it still cannot verify are not taken; the previous ones are kept, and the log says why at ERROR, naming the clock.
+- **Several tabs.** One tab renews the tokens and the others take its result — across Reflex replicas too, when they share the instance's Redis. A second renewal within 30 seconds is skipped, not treated as a failure.
 
 ### Across restarts and new tabs
 
@@ -140,7 +147,7 @@ class Overview(rx.State):
         self.resources = sorted({p["rsname"] for p in permissions})
 ```
 
-It asks Keycloak once per access token, and again after each renewal, so a changed role takes effect within minutes. If Keycloak cannot answer, the user keeps what they were last granted; someone Keycloak never answered for gets nothing.
+It asks Keycloak once per access token, and again after each renewal, so a changed role takes effect within minutes. If Keycloak cannot answer, the user keeps what they were last granted while the access token is valid; someone Keycloak never answered for gets nothing, and so does everyone whose access token has expired and cannot be renewed.
 
 **`has_permission(target, scope)`** turns one of them into an `auth=` check — for an event handler (`rxe.event`), a state field (`rxe.field`) or a computed var (`rxe.var`):
 
@@ -203,7 +210,7 @@ class Funds(rx.State):
         self.rows = response.json()["results"]
 ```
 
-`http://localhost:8000` is `lex start` locally; in production it is wherever the dashboard reaches the Lex App backend. The token never reaches the browser, and it is always a current one: the dashboard renews it before it expires.
+`http://localhost:8000` is `lex start` locally; in production it is wherever the dashboard reaches the Lex App backend. The token never reaches the browser, and it is always a current one: the dashboard renews it before it expires. While it has expired and Keycloak cannot renew it, `current_access_token` returns `""` — treat that as not signed in.
 
 ## Related
 

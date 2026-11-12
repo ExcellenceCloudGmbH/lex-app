@@ -119,27 +119,166 @@
 
 **Allocation note:** first written as 10p/10.91–10.94. [10p](#batch-10p--file-download-endpoints-write-an-audit-entry-) (#840) landed that letter and range on `lex-app-v2` while this branch was open, so the batch re-took the next free pair when the base was merged in. Letters are never renumbered; this one moved before it ever landed.
 
-## Batch 10r — the fields endpoint's value_list flag, and no filter bar (10.100-10.101)
+---
+
+### Batch 10aa — lex's REST surface speaks the HTTP auth contract v2 ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.152 – 10.166 |
+| Type | E |
+| Files covered | `lex/authentication/drf_exceptions.py` (new: `exception_handler`, `refusal_response`), `lex/authentication/authentication_backends/BearerMiddlewareAuthentication.py` (`authenticate_header`, bearer contexts only), `lex/authentication/identity.py` (new), `lex/authentication/views/user_api.py` (10.156 also pins `api/user/` to it), `lex/api/views/authentication/UserAPIView.py` (removed: the unrouted duplicate that called userinfo with a session token), `lex/authentication/views/session_views.py` (new), `lex/authentication/capabilities.py` (new), `lex/authentication/views/token_views.py`, `lex/api/views/model_entries/One.py` and `mixins/DestroyOneWithPayloadMixin.py` (refusal bodies), `lex/lex_app/settings.py` (`REST_FRAMEWORK`), `lex/contracts/auth/v2/fixtures/http/*.json` (read) |
+| Test file | `lex/test_project/tests/api_layer/test_10aa_auth_contract_v2.py` |
+| Test classes | `TestCluster10aa_NotAuthenticated` (10.152–10.154), `TestCluster10aa_Refusals` (10.155), `TestCluster10aa_CurrentUser` (10.156–10.157), `TestCluster10aa_SessionEndpoints` (10.158–10.161), `TestCluster10aa_ContractFixtures` (10.162–10.166) |
+| Fixtures | `create_oidc_session` sign-ins; django-oauth2-codeflow's `FakeOP` (bearer tokens, scripted refresh answers, the authorization round trip); `ContractItem` (new in `api_layer/models.py`: only superusers create/delete); the UMA call patched; outgoing HTTP refused in 10.156 |
+| Tests landed | **15 pass / 0 fail** against django-oauth2-codeflow 3.0.0 |
+| Also changed | 10o 10.90: the middleware builds no `KeycloakManager` (UMA is one cached call per token; roles come from the token) |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-06-auth-long-sessions-core.md) |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.152 | anonymous DRF → 401 | 401, `WWW-Authenticate: Session realm=…`, `code`/`error` `not_authenticated`, `login_url`, no-store (BUG-008, unauthenticated half) |
+| 10.153 | rejected bearer | 401 with `Bearer error="invalid_token"` |
+| 10.154 | CSRF stays on | a session POST with a made-up bearer header and no CSRF token: 403 `csrf_failed`, no token handed out |
+| 10.155 | refusals | create/delete 403 `permission_denied` (+ `detail`, documented `message`); DRF `PermissionDenied` coded; CSRF 403 `csrf_failed`; still signed in |
+| 10.156 | `api/user/` from the sign-in | profile + `client_roles` for browser, bearer and Django-only logins; no bookkeeping, no token, no HTTP call |
+| 10.157 | `api/user/` when unusable | ended sign-in 401 `session_expired` then signed out; Keycloak down 503 + `Retry-After`, sign-in kept |
+| 10.158 | `api/auth/session` | 200 `{authenticated, user, capabilities}`; anonymous 401; process-admin route; capabilities from the helper |
+| 10.159 | `oidc/auth-complete` | result message to own origin (opener, parent, BroadcastChannel); ok/false + error; hostile input not reflected; SAMEORIGIN; no token |
+| 10.160 | silent re-auth round trip | `prompt=none` → `login_required` → ok:false; then a sign-in → ok:true and signed in |
+| 10.161 | dashboard token | a token about to expire is renewed first; 401 after the sign-in ended |
+| 10.162–10.166 | contract fixtures | `session_missing`, `session_expired`, `auth_unavailable` (refresh and UMA), `permission_denied`, `csrf_failed`: status, body keys/values, headers; no token |
+
+**Why a regression matters:** a frontend decides from these answers whether to re-authenticate, retry or show a message. A 403 for a lost session, a 401 for a refusal, or an outage that looks like either signs users out or strands them on a dead page.
+
+**Allocation note:** Letter aa from 10.152: r–z and scenarios up to 10.151 are held by in-flight branches (feat/ext-*, integration/lex-3-extensions, feat/fleet-metrics-*, feat/multi-value-filters, fix/streamlit-report-frames-unauthenticated).
+
+---
+
+### Batch 10ab — The app's half of the Streamlit hand-off ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.167 – 10.174 |
+| Type | E |
+| Files covered | `lex/authentication/views/handoff_views.py` (new), `lex/authentication/dashboards/handoff.py` (`issue_code`, `redeem`), `lex/authentication/dashboards/sites.py`, `lex/authentication/capabilities.py` (`dashboard_handoff_surfaces`), `lex/authentication/views/token_views.py` (handoff placeholder), `lex/lex_app/urls.py` (`oidc/handoff`), `lex/lex_app/settings.py` (login and session exemptions) |
+| Test file | `lex/test_project/tests/api_layer/test_10ab_dashboard_handoff_endpoint.py` |
+| Test classes | `TestCluster10ab_SignedIn` (10.167), `TestCluster10ab_NotSignedIn` (10.168–10.169), `TestCluster10ab_Refusals` (10.170–10.171), `TestCluster10ab_Advertised` (10.172–10.174) |
+| Fixtures | sign-ins through `lex.lex_app.tests.auth.sign_in`; `LEX_STREAMLIT_AUTH` and `LEX_INSTANCE_HOSTS` from the environment; `FakeOP` answering 503 for the outage |
+| Tests landed | **8 pass / 0 fail** (13 subtests) |
+| Mutation check | any return origin accepted, frames sent to the sign-in, the capability never advertised, no placeholder: each fails its scenario (10.170, 10.168, 10.172, 10.173) |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-06-lex-surfaces-streamlit.md) |
+
+**Why a regression matters:** see [cluster.md § 10ab](cluster.md). The proxy's half of the hand-off is [01-init batch 1be](../01-init/batches.md).
+
+**Allocation note:** Letter ab, from 10.167: r–z are held by in-flight branches (see [10aa](#batch-10aa--lexs-rest-surface-speaks-the-http-auth-contract-v2-)).
+
+### Batch 10r — `api/htmlreport/<name>` hands a report the request, and the Streamlit frame a credential ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.100 – 10.102 |
+| Type | E (10.102 also U) |
+| Files covered | `lex/process_admin/views/model_relation_views.py` (`Overview`, `render_html_report`), `lex/lex_app/streamlit/Streamlit.py` (`get_html`) |
+| Test file | `lex/test_project/tests/api_layer/test_10r_html_report_request_and_streamlit_frame.py` |
+| Test classes | `TestCluster10r_StreamlitFrameCredential` (10.100–10.102), `TestCluster10r_RenderDispatch` (10.102, unit half) |
+| Fixtures | the real `Streamlit` report and two probe `HTMLReport` subclasses registered on `processAdminSite.html_reports` for the test; `E2ETestCase`'s session-authenticated `APIClient`, with `oidc_access_token` set and cleared on the session |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.100 | the sidebar entry frames a dashboard that can let the user in | the frame's URL is on `STREAMLIT_URL` and carries the session's access token as `auth_token`, and the response carrying it answers `Cache-Control: no-store` |
+| 10.101 | nothing to hand it means nothing handed | no OIDC token on the session → the host is still framed, with no `auth_token` key at all |
+| 10.102 | the published `get_html(self, user)` is unchanged | a report declaring only `(self, user)` renders through the route untouched; one declaring a second parameter receives the request; a `TypeError` raised *inside* a report is not mistaken for a signature |
+
+**Why a regression matters:** the customer-visible failure was not a broken page — it was the whole browser tab leaving the instance. Clicking **Streamlit** framed the dashboard host with no credential, the proxy 401'd the frame, and the framed-401 page moved the top window to that host's login, where a live SSO session completed the round trip before anyone could read it. 10.101 is the half that keeps the fix honest: an absent credential must stay absent rather than become a placeholder the proxy has to parse and reject. 10.102 is the blast radius — this route renders *every* report in a project, so a signature change here breaks every project report at once.
+
+---
+
+### Batch 10ad — `model_info` ships the project's per-column display options ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.184 – 10.187 |
+| Type | U |
+| Files covered | `lex/api/views/model_info/Fields.py` (`create_list_ui_info`), `lex/api/serializers/list_ui_columns.py` |
+| Test file | `lex/test_project/tests/api_layer/test_10ad_list_ui_column_options.py` |
+| Test classes | `TestCluster10ad_ListUiColumnOptions` (10.184–10.187) |
+| Fixtures | none — hand-rolled `model._meta` / serializer stand-ins, as 10i does |
+| Tests landed | **5 pass / 0 fail** |
+| Also changed | 10.25 and 12.35 no longer assert that `list_ui` has nothing else in it — their claims (the `hide_actions_column` flag is reflected, and survives wrapping) are unchanged |
+| Status | ✅ Complete — LEX-1556; paired with [12p](../12-serializers/batches.md) and frontend F03p/F03q |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.184 | the declaration reaches the frontend | `list_ui.columns` keyed by field name with the declared options; `hide_actions_column` still answered |
+| 10.185 | a plain DRF serializer gets the same contract | a non-`LexSerializer` class answers identically, flag and columns |
+| 10.186 | a model declaring nothing answers the key | `columns: {}` |
+| 10.187 | a malformed declaration never breaks the endpoint | the response arrives; the one usable declaration survives; a non-mapping declaration is simply absent |
+
+**Why a regression matters:** this payload is fetched before the frontend can draw a table
+at all. An exception raised while describing a **display preference** would take down every
+list view of that model — catastrophically out of proportion to the mistake that caused it.
+That is why 10.187 exists and why the normaliser validates rather than passes through.
+
+10.185 is the surface most likely to be missed: the endpoint serves both `LexSerializer`
+subclasses and a project's own hand-written DRF class, and it is the hand-written kind that
+a project reaching for column options is most likely to have.
+
+---
+
+### Batch 10ac — Scheduled jobs through the REST API ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.175 – 10.183 |
+| Type | E |
+| Files covered | `lex/scheduling/models.py` (definition validation, `next_run_at`, `run_as`, code-managed refusal), `lex/api/views/model_entries/One.py` (create / update / calculate, now through `lex/core/calculation_start.py`; `reset_calculation_on_edit`), `lex/core/models/CalculationModel.py` (`reset_calculation_on_edit`), `lex/utilities/config/generic_app_config.py` (sidebar) |
+| Test file | `lex/test_project/tests/api_layer/test_10ac_scheduled_jobs_api.py` |
+| Test classes | `TestCluster10ac_ScheduledJobsApi` (10.175–10.183) |
+| Fixtures | `ScheduledJobTestCase.scheduled_jobs_allowed()` (stands in for an admin's Keycloak grant on `scheduling.ScheduledJob`), `ScheduledTargetCalc`, `KeepsStatusOnEditCalc` |
+| Tests landed | **9 pass / 0 fail** |
+| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bn) |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.175 | create sets next slot and run-as | 201; next slot = next 06:00 UTC; `run_as` = the creator; enabled |
+| 10.176 | mistakes answer 400 naming the field | bad cron, seconds field, no / both schedules, past `run_at`, unknown zone, unknown / non-calculation / self model, missing record, unknown function; nothing stored |
+| 10.177 | an edit moves the slot and the run-as | a second person's cron edit moves the slot and becomes `run_as`; off → no slot; on → a future slot |
+| 10.178 | ▶ runs now | PATCH `calculate=true` runs the target; job SUCCESS; next slot unchanged |
+| 10.179 | code-declared schedules | a cron edit answers 400 pointing at `@lex_job`; `enabled=false` works |
+| 10.180 | bare model names | `scheduledtargetcalc` is stored as `lex_app.ScheduledTargetCalc` |
+| 10.181 | in the sidebar | `api/model-structure` lists `scheduledjob` |
+| 10.182 | an edit during a run | the edit is stored; the job stays IN_PROGRESS; a due slot is skipped; one run |
+| 10.183 | `reset_calculation_on_edit` | a model setting it `False` keeps SUCCESS through an edit (and says so); an ordinary model is still reset |
+
+**Why a regression matters:** Stored schedules that can never run, a job running as someone who never saved it, the UI and the code fighting over a declared schedule, or an edit hiding a running job from the overlap check.
+
+**Allocation note:** Allocated past the letters and scenario IDs that in-flight branches (feat/ext-*, feat/auth-long-sessions) already hold: the first letter absent from lex-app-v2 and every remote branch, and a range above the highest max_scenario on any branch, so neither side has to renumber on merge. Design: [`docs/superpowers/plans/2026-11-10-scheduled-jobs.md`](../../../../../docs/superpowers/plans/2026-11-10-scheduled-jobs.md).
+
+
+## Batch 10ae — the fields endpoint's value_list flag, and no filter bar (10.188-10.189)
 
 - **Type:** U
 - **Files covered:** `lex/api/views/model_info/Fields.py`, `lex/api/serializers/base_serializers.py`,
   `lex/api/utils/filterable_fields.py`
-- **Test file:** `lex/test_project/tests/api_layer/test_10r_fields_value_list_flag.py`
-- **Test classes:** `TestCluster10r_FieldsValueListFlag`
+- **Test file:** `lex/test_project/tests/api_layer/test_10ae_fields_value_list_flag.py`
+- **Test classes:** `TestCluster10ae_FieldsValueListFlag`
 - **Fixtures:** `ValueListItem`, `ValueListOptOutItem`, `AuditLog` and `auth.User` (no tables --
   `Fields.get` is called directly)
 - **Status:** complete — 2 pass
-- **Merged with lex-app-v2:** `value_list` also follows the filter allow-list for the caller (4.133);
-  10.100's helper points the allow-list at the container it builds.
+- **Merged with lex-app-v2:** `value_list` also follows the filter allow-list for the caller (4.176);
+  10.188's helper points the allow-list at the container it builds.
 - **Note:** every field descriptor carries `value_list`, decided by `value_list_field` -- the
   resolver the `filter_values` endpoint uses -- for the serializer the list renders through.
 - **Native column filters (2026-10-20, spec Amendment 18):** the grid's own column filters are the
   only filter UI, so `list_ui.filter_bar` is withdrawn: `Meta.filter_bar`, a model's `filter_bar`,
-  `_resolve_filter_bar` and the fields endpoint's per-caller narrowing are gone. 10.101 pins that
+  `_resolve_filter_bar` and the fields endpoint's per-caller narrowing are gone. 10.189 pins that
   `list_ui` has no `filter_bar` key for a model and a serializer that still declare one, and that
   every field keeps `value_list`. The bar's four scenarios (`Meta.filter_bar`, the model fallback,
   dropped names, a `filter_bar` that is not a list) went with their fixture `FilterBarColumnItem`;
-  10.94 became 10.100 and the file was renamed from `test_10p_list_ui_filter_bar.py`.
+  10.94 became 10.188 and the file was renamed from `test_10p_list_ui_filter_bar.py`.
   `test_10i_fields_view_and_list_ui.py`'s 10.25 and `test_12e_factory.py`'s 12.35 pin lex-app-v2's
   exact `list_ui` / `get_list_ui_options()` dicts again. See the
   [session note](../../progress/sessions/2026-10-20-native-column-filters.md).
