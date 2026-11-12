@@ -68,8 +68,14 @@ flowchart TB
 The dotted line is the one to remember: the interface talks to the backend
 over the API, and the two are upgraded independently.
 
+The frontend pod does not have to serve the standard interface: your application
+can ship its own Vite app in a folder of its repository, built and released with
+the backend, and an instance can serve that instead, on the same host and
+against the same API. See [[ship-and-operate/custom frontend|Custom frontend]].
+
 ## Related
 
 - [[ship-and-operate/configuration|Configuration]] — what these processes read
+- [[ship-and-operate/custom frontend|Custom frontend]] — your own interface in the frontend pod
 - [[calculations/celery and async calculations|Celery & async calculations]] — what the workers are for
 - [[reference/CLI Commands|CLI Commands]] — every command and flag

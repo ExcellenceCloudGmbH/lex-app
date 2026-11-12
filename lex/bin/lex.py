@@ -584,15 +584,17 @@ def _warn_if_sessions_are_not_durable() -> None:
 @lex.command(name="streamlit", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context
 def streamlit(ctx):
-    # ── uvloop / nest_asyncio fix ──────────────────────────────────────
+    # ── uvloop guard ───────────────────────────────────────────────────
     # uvloop (pulled in by `uv` or `uvicorn[standard]`) sets itself as
-    # the global event-loop policy.  Streamlit imports nest_asyncio which
-    # patches asyncio.run at import time, capturing the *current* policy.
-    # If uvloop is still active at that moment, nest_asyncio's patched
-    # asyncio.run will later call uvloop's get_event_loop(), which raises:
+    # the global event-loop policy. The failure this guards against came
+    # from nest_asyncio: its patched asyncio.run called uvloop's
+    # get_event_loop(), which raises
     #   RuntimeError: There is no current event loop in thread 'MainThread'
+    # lex no longer applies nest_asyncio (BUG-046), and Streamlit itself
+    # never did. The guard stays, so Streamlit keeps running on asyncio's
+    # own loop here, as it always has.
     #
-    # Fix: reset the policy and create a main-thread loop BEFORE importing
+    # Reset the policy and create a main-thread loop BEFORE importing
     # streamlit, and prevent uvloop from re-installing itself.
     asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
     asyncio.set_event_loop(asyncio.new_event_loop())

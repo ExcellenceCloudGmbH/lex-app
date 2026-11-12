@@ -181,9 +181,11 @@ class StreamlitTokenView(APIView):
                 access_token = auth_header[7:]
 
             if access_token:
-                from .KeycloakManager import KeycloakManager
+                # get_uma_permissions sends the token on its own request only
+                # (lex.api.keycloak.uma_client), so concurrent callers stay apart.
+                from lex.api.views.authentication.KeycloakManager import KeycloakManager
                 kc_manager = KeycloakManager()
-                return kc_manager.get_uma_permissions(access_token)
+                return kc_manager.get_uma_permissions(access_token) or []
         except Exception as e:
             logger.warning(f"Failed to get permissions: {e}")
         return []
