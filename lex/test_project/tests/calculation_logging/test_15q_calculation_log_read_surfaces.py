@@ -1,6 +1,6 @@
-"""Cluster 15m — the calculation-log table is readable again.
+"""Cluster 15q — the calculation-log table is readable again.
 
-Scenarios 15.56 – 15.59.
+Scenarios 15.78 – 15.81.
 
 Reported with LEX-1555: opening a failed run's log and switching to the
 **Details** tab threw the reader out of the drawer and onto the CalculationLog
@@ -21,15 +21,15 @@ raised ``AttributeError``:
 
 The two branches below this one guard themselves with ``has_can_read`` /
 ``has_permission_read``; this one did not, so it raised before they could run.
-15.59 is the guard the other way: the remembered decision is still consulted
+15.81 is the guard the other way: the remembered decision is still consulted
 for a model that *does* declare ``can_read``, so the fix costs the per-request
 memo nothing.
 
-Cluster 15m — scenarios 15.56–15.60. Type: E.
+Cluster 15q — scenarios 15.78–15.82. Type: E.
 Covers: lex/api/serializers/base_serializers.py (``LexSerializer.to_representation``,
 the remembered-decision branch), read through the ``model_entries`` detail,
 AG Grid and ``many`` endpoints.
-Run: python -m lex pytest lex/test_project/tests/calculation_logging/test_15m_calculation_log_read_surfaces.py -v
+Run: python -m lex pytest lex/test_project/tests/calculation_logging/test_15q_calculation_log_read_surfaces.py -v
 """
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def _ag(**overrides):
     return request
 
 
-class TestCluster15m_CalculationLogReadSurfaces(_CalcLogTestCase):
+class TestCluster15q_CalculationLogReadSurfaces(_CalcLogTestCase):
     """Every way the frontend reads a CalculationLog row, as a plain user.
 
     ``E2ETestCase`` logs in as ``e2e_user``, who is **not** a Django
@@ -74,9 +74,9 @@ class TestCluster15m_CalculationLogReadSurfaces(_CalcLogTestCase):
     def setUp(self):
         super().setUp()
         LogRootCalc.objects.bulk_create(
-            [LogRootCalc(name="15m-root", child_mode="log_only", units_csv="")]
+            [LogRootCalc(name="15q-root", child_mode="log_only", units_csv="")]
         )
-        self.row = LogRootCalc.objects.get(name="15m-root")
+        self.row = LogRootCalc.objects.get(name="15q-root")
         self.calculation_id = f"logrootcalc_{self.row.pk}_update_{uuid4().hex}"
         self.log = CalculationLog.objects.create(
             calculationId=self.calculation_id,
@@ -85,9 +85,9 @@ class TestCluster15m_CalculationLogReadSurfaces(_CalcLogTestCase):
             object_id=self.row.pk,
         )
 
-    # ── 15.56 ────────────────────────────────────────────────────────────
-    def test_15_56_the_detail_endpoint_serves_one_log(self):
-        """Scenario 15.56: the regression, at the endpoint ``<Show>`` calls.
+    # ── 15.78 ────────────────────────────────────────────────────────────
+    def test_15_78_the_detail_endpoint_serves_one_log(self):
+        """Scenario 15.78: the regression, at the endpoint ``<Show>`` calls.
 
         The Details tab of the log tree mounts react-admin's ``<Show>`` on
         ``calculationlog``. A failing ``getOne`` is what redirects the reader
@@ -103,9 +103,9 @@ class TestCluster15m_CalculationLogReadSurfaces(_CalcLogTestCase):
         self.assertEqual(response.data["calculationId"], self.calculation_id)
         self.assertIn("the step that ran before the failure", response.data["calculation_log"])
 
-    # ── 15.57 ────────────────────────────────────────────────────────────
-    def test_15_57_the_grid_endpoint_serves_the_table(self):
-        """Scenario 15.57: the ``ERR`` half.
+    # ── 15.79 ────────────────────────────────────────────────────────────
+    def test_15_79_the_grid_endpoint_serves_the_table(self):
+        """Scenario 15.79: the ``ERR`` half.
 
         AG Grid's server-side row model renders a block it could not load as
         ``ERR`` in every cell, so a 500 here and an empty table are
@@ -122,9 +122,9 @@ class TestCluster15m_CalculationLogReadSurfaces(_CalcLogTestCase):
         self.assertIn(self.log.pk, rows)
         self.assertEqual(rows[self.log.pk]["calculationId"], self.calculation_id)
 
-    # ── 15.58 ────────────────────────────────────────────────────────────
-    def test_15_58_many_serves_the_log_of_each_tree_node(self):
-        """Scenario 15.58: what the log tree itself reads.
+    # ── 15.80 ────────────────────────────────────────────────────────────
+    def test_15_80_many_serves_the_log_of_each_tree_node(self):
+        """Scenario 15.80: what the log tree itself reads.
 
         ``CalculationLogTree`` takes the shape of the run from its own view and
         then asks ``many`` for each node's ``calculation_log``. With this
@@ -143,9 +143,9 @@ class TestCluster15m_CalculationLogReadSurfaces(_CalcLogTestCase):
             response.data[0]["calculation_log"],
         )
 
-    # ── 15.59 ────────────────────────────────────────────────────────────
-    def test_15_59_a_model_with_can_read_still_uses_the_remembered_decision(self):
-        """Scenario 15.59: the guard against fixing this by deleting the branch.
+    # ── 15.81 ────────────────────────────────────────────────────────────
+    def test_15_81_a_model_with_can_read_still_uses_the_remembered_decision(self):
+        """Scenario 15.81: the guard against fixing this by deleting the branch.
 
         BUG-011: the list filter has already asked ``permission_read`` for every
         row it returns, and the serializer must not ask again once per row. The
@@ -166,7 +166,7 @@ class TestCluster15m_CalculationLogReadSurfaces(_CalcLogTestCase):
                 recorded.append(result)
                 # Answer for this row so the serializer's own branch is
                 # observable: only `name` survives into the payload.
-                return PermissionResult.allow_fields({"id", "name"}, "15.59")
+                return PermissionResult.allow_fields({"id", "name"}, "15.81")
             return result
 
         with pytest.MonkeyPatch.context() as patch:
@@ -178,12 +178,12 @@ class TestCluster15m_CalculationLogReadSurfaces(_CalcLogTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         self.assertTrue(recorded, "the serializer never consulted the remembered decision")
-        self.assertEqual(response.data.get("name"), "15m-root")
+        self.assertEqual(response.data.get("name"), "15q-root")
         self.assertNotIn("units_csv", response.data)
 
-    # ── 15.60 ────────────────────────────────────────────────────────────
-    def test_15_60_the_log_drawer_finds_the_run_that_failed_and_its_traceback(self):
-        """Scenario 15.60: the one query the log drawer asks, end to end.
+    # ── 15.82 ────────────────────────────────────────────────────────────
+    def test_15_82_the_log_drawer_finds_the_run_that_failed_and_its_traceback(self):
+        """Scenario 15.82: the one query the log drawer asks, end to end.
 
         ``useLastAuditedRun`` does not read the row's own fields — a model that
         declares neither ``calculation_error_message`` nor ``error_message``
@@ -206,7 +206,7 @@ class TestCluster15m_CalculationLogReadSurfaces(_CalcLogTestCase):
 
         trace = "Traceback (most recent call last):\n  ZeroDivisionError: division by zero"
         failed = AuditLog.objects.create(
-            author="15m",
+            author="15q",
             resource="logrootcalc",
             action="update",
             calculation_id=self.calculation_id,
@@ -215,7 +215,7 @@ class TestCluster15m_CalculationLogReadSurfaces(_CalcLogTestCase):
         AuditLogStatus.objects.create(audit_log=failed, status="failure", error_traceback=trace)
         # A later ordinary edit of the same row, audited under the same prefix.
         edited = AuditLog.objects.create(
-            author="15m",
+            author="15q",
             resource="logrootcalc",
             action="update",
             calculation_id=f"logrootcalc_{self.row.pk}_update_{uuid4().hex}",
