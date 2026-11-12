@@ -965,11 +965,11 @@ def calc_and_save_sync(models, *args):
 
             # Calculate and save the model
             try:
-                # Push the child model onto the model_context stack so that
-                # LexLogger / CalculationLog can identify it as the *current*
-                # model while the trigger remains visible as the *parent*.
-                from lex.core.models.CalculationModel import calculation_execution_context
-                with calculation_execution_context():
+                # The row goes on top of the model context stack, so what its
+                # calculate() logs is filed under it with the trigger as its
+                # parent; see child_calculation_context.
+                from lex.core.models.CalculationModel import child_calculation_context
+                with child_calculation_context(prepared):
                     try:
                         prepared.lex_func()(*args)
                         logger.debug(f"Calculation completed for model {i + 1}")
@@ -1027,7 +1027,7 @@ def calc_and_save_streaming(model_iter, *args):
     prepare (delete_models_with_same_defining_fields) and the same
     calculate+save body as calc_and_save_sync, then drops the reference.
     """
-    from lex.core.models.CalculationModel import calculation_execution_context
+    from lex.core.models.CalculationModel import child_calculation_context
     processed = 0
     for i, model in enumerate(model_iter):
         if model is None:
@@ -1039,7 +1039,7 @@ def calc_and_save_streaming(model_iter, *args):
         if skip_closed(prepared):
             continue
         try:
-            with calculation_execution_context():
+            with child_calculation_context(prepared):
                 try:
                     prepared.lex_func()(*args)
                 except Exception as calc_error:

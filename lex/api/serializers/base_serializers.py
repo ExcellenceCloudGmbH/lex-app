@@ -828,8 +828,21 @@ class LexSerializer(serializers.ModelSerializer):
         visible_fields = None
 
         # 0. Already decided for this request (the list filter asked first; BUG-011)
+        #
+        # ``has_can_read`` is asked FIRST, and that order is the fix (LEX-1555):
+        # ``type(...).can_read`` on a model that declares none raises
+        # ``AttributeError``, and this branch runs before the two below that do
+        # guard themselves. Not every model served through ``model_entries`` is a
+        # ``LexModel`` — ``CalculationLog`` is a plain ``django.db.models.Model`` —
+        # so every read of the calculation-log table, by id, by ids and through
+        # the grid, answered 500 and the frontend's log tree, its Details tab and
+        # the table page all broke at once.
         remembered = None
-        if request is not None and type(target_instance).can_read is _lex_model_can_read():
+        if (
+            request is not None
+            and target_caps['has_can_read']
+            and type(target_instance).can_read is _lex_model_can_read()
+        ):
             from lex.api.security import recalled
 
             remembered = recalled(request, "read", target_instance)

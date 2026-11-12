@@ -5,7 +5,6 @@ import sys
 import threading
 import traceback
 
-import nest_asyncio
 from asgiref.sync import sync_to_async
 from django.apps import apps
 from django.contrib.admin.apps import AdminConfig
@@ -102,23 +101,6 @@ def _create_audit_logger_for_task(audit_logging_enabled=None):
 
 
 
-def _apply_nest_asyncio():
-    """``nest_asyncio.apply()``, unless this process's event loop cannot be patched.
-
-    nest_asyncio patches asyncio's own pure-Python loop and refuses any other. A
-    server running on uvloop -- granian, which serves `lex reflex`, picks uvloop
-    whenever it is installed -- has already installed a uvloop policy when Django
-    is set up, so ``apply()`` raises ``ValueError`` inside ``ready()`` and takes
-    ``django.setup()`` down with it. Such a process does not need the patch: lex's
-    synchronous code reaches the database from worker threads there, and a worker
-    thread has no running loop to nest into.
-    """
-    try:
-        nest_asyncio.apply()
-    except ValueError as exc:
-        logger.info("nest_asyncio not applied (%s); this process's loop runs as it is.", exc)
-
-
 def should_load_data(auth_settings):
     """
     Check whether the initial data should be loaded.
@@ -141,7 +123,12 @@ class LexAppConfig(GenericAppConfig):
             generic_app_models = {f"{model.__name__}": model for model in
                                   set(list(apps.get_app_config(repo_name).models.values())
                                       + list(apps.get_app_config(repo_name).models.values())) if model.__name__.count("Historical") != 1}
-            _apply_nest_asyncio()
+
+            # No nest_asyncio here or anywhere in lex. It patched asyncio for
+            # the whole process, which stopped asyncio.run from closing its
+            # loop, and then the second async_to_sync in any thread could wait
+            # forever (BUG-046). Nothing in this startup needs a re-entrant
+            # loop: async_ready runs on a thread of its own, below.
 
             # Run the initial-data check (config load + are_all_models_empty()
             # DB query) OFF the ready() critical path so django.setup() returns
@@ -282,33 +269,17 @@ class LexAppConfig(GenericAppConfig):
 
         await sync_to_async(create_cache_tables, thread_sensitive=False)()
 
-        if await are_all_models_empty(test, generic_app_models):
-            # Prepare audit logging parameters for task execution
-            audit_enabled = is_audit_logging_enabled()
+        # The decision and the load run together in their own non-daemon thread, under
+        # a lock that lets one server process at a time decide (see initial_data_load).
+        from lex.lex_app.initial_data_load import start_initial_data_load
 
-            if os.getenv("DEPLOYMENT_ENVIRONMENT") and os.getenv("ARCHITECTURE") == "MQ/Worker":
-                from lex.lex_app.celery_tasks import load_data, WaitForTasks
-
-                def _load_initial_data_in_context():
-                    with WaitForTasks():
-                        load_data(
-                            test,
-                            generic_app_models,
-                            audit_enabled,
-                            project_config.initial_data,
-                        )
-
-                await sync_to_async(_load_initial_data_in_context, thread_sensitive=False)()
-            else:
-                # Pass audit logging parameters to thread
-                from lex.lex_app.celery_tasks import load_data
-                x = threading.Thread(target=load_data, args=(test, generic_app_models, audit_enabled, project_config.initial_data))
-                x.start()
-        else:
-            test.test_path = project_config.initial_data
-            non_empty_models = await sync_to_async(test.get_list_of_non_empty_models)(generic_app_models)
-            print(f"Loading Initial Data not triggered due to existence of objects of Model: {non_empty_models}")
-            print("Not all referenced Models are empty")
+        return start_initial_data_load(
+            test,
+            generic_app_models,
+            project_config.initial_data,
+            audit_enabled=is_audit_logging_enabled(),
+            mq_worker=bool(os.getenv("DEPLOYMENT_ENVIRONMENT")) and os.getenv("ARCHITECTURE") == "MQ/Worker",
+        )
 
 
     def validate_initial_data_path(self, initial_data_path):
