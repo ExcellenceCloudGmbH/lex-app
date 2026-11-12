@@ -1,7 +1,7 @@
 cluster: 2
 slug: crud_api
 title: CRUD via REST API
-max_scenario: 116
+max_scenario: 121
 letters:
   a:
     title: Create (POST)
@@ -130,3 +130,17 @@ letters:
       the edit keeps its status; 2.114 closing a record through an edit keeps its status; 2.115
       reopening it resets it like any edit of an open record; 2.116 an open record's edit still
       resets it to NOT_CALCULATED.
+  m:
+    title: An API key in the ?api_key= query parameter
+    scenarios: 2.117-2.121
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      2.117 a valid key in ?api_key= alone creates a model entry through the real middleware, the
+      view's HasAPIKey and the API-key identity (created_by = API-key audit actor); 2.118 a wrong
+      key in the Api-Key header is refused even with a valid query key (the header wins); 2.119 a
+      valid header key is not spoiled by a wrong query key; 2.120 a wrong query key and 2.121 an
+      empty or blank one are refused and create nothing.

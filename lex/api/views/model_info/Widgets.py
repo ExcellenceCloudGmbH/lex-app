@@ -1,7 +1,7 @@
 from django.http import JsonResponse
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
-from rest_framework_api_key.permissions import HasAPIKey
+from lex.api.utils.api_key_requests import HasAPIKey
 
 
 class Widgets(APIView):
