@@ -1,4 +1,4 @@
-"""Shared fixtures for the scheduled-job tests (clusters 1bk, 4z, 6v, 7x, 8f, 10ac).
+"""Shared fixtures for the scheduled-job tests (clusters 1bn, 4z, 6v, 7x, 8f, 10ac).
 
 ``ScheduledJob`` is a framework model with its own migration, so its table is in
 the test database already; the targets it calculates live in

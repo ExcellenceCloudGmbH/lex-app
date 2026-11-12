@@ -1814,32 +1814,32 @@ config each fail 1.404.
 
 ---
 
-### Batch 1bk — Scheduler bootstrap — the clock in the served backend, code-declared schedules, `run_scheduler` ✅
+### Batch 1bn — Scheduler bootstrap — the clock in the served backend, code-declared schedules, `run_scheduler` ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.619 – 1.629 |
+| Scenario range | 1.654 – 1.664 |
 | Type | U + E |
 | Files covered | `lex/scheduling/loop.py`, `lex/scheduling/registry.py` (`lex_job`, `sync_code_jobs`), `lex/scheduling/apps.py`, `lex/scheduling/management/commands/run_scheduler.py`, `lex/lex_app/settings.py` (`LEX_SCHEDULER_*`, `INSTALLED_APPS`), `lex/lex_app/asgi.py`, `lex/utilities/config/generic_app_config.py` (untracked history) |
-| Test file | `lex/test_project/tests/init/test_1bk_scheduler_bootstrap.py` |
-| Test classes | `TestCluster01bk_SchedulerClock` (U, 1.619–1.622), `TestCluster01bk_CodeDeclaredSchedules` (E, 1.623–1.629) |
+| Test file | `lex/test_project/tests/init/test_1bn_scheduler_bootstrap.py` |
+| Test classes | `TestCluster01bn_SchedulerClock` (U, 1.654–1.657), `TestCluster01bn_CodeDeclaredSchedules` (E, 1.658–1.664) |
 | Fixtures | `ScheduledJobTestCase`; jobs declared per test with `lex_job(...)` and removed with `unregister` |
 | Tests landed | **11 pass / 0 fail** |
-| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bk) |
+| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bn) |
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.619 | only in the served backend | importing `lex_app.asgi` in a test run starts nothing; a served start starts one thread; a second start returns it; it stops |
-| 1.620 | off is said out loud | `LEX_SCHEDULER_ENABLED=false` → no clock and a WARNING that no scheduled job will run |
-| 1.621 | on by default | enabled, 30 s tick, one-hour grace without any `LEX_SCHEDULER_*` variable |
-| 1.622 | survives failing passes | two raising ticks are logged and the clock keeps ticking |
-| 1.623 | a declaration becomes a row | `managed_by_code`, function target, cron, zone, kwargs, enabled, scheduled, no run-as |
-| 1.624 | code owns the schedule, the user the switch | a changed cron is applied; a user's `enabled=false` is kept |
-| 1.625 | a removed declaration | switched off (not deleted) with a message; declared again, switched back on |
-| 1.626 | a person's schedule is never taken over | same name created in the app: unchanged, conflict reported |
-| 1.627 | one function per name | a second function is refused naming it; the same function again is fine; a never-firing schedule is refused |
-| 1.628 | `run_scheduler --once` | syncs declarations, starts the due job, waits for it (SUCCESS), reports `fired=[...]` |
-| 1.629 | registered, not history-tracked | in `processAdminSite.registered_models`; no `history` |
+| 1.654 | only in the served backend | importing `lex_app.asgi` in a test run starts nothing; a served start starts one thread; a second start returns it; it stops |
+| 1.655 | off is said out loud | `LEX_SCHEDULER_ENABLED=false` → no clock and a WARNING that no scheduled job will run |
+| 1.656 | on by default | enabled, 30 s tick, one-hour grace without any `LEX_SCHEDULER_*` variable |
+| 1.657 | survives failing passes | two raising ticks are logged and the clock keeps ticking |
+| 1.658 | a declaration becomes a row | `managed_by_code`, function target, cron, zone, kwargs, enabled, scheduled, no run-as |
+| 1.659 | code owns the schedule, the user the switch | a changed cron is applied; a user's `enabled=false` is kept |
+| 1.660 | a removed declaration | switched off (not deleted) with a message; declared again, switched back on |
+| 1.661 | a person's schedule is never taken over | same name created in the app: unchanged, conflict reported |
+| 1.662 | one function per name | a second function is refused naming it; the same function again is fine; a never-firing schedule is refused |
+| 1.663 | `run_scheduler --once` | syncs declarations, starts the due job, waits for it (SUCCESS), reports `fired=[...]` |
+| 1.664 | registered, not history-tracked | in `processAdminSite.registered_models`; no `history` |
 
 **Why a regression matters:** Instances with no scheduler, clocks in the wrong processes, declared schedules drifting from the code, or a history table growing on every run.
 

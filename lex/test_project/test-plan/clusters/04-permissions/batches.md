@@ -155,7 +155,7 @@ must not open a check on the whole model.
 | Test classes | `TestCluster04z_ScheduledJobPermissions` (4.159–4.162) |
 | Fixtures | `ScheduledDeniedCalc` (readable, never editable), `ScheduledJobTestCase.scheduled_jobs_allowed()` |
 | Tests landed | **4 pass / 0 fail** |
-| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bk) |
+| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bn) |
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |

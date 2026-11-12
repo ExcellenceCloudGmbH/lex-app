@@ -209,7 +209,7 @@
 | Test classes | `TestCluster08f_CronSchedule` (U, 8.167–8.173), `TestCluster08f_SchedulerTick` (E, 8.174–8.181) |
 | Fixtures | `ScheduledJobTestCase` and `ScheduledTargetCalc` (`tests/_scheduling_support.py`, `calculations/models.py`) |
 | Tests landed | **16 pass / 0 fail** |
-| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bk) |
+| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bn) |
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |

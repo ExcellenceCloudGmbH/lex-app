@@ -215,9 +215,9 @@ record had before it (7.237).
 | Files covered | `lex/scheduling/models.py` (`ScheduledJob.calculate`, the stale-copy guard in `save`), `lex/scheduling/dispatch.py` (`fire`), `lex/core/calculation_start.py` |
 | Test file | `lex/test_project/tests/calculations/test_7x_scheduled_job_runs.py` |
 | Test classes | `TestCluster07x_ScheduledJobRuns` (7.269–7.278) |
-| Fixtures | `ScheduledTargetCalc` (counts runs, can fail, can be held open by a gate, can be closed) — added to `calculations/models.py` with `ScheduledDeniedCalc` and `KeepsStatusOnEditCalc`, kept out of `ALL_MODELS` (also used by 8f, 10ac, 6v, 4z, 1bk) |
+| Fixtures | `ScheduledTargetCalc` (counts runs, can fail, can be held open by a gate, can be closed) — added to `calculations/models.py` with `ScheduledDeniedCalc` and `KeepsStatusOnEditCalc`, kept out of `ALL_MODELS` (also used by 8f, 10ac, 6v, 4z, 1bn) |
 | Tests landed | **10 pass / 0 fail** |
-| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bk) |
+| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bn) |
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |

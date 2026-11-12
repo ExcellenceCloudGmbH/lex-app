@@ -132,7 +132,7 @@
 | Test classes | `TestCluster10ac_ScheduledJobsApi` (10.175–10.183) |
 | Fixtures | `ScheduledJobTestCase.scheduled_jobs_allowed()` (stands in for an admin's Keycloak grant on `scheduling.ScheduledJob`), `ScheduledTargetCalc`, `KeepsStatusOnEditCalc` |
 | Tests landed | **9 pass / 0 fail** |
-| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bk) |
+| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bn) |
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |

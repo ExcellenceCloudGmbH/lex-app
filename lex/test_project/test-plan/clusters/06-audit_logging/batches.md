@@ -140,7 +140,7 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Test classes | `TestCluster06v_ScheduledRunAudit` (6.173–6.175) |
 | Fixtures | `ScheduledJobTestCase` with `e2e_unpatch = {"ensure_terminal_calculation_audit"}` |
 | Tests landed | **3 pass / 0 fail** |
-| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bk) |
+| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bn) |
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |

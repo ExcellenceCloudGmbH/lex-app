@@ -209,7 +209,7 @@ a slot did not run. A `next_run_at` in the past on an enabled row means no clock
 | **10ac** (10.175–10.183) | 10 api_layer | E | create through REST computes `next_run_at` and sets `run_as`; field-level 400s (cron, timezone, target, past `run_at`, both/neither schedule); editing the schedule recomputes `next_run_at`; disabling clears it; ▶ (PATCH `calculate=true`) runs the job now; a code-managed row refuses schedule edits; the model is in the model structure |
 | **6v** (6.173–6.175) | 06 audit_logging | E | a scheduled run opens and finalises an `AuditLog` entry authored by the run-as user, payload marks the schedule; a failed run finalises as failure |
 | **4z** (4.159–4.162) | 04 permissions | E | saving a schedule for a target the caller may not calculate answers 400 and creates nothing; code without a request may |
-| **1bk** (1.619–1.629) | 01 init | U + E | the clock starts only in the served backend and only when enabled; disabled logs a WARNING; `run_scheduler --once` syncs code jobs and fires due ones; code-job sync creates/updates/keeps `enabled`/disables removed; a duplicate `@lex_job` name is refused |
+| **1bn** (1.654–1.664) | 01 init | U + E | the clock starts only in the served backend and only when enabled; disabled logs a WARNING; `run_scheduler --once` syncs code jobs and fires due ones; code-job sync creates/updates/keeps `enabled`/disables removed; a duplicate `@lex_job` name is refused |
 
 ## 9. Rollout
 
