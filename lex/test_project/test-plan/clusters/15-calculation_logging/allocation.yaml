@@ -8,56 +8,61 @@ letters:
     scenarios: 15.1-15.6
     status: complete
     tests:
-      pass: 0
+      pass: 6
       skip: 0
       xfail: 0
-    note: counts not yet measured — imported at cluster-15 promotion
+    note: measured 2026-11-06 — 6 pass
   b:
     title: Single-parent hierarchy, loud children
     scenarios: 15.7-15.10
     status: complete
     tests:
-      pass: 0
+      pass: 4
       skip: 0
       xfail: 0
-    note: counts not yet measured — imported at cluster-15 promotion
+    note: measured 2026-11-06 — 4 pass. 15.8 and 15.9 failed from eec74b6d (2026-05-14) until the fix for BUG-052
   c:
     title: Silent children + mixed-siblings regression gate
     scenarios: 15.11-15.13
     status: complete
     tests:
-      pass: 0
+      pass: 3
       skip: 0
       xfail: 0
-    note: counts not yet measured — imported at cluster-15 promotion
+    note: measured 2026-11-06 — 3 pass. 15.12 and 15.13 failed from eec74b6d (2026-05-14) until the fix for BUG-052
   d:
     title: Three-level chain (root → middle → grandchild)
     scenarios: 15.14-15.15
     status: complete
     tests:
-      pass: 0
+      pass: 2
       skip: 0
       xfail: 0
-    note: counts not yet measured — imported at cluster-15 promotion
+    note: measured 2026-11-06 — 2 pass. Both failed from eec74b6d (2026-05-14) until the fix for BUG-052
   e:
     title: CalculatedModelMixin combinatorial pipeline
     scenarios: 15.16-15.18
     status: complete
     tests:
-      pass: 0
+      pass: 3
       skip: 0
       xfail: 0
-    note: counts not yet measured — imported at cluster-15 promotion
+    note: measured 2026-11-06 — 3 pass. All three failed from eec74b6d (2026-05-14) until the fix for BUG-052
   f:
     title: Hierarchy preservation across the .save() boundary
     scenarios: 15.19-15.21
     status: complete
     tests:
-      pass: 0
+      pass: 3
       skip: 0
       xfail: 0
-    note: counts not yet measured — imported at cluster-15 promotion; three scenarios (15.19-15.21)
-      marked @unittest.expectedFailure pending the execute_calculation_sync fix
+    note: >-
+      measured 2026-11-09 — 3 pass. BUG-055. The three scenarios were @unittest.expectedFailure from
+      2026-05-12, because a CalculationModel saved inside another calculation never had a frame of its
+      own on the synchronous route, and its lines were appended to its caller's row. The markers are
+      gone: calculate_hook now runs a synchronous calculation inside child_calculation_context, which
+      skips the root already on top (pushed by _save_root here, by the API in production). 15o pins what
+      else that frame decides
   g:
     title: Object-less heading frames (TOC nodes) in the log tree
     scenarios: 15.22-15.31
@@ -157,6 +162,114 @@ letters:
       the system (15.53). A rendering failure is a `failure` entry with the 500 and no delivered
       size (15.54), and a log the caller may not see is a recorded refusal keeping the 404's
       traceback, with nothing attached (15.55).
+  q:
+    title: The calculation-log table is readable again
+    scenarios: 15.78-15.82
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      LEX-1555, second half. LexSerializer.to_representation asked
+      type(instance).can_read before asking whether the model declares one, and
+      CalculationLog is a plain django.db.models.Model - so every read of the
+      calculation-log table through model_entries raised AttributeError and
+      answered 500. The two branches beneath it guard themselves with
+      has_can_read / has_permission_read; this one ran first and raised before
+      they could. One 500, read twice by the frontend: react-admin's <Show>
+      answers a failed getOne by redirecting to the resource's list (15.78), and
+      AG Grid's server-side row model renders a block it could not load as "ERR"
+      in every cell (15.79) - which is exactly what the reporter saw on the
+      Details tab of a failed run's log. 15.80 is the third reader, the log
+      tree's per-node text. 15.81 is the guard the other way: a model that does
+      declare can_read still serves the decision the list filter remembered
+      (BUG-011), so the capability check costs the per-request memo nothing.
+      15.82 pins the one query the log drawer asks - newest audit entry whose
+      terminal status is the one the row ended with, under the
+      <model>_<pk>_ prefix - and that its answer carries error_traceback for a
+      plain user, which is the drawer's half of 6u.
+  m:
+    title: A generated row's log is filed under that row — synchronous routes
+    scenarios: 15.56-15.62
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      BUG-052 and BUG-053. Since eec74b6d (2026-05-14) no batch consumer put the row it calculated on the model
+      context stack, so every generated row's lines were filed under the root. 15b-15e pinned that
+      and failed unnoticed, because no CI job ran this cluster. All three consumers now run each row
+      inside CalculationModel.child_calculation_context. With a non-atomic root, lines are written
+      before a new row has a pk; such a row now gets a node of its own, kept on the instance and
+      linked to the record when its block ends. Before eec74b6d those siblings were merged into one
+      node with no record. Covers the materialising route (15.56), immediate writes on both routes
+      (15.57, 15.58), a re-run keyed by the stored rows (15.59), a middle that logs only after its
+      grandchild, atomic and not (15.60, 15.61), and a failing row (15.62). Each scenario was
+      checked to fail with the matching part of the fix undone.
+  n:
+    title: A generated row's log is filed under that row — Celery route
+    scenarios: 15.63-15.64
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      Eager Celery, as in cluster 8h. A worker writes every line immediately and works on a copy of
+      the stack. 15.63: a root running in the generic calc_and_save task finds a copy of itself on
+      top and is not pushed again (ModelContext.has_on_top), while each dispatched row gets its own
+      node. 15.64: a middle row that dispatches its grandchildren before logging is unsaved when the
+      stack is copied; copy_for_dispatch creates its node first, so every worker files under the same
+      node. Checked to fail without the guard (15.63, 15.64) and without the node created before
+      the copy (15.64).
+  o:
+    title: A nested CalculationModel's synchronous run is not taken for the root
+    scenarios: 15.65-15.71
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      BUG-055. calculate_hook gives a CalculationModel it runs synchronously a frame of its own
+      (child_calculation_context), from the run through the terminal bookkeeping in
+      execute_calculation_sync and the failure handling in calculate_hook. Both decide from the stack
+      whether the run is the root. Without the frame, a nested model was taken for the root. Covers a
+      nested model that finishes and leaves the run's live log alone (15.65), a run that fails in a
+      nested model and keeps its log (15.66), a nested failure the caller handles and that leaves one
+      root node (15.67), and a root saved with nothing on the stack, which gets a node of its own and
+      keeps its log when it fails (15.68, 15.69). It also covers the API route, a background thread in
+      a copy of the request context where the root is not pushed twice (15.70), and the Celery route,
+      which gives the same tree (15.71). 15.65 and 15.66 purge the live log as Redis does, which the
+      test cache cannot. Checked against the undone fix: no frame fails 15.65-15.70 and 15.19-15.21;
+      a frame around calculate() only fails 15.65, 15.66, 15.67 and 15.69; a frame that ends before
+      the failure handling fails 15.66 and 15.67; a frame pushed when the model is already on top fails
+      15.19-15.21, 15.67 and 15.70. 15.71 passes without the fix too: it guards the agreement of the routes.
+  p:
+    title: A CalculationModel dispatched to Celery runs in a frame of its own
+    scenarios: 15.72-15.77
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      BUG-056. Eager Celery, as in 15n. calculate_hook now opens child_calculation_context before it
+      either dispatches the run or runs it, and closes it in its finally, so the task is shipped a copy
+      of the stack with the model on top, and the hook's failure handling, which runs in the caller's
+      thread when the task failed, sees the model on top. Covers a nested model whose calculate() is a
+      @lex_shared_task, which gets its own node (15.72), and what it saves on the worker, which nests
+      under it (15.73); a decorated root saved with nothing on the stack, which gets a node keyed to its
+      record and closes its audit entry as a success (15.74); the generic task giving such a root the
+      same node (15.75); and a nested failure the root handles, which leaves the run's live log alone on
+      the generic task (15.76) and on the decorated route (15.77). Checked against the undone fix: no
+      frame on the Celery route fails 15.72-15.74, 15.76 and 15.77; a frame that ends before the
+      failure handling fails 15.76 and 15.77; the rejected alternative, a push of args[0] in the
+      lex_shared_task wrapper, fails 15.76 and 15.77; calc_and_save pushing a model already on top
+      fails 15.72, 15.73 and 15.75-15.77 (and 15.63, 15.64, 15.71). 15.75 passes without the fix: it
+      guards the agreement of the routes.
   r:
     title: The calculation-log PDF covers one step, a branch, or the whole calculation
     scenarios: 15.83-15.89

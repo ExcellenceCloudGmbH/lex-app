@@ -128,12 +128,36 @@ class CalculatedModelMixinTests(SimpleTestCase):
         self.assertEqual([model.region for model in combinations], ["DE", "SE"])
 
     def test_create_treats_empty_selections_as_valid_noop(self):
+        """An empty selection is a no-op on both synchronous routes.
+
+        Without Celery, ``create()`` streams by default and returns before the
+        four-step pipeline, so it never reaches ``_dispatch_model_processing``
+        (docs/reference/CalculatedModelMixin Internals.md, "The four-step
+        pipeline is not the default path locally"). This test predates that
+        route and expected the dispatch on every call. It failed from the day
+        the streaming route became the default (7efe7b1f, 2026-06-10). With
+        ``LEX_SYNC_STREAMING_EXPANSION=false`` the legacy route still
+        dispatches, with no clusters. Neither route calculates or raises.
+        """
         IterableSelectionModel.selected_values = LazyValues([])
 
-        IterableSelectionModel.create()
+        with self.subTest(route="streaming (default)"):
+            with patch.dict(os.environ, {"CELERY_ACTIVE": "false"}):
+                os.environ.pop("LEX_SYNC_STREAMING_EXPANSION", None)
+                IterableSelectionModel.create()
 
-        self.assertEqual(IterableSelectionModel.calculate_calls, 0)
-        self.assertEqual(IterableSelectionModel.dispatch_calls, [{}])
+            self.assertEqual(IterableSelectionModel.calculate_calls, 0)
+            self.assertEqual(IterableSelectionModel.dispatch_calls, [])
+
+        with self.subTest(route="materialising (LEX_SYNC_STREAMING_EXPANSION=false)"):
+            with patch.dict(
+                os.environ,
+                {"CELERY_ACTIVE": "false", "LEX_SYNC_STREAMING_EXPANSION": "false"},
+            ):
+                IterableSelectionModel.create()
+
+            self.assertEqual(IterableSelectionModel.calculate_calls, 0)
+            self.assertEqual(IterableSelectionModel.dispatch_calls, [{}])
 
     def test_dispatch_processing_dispatches_inside_worker_without_explicit_async_context(self):
         """Inside a worker with no explicit async context, dispatch now fans out

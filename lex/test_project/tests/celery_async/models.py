@@ -237,3 +237,104 @@ ALL_MODELS.extend([
     AuditCeleryChild,
     AuditDecoratedParentCalc,
 ])
+
+
+# ---------------------------------------------------------------------
+# create(*args) fixtures (sub-cluster 8e)
+#
+# ``CalculatedModelMixin.create(*args)`` passes its positional arguments to
+# every generated row's ``calculate()``. These batches are grouped one task
+# per region, so the Celery route sends three group messages with three
+# different group indexes. Both ``calculate`` methods are @lex_shared_task:
+# without ``.delay`` on ``calculate`` the Celery route is never taken.
+# ---------------------------------------------------------------------
+
+import json  # noqa: E402
+
+from lex.core.mixins.CalculatedModelMixin import CalculatedModelMixin  # noqa: E402
+
+
+@_permissive
+class CreateArgsBatch(CalculatedModelMixin):
+    """Writes the positional arguments its ``calculate()`` received onto the row.
+
+    ``calls`` logs every call as ``(region, args)``, including calls whose row
+    is not saved afterwards. ``fail_once_for`` lists regions whose next call
+    raises once, the way a transient error in a worker would.
+    """
+
+    region = models.CharField(max_length=16)
+    received_args = models.TextField(blank=True, default="")
+
+    defining_fields = ["region"]
+    parallelizable_fields = ["region"]
+
+    _region_keys = ["US", "EU", "APAC"]
+    calls: list = []
+    fail_once_for: set = set()
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.region
+
+    def get_selected_key_list(self, key):
+        if key == "region":
+            return list(type(self)._region_keys)
+        return []
+
+    def calculate(self, *args):
+        type(self).calls.append((self.region, args))
+        if self.region in type(self).fail_once_for:
+            type(self).fail_once_for.discard(self.region)
+            raise RuntimeError(
+                f"CreateArgsBatch({self.region!r}) failing once on purpose"
+            )
+        self.received_args = json.dumps(list(args))
+
+
+@_permissive
+class NoArgBatch(CalculatedModelMixin):
+    """A ``calculate()`` that takes no arguments, like most customer batches."""
+
+    region = models.CharField(max_length=16)
+    calculated = models.BooleanField(default=False)
+
+    defining_fields = ["region"]
+    parallelizable_fields = ["region"]
+
+    _region_keys = ["US", "EU", "APAC"]
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.region
+
+    def get_selected_key_list(self, key):
+        if key == "region":
+            return list(type(self)._region_keys)
+        return []
+
+    def calculate(self):
+        self.calculated = True
+
+
+try:
+    from lex.lex_app.celery_tasks import lex_shared_task
+
+    # Explicit names for the same reason as the 8c fixtures above: every
+    # ``calculate`` in this module would otherwise register as
+    # ``...models.calculate`` and the last one would win.
+    CreateArgsBatch.calculate = lex_shared_task(
+        name="test_8e.create_args_batch.calculate"
+    )(CreateArgsBatch.calculate)
+    NoArgBatch.calculate = lex_shared_task(
+        name="test_8e.no_arg_batch.calculate"
+    )(NoArgBatch.calculate)
+except Exception:  # pragma: no cover - decorator must exist in a real build
+    pass
+
+# Kept out of ALL_MODELS: only 8e's classes need these tables.
+CREATE_ARGS_MODELS = [CelerySyncCalc, CreateArgsBatch, NoArgBatch]

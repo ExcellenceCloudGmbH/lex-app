@@ -46,8 +46,24 @@ _NOT_THE_PACKAGE = {
 
 
 def management_commands(root: Path):
-    """Management-command modules that this package actually ships."""
+    """Management-command modules that this package actually ships.
+
+    Underscore-prefixed modules are skipped because Django skips them. Its own
+    loader is::
+
+        # django/core/management/__init__.py -- find_commands()
+        if not is_pkg and not name.startswith("_")
+
+    so a module like ``_keycloak_env.py`` living in a ``commands/`` package is
+    a shared helper, not a command: there is no ``lex _keycloak_env`` for a
+    reader to run. Collecting it made this gate demand documentation for
+    something nobody can type, and the only place that documentation could go
+    is a mirror-owned page this repo cannot edit -- a red check with no fix
+    available in the repository that reported it.
+    """
     for path in root.rglob("management/commands/*.py"):
+        if path.name.startswith("_"):
+            continue
         if _NOT_THE_PACKAGE.isdisjoint(path.parts):
             yield path
 
@@ -63,7 +79,13 @@ DJANGO_BUILTINS = {
 }
 
 #: Words that follow "lex " in prose without being commands.
-NOT_A_COMMAND = {"command", "commands", "app", "apps", "framework", "cli", "test"}
+#:
+#: "looks" arrives with the CLI reference's own heading, "Where lex looks for
+#: the project". A heading is prose, and the regex below cannot tell prose from
+#: an instruction -- which is what this set is for. The risk it carries is the
+#: same one every entry here carries: a real command by that name would go
+#: unchecked. None of these will ever be one.
+NOT_A_COMMAND = {"command", "commands", "app", "apps", "framework", "cli", "test", "looks"}
 
 #: A line that says a command does not exist is documentation ABOUT its
 #: absence, not an instruction to run it. The CLI reference has one: it warns
