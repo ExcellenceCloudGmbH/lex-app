@@ -27,9 +27,20 @@ import pytest
 pytestmark = pytest.mark.api_layer
 
 
+class _Operator:
+    """A superuser: only operators read logs that belong to no record (LEX_SEC_INTERNAL, 4.104)."""
+
+    is_authenticated = True
+    is_superuser = True
+    is_active = True
+
+
 def _get(params: dict):
     """Drive the view through a DRF request and return the Response."""
+    from rest_framework.test import force_authenticate
+
     request = APIRequestFactory().get("/api/calculationlog/tree/", params)
+    force_authenticate(request, user=_Operator())
     return CalculationLogTreeView.as_view()(request)
 
 

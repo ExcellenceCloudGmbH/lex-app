@@ -129,7 +129,82 @@ class ApiLayerCalc(CalculationModel):
         return None
 
 
+@_permissive
+class ExplodingItem(LexModel):
+    """Cluster 10o: saving a row named "explode" fails, so the API answers 500."""
+
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if self.name == "explode":
+            raise RuntimeError("cluster 10o: save failed on purpose")
+        return super().save(*args, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# File-download models (Cluster 10p)
+# ---------------------------------------------------------------------------
+
+@_permissive
+class DownloadableDocument(LexModel):
+    """A record carrying a file the download endpoints serve."""
+
+    name = models.CharField(max_length=200)
+    attachment = models.FileField(upload_to="cluster10p/", blank=True, null=True)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+
 ALL_MODELS = [ApiSimpleItem, SchemaFKTarget, SchemaItem, SchemaHiddenItem, ApiLayerCalc]
+HARDENING_MODELS = [ApiSimpleItem, ExplodingItem]
+DOWNLOAD_MODELS = [DownloadableDocument]
 
 API_SIMPLE = "apisimpleitem"
 API_LAYER_CALC = "apilayercalc"
+EXPLODING = "explodingitem"
+DOWNLOADABLE = "downloadabledocument"
+
+
+class ContractItem(LexModel):
+    """Cluster 10aa: a model everyone may read and edit, but only superusers create or delete.
+
+    Its refusals are the permission answers of the HTTP auth contract v2 (403
+    ``permission_denied``, the user stays signed in).
+    """
+
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 10aa: read-open")
+
+    def permission_list(self, uc):
+        return True
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 10aa: edit-open")
+
+    def permission_create(self, uc):
+        return bool(uc.is_superuser)
+
+    def permission_delete(self, uc):
+        return bool(uc.is_superuser)
+
+
+CONTRACT_MODELS = [ContractItem]
+CONTRACT_ITEM = "contractitem"

@@ -45,8 +45,13 @@ Business logic for one combination. Same contract as `CalculationModel.calculate
 ## The `create()` Classmethod
 
 ```python
-MyBatchModel.create(**kwargs)
+MyBatchModel.create(*args, **kwargs)
 ```
+
+Keyword arguments override the values of `defining_fields` (see Step 1).
+Positional arguments are passed to every generated row's `calculate()`. That
+holds on every route, Celery included: before lex-app 2.5.0 the Celery task
+dropped them.
 
 Which route `create()` takes depends on whether Celery is active, and — when it
 is not — on `LEX_SYNC_STREAMING_EXPANSION`:
@@ -133,7 +138,7 @@ Checks `CELERY_ACTIVE` environment variable and whether `calculate()` has a `.de
 - **Celery path:** `CeleryTaskDispatcher.dispatch_calculation_groups()` sends each group as a `calc_and_save.delay()` call inside a `WaitForTasks` context, then waits for completion.
 - **Sync path:** `calc_and_save_sync()` processes all models sequentially — calls `lex_func()` then `save()` on each. `None` models are skipped. The path is **fail-fast**: the first model whose `calculate()` or `save()` raises immediately aborts the batch with `CalculatedModelError` (wrapping the underlying error with `model_class` / `model_index` / `total_models` context). Earlier successful saves are not rolled back by the helper itself, so wrap the trigger in a transaction if you need all-or-nothing semantics.
 
-In both paths, the framework sets logging context for the currently executing child model automatically.
+On every route, the framework puts each generated row on top of the model context while it is calculated and saved. Its log goes into a node of its own, under the calculation that called `create()`. The routes are `calc_and_save_streaming()`, `calc_and_save_sync()`, the Celery `calc_and_save` task, and the synchronous retry after a failed task. On a re-run the log is filed under the stored row. A new row's node is linked to it once it is saved. See [[calculations/logging#Nested Calculations|Nested Calculations]].
 
 Failed Celery *dispatch* (the broker is unreachable, or a single group's `.delay()` call fails) falls back to synchronous processing.
 

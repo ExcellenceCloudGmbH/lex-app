@@ -1,0 +1,272 @@
+{
+  "contract": 2,
+  "cases": [
+    {
+      "id": "v2-401-not-authenticated",
+      "server": "v2",
+      "server_case": "session_missing",
+      "description": "No session (or an ended one) on a background request.",
+      "request": {
+        "method": "GET",
+        "path": "api/model_entries/fund/list"
+      },
+      "response": {
+        "status": 401,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json",
+          "www-authenticate": "Session realm=\"LEX-demo\"",
+          "cache-control": "no-store"
+        },
+        "body": {
+          "error": "not_authenticated",
+          "login_url": "/oidc/authenticate"
+        }
+      },
+      "expect": {
+        "kind": "reauth",
+        "reason": "not_authenticated",
+        "loginUrl": "/oidc/authenticate",
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    },
+    {
+      "id": "v2-401-session-expired",
+      "server": "v2",
+      "server_case": "session_expired",
+      "description": "Keycloak answered invalid_grant on refresh: the session ended.",
+      "request": {
+        "method": "POST",
+        "path": "api/model_entries/fund/1/one"
+      },
+      "response": {
+        "status": 401,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json",
+          "www-authenticate": "Session realm=\"LEX-demo\"",
+          "cache-control": "no-store"
+        },
+        "body": {
+          "error": "session_expired",
+          "login_url": "/oidc/authenticate"
+        }
+      },
+      "expect": {
+        "kind": "reauth",
+        "reason": "session_expired",
+        "loginUrl": "/oidc/authenticate",
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    },
+    {
+      "id": "v2-401-offsite-login-url-dropped",
+      "server": "v2",
+      "server_case": null,
+      "description": "A login_url pointing to another site is ignored (open-redirect guard).",
+      "request": {
+        "method": "GET",
+        "path": "api/user/"
+      },
+      "response": {
+        "status": 401,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "error": "not_authenticated",
+          "login_url": "https://evil.example/oidc/authenticate"
+        }
+      },
+      "expect": {
+        "kind": "reauth",
+        "reason": "not_authenticated",
+        "loginUrl": null,
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    },
+    {
+      "id": "v2-401-protocol-relative-login-url-dropped",
+      "server": "v2",
+      "server_case": null,
+      "description": "A protocol-relative login_url is not same-origin.",
+      "request": {
+        "method": "GET",
+        "path": "api/user/"
+      },
+      "response": {
+        "status": 401,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "error": "not_authenticated",
+          "login_url": "//evil.example/oidc/authenticate"
+        }
+      },
+      "expect": {
+        "kind": "reauth",
+        "reason": "not_authenticated",
+        "loginUrl": null,
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    },
+    {
+      "id": "legacy-401-codeflow-1x",
+      "server": "legacy",
+      "server_case": "legacy_refresh_failed",
+      "description": "django-oauth2-codeflow 1.x/2.0 JSON 401 after a failed refresh.",
+      "request": {
+        "method": "POST",
+        "path": "api/model_entries/fund/1/one"
+      },
+      "response": {
+        "status": 401,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "error": "{\"error\":\"invalid_grant\",\"error_description\":\"Session not active\"}",
+          "token_type": "access_token"
+        }
+      },
+      "expect": {
+        "kind": "reauth",
+        "reason": "legacy_401",
+        "loginUrl": null,
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    },
+    {
+      "id": "legacy-403-drf-not-authenticated",
+      "server": "legacy",
+      "server_case": "legacy_drf_not_authenticated",
+      "description": "DRF NotAuthenticated rendered as 403 (first auth class has no authenticate_header).",
+      "request": {
+        "method": "GET",
+        "path": "api/model_entries/fund/1/one"
+      },
+      "response": {
+        "status": 403,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "detail": "Authentication credentials were not provided."
+        }
+      },
+      "expect": {
+        "kind": "reauth",
+        "reason": "legacy_403",
+        "loginUrl": null,
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    },
+    {
+      "id": "legacy-403-drf-authentication-failed",
+      "server": "legacy",
+      "server_case": null,
+      "description": "DRF AuthenticationFailed rendered as 403.",
+      "request": {
+        "method": "GET",
+        "path": "api/user/"
+      },
+      "response": {
+        "status": 403,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "detail": "Incorrect authentication credentials."
+        }
+      },
+      "expect": {
+        "kind": "reauth",
+        "reason": "legacy_403",
+        "loginUrl": null,
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    },
+    {
+      "id": "v2-403-code-not-authenticated",
+      "server": "v2",
+      "server_case": null,
+      "description": "A 403 explicitly coded not_authenticated is a lost session.",
+      "request": {
+        "method": "GET",
+        "path": "api/user/"
+      },
+      "response": {
+        "status": 403,
+        "type": "basic",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "detail": "Authentication credentials were not provided.",
+          "code": "not_authenticated"
+        }
+      },
+      "expect": {
+        "kind": "reauth",
+        "reason": "legacy_403",
+        "loginUrl": null,
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    },
+    {
+      "id": "legacy-opaque-redirect",
+      "server": "legacy",
+      "server_case": "legacy_redirect",
+      "description": "fetch(redirect:'manual') saw the old 302 to the login flow.",
+      "request": {
+        "method": "GET",
+        "path": "api/model_entries/fund/list"
+      },
+      "response": {
+        "status": 0,
+        "type": "opaqueredirect",
+        "headers": {},
+        "body": null
+      },
+      "expect": {
+        "kind": "reauth",
+        "reason": "legacy_redirect",
+        "loginUrl": null,
+        "retry": {
+          "GET": false,
+          "POST": false
+        }
+      }
+    }
+  ]
+}

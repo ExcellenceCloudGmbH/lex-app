@@ -2,8 +2,11 @@ import io
 import logging
 
 import markdown2
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
+from lex.audit_logging.mixins.FileOperationAuditMixin import FileOperationAuditMixin
 from lex.audit_logging.models.CalculationLog import CalculationLog
+from lex.audit_logging.utils.file_operation_audit import ACTION_DOWNLOAD
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
@@ -146,6 +149,44 @@ def _wants_descendants(raw: "str | None") -> bool:
     return str(raw or "").strip().lower() in _TRUTHY
 
 
+#: The three things a reader can ask the endpoint for. ``node`` is one log,
+#: ``subtree`` that log and everything under it, ``calculation`` every log of
+#: the calculation the log belongs to -- the whole execution tree, whichever
+#: node the reader happened to have selected.
+SCOPE_NODE = "node"
+SCOPE_SUBTREE = "subtree"
+SCOPE_CALCULATION = "calculation"
+SCOPES = (SCOPE_NODE, SCOPE_SUBTREE, SCOPE_CALCULATION)
+
+_FILENAME_SUFFIX = {
+    SCOPE_NODE: "",
+    SCOPE_SUBTREE: "_full",
+    SCOPE_CALCULATION: "_calculation",
+}
+
+
+def resolve_scope(query_params) -> str:
+    """Which scope a request asked for.
+
+    ``?scope=`` wins when present. Without it, ``?include_descendants=true``
+    still means ``subtree`` -- that flag predates ``scope`` and released
+    frontends send it. An unknown scope is a 400 rather than a quiet fallback
+    to one log: a reader who asked for the whole calculation and received one
+    step would have no way to tell from the file.
+    """
+    raw = query_params.get("scope")
+    if raw is not None and str(raw).strip():
+        scope = str(raw).strip().lower()
+        if scope not in SCOPES:
+            raise ValidationError(
+                {"scope": f"Unknown scope {raw!r}; expected one of: {', '.join(SCOPES)}."}
+            )
+        return scope
+    if _wants_descendants(query_params.get("include_descendants")):
+        return SCOPE_SUBTREE
+    return SCOPE_NODE
+
+
 def _node_title(log: CalculationLog, index: int) -> str:
     """A heading a person can navigate by.
 
@@ -208,18 +249,81 @@ def collect_subtree(root: CalculationLog, cap: int = MAX_SUBTREE_NODES):
     return ordered, truncated
 
 
-def build_subtree_markdown(ordered, truncated: bool) -> str:
+def collect_calculation(log: CalculationLog, cap: "int | None" = None):
+    """Every log of ``log``'s calculation, in the order the execution tree shows.
+
+    The execution tree is every row sharing a ``calculationId``; a row whose
+    parent is not in that set is one of its roots. The same rule is applied
+    here, so "the whole calculation" is exactly what the reader was looking at
+    -- including a calculation with more than one root, which a walk down from
+    the topmost ancestor of the selected node would miss.
+
+    One query, bounded by ``cap``. Rows are taken in id order, and a parent row
+    is written before its children, so truncation drops the end of the run
+    rather than orphaning its middle.
+
+    A cycle has no root and would never be reached from one; its rows are
+    appended as roots of their own, so nothing the table holds goes missing.
+
+    Returns ``(ordered, truncated)`` like :func:`collect_subtree`.
+    """
+    if cap is None:
+        cap = MAX_SUBTREE_NODES
+    rows = list(
+        CalculationLog.objects.filter(calculationId=log.calculationId).order_by("id")[: cap + 1]
+    )
+    truncated = len(rows) > cap
+    rows = rows[:cap]
+
+    ids = {row.pk for row in rows}
+    by_parent: "dict[int, list[CalculationLog]]" = {}
+    roots = []
+    for row in rows:
+        if row.parent_log_id is None or row.parent_log_id not in ids:
+            roots.append(row)
+        else:
+            by_parent.setdefault(row.parent_log_id, []).append(row)
+
+    ordered = []
+    seen: "set[int]" = set()
+
+    def walk(start):
+        stack = [(start, 0)]
+        while stack:
+            node, depth = stack.pop()
+            if node.pk in seen:
+                continue
+            seen.add(node.pk)
+            ordered.append((node, depth))
+            for child in reversed(by_parent.get(node.pk, [])):
+                stack.append((child, depth + 1))
+
+    for root in roots:
+        walk(root)
+    for row in rows:
+        if row.pk not in seen:
+            walk(row)
+
+    return ordered, truncated
+
+
+def build_subtree_markdown(ordered, truncated: bool, title_roots: bool = False) -> str:
     """One markdown document from a log and its descendants.
 
     The root contributes its body with no synthetic heading -- it IS the
     document, and its log usually opens with a title of its own. Every
     descendant gets a heading at its tree depth, so the PDF carries the shape
     the log tree showed instead of running the sections together.
+
+    ``title_roots`` is for a document with several roots (a whole calculation):
+    there no single root is the document, so each root gets a top-level
+    heading too, or the reader could not tell where one ends and the next
+    begins.
     """
     parts: "list[str]" = []
     for index, (log, depth) in enumerate(ordered):
         body = (log.calculation_log or "").strip()
-        if depth == 0:
+        if depth == 0 and not title_roots:
             if body:
                 parts.append(body)
             continue
@@ -239,28 +343,67 @@ def build_subtree_markdown(ordered, truncated: bool) -> str:
     return "\n\n".join(parts)
 
 
-class DownloadMarkdownPdf(APIView):
+class DownloadMarkdownPdf(FileOperationAuditMixin, APIView):
     permission_classes = [IsAuthenticated]
+    audit_action = ACTION_DOWNLOAD
+
+    def audit_model(self, request, *args, **kwargs):
+        return CalculationLog
+
+    def audit_request_payload(self, request, *args, **kwargs):
+        # The payload is opened before ``get`` runs. A bad scope is rejected
+        # there; here it is recorded as asked, so the refusal's entry says what
+        # was requested.
+        try:
+            scope = resolve_scope(request.query_params)
+        except ValidationError:
+            scope = request.query_params.get("scope")
+        return {
+            "pk": kwargs.get("pk"),
+            "format": "pdf",
+            "delivery": "stream",
+            "include_descendants": scope in (SCOPE_SUBTREE, SCOPE_CALCULATION),
+            "scope": scope,
+        }
 
     def get(self, request, pk, format=None):
-        """One calculation log as PDF, or that log and everything under it.
+        """One calculation log as PDF -- or more of its tree, as one document.
 
-        ``?include_descendants=true`` renders the whole subtree into a single
-        document. Without it the behaviour is exactly what it always was, so
-        every existing caller is unaffected.
+        ``?scope=`` picks how much: ``node`` (the default, exactly what this
+        endpoint always returned), ``subtree`` (the log and everything under
+        it; ``?include_descendants=true`` is the older spelling), or
+        ``calculation`` (every log of the calculation the log belongs to --
+        the whole execution tree).
         """
+        scope = resolve_scope(request.query_params)
         obj = CalculationLog.objects.filter(pk=pk).first()
-        include_descendants = _wants_descendants(
-            request.query_params.get("include_descendants")
-        )
+        # The same rule as the log tree (LEX_SEC_INTERNAL): a log of a
+        # calculation the caller may not see does not exist for it.
+        from lex.core.security_flags import superuser_only
 
-        if obj is not None and include_descendants:
+        if superuser_only(request):
+            from lex.api.views.model_entries.CalculationLogTreeView import calculation_visible
+
+            if obj is None or not calculation_visible(request, obj.calculationId):
+                raise Http404()
+
+        if obj is not None:
+            self.attach_audit(obj)
+
+        filename = f"document_{pk}{_FILENAME_SUFFIX[scope]}.pdf"
+        if obj is not None and scope == SCOPE_SUBTREE:
             ordered, truncated = collect_subtree(obj)
             md_text = build_subtree_markdown(ordered, truncated)
-            filename = f"document_{pk}_full.pdf"
+            self.record_audit(section_count=len(ordered), truncated=truncated)
+        elif obj is not None and scope == SCOPE_CALCULATION:
+            ordered, truncated = collect_calculation(obj)
+            root_count = sum(1 for _, depth in ordered if depth == 0)
+            md_text = build_subtree_markdown(
+                ordered, truncated, title_roots=root_count > 1
+            )
+            self.record_audit(section_count=len(ordered), truncated=truncated)
         else:
             md_text = (obj.calculation_log if obj else "") or ""
-            filename = f"document_{pk}.pdf"
 
         full_html = build_document_html(md_text)
         try:
@@ -268,6 +411,8 @@ class DownloadMarkdownPdf(APIView):
         except Exception:
             logger.exception("Calculation-log PDF rendering failed for pk=%s", pk)
             return HttpResponse("Error generating PDF", status=500)
+
+        self.record_audit(filename=filename, size_bytes=len(pdf_bytes))
 
         resp = HttpResponse(pdf_bytes, content_type="application/pdf")
         resp["Content-Disposition"] = f'attachment; filename="{filename}"'

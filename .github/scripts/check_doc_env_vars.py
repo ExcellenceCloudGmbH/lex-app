@@ -84,6 +84,9 @@ INTERNAL_OR_INDIRECT = {
     "LEX_LEGACY_FREEZE_MANIFEST_PATH",
     # Test-suite switches, read only by lex/test_project.
     "LEX_ALLOW_CLEAN_REBUILD_NON_TEST_CLIENT", "LEX_STRESS_REPORT_DIR",
+    # Set by a test for the child interpreter it starts (database name, hang watchdog),
+    # read only by that child: tests/init/test_1bo_*, tests/celery_async/test_8d_*.
+    "CLUSTER1AY_WATCHDOG", "CLUSTER8D_DB_NAME", "CLUSTER8D_WATCHDOG",
 }
 
 

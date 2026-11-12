@@ -15,6 +15,7 @@ import streamlit.components.v1 as components
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 from lex.lex_app.streamlit.eager_frames import eager_frames_js
+from lex.lex_app.streamlit.embed import remember_lex_app_origin
 from lex.lex_app.streamlit.quackback import quackback_launcher_js
 from lex.lex_app.streamlit.sidebar import (
     embedded_in_lex_app,
@@ -88,12 +89,6 @@ if __name__ == "__main__":
     )
 
 
-def _oidc_token_endpoint() -> str:
-    base = (os.getenv("KEYCLOAK_URL") or "").rstrip("/")
-    realm = os.getenv("KEYCLOAK_REALM") or ""
-    return f"{base}/realms/{realm}/protocol/openid-connect/token"
-
-
 def _decode_exp_no_verify(token: str) -> int:
     try:
         claims = jwt.decode(token, options={"verify_signature": False, "verify_exp": False})
@@ -106,44 +101,14 @@ def _now() -> int:
     return int(time.time())
 
 
-def _post_refresh(refresh_token: str) -> dict | None:
-    url = _oidc_token_endpoint()
-    client_id = os.getenv("OIDC_RP_CLIENT_ID")
-    client_secret = os.getenv("OIDC_RP_CLIENT_SECRET")
-
-    data = {
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-        "client_id": client_id or "",
-    }
-    if client_secret:
-        data["client_secret"] = client_secret
-
-    try:
-        r = requests.post(url, data=data, timeout=15)
-        if r.status_code >= 400:
-            log.warning("Refresh failed: %s %s", r.status_code, r.text)
-            return None
-        return r.json()
-    except Exception as e:
-        log.warning("Refresh exception: %s", e)
-        return None
-
-
 def _store_tokens(access: str, refresh: str | None = None, expires_in=None) -> None:
-    """Record a token set, keeping the refresh token when the response omits it."""
+    """Record an access token (Streamlit never receives a refresh token; ``refresh`` stays None)."""
     with _TOKEN_REFRESH_LOCK:
         st.session_state.access_token = access or ""
         if refresh is not None:
             st.session_state.refresh_token = refresh
         st.session_state.token_exp = _decode_exp_no_verify(access) if access else 0
         st.session_state.expires_in = expires_in
-
-
-def _update_tokens_from_response(tok: dict) -> None:
-    access = tok.get("access_token") or ""
-    refresh = tok.get("refresh_token") or st.session_state.get("refresh_token") or ""
-    _store_tokens(access, refresh, tok.get("expires_in"))
 
 
 def _token_exp_from_state_or_decode(access: str) -> int:
@@ -209,26 +174,31 @@ def _adopt_header_token(h: Dict[str, str]) -> bool:
 
 
 def _sync_tokens_from_headers(h: Dict[str, str]) -> None:
+    # Only the access token. Streamlit never holds a refresh token: the proxy (legacy) or the
+    # app's sign-in (hand-off) is the one place a token is refreshed.
     _adopt_header_token(h)
 
-    # The refresh token is only ever a fallback for deployments without the
-    # proxy; adopting the handshake copy is harmless because we never spend it
-    # while the proxy is answering.
-    rt_hdr = (h.get("x-streamlit-refresh-token") or "").strip()
-    if rt_hdr and rt_hdr != (st.session_state.get("refresh_token") or ""):
-        st.session_state.refresh_token = rt_hdr
+
+#: Outcomes of asking the proxy for a fresh token (``_pull_from_proxy``).
+PULL_OK = "ok"
+#: The sign-in is over (the hand-off answers 401 only then).
+PULL_ENDED = "ended"
+#: Keycloak, the database or the proxy could not answer right now (503, 5xx, unreachable).
+PULL_UNAVAILABLE = "unavailable"
+#: Nothing to ask with (no proxy secret, no cookie) or an answer that carried no token.
+PULL_FAILED = "failed"
 
 
-def _pull_token_from_proxy(cookie_header: str) -> bool:
+def _pull_from_proxy(cookie_header: str) -> str:
     """Ask the proxy for a currently-valid access token for this browser session.
 
-    The proxy refreshes on our behalf, so this succeeds even when the token we
-    hold has already expired. Returns ``False`` when there is no proxy to ask,
-    no session cookie to present, or the session itself is gone.
+    The proxy refreshes on our behalf -- through the app's sign-in with the hand-off, through
+    its own token store otherwise -- so this succeeds even when the token we hold has already
+    expired. Returns one of the ``PULL_*`` outcomes.
     """
     secret = os.getenv("LEX_INTERNAL_AUTH_SECRET") or ""
     if not secret or not cookie_header:
-        return False
+        return PULL_FAILED
 
     try:
         resp = requests.get(
@@ -238,25 +208,40 @@ def _pull_token_from_proxy(cookie_header: str) -> bool:
         )
     except Exception as e:
         log.warning("Token pull from proxy failed: %s", e)
-        return False
+        return PULL_UNAVAILABLE
 
+    if resp.status_code == 401:
+        log.info("Token pull from proxy: the sign-in has ended (401)")
+        return PULL_ENDED
+    if resp.status_code >= 500:
+        log.warning("Token pull from proxy returned %s; retrying later", resp.status_code)
+        return PULL_UNAVAILABLE
     if resp.status_code != 200:
         log.warning("Token pull from proxy returned %s", resp.status_code)
-        return False
+        return PULL_FAILED
 
     try:
         data = resp.json()
     except Exception:
-        return False
+        return PULL_FAILED
 
     access = (data.get("access_token") or "").strip()
     if not access:
-        return False
+        return PULL_FAILED
 
-    # Keep whatever refresh token we already hold: the proxy deliberately does
-    # not return one, because spending it must stay single-writer.
     _store_tokens(access, refresh=None, expires_in=None)
-    return True
+    return PULL_OK
+
+
+def _pull_token_from_proxy(cookie_header: str) -> bool:
+    """``True`` when the proxy handed over a fresh access token (see ``_pull_from_proxy``)."""
+    return _pull_from_proxy(cookie_header) == PULL_OK
+
+
+def _record_pull_outcome(outcome: str) -> None:
+    """Remember what the last pull said: an ended sign-in and an outage are told apart."""
+    st.session_state.token_session_ended = outcome == PULL_ENDED
+    st.session_state.token_auth_unavailable = outcome == PULL_UNAVAILABLE
 
 
 def renew_access_token() -> bool:
@@ -275,21 +260,11 @@ def renew_access_token() -> bool:
         if _adopt_header_token(h) and _is_token_valid(st.session_state.get("access_token") or ""):
             return True
 
-        # 2) The proxy: sole owner of the refresh token, always current.
-        if _pull_token_from_proxy(h.get("cookie", "")):
-            return True
-
-        # 3) No proxy answering (plain ``streamlit run``, or it is down). Only
-        #    then do we spend our own copy of the refresh token -- with the
-        #    proxy silent there is nobody to race for the rotation.
-        refresh = (st.session_state.get("refresh_token") or "").strip()
-        if refresh:
-            tok = _post_refresh(refresh)
-            if tok and tok.get("access_token"):
-                _update_tokens_from_response(tok)
-                return True
-
-        return False
+        # 2) The proxy: the one place a token is refreshed, always current. There is no
+        #    third way any more -- Streamlit holds no refresh token to spend.
+        outcome = _pull_from_proxy(h.get("cookie", ""))
+        _record_pull_outcome(outcome)
+        return outcome == PULL_OK
 
 
 def ensure_valid_access_token(allow_refresh: bool = True) -> bool:
@@ -502,13 +477,17 @@ def get_user_info(access_token: str):
     if not keycloak_url or not realm_name:
         return None
 
-    userinfo_url = f"{keycloak_url}/realms/{realm_name}/protocol/openid-connect/userinfo"
+    from lex.api.keycloak import uma_client
+
+    endpoints = uma_client.KeycloakEndpoints(
+        token_url=f"{keycloak_url.rstrip('/')}/realms/{realm_name}/protocol/openid-connect/token",
+        userinfo_url=f"{keycloak_url.rstrip('/')}/realms/{realm_name}/protocol/openid-connect/userinfo",
+    )
     try:
-        headers = {"Authorization": f"Bearer {access_token}"}
-        response = requests.get(userinfo_url, headers=headers, timeout=10)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
+        # The shared per-call client: the token travels on this request only.
+        # TLS stays verified here, as it always was for this call.
+        return uma_client.fetch_userinfo(access_token, endpoints=endpoints, verify=True)
+    except uma_client.KeycloakCallError as e:
         logger.error(f"Failed to get user info: {e}")
         return None
 
@@ -627,7 +606,8 @@ def _logout_href() -> str:
     rd = urllib.parse.quote(logout_landing_abs, safe="")
 
     auth_method = st.session_state.get("auth_method", "session")
-    if auth_method == "session":
+    if auth_method in ("session", "handoff"):
+        # handoff: the proxy revokes the dashboard's binding and signs out through the app.
         return f"{base_path}/oauth2/sign_out?rd={rd}"
     # JWT: we cannot revoke upstream; just clear local session_state on landing.
     return f"{base_path}/?logout=1"
@@ -653,8 +633,98 @@ def _within_renewal_grace() -> bool:
     return (_now() - since) < RENEWAL_GRACE_SECONDS
 
 
+def _uses_handoff() -> bool:
+    """Whether this session signed in through the Django-anchored hand-off (proxy header)."""
+    return st.session_state.get("auth_method") == "handoff"
+
+
+def needs_session_recovery() -> bool:
+    """Whether the page must stop and ask for the session to be recovered.
+
+    With the hand-off the proxy's answers are definite: ``/auth/token`` says 401 only when the
+    sign-in has ended, so that asks for recovery at once -- and 503 (Keycloak or the database
+    unreachable) never does: the dashboard keeps going on what it has and retries underneath.
+    Without it, a failed renewal is ambiguous, so it gets the grace window first.
+    """
+    if _uses_handoff():
+        return bool(st.session_state.get("token_session_ended"))
+    return not _within_renewal_grace()
+
+
+#: The proxy's sign-in-required page (served at the root of the dashboard origin).
+AUTH_REQUIRED_PATH = "/auth/required"
+#: The proxy's answer to "does this browser's dashboard sign-in still stand?" (hand-off only).
+AUTH_STATUS_PATH = "/auth/status"
+#: How often the sign-in watcher asks, while the page is visible.
+AUTH_WATCH_INTERVAL_MS = 60_000
+
+
+def _in_dashboard_document(code: str) -> str:
+    """A component-frame script that runs ``code`` as the dashboard document's own script.
+
+    A component frame is sandboxed, and a sandboxed frame may navigate itself but not the
+    dashboard document around it ("disallowed from navigating its ancestors"): a
+    ``location.replace`` on its parent is refused. It is same-origin with that document, though,
+    so it adds a ``<script>`` element to it -- which runs in the dashboard document's own realm,
+    as that document's code, and a document may always navigate itself.
+    """
+    source = json.dumps(code).replace("<", "\\u003c")
+    return (
+        "<script>(function(){try{var p=window.parent;if(!p||p===window){return;}"
+        "var s=p.document.createElement('script');s.textContent=" + source + ";"
+        "(p.document.head||p.document.documentElement).appendChild(s);}catch(e){}})();</script>"
+    )
+
+
+def _go_to_auth_required_js() -> str:
+    """Dashboard-document code: replace this page with ``/auth/required`` for this page's URL."""
+    return (
+        "location.replace(" + json.dumps(AUTH_REQUIRED_PATH)
+        + "+'?reason=session_ended&next='+encodeURIComponent(location.pathname+location.search));"
+    )
+
+
+def _handoff_recovery_js() -> str:
+    """Send the *dashboard document* to the proxy's sign-in-required page, which tells the
+    frontend around it -- the frontend only listens to the dashboard frame itself, not to the
+    component frames inside it. Standalone (no frontend around it) the page stays, with its
+    sign-in link. Runs in the dashboard document (:func:`_in_dashboard_document`)."""
+    return _in_dashboard_document("(function(){if(window.top===window){return;}" + _go_to_auth_required_js() + "})();")
+
+
+def _auth_watch_js() -> str:
+    """The sign-in watcher, installed once into the dashboard document of a hand-off page.
+
+    The token pull notices an ended sign-in only while the page's socket is up. Once the socket
+    has dropped, Streamlit retries the reconnect -- refused with 4401 -- forever, and the frame
+    would sit on "Connecting" until someone reloads it. So the dashboard document asks the proxy's
+    ``/auth/status`` (a cookie-authenticated read, no Keycloak call) every minute while visible,
+    and as soon as it becomes visible again or the browser comes back online; a 401 sends it to
+    ``/auth/required``, which posts the v2 ``required`` message to the frontend around it (and,
+    standalone, offers the sign-in). 503 or no network: nothing, ask again later. 404 (the proxy
+    has no hand-off): stop asking.
+    """
+    code = (
+        "(function(){if(window.__lexAuthWatch){return;}window.__lexAuthWatch=1;var busy=0,timer=0;"
+        "function check(){if(busy||document.hidden){return;}busy=1;"
+        "fetch(" + json.dumps(AUTH_STATUS_PATH) + ",{credentials:'same-origin',cache:'no-store'}).then("
+        "function(r){busy=0;if(r.status===401){clearInterval(timer);" + _go_to_auth_required_js() + "}"
+        "else if(r.status===404){clearInterval(timer);}},function(){busy=0;});}"
+        "timer=setInterval(check," + str(AUTH_WATCH_INTERVAL_MS) + ");"
+        "document.addEventListener('visibilitychange',check);window.addEventListener('online',check);})();"
+    )
+    return _in_dashboard_document(code)
+
+
 def render_session_recovery() -> None:
     """Get the session renewed, preferring the paths the user never sees.
+
+    With the hand-off, the dashboard document goes to the proxy's ``/auth/required`` page,
+    which posts ``{"type": "lex-auth", "v": 2, "event": "required", "surface": "streamlit"}`` to
+    the frontend around it; the frontend renews its own sign-in and reloads the dashboard in
+    place. Standalone, the sign-in link goes through the hand-off at top level.
+
+    Otherwise (the legacy paths):
 
     Embedded, the parent shell renews by re-sourcing the iframe with a fresh
     ``auth_token``; it is already listening for ``lex-auth-required`` because the
@@ -664,6 +734,17 @@ def render_session_recovery() -> None:
     permitted -- is the honest fallback rather than a redirect that would be
     silently blocked.
     """
+    if _uses_handoff():
+        components.html(_handoff_recovery_js(), height=0)
+        st.warning("⏳ Your sign-in has ended.")
+        # The dashboard root starts a fresh hand-off: through the app's sign-in when needed.
+        st.markdown(
+            f'<a href="{html.escape(_current_base_url() + _base_path() + "/", quote=True)}" '
+            'target="_top" rel="noopener">Sign in again</a>',
+            unsafe_allow_html=True,
+        )
+        return
+
     login_url = f"{_current_base_url()}{_base_path()}/auth/login"
     login_js = json.dumps(login_url)
 
@@ -722,6 +803,10 @@ def init_session_state() -> None:
         st.session_state.token_renewal_failed = False
     if "reauth_requested" not in st.session_state:
         st.session_state.reauth_requested = False
+    if "token_session_ended" not in st.session_state:
+        st.session_state.token_session_ended = False
+    if "token_auth_unavailable" not in st.session_state:
+        st.session_state.token_auth_unavailable = False
 
 
 # -------------------------
@@ -893,6 +978,9 @@ def render_theme_follower() -> None:
         logger.warning("Could not mount the feedback launcher", exc_info=True)
     if follow:
         body = theme_follower_html(_url_embed_theme(), debug=debug) + body
+    if _uses_handoff():
+        # A hand-off page learns that its sign-in ended even after its socket dropped.
+        body += _auth_watch_js()
 
     components.html(body, height=DEBUG_PANEL_HEIGHT if debug else 0)
 
@@ -935,9 +1023,14 @@ if __name__ == "__main__":
         st.info("Please access this application through the main portal.")
         st.stop()
 
-    if not _within_renewal_grace():
+    if needs_session_recovery():
         render_session_recovery()
         st.stop()
+
+    # The frontend that frames this dashboard names its own origin (lex_app_origin); once the
+    # instance confirms it, lex_view() embeds app pages from that same origin -- the one the
+    # user is signed in on, same-site with this dashboard.
+    remember_lex_app_origin()
 
     from lex.lex_app.settings import repo_name
 

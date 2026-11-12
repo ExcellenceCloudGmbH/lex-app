@@ -22,6 +22,12 @@ class LexLoggerView(View):
         return JsonResponse(logs, safe=False)
 
     def post(self, request, *args, **kwargs):
+        from lex.core.security_flags import superuser_only
+
+        # Writing to the server log is an operator tool (LEX_SEC_INTERNAL): for
+        # anyone but a superuser the endpoint does not exist.
+        if superuser_only(request):
+            return JsonResponse({"detail": "Not found.", "error": "Not found."}, status=404)
         # Handle POST request to create a log (if needed)
         # Example of log creation or storage (typically, logging to file or database)
         message = request.POST.get('message', 'No message provided')

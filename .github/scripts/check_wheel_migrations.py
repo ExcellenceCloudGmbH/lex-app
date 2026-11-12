@@ -80,8 +80,11 @@ class NoteTotal(CalculationModel):
 
 # Installed packages whose models differ from the migrations they ship, kept
 # on purpose, each with its reason: reported as a warning on every run. Any
-# other package that drifts fails. oauth2_authcodeflow and rest_framework_api_key
-# were here until lex supplied what they lack (lex/lex_app/vendored).
+# other package that drifts fails. `lex init` now makes migrations for the
+# project's own app only, and neither former entry drifts any more:
+# oauth2_authcodeflow left with django-oauth2-codeflow 3.0, whose AppConfig pins
+# default_auto_field, and rest_framework_api_key with exc-djangorestframework-api-key
+# 1.0.1, which ships the migration widening id and hashed_key to 150 characters.
 KNOWN_THIRD_PARTY_DRIFT: dict[str, str] = {}
 
 # Before the project has a model: anything makemigrations finds is drift in the

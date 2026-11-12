@@ -15,6 +15,9 @@ def create_app():
       and it is what puts every page, handler and var behind sign-in.
     * :class:`DjangoConnectionMiddleware`, so each event gets the connection
       handling a Django request gets.
+    * :class:`~lex.lex_app.reflex.auth.SignInExpiryMiddleware`, so no event is
+      served on a profile whose access token has expired. Added here, before the
+      auth plugin adds its gate after compiling, so it runs first.
     * ``/``, which shows whichever dashboard the query string asks for.
 
     Further pages come from the project itself: any ``@rxe.page`` in
@@ -23,6 +26,7 @@ def create_app():
     """
     import reflex_enterprise as rxe
 
+    from lex.lex_app.reflex.auth import SignInExpiryMiddleware
     from lex.lex_app.reflex.dashboards import (
         LexDashboardState,
         dashboard_page,
@@ -32,6 +36,7 @@ def create_app():
 
     app = rxe.App()
     app.add_middleware(DjangoConnectionMiddleware())
+    app.add_middleware(SignInExpiryMiddleware())
     app.add_page(
         dashboard_page(load_structure()),
         route="/",

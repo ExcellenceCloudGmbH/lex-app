@@ -200,12 +200,12 @@ class TestCluster04j_PrimaryKeyListFilterBackend(SimpleTestCase):
 
 
 class TestCluster04j_FilterDispatchByModel(SimpleTestCase):
-    """``filter_queryset`` short-circuits for AuditLogStatus /
-    CalculationLog (always-allow), routes AuditLog to `_handle_auditlog`,
-    and falls through to `_handle_lexmodel_default` for everything else.
-    The dispatch matters because each branch has very different DB
-    cost — short-circuiting AuditLogStatus saves us a per-row loop on
-    every audit-status list request."""
+    """``filter_queryset`` short-circuits for CalculationLog
+    (always-allow), routes AuditLogStatus to `_handle_auditlogstatus`
+    (a status row is visible iff its audit-log entry is), AuditLog to
+    `_handle_auditlog`, and falls through to `_handle_lexmodel_default`
+    for everything else. The dispatch matters because each branch has
+    very different DB cost."""
 
     def setUp(self):
         self.backend = UserReadRestrictionFilterBackend()
@@ -215,17 +215,18 @@ class TestCluster04j_FilterDispatchByModel(SimpleTestCase):
         model.__name__ = name
         return _view_with_container(model_class=model)
 
-    def test_4_53_auditlogstatus_short_circuits_to_passthrough(self):
+    def test_4_53_auditlogstatus_routes_to_status_handler(self):
+        # A status row carries its entry's description and traceback, so it
+        # is only as visible as its AuditLog row (LEX_SEC_READ_SURFACES);
+        # end-to-end in scenario 6.164.
         view = self._view_with_named_model("AuditLogStatus")
         qs = _mock_qs()
-        result = self.backend.filter_queryset(_request_with_perms(), qs, view)
-        # No filter, no exclude, no none — the queryset comes back
-        # untouched. AuditLogStatus is always visible to whoever can
-        # see the parent AuditLog row (handled by AuditLog's filter).
-        qs.filter.assert_not_called()
-        qs.exclude.assert_not_called()
-        qs.none.assert_not_called()
-        self.assertIs(result, qs)
+        with mock.patch.object(
+            self.backend, "_handle_auditlogstatus", return_value="STATUS_RESULT"
+        ) as h:
+            result = self.backend.filter_queryset(_request_with_perms(), qs, view)
+        h.assert_called_once()
+        self.assertEqual(result, "STATUS_RESULT")
 
     def test_4_53b_calculationlog_short_circuits_to_passthrough(self):
         view = self._view_with_named_model("CalculationLog")

@@ -782,14 +782,18 @@ def collect_groups(config: LexTestConfig, extra_args: list[str] | None = None) -
 
     recorder = _SelectedItemsRecorder()
 
-    args = ["--collect-only", "-q", config.tests_entrypoint]
+    from lex.tools import pytest_plugin
+
+    # The setup a `lex pytest` run gets, from the same plugin; collect-only, so no
+    # database. `-p no:lex`: the module is passed in, not loaded twice.
+    args = ["-p", "no:lex", "--collect-only", "-q", config.tests_entrypoint]
     if extra_args:
         args.extend(extra_args)
 
     previous_cwd = Path.cwd()
     try:
         os.chdir(config.project_root)
-        exit_code = _pytest.main(args, plugins=[plugin, recorder])
+        exit_code = _pytest.main(args, plugins=[pytest_plugin, plugin, recorder])
     finally:
         os.chdir(previous_cwd)
 

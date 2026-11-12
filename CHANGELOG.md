@@ -1,3 +1,31 @@
+## [2.4.2] - 2026-10-29
+
+### Changed
+- **backend** Accept an API key from the ?api_key= query parameter ([f8c45a9a](https://github.com/ExcellenceCloudGmbH/lex-app/commit/f8c45a9a)) (#855)
+
+## [2.4.1] - 2026-10-25
+
+### Changed
+- **backend** Bump exc-djangorestframework-api-key to 1.0.1 (missing APIKey column-width migration) ([0f266ee6](https://github.com/ExcellenceCloudGmbH/lex-app/commit/0f266ee6)) (#852)
+
+## [2.4.0] - 2026-10-23
+
+### Added
+- **backend** audit every export and download operation ([4f080552](https://github.com/ExcellenceCloudGmbH/lex-app/commit/4f080552)) (#840)
+- **backend** run a lex project's tests in PyCharm's own test runner ([9f43cd4d](https://github.com/ExcellenceCloudGmbH/lex-app/commit/9f43cd4d)) (#814)
+
+### Fixed
+- **backend** streamlit 1.66.1 so lex-app can install Pillow 13 (LEX-1126) ([8a78714d](https://github.com/ExcellenceCloudGmbH/lex-app/commit/8a78714d)) (#850)
+- **backend** a raising permission hook denies on the remaining read and export surfaces ([f7afdb58](https://github.com/ExcellenceCloudGmbH/lex-app/commit/f7afdb58)) (#848)
+- **backend** ask permission_create on the record the request fills ([35cb87bf](https://github.com/ExcellenceCloudGmbH/lex-app/commit/35cb87bf)) (#845)
+- **backend** audit-log read side for export and download entries (re-land #842) ([03dfb18a](https://github.com/ExcellenceCloudGmbH/lex-app/commit/03dfb18a)) (#846)
+- **backend** v2 security hardening without the 3.0 extension features ([50c0b9e6](https://github.com/ExcellenceCloudGmbH/lex-app/commit/50c0b9e6)) (#833)
+- **backend** find the open mirror PR by its branch, and close superseded ones ([70d48cdf](https://github.com/ExcellenceCloudGmbH/lex-app/commit/70d48cdf)) (#811)
+
+### Changed
+- **backend** Remove the Process and ProcessFlow features ([88d4d63c](https://github.com/ExcellenceCloudGmbH/lex-app/commit/88d4d63c)) (#844)
+- **backend** Revert "docs(spec): proposal — ship the frontend as a versioned pip package" ([7ad0cab7](https://github.com/ExcellenceCloudGmbH/lex-app/commit/7ad0cab7)) (#809)
+
 ## [2.3.5] - 2026-10-09
 
 ### Added

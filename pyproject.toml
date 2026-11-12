@@ -27,6 +27,12 @@ lex-generate-configs = "generate_pycharm_configs:generate_run_configs_cli"
 lex-recovery-supervisor = "lex.lex_app.celery_recovery.entrypoint:main"
 lex-recovery-beat = "lex.lex_app.celery_recovery.entrypoint:beat_main"
 
+[project.entry-points.pytest11]
+# lex's pytest plugin (lex/tools/pytest_plugin.py): gives a plain pytest run --
+# PyCharm's runner, VS Code, a terminal -- the setup `lex pytest` does. Active only in
+# a project with a lex_test_config.yaml; `-p no:lex` switches it off.
+lex = "lex.tools.pytest_plugin"
+
 [tool.setuptools]
 py-modules = ["generate_pycharm_configs"]
 

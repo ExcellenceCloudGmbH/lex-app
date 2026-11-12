@@ -195,3 +195,72 @@
 | Note | Two assertions had to be strengthened before they could detect the defect, and both are worth remembering. (1) `edited_by`: a worker resolves the same fallback actor the fixture already carried, so an identical overwrite was invisible — 8.147 now seeds a distinct sentinel via `queryset.update()`. (2) The failing calc is deliberately `is_atomic = False`: under `is_atomic = True` the raise rolls the whole calculation back and would hide any stamp. Fixture note — the decorated tasks require explicit Celery task names; Celery derives a default name from `module.func_name` and all three `calculate` methods share one fixture module, so without them the last registration silently wins and one model runs another's body. |
 
 ---
+
+### Batch 8e — `create(*args)` reach `calculate()` on every route, Celery included (BUG-054) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.157 – 8.163 |
+| Type | I |
+| Files covered | `lex/lex_app/celery_tasks.py` (`calc_and_save` names the `group_index` slot of its message and calls `model.lex_func()(*args)`); `lex/core/tasks/CeleryTaskDispatcher.py` (`_dispatch_single_group` documents the message it sends, `(group, group_index, *args)`, unchanged); `lex/core/mixins/CalculatedModelMixin.py` (`create` and both sync consumers, unchanged); `lex/core/models/CalculationModel.py` (`dispatch_calculation_task`, the task's other sender, unchanged) |
+| Test file | `lex/test_project/tests/celery_async/test_8e_create_args_reach_calculate.py` |
+| Test classes | `TestCluster08e_CreateArgsReachCalculate`: 8.157 Celery route, three groups, `create("Q4", 7)`; 8.158 Celery route with a `calculate(self)` that takes no arguments; 8.159 a worker running a group message in the shape v2.4.2 queued; 8.160 the message `dispatch_calculation_task` sends; 8.161 sync streaming; 8.162 sync materialising; 8.163 Celery with the fallback after a failed task |
+| Fixtures | `CreateArgsBatch` (writes the arguments its `calculate()` received onto the row, logs every call, can fail once per region) and `NoArgBatch` (`calculate(self)`): both `@lex_shared_task` with explicit task names, one Celery group per region, listed in `CREATE_ARGS_MODELS` rather than `ALL_MODELS`; `CelerySyncCalc` (existing). The module runs each eager task with the empty dispatch scopes a worker process starts with (`task_prerun` / `task_postrun`) and records the executed tasks from `task_prerun` |
+| Tests landed | **7 pass / 0 fail** (8.157–8.163). On v2.4.2, 8.157, 8.159 and 8.163 fail: every `calculate()` a task called received no arguments. Mutation-checked: passing the index on as well fails 8.157–8.159 and 8.163; moving the index to a keyword on both sides fails 8.159. Regression: `celery_async` 156 pass / 7 skip (the opt-in Redis broker and recovery-beat tests) and `calculations` 218 pass, 0 fail, 31 subtests, 4 min 55 s |
+| Coverage gain | `calc_and_save` with arguments, run by a worker and reached through `create()`; the message contract on both sides; every route `create()` can take |
+| Status | ✅ Complete. BUG-054 resolved. |
+| Note | Without the per-task dispatch scopes, eager mode shows a task the dispatcher's own `WaitForTasks` scope, which is open in the same thread. The task then sends `calculate()` off as one more message, Celery pickles it even in eager mode, and the row is saved without the result: a decorated batch's results never persist under plain `_celery_eager()`. A worker process has no such scope. Letter `d` and 8.154–8.156 belong to PR #865, so 8e starts at 8.157. The per-group retry in `_handle_task_results` and the per-group fallback after a `CeleryDispatchError` are not covered separately (see cluster.md). |
+### Batch 8d — The startup reset works on every route and leaves asyncio usable (BUG-046) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.154 – 8.156 |
+| Type | I |
+| Files covered | `lex/process_admin/utils/model_registration.py` (`register_models`, `_handle_calculation_model_reset`, new `_run_on_own_thread`) |
+| Test file | `lex/test_project/tests/celery_async/test_8d_startup_reset_event_loops.py` |
+| Test classes | `TestCluster08d_StartupResetLeavesAsyncioUsable`: 8.154 no running loop; 8.155 inside a running asyncio loop; 8.156 inside a running uvloop loop (skipped without uvloop) |
+| Fixtures | `CelerySyncCalc` (existing, `celery_async/models.py`). Each scenario starts a fresh interpreter from this checkout (`PYTHONPATH`), gives it the test database by name, and wraps its two `async_to_sync` calls in a `faulthandler` watchdog |
+| Tests landed | **3 pass / 0 fail**. On v2.4.2 all three fail. In 8.154 and 8.155 the watchdog fires (the second call is blocked in asgiref's `run_until_future`). 8.156 fails with `RuntimeError: Failed to register model CelerySyncCalc: Can't patch loop of type <class 'uvloop.Loop'>` |
+| Coverage gain | every route the startup reset can run by; `_run_on_own_thread` |
+| Status | ✅ Complete. BUG-046 resolved. |
+| Note | 8x's `tearDown` no longer calls `nest_asyncio.apply()`. It did so to close the connection that asgiref's shared executor thread kept open, and the reset's own thread now closes that connection. That tearDown is what left asyncio patched for the rest of a single-process run, which is how the bug surfaced (1aq 1.360 hung after 8x). Letter `d` is the first letter absent from `allocation.yaml`. That file does not list the existing `8aa`–`8ad`. |
+
+---
+
+---
+
+### Batch 8f — Scheduled dispatch — cron in a time zone, exactly-once claim, overlap, missed slots, one-off, the Celery route ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.167 – 8.182 |
+| Type | U + E |
+| Files covered | `lex/scheduling/cron.py`, `lex/scheduling/dispatch.py` (`run_due_jobs`, `_claim`, `fire`), `lex/scheduling/models.py` (`next_slot_after`, the next-slot bookkeeping of `save`) |
+| Test file | `lex/test_project/tests/celery_async/test_8f_scheduled_dispatch.py` |
+| Test classes | `TestCluster08f_CronSchedule` (U, 8.167–8.173), `TestCluster08f_SchedulerTick` (E, 8.174–8.181) |
+| Fixtures | `ScheduledJobTestCase` and `ScheduledTargetCalc` (`tests/_scheduling_support.py`, `calculations/models.py`) |
+| Tests landed | **16 pass / 0 fail** |
+| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bn) |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 8.167 | weekday schedule skips the weekend | `0 6 * * 1-5` after Friday 07:00 Berlin fires Mon–Thu 06:00 CET |
+| 8.168 | classic cron syntax | steps, range steps, lists, month/weekday names, `@hourly`/`@monthly`; `7` = `0` = Sunday |
+| 8.169 | day fields OR rule | both restricted → a day matching either fires; one `*` → only the other counts |
+| 8.170 | unusable expressions refused | empty, 4 or 6 fields, out of range, backwards range, zero step, never fires, `@reboot`, unknown macro or name — each with its reason |
+| 8.171 | spring-forward | a skipped 02:30 fires once at 03:00 CEST; a half-hourly schedule collapses the gap into one run |
+| 8.172 | fall-back | a repeated 02:30 fires once; a half-hourly schedule does not rerun the repeated hour |
+| 8.173 | unknown time zone refused | the message names a valid example |
+| 8.174 | a due job runs and moves on | only the due job starts; `last_run_at` = now; next slot = next 06:00; a job not due is untouched |
+| 8.175 | a disabled job never runs | no next slot; forced due, still ignored |
+| 8.176 | two clocks, one run | two threads with their own connections tick at once; one starts the slot; the target runs once |
+| 8.177 | runs never stack | a slot due mid-run is skipped with its reason and moves on; the run's own end-of-run save keeps the note and the moved slot |
+| 8.178 | recent misses collapse | five missed 10-minute slots inside the grace window cost one run; next slot = next mark after now |
+| 8.179 | old misses are recorded | a slot two hours late (grace one hour) does not run; the message names it; next slot = tomorrow |
+| 8.180 | one-off runs once | next slot = `run_at`; it runs once; afterwards no next slot and no second run |
+| 8.181 | the Celery route | with Celery on, `calc_and_save.delay` receives the job; nothing is calculated in the backend |
+| 8.182 | an old copy cannot bring a slot back | a copy loaded before the clock ran the slot, renamed and saved after: name stored, slot and status kept, nothing runs again |
+
+**Why a regression matters:** Double runs, runs at the wrong hour twice a year, a pile-up of runs after an outage, or jobs that silently never run.
+
+**Allocation note:** Allocated past the letters and scenario IDs that in-flight branches (feat/ext-*, feat/auth-long-sessions) already hold: the first letter absent from lex-app-v2 and every remote branch, and a range above the highest max_scenario on any branch, so neither side has to renumber on merge. Design: [`docs/superpowers/plans/2026-11-10-scheduled-jobs.md`](../../../../../docs/superpowers/plans/2026-11-10-scheduled-jobs.md).

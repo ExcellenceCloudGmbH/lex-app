@@ -35,6 +35,26 @@ Work in **Light** or **Dark** mode — switch instantly based on your preference
 ### [[using-the-app/navigation|Navigation]]
 A stable, professional sidebar organizes your models into groups. Global search and breadcrumbs keep you oriented no matter how deep you go.
 
+## Staying Signed In
+
+You sign in once and stay signed in, across all Lex apps that share your sign-in.
+
+- **Not allowed to do something?** The app tells you so, and you stay signed in. A
+  refused action never signs you out.
+- **Server or sign-in service briefly unavailable?** A banner at the top says so, for
+  example *Connection lost — retrying when you are back online*. The app retries by
+  itself.
+- **Your session has ended** (it expired, or you signed out in another app)? A dialog
+  asks you to **Sign in** again. Sign-in opens in a small window, and you carry on where
+  you were. Your unsaved changes stay on the page.
+- **Browser blocked the sign-in window?** Allow pop-ups for the site, or choose
+  **Continue in this tab**. Your changes in an open form are kept first, and after
+  sign-in a note says *Your unsaved changes were restored*. Review them, then save. A
+  file you picked but did not save yet is not kept; choose it again.
+
+You are signed out only when you sign out yourself from the user menu, or when your
+sign-in really ends.
+
 ## How It Connects
 
 The interface sits on top of the [[home|what the framework gives you]]. Every feature you see here — the grid, the audit log, the history timeline — is powered by a backend building block that a developer configured. As a user, you get all of this out of the box without writing a line of code.
@@ -45,6 +65,7 @@ The interface sits on top of the [[home|what the framework gives you]]. Every fe
 | Validation errors when editing | [[model-your-data/serializers\|Serializers]] |
 | Timeline and history tabs | [[history-and-audit/bitemporal history\|Bitemporal History]] |
 | Audit log per record | [[history-and-audit/audit logs\|Audit Logs]] |
-| Embedded Streamlit dashboards | [[access-and-dashboards/streamlit dashboards\|Streamlit Dashboards]] |
+| Embedded Streamlit dashboards | [[access-and-dashboards/streamlit/index\|Streamlit Dashboards]] |
+| Embedded Reflex dashboards | [[access-and-dashboards/reflex/index\|Reflex Dashboards]] |
 | Calculation logs with progress | [[calculations/logging\|LexLogger]] |
 | Field and row restrictions | [[access-and-dashboards/permissions\|Permissions]] |

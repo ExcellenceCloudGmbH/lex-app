@@ -29,6 +29,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from django.db.models import FileField
+
 from django.http import FileResponse, JsonResponse
 from django.test import SimpleTestCase
 
@@ -42,6 +44,18 @@ pytestmark = pytest.mark.api_layer
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _file_stub(**attrs):
+    """Stand in for a ``FieldFile``.
+
+    The view reads ``name`` and ``size`` off the field's value to record
+    what it served, so the stub carries them alongside whichever of
+    ``path`` / ``url`` the scenario under test needs.
+    """
+    attrs.setdefault("name", "document.bin")
+    attrs.setdefault("size", 1234)
+    return SimpleNamespace(**attrs)
 
 
 def _build_request(pk="42", field="document"):
@@ -58,15 +72,22 @@ def _build_kwargs(instance=None, *, model_class=None):
     """
     model_class = model_class or MagicMock(name="ModelClass")
     model_class.objects.filter.return_value.first.return_value = instance
+    # Only real file fields are served: the stand-in model reports one.
+    model_class._meta.get_field.return_value = FileField()
     container = SimpleNamespace(model_class=model_class)
     return {"model_container": container}
 
 
 def _build_view():
-    """Instantiate the APIView without going through the URL resolver."""
+    """Instantiate the APIView without going through the URL resolver.
+
+    These scenarios pin the storage dispatch; the read-permission check
+    (LEX_SEC_READ_SURFACES) is covered by scenario 4.94 and stood in for here.
+    """
     view = FileDownloadView()
     view.kwargs = {}
     view.request = None
+    view._may_read_file = lambda request, instance, field_name: True
     return view
 
 
@@ -122,7 +143,7 @@ class TestCluster10l_LocalStorage(SimpleTestCase):
     """
 
     def test_10_48_local_happy_path_returns_file_response(self):
-        instance = SimpleNamespace(document=SimpleNamespace(path="/tmp/test-fixture.bin"))
+        instance = SimpleNamespace(document=_file_stub(path="/tmp/test-fixture.bin"))
         view = _build_view()
         request = _build_request()
         kwargs = _build_kwargs(instance=instance)
@@ -143,7 +164,7 @@ class TestCluster10l_LocalStorage(SimpleTestCase):
         )
 
     def test_10_49_local_file_not_found_returns_404_json(self):
-        instance = SimpleNamespace(document=SimpleNamespace(path="/tmp/missing.bin"))
+        instance = SimpleNamespace(document=_file_stub(path="/tmp/missing.bin"))
         view = _build_view()
         request = _build_request()
         kwargs = _build_kwargs(instance=instance)
@@ -168,7 +189,7 @@ class TestCluster10l_LocalStorage(SimpleTestCase):
         crash every dev / single-host deployment that never set the
         env var.
         """
-        instance = SimpleNamespace(document=SimpleNamespace(path="/tmp/x.bin"))
+        instance = SimpleNamespace(document=_file_stub(path="/tmp/x.bin"))
         view = _build_view()
         request = _build_request()
         kwargs = _build_kwargs(instance=instance)
@@ -194,7 +215,7 @@ class TestCluster10l_LocalStorage(SimpleTestCase):
         404 JsonResponse) instead of silently dispatching to GCS
         because the elif chain happened to fall through.
         """
-        instance = SimpleNamespace(document=SimpleNamespace(path="/tmp/y.bin"))
+        instance = SimpleNamespace(document=_file_stub(path="/tmp/y.bin"))
         view = _build_view()
         request = _build_request()
         kwargs = _build_kwargs(instance=instance)
@@ -249,7 +270,7 @@ class TestCluster10l_SharePointStorage(SimpleTestCase):
 
     def test_10_50_sharepoint_returns_file_response_with_binary_content(self):
         shrp_ctx, fake_target, fake_binary = self._patch_sp(b"hello-sp")
-        instance = SimpleNamespace(document=SimpleNamespace(url="/sites/x/file.pdf"))
+        instance = SimpleNamespace(document=_file_stub(url="/sites/x/file.pdf"))
         view = _build_view()
         request = _build_request()
         kwargs = _build_kwargs(instance=instance)
@@ -283,7 +304,7 @@ class TestCluster10l_SharePointStorage(SimpleTestCase):
         server-relative path and the SDK raises a confusing
         'site not found' error."""
         shrp_ctx, fake_target, _ = self._patch_sp()
-        instance = SimpleNamespace(document=SimpleNamespace(url="/sites/x/has-slash.pdf"))
+        instance = SimpleNamespace(document=_file_stub(url="/sites/x/has-slash.pdf"))
         view = _build_view()
         request = _build_request()
         kwargs = _build_kwargs(instance=instance)
@@ -334,7 +355,7 @@ class TestCluster10l_GCSStorage(SimpleTestCase):
     """
 
     def test_10_52_gcs_returns_download_url_json(self):
-        file_obj = SimpleNamespace(url="https://storage.googleapis.com/bucket/file.pdf?signed")
+        file_obj = _file_stub(url="https://storage.googleapis.com/bucket/file.pdf?signed")
         instance = SimpleNamespace(document=file_obj)
         view = _build_view()
         request = _build_request()

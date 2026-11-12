@@ -41,6 +41,7 @@ Before starting, make sure you have:
 
 - Lex App installed and configured (see [[start-here/installation]]) — [source on GitHub](https://github.com/ExcellenceCloudGmbH/lex-app)
 - [PyCharm](https://www.jetbrains.com/pycharm/) (recommended) or any Python-capable editor
+- A database — PostgreSQL on your machine, or SQLite; see [[start-here/installation#Choose a Database|Choose a Database]]
 - Access to [Excellence Cloud](https://excellence-cloud.de) for [Keycloak](https://www.keycloak.org/documentation) setup
 
 ## Project Structure
@@ -50,9 +51,7 @@ Lex App uses a flat project layout — no `manage.py`, no nested [Django](https:
 ```
 TeamBudget/
 ├── .env
-├── .run/
-│   ├── Init.run.xml
-│   └── Start.run.xml
+├── .run/                      ← run configurations (lex setup writes eleven)
 ├── lex_config.py
 ├── migrations/
 ├── sample_data/

@@ -80,7 +80,7 @@ class HeavyReport(CalculationModel):
 
 - **Context-aware dispatch** — respects `WaitForTasks` and `FireAndForget` context managers
 - **Automatic status callbacks** — the task lifecycle updates `is_calculated` to the right terminal state on completion
-- **Context propagation** — calculation IDs and audit logging context are forwarded to workers, including the active child model during batch dispatch
+- **Context propagation** — calculation IDs and audit logging context are forwarded to workers, including the active child model during batch dispatch. A child's log lands in the same place in the execution tree on a worker as in-process; see [[calculations/logging#Nested Calculations|Nested Calculations]]
 
 For root `CalculationModel` runs, the decorator is now optional. If `CELERY_ACTIVE=true` and Celery is reachable, the framework dispatches the calculation to a worker either way. Decorated methods are sent directly; undecorated ones are wrapped automatically.
 
@@ -96,7 +96,7 @@ If **both** are true, the calculation is dispatched to a Celery worker — decor
 For batch calculations (a parent triggering children), the framework uses `CeleryTaskDispatcher` to:
 
 1. **Group** the child models into batches (clustered by calculation order)
-2. **Dispatch** each group as a separate `calc_and_save` Celery task inside a `WaitForTasks` context
+2. **Dispatch** each group as a separate `calc_and_save` Celery task inside a `WaitForTasks` context. Positional arguments passed to `create()` reach every child's `calculate()` in the task, as they do in-process
 3. **Monitor** task completion (blocks until all groups finish)
 4. **Retry** failed groups synchronously as a fallback
 

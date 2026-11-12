@@ -1,7 +1,13 @@
+import logging
 import re
 from functools import lru_cache
 
 from rest_framework import serializers
+
+from lex.api.security import is_auth_outage
+from lex.core.security_flags import strict
+
+logger = logging.getLogger(__name__)
 
 
 def _camel_to_snake(name: str) -> str:
@@ -89,9 +95,18 @@ class PermissionAwareSerializerMixin:
                 else:
                     # Default to allow all fields if no permission method
                     editable_backend_fields = {f.name for f in instance._meta.fields}
-            except Exception:
-                # Allow all fields by default on error
-                editable_backend_fields = {f.name for f in instance._meta.fields}
+            except Exception as exc:
+                if is_auth_outage(exc):
+                    raise  # 503/401 per the auth contract, never a refused edit
+                if strict("FAIL_CLOSED"):
+                    logger.exception(
+                        "permission_edit of %s raised; edit refused (LEX_SEC_FAIL_CLOSED)",
+                        instance.__class__.__name__,
+                    )
+                    editable_backend_fields = set()
+                else:
+                    # Legacy: allow all fields on error
+                    editable_backend_fields = {f.name for f in instance._meta.fields}
 
             if not editable_backend_fields:
                 raise PermissionDenied(
@@ -151,9 +166,18 @@ class PermissionAwareSerializerMixin:
                 else:
                     # Default to allow if no permission method
                     can_create = True
-            except Exception:
-                # Allow by default on error
-                can_create = True
+            except Exception as exc:
+                if is_auth_outage(exc):
+                    raise  # 503/401 per the auth contract, never a refused create
+                if strict("FAIL_CLOSED"):
+                    logger.exception(
+                        "permission_create of %s raised; create refused (LEX_SEC_FAIL_CLOSED)",
+                        model_class.__name__,
+                    )
+                    can_create = False
+                else:
+                    # Legacy: allow on error
+                    can_create = True
                 
             if not can_create:
                 raise PermissionDenied(

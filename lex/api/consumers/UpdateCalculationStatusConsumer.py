@@ -3,15 +3,23 @@ import logging
 
 from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
+from lex.api.consumers.auth import LexSocketAuthMixin
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
 
 logger = logging.getLogger(__name__)
 
 
-class UpdateCalculationStatusConsumer(AsyncWebsocketConsumer):
+class UpdateCalculationStatusConsumer(LexSocketAuthMixin, AsyncWebsocketConsumer):
+    """``ws/calculation_status_update``: calculation states, for signed-in users (see ``auth``).
+
+    A refused socket gets no snapshot of the active calculations either.
+    """
+
     active_consumers = set()
 
     async def connect(self):
+        if not await self.lex_socket_connect():
+            return
         await self.channel_layer.group_add(f'update_calculation_status', self.channel_name)
         await self.accept()
         self.active_consumers.add(self)
@@ -25,6 +33,7 @@ class UpdateCalculationStatusConsumer(AsyncWebsocketConsumer):
         }))
 
     async def disconnect(self, close_code):
+        await self.lex_socket_disconnect()
         await self.channel_layer.group_discard(f'update_calculation_status', self.channel_name)
         self.active_consumers.discard(self)
         await super().disconnect(close_code)

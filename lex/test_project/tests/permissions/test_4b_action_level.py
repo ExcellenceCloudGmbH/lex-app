@@ -35,31 +35,31 @@ class TestCluster04b_ActionLevel(E2ETestCase):
     e2e_models = ALL_MODELS
 
     # -- 4.4 -----------------------------------------------------------
-    # @unittest.expectedFailure  # BUG-010: permission_edit field-restriction not enforced on PATCH
-    # def test_4_4_permission_edit_restricts_editable_fields(self) -> None:
-    #     """
-    #     Scenario 4.4: PATCH to a field outside the permitted set must
-    #     leave that field unchanged.
-    #
-    #     ``ProtectedItem.permission_edit`` allows only ``name`` for
-    #     non-admins. A non-admin PATCH of ``secret`` must either be
-    #     rejected (4xx) or silently ignored (200 + DB unchanged).
-    #     Either satisfies the customer contract: "the restricted field
-    #     is not mutated".
-    #     """
-    #     item = ProtectedItem.objects.create(name="p4-4", secret="original")
-    #
-    #     resp = self.client.patch(
-    #         self.url_detail(PROTECTED, item.pk),
-    #         data={"secret": "leaked"}, format="json",
-    #     )
-    #
-    #     item.refresh_from_db()
-    #     self.assertEqual(
-    #         item.secret, "original",
-    #         f"Restricted field must not be mutated by a non-admin PATCH "
-    #         f"(status={resp.status_code}); got secret={item.secret!r}",
-    #     )
+    # BUG-010 fixed (LEX_SEC_EDIT): the restricted write is refused with 400.
+    def test_4_4_permission_edit_restricts_editable_fields(self) -> None:
+        """
+        Scenario 4.4: PATCH to a field outside the permitted set must
+        leave that field unchanged.
+
+        ``ProtectedItem.permission_edit`` allows only ``name`` for
+        non-admins. A non-admin PATCH of ``secret`` must either be
+        rejected (4xx) or silently ignored (200 + DB unchanged).
+        Either satisfies the customer contract: "the restricted field
+        is not mutated".
+        """
+        item = ProtectedItem.objects.create(name="p4-4", secret="original")
+
+        resp = self.client.patch(
+            self.url_detail(PROTECTED, item.pk),
+            data={"secret": "leaked"}, format="json",
+        )
+
+        item.refresh_from_db()
+        self.assertEqual(
+            item.secret, "original",
+            f"Restricted field must not be mutated by a non-admin PATCH "
+            f"(status={resp.status_code}); got secret={item.secret!r}",
+        )
 
     # -- 4.5 -----------------------------------------------------------
     def test_4_5_permission_delete_denies_non_admin(self) -> None:

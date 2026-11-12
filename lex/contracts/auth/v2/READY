@@ -1,0 +1,1 @@
+lex-auth contract 2.0.2 ready for consumers (2026-11-06). 2.0.2: the CSRF header comes from the current cookie on every attempt (a request replayed after re-authentication carried the ended session's token and failed the CSRF check). 2.0.1 fixed Request inputs in createAuthFetch (RTK Query fetchFn). Re-vendor if you took 2.0.0 or 2.0.1.

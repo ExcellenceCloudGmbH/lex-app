@@ -11,7 +11,7 @@ from django_sharepoint_storage.SharePointContext import SharePointContext
 from lex.lex_app import settings
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
-from rest_framework_api_key.permissions import HasAPIKey
+from lex.api.utils.api_key_requests import HasAPIKey
 
 DB_NAME = connection.settings_dict["NAME"]
 
@@ -19,6 +19,18 @@ DB_NAME = connection.settings_dict["NAME"]
 class DeleteUnusedFiles(APIView):
     http_method_names = ["post"]
     permission_classes = [HasAPIKey | IsAuthenticated]
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        from rest_framework.exceptions import NotFound
+
+        from lex.core.security_flags import is_superuser_or_admin, strict
+
+        # Deleting files from the storage is an operator tool (LEX_SEC_INTERNAL):
+        # superusers and the Keycloak client role "admin" only; for everyone
+        # else the endpoint does not exist.
+        if strict("INTERNAL") and not is_superuser_or_admin(request):
+            raise NotFound()
 
     def print_failure(self, retry_number, ex):
         print(f"{retry_number}: {ex}")

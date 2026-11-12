@@ -83,7 +83,16 @@ class AuditLogDefaultSerializer(AuditLogReadOnlySerializerMixin, serializers.Mod
 
     def get_error_traceback(self, obj):
         record = self._get_latest_status_record(obj)
-        return record.error_traceback if record else None
+        if record is None:
+            return None
+        # The traceback follows the entry: whoever may read this entry (under
+        # LEX_SEC_READ_SURFACES, whoever may read its record) reads why it
+        # failed. It is the only lasting diagnostic of a failed calculation,
+        # and the record's readers already get the same text through the
+        # record's calculation_error_message and the calculation_error
+        # broadcast. A superuser-only rule hid it from every Keycloak user,
+        # since none of them is a Django superuser (LEX-1555).
+        return record.error_traceback
 
     def get_status_created_at(self, obj):
         record = self._get_latest_status_record(obj)

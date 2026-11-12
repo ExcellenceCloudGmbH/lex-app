@@ -14,8 +14,7 @@ on:
     paths:
       - ".github/scripts/**"
       - ".github/workflows/scripts_tests.yml"
-      - "pyproject.toml"          # supplies pytest's addopts, and decides what
-                                  # the wheel ships
+      - "pyproject.toml"          # decides what the wheel ships
       # These two together decide whether a built wheel delivers a frontend at
       # all: the manifest says whether the bundle is in it, requirements.txt
       # says whether the dependency that replaces it is declared.
@@ -27,12 +26,13 @@ on:
       - ".github/workflows/pip_publish.yml"
       - ".github/workflows/prerelease_gate.yml"
       - ".github/workflows/wheel_migrations.yml"
+      # test_docs_mirror.py reads how this one finds and supersedes mirror PRs.
+      - ".github/workflows/sync_docs_from_lex_app_docs.yml"
   pull_request:
     paths:
       - ".github/scripts/**"
       - ".github/workflows/scripts_tests.yml"
-      - "pyproject.toml"          # supplies pytest's addopts, and decides what
-                                  # the wheel ships
+      - "pyproject.toml"          # decides what the wheel ships
       # These two together decide whether a built wheel delivers a frontend at
       # all: the manifest says whether the bundle is in it, requirements.txt
       # says whether the dependency that replaces it is declared.
@@ -44,6 +44,8 @@ on:
       - ".github/workflows/pip_publish.yml"
       - ".github/workflows/prerelease_gate.yml"
       - ".github/workflows/wheel_migrations.yml"
+      # test_docs_mirror.py reads how this one finds and supersedes mirror PRs.
+      - ".github/workflows/sync_docs_from_lex_app_docs.yml"
   workflow_dispatch:
 
 jobs:
@@ -62,8 +64,7 @@ jobs:
 
       - name: Run tests
         # -p no:cacheprovider keeps the runner from writing .pytest_cache.
-        # pytest walks upward from the test path and finds pyproject.toml on
-        # its own, so its `-p no:django` addopt applies here too. That is
-        # harmless: pytest-django is not installed on this runner, and
-        # disabling a missing plugin is a no-op rather than an error.
+        # .github/scripts/pytest.ini is the nearest ini, so its addopts apply:
+        # `-p no:lex -p no:django`. Neither plugin is installed on this runner,
+        # and disabling a missing plugin is a no-op rather than an error.
         run: python -m pytest .github/scripts/tests/ -q -p no:cacheprovider

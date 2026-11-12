@@ -15,7 +15,11 @@ caller has nothing to schedule against; if the proxy keeps the older token, ever
 renewal is discarded and the session dies at the original expiry anyway -- with
 no error anywhere, just a user sent back to the login page mid-work.
 
-Cluster 1aa — scenarios 1.217–1.222. Type: U.
+Since lex-app 2.5 the token is the sign-in's own (``oauth2_authcodeflow.tokens.get_access_token``,
+an encrypted ``OIDCSession`` row -- no token lives in the Django session any more), so the
+issuer-side scenarios sign the user in with ``oauth2_authcodeflow.testing.create_oidc_session``.
+
+Cluster 1aa — scenarios 1.217–1.222. Type: U (1.220–1.222) and I (1.217–1.219).
 Covers: lex/authentication/views/token_views.py (StreamlitTokenView.post,
         _access_token_expiry), lex/proxy.py (_persist_jwt_to_session_if_needed).
 Run: python -m lex pytest lex/test_project/tests/init/test_1aa_embedded_token_renewal.py -v
@@ -30,7 +34,9 @@ from unittest.mock import patch
 
 import jwt
 import pytest
-from django.test import SimpleTestCase
+from django.contrib.auth import get_user_model
+from django.test import SimpleTestCase, TestCase
+from oauth2_authcodeflow.testing import create_oidc_session
 from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
@@ -53,11 +59,26 @@ def _access_token(exp: int) -> str:
     return jwt.encode({"sub": "u1", "email": "u@example.com", "exp": exp}, "irrelevant", algorithm="HS256")
 
 
-def _post_token(session: dict):
-    """Drive the real endpoint the frontend calls, with ``session`` on the request."""
+def _token_request(*, access_expires_in=None):
+    """A request of a signed-in user to the endpoint the frontend calls; (request, sign-in row).
+
+    ``access_expires_in`` given: the user signed in through OIDC (``create_oidc_session``)
+    and the access token expires that many seconds from now. ``None``: the user is signed
+    in to Django only (e.g. an admin login), with no OIDC sign-in.
+    """
+    user = get_user_model().objects.create_user(username="token-user", email="u@example.com")
     request = APIRequestFactory().post("/api/auth/streamlit-token/")
-    force_authenticate(request, user=SimpleNamespace(id=1, email="u@example.com", is_authenticated=True))
-    request.session = session
+    row = None
+    if access_expires_in is not None:
+        row = create_oidc_session(request, user, access_expires_in=access_expires_in)
+    else:
+        request.session = {}
+    force_authenticate(request, user=user)
+    return request, row
+
+
+def _post_token(request):
+    """Drive the real endpoint with ``request``."""
     return StreamlitTokenView.as_view()(request)
 
 
@@ -79,10 +100,9 @@ class _FakeTokenStore:
         self.tokens.pop(sid, None)
 
 
-class TestCluster01aa_EmbeddedTokenRenewal(SimpleTestCase):
-    """Cluster 1aa: the token endpoint publishes an expiry and the proxy adopts renewals."""
+class TestCluster01aa_EmbeddedTokenIssuer(TestCase):
+    """Cluster 1aa: the token endpoint publishes an expiry (the issuer side)."""
 
-    # -- the issuer side -------------------------------------------------
 
     def test_1_217_token_response_carries_expiry_metadata(self):
         """
@@ -93,11 +113,11 @@ class TestCluster01aa_EmbeddedTokenRenewal(SimpleTestCase):
               refresh_interval, so the caller can schedule a renewal instead of
               discovering the expiry as a failed request
         """
-        exp = _epoch(300)
-        response = _post_token({"oidc_access_token": _access_token(exp), "oidc_access_expires_at": exp})
+        request, row = _token_request(access_expires_in=300)
+        response = _post_token(request)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertTrue(response.data.get("token"), "The access token must still be returned.")
+        self.assertEqual(response.data.get("token"), row.access_token, "The sign-in's access token must be returned.")
         self.assertAlmostEqual(
             response.data["expires_in"], 300, delta=5,
             msg="expires_in must reflect the real remaining lifetime of the token.",
@@ -112,14 +132,15 @@ class TestCluster01aa_EmbeddedTokenRenewal(SimpleTestCase):
     def test_1_218_expiry_falls_back_to_the_token_exp(self):
         """
         Scenario 1.218: expiry still published when the session lacks the hint.
-        Given: a session with an access token but no oidc_access_expires_at
+        Given: a sign-in whose context records no access-token expiry
         When: the endpoint is called
         Then: the expiry is read from the token's own exp claim — the caller is
               never left without a renewal deadline just because the auth library
               stored its bookkeeping differently
         """
-        exp = _epoch(180)
-        response = _post_token({"oidc_access_token": _access_token(exp)})
+        request, _ = _token_request(access_expires_in=180)
+        request.oidc.access_expires_at = None
+        response = _post_token(request)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertAlmostEqual(
@@ -130,12 +151,13 @@ class TestCluster01aa_EmbeddedTokenRenewal(SimpleTestCase):
     def test_1_219_missing_session_token_is_a_clean_401(self):
         """
         Scenario 1.219: no OIDC token on the session is an auth problem, not a crash.
-        Given: a user authenticated to Django whose session carries no OIDC token
+        Given: a user authenticated to Django who has no OIDC sign-in (so no token)
         When: the endpoint is called
         Then: a 401 is returned rather than a KeyError surfacing as a 500 — only
               re-authentication can fix this, and a 500 tells the caller nothing
         """
-        response = _post_token({})
+        request, _ = _token_request()
+        response = _post_token(request)
 
         self.assertEqual(
             response.status_code, status.HTTP_401_UNAUTHORIZED,
@@ -143,7 +165,10 @@ class TestCluster01aa_EmbeddedTokenRenewal(SimpleTestCase):
         )
         self.assertNotIn("token", response.data)
 
-    # -- the proxy side --------------------------------------------------
+
+
+class TestCluster01aa_EmbeddedTokenRenewal(SimpleTestCase):
+    """Cluster 1aa: the proxy adopts renewals (the proxy side)."""
 
     def _persist(self, store, session, exp):
         """Run the proxy's persistence path for a token expiring at ``exp``."""

@@ -93,6 +93,22 @@ columns downstream apps declare and write from `calculate()`.
 | 13.44 | 122-char nested report path | Round-trips byte-for-byte; over the column width Django's storage silently truncates and suffixes rather than raising |
 | 13.45 | Bare `PDFField()` width | Same 300 default — PDF reports build the same nested paths |
 
+### 13i. The export endpoint writes an audit entry
+
+An export hands model data out of the system, so it is recorded like a
+create / update / delete — see [[history-and-audit/audit logs]]. ``post``
+reaches the file through four machines that share no code between request
+and response, so each is asserted on its own.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 13.46 | Universal streaming export | One ``AuditLog`` row, ``action='export'``, ``resource`` and content type naming the model, ``object_id`` unset (a model-wide export touches no single record), ``export_path='universal-stream'``, the rows and columns actually written and the file's size |
+| 13.47 | Flat DB-only streaming export | Same facts under ``export_path='flat-stream'`` — the universal path's coverage says nothing about this writer |
+| 13.48 | Export with no rows | The entry still exists, status ``failure``, carrying the 404 — a refused export is an attempt worth recording |
+| 13.49 | Legacy non-AG export | ``export_path='legacy'``, ``mode='legacy'``, row count and the worksheet the data was written to |
+| 13.50 | AG-Grid pandas fallback | ``export_path='pandas'`` and the ``filter_model`` that decided which rows left the system |
+| 13.51 | Hand-picked selection | ``mode='filtered'`` with ``selected_row_count``; the id list itself never enters the payload, so a ten-thousand-row selection stays one bounded entry |
+
 **What is explicitly NOT tested here:**
 
 - ❌ **Excel formatting cosmetics** (column widths, cell colours,

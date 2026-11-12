@@ -5,6 +5,11 @@ from pathlib import Path
 
 MARKERS = {".git", "pyproject.toml", "setup.cfg", "manage.py", "requirements.txt", ".idea", ".vscode"}
 
+#: The file only a Lex project root has. A Lex project inside a larger
+#: repository (a monorepo with a web client beside it) is found by this before
+#: the git toplevel is consulted.
+PROJECT_CONFIG_FILE = "lex_config.py"
+
 
 def _is_safe_root(candidate: Path, home: Path) -> bool:
     """A directory is only an acceptable "project root" if it lives strictly
@@ -28,7 +33,15 @@ def find_project_root(start=None) -> str:
     base = Path(start or os.getcwd()).resolve()
     home = Path.home().resolve()
 
-    # 1) Prefer the git toplevel, but only if it's a safe project root.
+    # 1) The nearest directory holding lex_config.py is the project, even when
+    #    it sits below the git toplevel. Stops at the user's home like step 3.
+    for p in [base] + list(base.parents):
+        if not _is_safe_root(p, home):
+            break
+        if (p / PROJECT_CONFIG_FILE).is_file():
+            return str(p)
+
+    # 2) Prefer the git toplevel, but only if it's a safe project root.
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -46,7 +59,7 @@ def find_project_root(start=None) -> str:
     except Exception:
         pass
 
-    # 2) Walk up looking for a project marker, but stop at the user's
+    # 3) Walk up looking for a project marker, but stop at the user's
     #    home directory so we never silently relocate the project to ``~``.
     for p in [base] + list(base.parents):
         if not _is_safe_root(p, home):
@@ -54,7 +67,7 @@ def find_project_root(start=None) -> str:
         if any((p / m).exists() for m in MARKERS):
             return str(p)
 
-    # 3) Fall back to the starting directory. The caller (e.g. setup-with-ai)
+    # 4) Fall back to the starting directory. The caller (e.g. setup-with-ai)
     #    will operate on the directory the user actually invoked the command
     #    from instead of escaping into ``~`` or ``/``.
     return str(base)

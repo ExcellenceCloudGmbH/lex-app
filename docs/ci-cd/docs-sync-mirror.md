@@ -28,9 +28,14 @@ fine.
 
 The branch name now carries the run id as well, so nothing ever needs a force,
 and the job exits early when an open PR already mirrors the same upstream
-commit. If the mirror looks stale again, check the workflow's run history
-first — a red daily cron is the symptom, and the failure is at the very last
-step, after all the useful work is done.
+commit. It finds that PR by its `docs-sync/<sha>-` branch. It used to search
+titles for "docs-sync", which the titles never contained: the run then adopted
+the open PR's branch, failed to open a second PR for it, and went red on every
+morning the open one was current (October 2026). Opening a new mirror PR now
+closes the older open ones, which it supersedes: each sync mirrors the whole
+subset at the newest upstream commit. If the mirror looks stale again, check
+the workflow's run history first — a red daily cron is the symptom, and the
+failure is at the very last step, after all the useful work is done.
 
 Behind that was a second fault, invisible until the first was fixed because
 the job never reached it:

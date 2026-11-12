@@ -16,7 +16,7 @@
 | 4.1 | Superuser reads all fields | `permission_read` returns `allow_all` |
 | 4.2 | Regular user reads allowed fields only | API response only includes permitted field names |
 | 4.3 | `allow_all_except` hides sensitive fields | Excluded fields absent from API response |
-| 4.4 | `permission_edit` restricts editable fields | PATCH to restricted field is rejected or ignored |
+| 4.4 | `permission_edit` restricts editable fields | PATCH to restricted field is rejected or ignored (BUG-010 resolved: 400 `EDIT_NOT_ALLOWED`) |
 | 4.5 | `permission_delete` denies deletion | DELETE returns 403 |
 | 4.6 | `permission_create` denies creation | POST returns 403 |
 | 4.7 | Keycloak scope fallback — read scope present | Default `permission_read` allows all fields |
@@ -26,7 +26,7 @@
 | 4.11 | API key context | `client_roles` includes "api_key", scopes from key identity |
 | 4.12 | `with_instance` resolves instance-specific Keycloak scopes | Scopes matched by `rsname` and `resource_set_id` |
 | 4.40 | `permission_export` full deny at the export endpoint (sub-cluster 4h) | POST `/api/<model>/export` → 200 with rows present (read open) but every domain field blanked; only the framework's `{id, created_by, edited_by}` columns may carry data. Pins the union behaviour in `ModelExportView.get_exportable_fields_for_object` against both over-restrictive (rows dropped) and over-permissive (domain leaks) drift. |
-| 4.41 | Full `permission_read` deny at the detail endpoint (sub-cluster 4e) | GET `/api/<model>/<id>/` for a row whose `permission_read` returns `deny` → 200 with `{}` and no domain fields / `id` leakage. List endpoints already drop denied rows; this pins the serializer guard for guessed detail URLs. |
+| 4.41 | Full `permission_read` deny at the detail endpoint (sub-cluster 4e) | GET `/api/<model>/<id>/` for a row whose `permission_read` returns `deny` → 404 by default (LEX_SEC_NOT_FOUND); with `LEX_LEGACY_SECURITY=true` the old 200 with `{}` and no domain fields / `id` leakage. List endpoints already drop denied rows; this pins the serializer guard for guessed detail URLs. |
 
 ---
 
@@ -53,3 +53,155 @@
 **Scenario range:** 4.75 – 4.79. **Test file:** `lex/test_project/tests/permissions/test_4n_reflex_permissions.py`. **Type:** U. **Status:** ✅ Complete (2026-09-28). Covers `lex/lex_app/reflex/auth.py`. Batch: [4n](batches.md).
 
 ---
+
+---
+
+### 4o. Secure defaults on the generic REST endpoints ✅
+
+**Gap:** permission methods were only enforced where the serializer happened to ask: a raising hook allowed, an unreadable record answered `200 {}`, `permission_edit` was ignored on writes (BUG-010), bulk delete and `run_step` skipped `permission_delete`/`permission_create`, and history, global search, export and file download ignored read permission. The hardening turns every one of these on by default (`lex/core/security_flags.py`; `LEX_LEGACY_SECURITY=true` or `LEX_SEC_<FLAG>=false` restore the old behaviour). No new denial answers 403 — the bundled frontend signs out on 403.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.80 | raising `permission_read` | the row is hidden; legacy lets it through and fails 500 |
+| 4.81 | raising `permission_create` | the create is refused (500, nothing stored); legacy stores |
+| 4.82 | unreadable record | 404; legacy `200 {}`; `LEX_SEC_NOT_FOUND=true` wins over the umbrella |
+| 4.83 | PATCH/DELETE unreadable | 404, row unchanged |
+| 4.84 | `/many` | GET drops unreadable ids (200); DELETE naming one answers 404 |
+| 4.85 | disallowed field | 400 `{code: EDIT_NOT_ALLOWED, detail, error, fields}`; allowed field 200 |
+| 4.86 | unchanged values | sending a disallowed field unchanged is not an edit |
+| 4.87 | no edit right | every PATCH refused; legacy applies it |
+| 4.88 | bulk PATCH | 400, nothing changed |
+| 4.89 | bulk DELETE | `permission_delete` per row, 400 `DELETE_NOT_ALLOWED` with ids |
+| 4.90 | ~~run_step~~ | **Retired 2026-10-22** — it pinned the ProcessFlow endpoint, removed with the Process feature; its absence is pinned by [10.97](../10-api_layer/cluster.md). The id is not reused. |
+| 4.91 | history | 404 for an unreadable record |
+| 4.92 | global search | only readable rows; legacy all |
+| 4.93 | export | only readable rows |
+| 4.94 | file download | 400 without params, 404 for non-file field or unreadable record, 200 bytes |
+| 4.95 | HTML report | signed-in 200, anonymous not 200, unknown 404 |
+| 4.96 | BUG-011 | `permission_read` once per row on a list |
+| 4.97 | API key | the serializer decides a key's read with the key's own context |
+| 4.98 | flags | defaults, umbrella, per-flag override, unknown name |
+| 4.99 | `is_superuser_or_admin` | superuser or `admin` group only |
+| 4.100 | signed out | the sign-in answer (302/401/403), never 404/200 |
+
+**Scenario range:** 4.80 – 4.100. **Test file:** `lex/test_project/tests/permissions/test_4o_secure_defaults.py`. **Type:** E (4.98–4.99 U). **Status:** ✅ Complete (2026-10-18). Batch: [4o](batches.md).
+
+---
+
+### 4p. Internal tools, Django users, permission_list and history writes ✅
+
+**Gap:** operator endpoints were open to every signed-in user: anyone could delete unused storage files, write to the server log, read every calculation log (and its PDF) and edit Django's users through the generic API — including making themselves superuser. A model's own `permission_list` was ignored by the list endpoint. History rows could be "corrected" by anyone (`One.update`'s bitemporal correction). All on by default; `LEX_LEGACY_SECURITY=true` / `LEX_SEC_INTERNAL|NOT_FOUND|HISTORY_WRITE=false` restore the old behaviour. No new 403.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.101 | delete-unused-files | plain user 404 and no cleanup; `admin` client role and superuser 200; legacy 200 |
+| 4.102 | POST api/logs | plain user 404 with `error`, nothing logged; superuser and legacy 201 |
+| 4.103 | calculation-log tree | readable record's calculation 1, hidden 0, record-less 0, unfiltered 0; superuser and legacy all |
+| 4.104 | calculation-log PDF | readable 200; hidden, record-less and unknown 404; superuser 200 for the record-less log |
+| 4.105 | `auth.User` writes | PATCH, create, bulk delete → 400 `EDIT_NOT_ALLOWED`, nothing changes; superuser PATCH 200 |
+| 4.106 | `permission_list` false | list 404; legacy 200; allowing 200 |
+| 4.107 | PATCH/PUT history row | 400 `EDIT_NOT_ALLOWED` with `error`, history unchanged; superuser 200 |
+| 4.108 | other history writes | DELETE, POST, bulk PATCH/DELETE, meta-history PATCH → 400 `EDIT_NOT_ALLOWED`, never 403 |
+| 4.109 | opt-out | `LEX_SEC_HISTORY_WRITE=false` applies the correction (200) |
+| 4.110 | main record | PATCH of the record itself still 200 |
+
+**Scenario range:** 4.101 – 4.110. **Test file:** `lex/test_project/tests/permissions/test_4p_internal_tools_and_history.py`. **Type:** E. **Status:** ✅ Complete (2026-10-18). Batch: [4p](batches.md).
+
+---
+
+### 4r. A raising permission hook denies on the remaining surfaces ✅
+
+**Gap:** 4o made a raising permission hook deny on the record endpoints, but four places still caught the exception and allowed: the audit-log list (`can_read_from_payload`), the audit-log payload's foreign-key references and its field filtering, the export's per-row field selection, and `PermissionAwareSerializerMixin`. Under `LEX_SEC_FAIL_CLOSED` (on by default) each denies; `LEX_SEC_FAIL_CLOSED=false` restores the allow.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.116 | audit entry, record's read raises | entry hidden; opt-out lists it |
+| 4.117 | payload reference, referenced record's read raises | reference dropped from the payload; opt-out keeps it |
+| 4.118 | payload filtering raises | payload `{}`; opt-out returns it unfiltered |
+| 4.119 | export, row's export check raises | row left out; opt-out exports it |
+| 4.120 | serializer mixin, edit/create check raises | `PermissionDenied`; opt-out validates |
+
+**Scenario range:** 4.116 – 4.120. **Test file:** `lex/test_project/tests/permissions/test_4r_fail_closed_remaining_surfaces.py`. **Type:** E (4.118, 4.120 I). **Status:** ✅ Complete (2026-10-23). Batch: [4r](batches.md).
+
+---
+
+### 4q. permission_create on the record the request fills ✅
+
+**Gap:** `POST …/create` asked `permission_create` only on a blank `model_class()`, before any request value was set. A rule that depends on the parent or a value ("may add an investor only to her own fund") could not be decided there, so projects re-checked creation in `pre_validation`. With `LEX_SEC_CREATE` (on by default) the hook is asked again on the record filled with the validated values, foreign keys set, before the audit entry and `pre_validation`. The blank check stays first (it is what a UI asks before offering a form). Refusal shape unchanged: 401/403 `{message}`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.111 | refused under a closed parent | 403 `{message}`, nothing stored, no audit entry; open parent 201 |
+| 4.112 | what the hook sees | blank record, then the filled unsaved record with values and FK |
+| 4.113 | refused on a plain value | 403, nothing stored |
+| 4.114 | hook raises on the filled record | 500 with the create check's error, nothing stored; `LEX_SEC_FAIL_CLOSED=false` stores |
+| 4.115 | opt-out | `LEX_SEC_CREATE=false` and `LEX_LEGACY_SECURITY=true` store; blank check only |
+
+**Scenario range:** 4.111 – 4.115. **Test file:** `lex/test_project/tests/permissions/test_4q_create_on_filled_record.py`. **Type:** E. **Status:** ✅ Complete (2026-10-23). Batch: [4q](batches.md).
+
+### 4x. Per-user Keycloak calls stay with their user; forged tokens and look-alike paths get no access ✅
+
+**Gap:** three ways the permission layer could hand access to the wrong party. (1) python-keycloak's `uma_permissions()`/`userinfo()` put the caller's token on the process-wide connection before sending, so concurrent requests could receive another user's permissions and profile (BUG-038). (2) The bearer path accepted HS256 signed with the OIDC client secret, which every instance holds (BUG-035). (3) Login exemptions were unanchored regular expressions, so `/api/user_permissions/` and any path containing `/health` skipped sign-in (BUG-036). Per-user calls now go through `lex/api/keycloak/uma_client.py` with the token on that one request; `OIDC_RP_SIGN_ALGOS_ALLOWED = ["RS256"]`; every exemption is anchored.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.138 | the middleware under concurrency | 240 concurrent requests for 12 users: each carries only its own permissions, profile and roles |
+| 4.139 | `KeycloakManager` under concurrency | 250 concurrent `get_uma_permissions` calls (the Reflex, Streamlit and token-view path): each its own answer |
+| 4.140 | `access_denied` | `[]` on the request and from `get_uma_permissions`; `set()` from `get_user_permissions` |
+| 4.141 | token rejected | the request continues with `[]`/`{}`; `get_uma_permissions` → `None`; userinfo → `KeycloakUnauthorized` |
+| 4.142 | Keycloak down | 502 HTML and unreachable: the request continues with the defaults; `KeycloakUnavailable`; no token in the logs |
+| 4.143 | TLS and timeouts | `KEYCLOAK_VERIFY_SSL` (True, False, a CA path) and `(3.05, 10)` reach every call, with the caller's token on it |
+| 4.144 | forged bearer token | HS256 signed with the client secret: no access and no user; RS256 from the IdP key: 200 |
+| 4.145 | public endpoints | health, current user, active calculations, manifest and favicon (incl. `/api/api/...`) are not refused |
+| 4.146 | look-alike paths | `/api/user_permissions/`, `/api/users/`, `.../healthx/...`, `.../health` are refused by the login middleware |
+| 4.147 | anchors | every `OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS` entry starts with `^` and ends with `$` or `(?:/\|$)` |
+
+**Scenario range:** 4.138 – 4.147. **Test file:** `lex/test_project/tests/permissions/test_4x_keycloak_call_isolation.py`. **Type:** U (4.138–4.143), I (4.144–4.147). **Status:** ✅ Complete (2026-11-06). Batch: [4x](batches.md).
+
+### 4y. The permission lookup is lazy, cached per token, single-flight and never a silent deny ✅
+
+**Gap:** every request made two or more synchronous Keycloak calls (UMA + userinfo), and any failure became `[]` — a signed-in user saw "permission denied" during a Keycloak blip. Now `request.user_permissions` / `userinfo` / `client_roles` are lazy; profile and roles come from the sign-in (`request.oidc`, the access token's `resource_access`); UMA answers are cached per token digest (≤ min(60 s, token lifetime)), single-flight, behind their own breaker; `access_denied` is `[]`, a rejected token 401, an outage 503 — and every fail-closed site passes those through.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.148 | lazy | no UMA call until read; one then |
+| 4.149 | cached per token | one call per token, never across users |
+| 4.150 | TTL | ≤ min(60 s, token lifetime) |
+| 4.151 | single flight | one call for concurrent requests, outcome shared |
+| 4.152 | `access_denied` | `[]`, 403 `permission_denied`, still signed in |
+| 4.153 | token rejected | 401 `session_expired`, before the view for writes |
+| 4.154 | Keycloak down | 503 `auth_unavailable`, before the view for writes |
+| 4.155 | UMA breaker | opens, blocks, recovers; issuer mismatch = config outage |
+| 4.156 | roles from the sign-in | token roles, claims profile, no userinfo call |
+| 4.157 | `guarded()` | auth outcomes re-raised in both modes |
+| 4.158 | fail-closed sites | 503/401 instead of a denial or a grant |
+
+**Scenario range:** 4.148 – 4.158. **Test file:** `lex/test_project/tests/permissions/test_4y_permission_lookup.py`. **Type:** U (4.148–4.151, 4.155–4.157), E (4.152–4.154, 4.158). **Status:** ✅ Complete (2026-11-06). Batch: [4y](batches.md).
+
+### 4aa. The Streamlit token carries the caller's own Keycloak permissions ✅
+
+**Gap:** `StreamlitTokenView` imported `KeycloakManager` from a module that does not exist; the error was swallowed and every Streamlit token carried no permissions.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.163 | the token view asks Keycloak with the caller's token | since lex-app 2.5: two signed-in callers each get exactly their own sign-in's access token, with their own client roles in it, and the view asks Keycloak for no permissions (before 2.5: the caller's bearer token reached `get_uma_permissions`) |
+
+**Scenario range:** 4.163 – 4.163. **Test file:** `lex/test_project/tests/permissions/test_4aa_streamlit_token_permissions.py`. **Type:** E. **Status:** ✅ Complete (2026-11-12). Batch: [4aa](batches.md).
+
+
+---
+
+### 4z. A schedule can do no more than the person who saved it ✅
+
+**What it tests:** A scheduled run has no request, so no Keycloak permissions to check when it fires; the check happens when the schedule is saved — the same checks the Calculate button passes — and the run then acts as that person. Schedules keep the framework's default permissions; code is trusted.
+
+**Why a regression matters:** Anyone with access to schedules could calculate records they could never calculate themselves.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.159 | a forbidden record | 400 on `target_model` saying the caller may not calculate it; nothing stored |
+| 4.160 | every record of a forbidden model | 400 on `target_model`; nothing stored |
+| 4.161 | code is trusted | a schedule created without a request for the same model is stored and scheduled |
+| 4.162 | no access to schedules | creating one without the grant is refused (401/403); nothing stored |
+
+**Scenario range:** 4.159 – 4.162. **Test file:** `lex/test_project/tests/permissions/test_4z_scheduled_job_permissions.py`. **Type:** E. **Status:** ✅ Complete (2026-11-10). Batch: [4z](batches.md).

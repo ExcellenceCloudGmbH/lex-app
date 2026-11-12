@@ -14,6 +14,8 @@ from rest_framework import serializers, viewsets
 
 logger = logging.getLogger(__name__)
 
+from lex.api.serializers.list_ui_columns import build_column_options
+
 # Field-names that React-Admin expects
 from lex.api.serializers.sensitive_fields import (
     filter_sensitive_field_names,
@@ -92,6 +94,26 @@ def _get_model_lookup() -> dict:
 
 # Cache: model_class -> capability flags (avoids repeated hasattr per record)
 _capability_cache: dict = {}
+
+
+def _fail_closed() -> bool:
+    from lex.core.security_flags import strict
+
+    return strict("FAIL_CLOSED")
+
+
+def _auth_outage(exc: BaseException) -> bool:
+    """An auth outage (503/401) is re-raised, never turned into a withheld record."""
+    from lex.api.security import is_auth_outage
+
+    return is_auth_outage(exc)
+
+
+def _lex_model_can_read():
+    """LexModel's own can_read wrapper (which delegates to permission_read)."""
+    from lex.core.models.LexModel import LexModel
+
+    return LexModel.can_read
 
 
 def _get_capabilities(model_class: type) -> dict:
@@ -273,6 +295,22 @@ class LexClearableFileField(serializers.FileField):
             if self.required:
                 self.fail("required")
             return ""
+        # A file too large for one request body arrives in pieces first and
+        # is referred to here by its upload token (see ChunkedUpload.py).
+        from lex.api.views.file_operations.ChunkedUpload import (
+            ChunkedUploadError,
+            is_upload_token,
+            resolve_upload_token,
+        )
+
+        if is_upload_token(data):
+            request = self.context.get("request")
+            if request is None:
+                raise serializers.ValidationError("A chunked upload needs a request context.")
+            try:
+                data = resolve_upload_token(data, request)
+            except ChunkedUploadError as exc:
+                raise serializers.ValidationError(str(exc)) from exc
         return super().to_internal_value(data)
 
 
@@ -302,6 +340,7 @@ class LexSerializer(serializers.ModelSerializer):
     # Per-serializer caches (populated once, reused across all records)
     # ------------------------------------------------------------------
     _base_user_context = None  # Cached UserContext without keycloak scopes
+    _read_context_is_api_key = None  # Cached: does the request carry an API key context?
     _meta_fields_cache: dict = {}  # { model_class: set_of_field_names }
     _concrete_field_map_cache: dict = {}  # { model_class: { field_name: field } }
 
@@ -322,6 +361,18 @@ class LexSerializer(serializers.ModelSerializer):
         """
         base = self._get_base_user_context(request)
         return base.with_instance(request, target_instance, original_instance=original_instance)
+
+    def _get_can_read_context(self, request, target_instance):
+        """The context ``LexModel.can_read`` would build (``UserContext.from_request``),
+        from the cached base: an API-key context as is — it carries the key's
+        scopes and does not depend on the record — any other with the record's
+        keycloak scopes."""
+        base = self._get_base_user_context(request)
+        if self._read_context_is_api_key is None:
+            self._read_context_is_api_key = UserContext._api_key_context(request) is not None
+        if self._read_context_is_api_key:
+            return base
+        return base.with_instance(request, target_instance)
 
     @classmethod
     def _get_cached_field_names(cls, model_class) -> set:
@@ -359,10 +410,20 @@ class LexSerializer(serializers.ModelSerializer):
 
     @classmethod
     def get_list_ui_options(cls) -> dict:
-        """Expose serializer-level frontend list options via ``Meta``."""
+        """
+        Expose serializer-level frontend list options via ``Meta``.
+
+        ``columns`` carries the per-column display defaults a project declares
+        in ``Meta.lex_column_options`` -- the developer layer of the three that
+        decide how a table looks (the user's own Settings panel and a saved
+        view are the other two). See
+        ``lex.api.serializers.list_ui_columns`` for the options and why
+        an invalid one is dropped rather than raised.
+        """
         meta = getattr(cls, "Meta", None)
         return {
             "hide_actions_column": bool(getattr(meta, "hide_actions_column", False)),
+            "columns": build_column_options(meta),
         }
 
     # ------------------------------------------------------------------
@@ -421,11 +482,31 @@ class LexSerializer(serializers.ModelSerializer):
     def get_lex_reserved_scopes(self, instance):
         """
         Compute per-record scopes using the new permission system.
+
+        History rows (``Historical*``) tell a non-superuser ``edit: []`` and
+        ``delete: false``: only superusers may write to history tables
+        (``LEX_SEC_HISTORY_WRITE``), and the frontend hides the controls it
+        reads from here.
         """
         request = self.context.get('request')
         if not request:
             return {}
 
+        scopes = self._compute_lex_reserved_scopes(request, instance)
+        if not instance.__class__.__name__.startswith('MetaHistorical') and self._history_write_closed(request, instance):
+            export = scopes.get("export", True) if isinstance(scopes, dict) else True
+            return {"edit": [], "delete": False, "export": bool(export)}
+        return scopes
+
+    @staticmethod
+    def _history_write_closed(request, instance) -> bool:
+        from lex.api.security import is_history_model
+        from lex.core.security_flags import is_superuser, strict
+
+        return strict("HISTORY_WRITE") and is_history_model(type(instance)) and not is_superuser(request)
+
+    def _compute_lex_reserved_scopes(self, request, instance):
+        """The scopes from the record's permission methods (before the history-write rule)."""
         try:
             if instance.__class__.__name__.startswith('MetaHistorical'):
                 return {
@@ -581,7 +662,11 @@ class LexSerializer(serializers.ModelSerializer):
         allowed = True
         try:
             related_obj = related_model.objects.get(pk=related_id)
-
+        except Exception:
+            # The related record is gone (or the id is malformed): nothing to judge.
+            cache[cache_key] = True
+            return True
+        try:
             if hasattr(related_obj, "permission_read"):
                 if base_user_context is not None:
                     user_context = base_user_context.with_instance(request, related_obj)
@@ -595,8 +680,17 @@ class LexSerializer(serializers.ModelSerializer):
                     allowed = len(readable_fields) > 0
                 else:
                     allowed = bool(readable_fields)
-        except Exception:
-            allowed = True
+        except Exception as exc:
+            if _auth_outage(exc):
+                raise
+            if _fail_closed():
+                logger.exception(
+                    "permission_read of %s raised on an audit-log payload reference; reference withheld",
+                    related_model.__name__,
+                )
+                allowed = False
+            else:
+                allowed = True
 
         cache[cache_key] = allowed
         return allowed
@@ -758,9 +852,50 @@ class LexSerializer(serializers.ModelSerializer):
         # Normal visible fields for concrete models
         visible_fields = None
 
+        # 0. Already decided for this request (the list filter asked first; BUG-011)
+        #
+        # ``has_can_read`` is asked FIRST, and that order is the fix (LEX-1555):
+        # ``type(...).can_read`` on a model that declares none raises
+        # ``AttributeError``, and this branch runs before the two below that do
+        # guard themselves. Not every model served through ``model_entries`` is a
+        # ``LexModel`` — ``CalculationLog`` is a plain ``django.db.models.Model`` —
+        # so every read of the calculation-log table, by id, by ids and through
+        # the grid, answered 500 and the frontend's log tree, its Details tab and
+        # the table page all broke at once.
+        remembered = None
+        if (
+            request is not None
+            and target_caps['has_can_read']
+            and type(target_instance).can_read is _lex_model_can_read()
+        ):
+            from lex.api.security import recalled
+
+            remembered = recalled(request, "read", target_instance)
+        if remembered is not None:
+            if not remembered.allowed:
+                return {}
+            visible_fields = self._normalize_field_names(
+                remembered.get_fields(self._get_cached_field_names(type(target_instance)))
+            )
+
         # 1. Try Legacy 'can_read'
-        if target_caps['has_can_read']:
-            raw_visible_fields = target_instance.can_read(request)
+        elif target_caps['has_can_read']:
+            try:
+                if request is not None and type(target_instance).can_read is _lex_model_can_read():
+                    # LexModel.can_read is permission_read with a context built from
+                    # the request; build it from this serializer's cached base
+                    # instead of querying the user's groups once per row (BUG-011).
+                    result = target_instance.permission_read(self._get_can_read_context(request, target_instance))
+                    raw_visible_fields = result.get_fields(target_instance._get_all_field_names())
+                else:
+                    raw_visible_fields = target_instance.can_read(request)
+            except Exception as exc:
+                if _auth_outage(exc):
+                    raise
+                if _fail_closed():
+                    logger.exception("can_read raised for %s; record withheld", type(target_instance).__name__)
+                    return {}
+                raise
             if raw_visible_fields is False:
                 return {}
             if raw_visible_fields is True:
@@ -771,7 +906,15 @@ class LexSerializer(serializers.ModelSerializer):
         # 2. Try New System 'permission_read'
         elif target_caps['has_permission_read']:
             user_context = self._get_user_context(request, target_instance)
-            result = target_instance.permission_read(user_context)
+            try:
+                result = target_instance.permission_read(user_context)
+            except Exception as exc:
+                if _auth_outage(exc):
+                    raise
+                if _fail_closed():
+                    logger.exception("permission_read raised for %s; record withheld", type(target_instance).__name__)
+                    return {}
+                raise
             if hasattr(result, "allowed") and not result.allowed:
                 return {}  # Hide entirely
 
@@ -818,7 +961,12 @@ class LexSerializer(serializers.ModelSerializer):
         try:
             if instance.__class__._meta.model_name.lower() == 'auditlog':
                 payload = representation.get('payload') or getattr(instance, 'payload', None)
-                if isinstance(payload, dict):
+                if self._is_readable_file_operation_payload(instance):
+                    # An export or download payload describes the request (file
+                    # name, size, rows, filter), not field values of the record:
+                    # whoever may read the entry reads it whole.
+                    pass
+                elif isinstance(payload, dict):
                     model_class = self._resolve_target_model(instance)
                     if model_class is not None:
                         base_user_context = self._get_base_user_context(request) if request else None
@@ -847,8 +995,13 @@ class LexSerializer(serializers.ModelSerializer):
                             representation['payload'] = pruned
                         else:
                             representation['payload'] = filtered_payload
-        except Exception:
-            pass
+        except Exception as exc:
+            if _auth_outage(exc):
+                raise
+            if _fail_closed():
+                # The payload could not be judged: withhold it rather than show it unfiltered.
+                logger.exception("Filtering the audit-log payload raised; payload withheld")
+                representation['payload'] = {}
 
         # Add FK display-name companions (<fk>__short_description) for the
         # detail / single-object path. During list serialization this is
@@ -858,6 +1011,14 @@ class LexSerializer(serializers.ModelSerializer):
             self._add_fk_display_names_single(representation)
 
         return representation
+
+    @staticmethod
+    def _is_readable_file_operation_payload(instance) -> bool:
+        """An export/download entry whose payload is not pruned (LEX_SEC_READ_SURFACES)."""
+        from lex.core.security_flags import strict
+
+        file_operation_actions = getattr(type(instance), "FILE_OPERATION_ACTIONS", ())
+        return getattr(instance, "action", None) in file_operation_actions and strict("READ_SURFACES")
 
     def _add_fk_display_names_single(self, representation: dict) -> None:
         """Per-instance twin of ``FilteredListSerializer._batch_add_fk_display_names``.

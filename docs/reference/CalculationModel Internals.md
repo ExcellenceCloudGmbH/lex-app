@@ -83,6 +83,14 @@ class LargeImport(CalculationModel):
         ...
 ```
 
+## Calculating on Create
+
+Set `calculate_on_create = True` to have records created through the app start
+their calculation straight away, in the background, as if **Calculate** had been
+clicked. Records created in code are not affected. It is read from the instance,
+so it can be a property that decides per record. See
+[[calculations/calculation models#Calculating New Records Automatically|Calculating New Records Automatically]].
+
 ## Celery Integration
 
 In production, calculations can be dispatched to [Celery](https://docs.celeryq.dev/) workers for background/parallel processing. The framework checks two things automatically:
@@ -132,20 +140,40 @@ For triaging and recovering from calculations that are wedged in `IN_PROGRESS`, 
 
 `started_at` is anchored to a monotonic clock internally, so `age_seconds` stays correct even if the system wall-clock jumps.
 
+## Closing a Record
+
+`calculation_closed_reason()` returns why a record must not be calculated again, or `None` while it may be. `CalculationModel` and `CalculatedModelMixin` both define it, returning `None`; returning `True` closes the record with a generic message. Every way a calculation can start asks it first, and sees the record as it was before the run was asked for:
+
+| How the calculation starts | What a closed record does |
+|---|---|
+| **Calculate** (`PATCH` with `calculate=true`) | Refused with HTTP 409, `{"detail": "<reason>", "code": "calculation_closed"}`; nothing changes |
+| A save that sets `is_calculated = IN_PROGRESS` (scripts, other calculations) | Keeps its previous status; the rest of the save is written, and the skip is logged, into the calling calculation's log when there is one |
+| `CalculatedModelMixin.create()`, in any mode | The existing row is neither recalculated nor saved; the Celery task counts it under `skipped_closed` |
+| A create on a `calculate_on_create` model | No run starts, and nothing of one is recorded: the record stays `NOT_CALCULATED`, with no audit entry or history row beyond its creation |
+
+Closing stops only the calculation. An edit through the app (a `PATCH` without `calculate`) saves the record's other fields and keeps its status, closing it included; an edit to an open record resets it to `NOT_CALCULATED`, as it always has. `calculation_closed_reason()` is asked on the record as the edit leaves it, so reopening a record resets it like any open one.
+
+Rows of calculation models carry the reason as `lex_reserved_calculation_closed_reason` (`null` while the record is open), and a closed record's `lex_reserved_scopes.edit` leaves out `is_calculated`, which is what greys its Calculate button. See [[calculations/calculation models#Closing a Record|Closing a Record]].
+
 ## Nested Calculations
 
-When a parent calculation triggers a child, wrap the child execution in `model_logging_context` to preserve the log hierarchy:
+When a parent calculation saves a child as `IN_PROGRESS`, the child's log nests under the parent on its own:
 
 ```python
-from lex.audit_logging.utils.ModelContext import model_logging_context
-
 class ParentReport(CalculationModel):
     def calculate(self):
         child = ChildReport.objects.get(pk=self.child_id)
-        with model_logging_context(child):
-            child.is_calculated = "IN_PROGRESS"
-            child.save()
+        child.is_calculated = "IN_PROGRESS"
+        child.save()
 ```
+
+`calculate_hook()` puts the child on top of the model context before it runs the child in-process or dispatches it to Celery, and takes it off when the run ends. So:
+
+- The child's log lines go into a node of its own, under the parent's node. This is the same in-process and on Celery, with or without `@lex_shared_task`. The task is shipped the context with the child on top.
+- The frame also covers the end-of-run bookkeeping and the failure handling. Both decide from the context whether a run is the root. A child that finishes or fails is never taken for the root, so it leaves the run's live log alone.
+- A model already on top is not pushed again: the record a **Calculate** click runs, or a child a caller wrapped in `model_logging_context` itself.
+
+Before lex-app 2.5.0 this page told you to wrap the child's save in `model_logging_context(child)`. That is no longer needed, and it still does no harm. See [[calculations/logging#Nested Calculations|Nested Calculations]] for where each kind of child shows up in the execution tree.
 
 ## Batch Generation with CalculatedModelMixin
 

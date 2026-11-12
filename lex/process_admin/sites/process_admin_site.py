@@ -1,12 +1,17 @@
 from django.db.models.base import ModelBase
 from django.db.models.signals import post_save
 from django.http import HttpResponse
-from django.urls import path, register_converter
+from django.urls import path, re_path, register_converter
 from lex.api.utils import create_model_converter
 from lex.api.views.LexLoggerView.LexLoggerView import LexLoggerView
 from lex.api.views.calculations.CleanCalculations import CleanCalculations
 from lex.api.views.calculations.DownloadMarkdownPdf import DownloadMarkdownPdf
 from lex.api.views.calculations.InitCalculationLogs import InitCalculationLogs
+from lex.api.views.file_operations.ChunkedUpload import (
+    ChunkedUploadChunkView,
+    ChunkedUploadDetailView,
+    ChunkedUploadStartView,
+)
 from lex.api.views.file_operations.FileDownload import FileDownloadView
 from lex.api.views.file_operations.ModelExport import ModelExportView
 from lex.api.views.global_search_for_models.Search import Search
@@ -18,13 +23,13 @@ from lex.api.views.model_entries.One import OneModelEntry
 from lex.api.views.model_info.Fields import Fields
 from lex.api.views.model_info.Widgets import Widgets
 from lex.api.views.permissions.ModelPermissions import ModelPermissions
-from lex.api.views.process_flow.CreateOrUpdate import CreateOrUpdate
 from lex.api.views.project_info.ProjectInfo import ProjectInfo
 from lex.api.views.sharepoint.DeleteUnusedFiles import DeleteUnusedFiles
 from lex.api.views.sharepoint.SharePointFileDownload import SharePointFileDownload
 from lex.api.views.sharepoint.SharePointPreview import SharePointPreview
 from lex.api.views.sharepoint.SharePointShareLink import SharePointShareLink
 from lex.authentication.views.permissions import UserPermissionsView
+from lex.authentication.views.session_views import AuthCompleteView, SessionStatusView
 from lex.authentication.views.token_views import StreamlitTokenView
 from lex.core.mixins.CalculatedModelMixin import CalculatedModelMixin
 from lex.core.signals import do_post_save
@@ -33,7 +38,6 @@ from lex.process_admin.models.ModelProcessAdmin import ModelProcessAdmin
 from lex.process_admin.views.model_relation_views import (
     ModelStructureObtainView,
     Overview,
-    ProcessStructure,
 )
 from lex.utilities.decorators.singleton import LexSingleton
 
@@ -54,7 +58,6 @@ class ProcessAdminSite:
         self.auto_include_missing_models_in_structure = True
         self.model_styling = {}
         self.html_reports = {}
-        self.processes = {}
         self.widget_structure = []
 
         self.initialized = False
@@ -74,9 +77,6 @@ class ProcessAdminSite:
 
     def registerHTMLReport(self, name, report):
         self.html_reports[name] = report
-
-    def registerProcess(self, name, process):
-        self.processes[name] = process
 
     def register_model_structure(
         self,
@@ -152,9 +152,6 @@ class ProcessAdminSite:
         # Define the function that returns the HTML report
         return self.html_reports[report_name].get_html(user)
 
-    def get_process_structure_func(self, process_name):
-        return self.processes[process_name]()
-
     # TODO: Put urls definitions in the correct place (e.g. in a urls.py file)
     def _get_urls(self):
         register_converter(
@@ -176,6 +173,23 @@ class ProcessAdminSite:
                 FileDownloadView.as_view(model_collection=self.model_collection),
                 name="file-download",
             ),
+            # Files above the ~100 MB request-body limits of Cloudflare, the
+            # Ingress and ModSecurity are uploaded in pieces first.
+            path(
+                "api/chunked-uploads/",
+                ChunkedUploadStartView.as_view(),
+                name="chunked-upload-start",
+            ),
+            path(
+                "api/chunked-uploads/<str:upload_id>",
+                ChunkedUploadDetailView.as_view(),
+                name="chunked-upload-detail",
+            ),
+            path(
+                "api/chunked-uploads/<str:upload_id>/chunks/<int:index>",
+                ChunkedUploadChunkView.as_view(),
+                name="chunked-upload-chunk",
+            ),
             path(
                 "api/<model:model_container>/export",
                 ModelExportView.as_view(model_collection=self.model_collection),
@@ -186,12 +200,10 @@ class ProcessAdminSite:
                 Overview.as_view(HTML_reports=self.html_reports),
                 name="htmlreports",
             ),
-            path(
-                "api/process/<str:process_name>",
-                ProcessStructure.as_view(processes=self.processes),
-                name="process",
-            ),
             path('api/auth/streamlit-token/', StreamlitTokenView.as_view(), name='streamlit_token'),
+            # HTTP auth contract v2, also under DJANGO_BASE_PATH (lex_app/urls.py routes the root).
+            re_path(r'^api/auth/session/?$', SessionStatusView.as_view(), name='process-admin-auth-session'),
+            re_path(r'^oidc/auth-complete/?$', AuthCompleteView.as_view(), name='process-admin-oidc-auth-complete'),
 
         ]
 
@@ -217,11 +229,6 @@ class ProcessAdminSite:
                 name="model-history-list",
             ),
             path(
-                "api/run_step/<model:model_container>/<str:pk>",
-                CreateOrUpdate.as_view(),
-                name="run_step",
-            ),
-            path(
                 "api/model_entries/<model:model_container>/many",
                 ManyModelEntries.as_view(),
                 name="model-many-entries",
@@ -235,6 +242,12 @@ class ProcessAdminSite:
                 "api/global-search/<str:query>",
                 Search.as_view(model_collection=self.model_collection),
                 name="global-search",
+            ),
+            # The bundled frontend asks api/global-search/?q=<text>.
+            path(
+                "api/global-search/",
+                Search.as_view(model_collection=self.model_collection),
+                name="global-search-query",
             ),
             path(
                 "api/<model:model_container>/model-permissions",

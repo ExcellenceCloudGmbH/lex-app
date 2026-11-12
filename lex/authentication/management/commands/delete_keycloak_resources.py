@@ -2,7 +2,9 @@
 
 from django.apps import apps
 from django.core.management.base import BaseCommand
-from keycloak import KeycloakOpenIDConnection, KeycloakUMA, KeycloakAdmin
+from keycloak import KeycloakUMA, KeycloakAdmin
+
+from lex.authentication.management.commands._keycloak_env import instance_keycloak_connection
 from keycloak.exceptions import KeycloakGetError
 from keycloak.urls_patterns import (
     URL_ADMIN_CLIENT_AUTHZ_SCOPE_PERMISSION,
@@ -40,19 +42,10 @@ class Command(BaseCommand):
     )
 
     def handle(self, *args, **options):
-        # 1) connect via client-credentials
-        conn = KeycloakOpenIDConnection(
-            server_url="https://exc-testing.com",
-            realm_name="lex",
-            client_id="LEX_LOCAL_ENV",
-            client_secret_key="O1dT6TEXjsQWbRlzVxjwfUnNHPnwDmMF",
-            verify=False,
-        )
+        # 1) connect as the instance's own client, in the realm it lives in
+        conn, client_uuid = instance_keycloak_connection()
         kc_uma = KeycloakUMA(connection=conn)
         kc_admin = KeycloakAdmin(connection=conn)
-
-        # 2) your client's internal UUID
-        client_uuid = "3e5eeafe-a3b3-469e-9db3-54cff7108d70"
 
         # 3) load existing UMA resource-sets of the django:model type
         existing = kc_uma.resource_set_list()

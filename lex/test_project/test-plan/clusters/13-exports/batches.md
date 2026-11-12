@@ -65,3 +65,19 @@ writing-plan batch blocks were recorded for this cluster.
 | Status | ✅ Complete — two independent traps in one declaration. (1) The helpers are written against a `FieldFile` (`create_excel_file_from_dfs` ends in `self.save(name, content, save=False)`, a FieldFile API) but lived only on the field class, so the spelling customers reach for first raised `AttributeError: 'FieldFile' object has no attribute 'create_excel_file_from_dfs'` inside a Celery worker, naming no code they wrote. `attr_class = XLSXFieldFile` binds the *same function objects*, so both spellings resolve to one implementation and the ~30 unbound call sites across the estate are untouched. (2) `max_length = 300` was dead — `FileField.__init__` setdefaults 100 and `Field.__init__` shadows the class attribute — so every bare `XLSXField()`/`PDFField()` was `varchar(100)`, over which Django's storage *silently truncates and suffixes* rather than raising. **Downstream impact:** apps get one `AlterField` per report column on their next `makemigrations`; `lex_migrate` runs it by default, so the widening lands on deploy. No lex-app model uses either field, so no migration ships in this repo. |
 
 ---
+
+### Batch 13i — The export endpoint writes an audit entry ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 13.46 – 13.51 |
+| Type | E |
+| Files covered | `lex/api/views/file_operations/ModelExport.py` (`audit_request_payload`, the four response paths of `post`) |
+| Test file | `lex/test_project/tests/exports/test_13i_export_audit.py` |
+| Test classes | `TestCluster13i_StreamingExportAudit` (13.46 universal streaming → `export_path`, rows, columns, size, model content type and unset `object_id`; 13.47 flat DB-only streaming; 13.48 an export that returns no file → `failure` + status code) · `TestCluster13i_DataFrameExportAudit` (13.49 legacy non-AG path with its sheet name; 13.50 AG-Grid pandas fallback incl. the `filter_model` that decided which rows left; 13.51 a selection recorded as a count, never as the id list) |
+| Fixtures | `FastExportItem` (default export permissions → streaming paths) and `ExportItem` (overridden `permission_export` → pandas paths) from `tests/exports/models.py`; `AuditLog` + `AuditLogStatus` in `e2e_framework_models`; Keycloak `export` scope patched for the streaming class |
+| Tests landed | **6 pass / 0 fail** |
+| Coverage gain | one audited scenario per export writer — the four share no code between request and response, so a green streaming test says nothing about the other three |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-22-export-download-audit.md) |
+
+---

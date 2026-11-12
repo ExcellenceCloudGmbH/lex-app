@@ -138,9 +138,12 @@ jobs:
 
           # If a sync PR for this same upstream commit is already open, there is
           # nothing to do. Without this the daily cron opens an identical PR
-          # every morning until someone merges one.
-          EXISTING=$(gh pr list --state open --search "docs-sync in:title ${UPSTREAM_SHA}" \
-                       --json number --jq '.[0].number // empty')
+          # every morning until someone merges one. Matched on the branch: the
+          # titles never said "docs-sync", so a title search found nothing, the
+          # run adopted the open PR's branch below, and opening a second PR for
+          # it failed red on every morning the open one was current.
+          EXISTING=$(gh pr list --state open --limit 100 --json number,headRefName \
+                       --jq "[.[] | select(.headRefName | startswith(\"docs-sync/${UPSTREAM_SHA}-\"))][0].number // empty")
           if [[ -n "${EXISTING}" ]]; then
             echo "PR #${EXISTING} already mirrors lex-app-docs@${UPSTREAM_SHA}. Nothing to do."
             exit 0
@@ -190,3 +193,12 @@ jobs:
             echo "::error title=Could not open the mirror PR::Branch ${BRANCH} is pushed, but opening the pull request was refused. Either the lex-docs-bot App lacks pull_requests:write on lex-app, or it is not installed here. Open it by hand meanwhile: ${REPO_URL}/compare/lex-app-v2...${BRANCH}?expand=1"
             exit 1
           fi
+
+          # This PR mirrors the whole subset at the newest upstream commit, so
+          # every other open mirror PR is superseded. Left open, they conflict
+          # as soon as anything else lands: four piled up in two weeks.
+          NEW=$(gh pr view "${BRANCH}" --json number --jq .number)
+          for OLD in $(gh pr list --state open --limit 100 --json number,headRefName \
+                         --jq ".[] | select(.headRefName | startswith(\"docs-sync/\")) | select(.headRefName != \"${BRANCH}\") | .number"); do
+            gh pr close "${OLD}" --comment "Superseded by #${NEW}, which mirrors lex-app-docs@${UPSTREAM_SHA}, a later commit of the same published subset."
+          done

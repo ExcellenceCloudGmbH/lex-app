@@ -1,6 +1,12 @@
 import contextvars
 from contextlib import contextmanager
+from copy import deepcopy
 from typing import Optional, Any, List, Dict
+
+# Attribute on a model instance that keeps, per calculation id, the pk of the
+# calculation log row it was logged into while it had no primary key. Written
+# and read by CalculationLog; see CalculationLog._kept_row.
+UNSAVED_ROWS_ATTR = "_lex_calculation_log_rows"
 
 
 class LogHeading:
@@ -65,6 +71,27 @@ class ModelContext:
                 return frame
         return None
 
+
+    def has_on_top(self, instance: Any) -> bool:
+        """Whether ``instance`` already is the top frame.
+
+        True for the same object, or for the same saved row arriving as another
+        object - a calculation dispatched to Celery finds a copy of itself on
+        top of the stack it was shipped with. Two unsaved instances are never
+        the same row.
+        """
+        top = self.current
+        if top is None or isinstance(top, LogHeading) or isinstance(instance, (str, LogHeading)):
+            return False
+        if top is instance:
+            return True
+        top_pk = getattr(top, "pk", None)
+        return (
+            top_pk is not None
+            and top_pk == getattr(instance, "pk", None)
+            and getattr(getattr(top, "_meta", None), "label_lower", None)
+            == getattr(getattr(instance, "_meta", None), "label_lower", None)
+        )
 
     @property
     def parent(self) -> Optional[Any]:
@@ -162,3 +189,25 @@ def model_logging_context(instance: Any):
     finally:
         # Use the token to reset the context variable to its previous state.
         context.pop()
+        if getattr(instance, UNSAVED_ROWS_ATTR, None):
+            # A model logged before its first save, and saved inside the
+            # block, gets its log rows linked to it now.
+            from lex.audit_logging.models.CalculationLog import CalculationLog
+
+            CalculationLog.claim_rows(instance)
+
+
+def copy_for_dispatch(context: Optional[ModelContext] = None) -> ModelContext:
+    """The copy of the model context stack that is shipped with a Celery task.
+
+    Every task that carries the stack takes it from here, so the unsaved
+    models on it get their log rows before the copy is made (see
+    ``CalculationLog.prepare_for_dispatch``). ``context`` defaults to the
+    current stack.
+    """
+    from lex.audit_logging.models.CalculationLog import CalculationLog
+
+    if context is None:
+        context = _model_context.get()['model_context']
+    CalculationLog.prepare_for_dispatch(getattr(context, "_stack", None))
+    return deepcopy(context)

@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 82
+max_scenario: 187
 letters:
   a:
     title: ''
@@ -143,3 +143,159 @@ letters:
       xfail: 0
     note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
       recorded
+  o:
+    title: Error bodies, OIDC redirects, unknown api/ paths, global search ?q=, one KeycloakManager
+    scenarios: 10.83-10.90
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      v2 security hardening. TRACEBACKS (10.83-10.84): no traceback in generic error bodies unless
+      DEBUG, LEX_API_TRACEBACKS=true or the opt-out; error text kept; the explicit switch wins over
+      DEBUG. OIDC_REDIRECT (10.85-10.86): next/fail on /oidc/* relative, own host, CSRF_TRUSTED_ORIGINS
+      or the CORS allow-list, else 400 REDIRECT_NOT_ALLOWED before the OIDC view. Unknown api/ path is
+      a JSON 404, SPA routes keep index.html (10.87-10.88). api/global-search/?q= routed (10.89). One
+      KeycloakManager per process (10.90). Ported from #815, #821 (manager only), #830.
+  p:
+    title: File-download endpoints write an audit entry
+    scenarios: 10.91-10.96
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      Four endpoints serve a file and each has its own machine. `file-download` on local storage
+      records the record, field, filename, byte size and `delivery: stream` (10.91); a refused
+      download is a `failure` entry with its status code and no record attached (10.92); on GCS the
+      caller gets a URL, recorded as `delivery: url` so "bytes streamed" and "access handed out"
+      stay distinguishable (10.93). The SharePoint download (10.94), share link (10.95) and preview
+      link (10.96) are audited as downloads too, told apart by `delivery`. SharePoint's SDK is mocked
+      at the project boundary; `DownloadableDocument` is the cluster's own FileField model.
+  q:
+    title: The Process and ProcessFlow endpoints are gone from the route table
+    scenarios: 10.97-10.99
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      Removing the Process feature took out two public routes and must have taken out nothing else.
+      api/run_step/<model>/<pk> no longer reverses, no route is named run_step or served under
+      api/run_step/, and lex.api.views.process_flow no longer imports (10.97). The same for
+      api/process/<name>, plus ProcessStructure gone from lex.process_admin.views and
+      lex.api.views.ModelStructureObtainView (10.98). The endpoints the bundled frontend loads a
+      project with -- model-structure, project-info, calculationlog-tree, init-calculation-logs,
+      clean-calculations, widget-structure, global-search-query, user-permissions, log and
+      htmlreports -- all still reverse (10.99). This resolves pending decision 4 in clusters/README
+      for CreateOrUpdate. The model-side removal is pinned by 1ax. Originally allocated as
+      10p/10.91-10.94; #840 landed that letter and range on lex-app-v2 first, so this batch re-took
+      the next free pair on merge.
+  aa:
+    title: lex's REST surface speaks the HTTP auth contract v2 - 401/403/503 with codes, api/user/ from the sign-in, api/auth/session, oidc/auth-complete, the shared fixtures
+    scenarios: 10.152-10.166
+    status: complete
+    tests:
+      pass: 15
+      skip: 0
+      xfail: 0
+    note: >-
+      DRF answers "not authenticated" with 401, WWW-Authenticate and code not_authenticated - the
+      unauthenticated half of BUG-008 (10.152); a rejected bearer token gets Bearer
+      error="invalid_token" (10.153); a session request stays CSRF-checked whatever Authorization
+      header it adds (10.154); refusals are 403 permission_denied (keeping the documented message)
+      and CSRF failures 403 csrf_failed (10.155). api/user/ answers from the validated sign-in -
+      profile and client_roles, no Keycloak call, for browsers, bearer clients and Django-only
+      logins (10.156) - and 401 session_expired / 503 auth_unavailable when the sign-in cannot be
+      used (10.157). api/auth/session reports sign-in and capabilities from
+      lex.authentication.capabilities (10.158); oidc/auth-complete posts its result to its own origin
+      only, with no token and SAMEORIGIN framing (10.159); the silent prompt=none round trip works
+      end to end (10.160); api/auth/streamlit-token/ renews a token about to expire and answers 401
+      once the sign-in ended (10.161). 10.162-10.166 drive lex's real responses for every server
+      case of lex/contracts/auth/v2/fixtures/http (session_missing, session_expired,
+      auth_unavailable through refresh and UMA, permission_denied, csrf_failed). Also updated: 10o
+      10.90 (the middleware builds no KeycloakManager). Letter aa, from 10.152: r-z and scenarios up
+      to 10.151 are held by in-flight branches (feat/ext-*, integration/lex-3-extensions,
+      feat/fleet-metrics-*, feat/multi-value-filters, fix/streamlit-report-frames-unauthenticated).
+  ab:
+    title: The app's half of the Streamlit hand-off - GET oidc/handoff (a bound single-use code, login_required in a frame, never an unlisted origin), the dashboard_handoff capability per LEX_STREAMLIT_AUTH, the handoff-mode placeholder token
+    scenarios: 10.167-10.174
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      Plan P5 section 6.3: item 2, and the API surfaces of item 8. A signed-in browser gets a code
+      bound to its sign-in, `streamlit`, the dashboard origin and its state, valid 60 s (10.167);
+      without a sign-in a frame goes back with error=login_required, a page signs in first and a
+      background request gets the contract's 401 (10.168), also for an ended sign-in, which the
+      view answers itself (10.169). Only listed dashboard origins, a well-formed state and aud
+      streamlit are accepted; 404 in legacy mode; loopback only when not deployed (10.170); Keycloak
+      down is a 503 with no code (10.171). api/auth/session advertises dashboard_handoff exactly in
+      dual and handoff (10.172); handoff mode answers old frontends a placeholder token (10.173);
+      only the exact path is login- and session-exempt (10.174). Four mutations each fail their
+      scenario. Letter ab, from 10.167: r-z are held by in-flight branches (see aa).
+  r:
+    title: api/htmlreport/<name> hands a report the request, and the Streamlit frame a credential
+    scenarios: 10.100-10.102
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      The Streamlit sidebar entry framed its dashboard host with no credential at all. A
+      cross-origin frame cannot authenticate itself -- the proxy would have to redirect it to
+      Keycloak, which forbids being framed -- so the frame 401'd and the framed-401 page took the
+      browser tab to the dashboard host. The report now carries the session's own OIDC access
+      token as the bootstrap auth_token (10.100), the same handshake the React shell's embed has
+      always used, and carries none at all when the session has none (10.101) rather than a
+      placeholder the proxy must reject. The route answers Cache-Control: no-store now that its
+      body can hold a credential (10.100). HTMLReport's published get_html(self, user) is untouched:
+      the request reaches only a report that declares a second parameter, decided by reading the
+      signature rather than catching a TypeError that could have come from inside the report
+      (10.102). Mutation: the pre-fix report fails 10.100.
+  ad:
+    title: "model_info ships the project's per-column display options"
+    scenarios: "10.184-10.187"
+    tier: U
+    status: complete
+    tests: {pass: 5, skip: 0, xfail: 0}
+    note: >-
+      LEX-1556. A customer reported the grid's ID column is too wide, and the framework had no
+      way for a project to say anything about a COLUMN: ``list_ui`` carried one flag
+      (``hide_actions_column``). ``Meta.lex_column_options`` is the missing developer layer -
+      width / min_width / max_width / pinned / hidden per field - and this batch covers the
+      half a frontend actually reads: ``/api/<model>/fields/`` returning it.
+      10.184 the declaration arrives keyed by field name. 10.185 a project's own PLAIN DRF
+      serializer gets the identical contract, because the endpoint serves both kinds and a
+      frontend that had to tell them apart would need two code paths for one payload - and the
+      hand-written kind is the one that would be missed. 10.186 every response answers the key,
+      so "declared nothing" and "declared an empty thing" cannot diverge between readers.
+      10.187 a malformed declaration costs the project that option and not the grid: this
+      payload is fetched before any table can be drawn, so an exception raised while describing
+      a DISPLAY PREFERENCE would take down every list view of the model.
+      Paired with cluster 12p (the serializer-side contract and its validation) and frontend
+      clusters F03p/F03q.
+
+  ac:
+    title: 'Scheduled jobs through the REST API'
+    scenarios: 10.175-10.183
+    status: complete
+    tests:
+      pass: 9
+      skip: 0
+      xfail: 0
+    note: >-
+      Schedules are created, edited, switched off and run through the generic API and UI: every
+      definition mistake answers 400 naming the field, a save records who the job runs as and
+      moves its next slot, the ▶ button runs it now, a schedule declared in code can be switched
+      off but not rewritten, and an edit never resets a scheduled job's status. Allocated past
+      the letters and scenario IDs that in-flight branches (feat/ext-*, feat/auth-long-sessions)
+      already hold: the first letter absent from lex-app-v2 and every remote branch, and a range
+      above the highest max_scenario on any branch, so neither side has to renumber on merge.
+      Design: docs/superpowers/plans/2026-11-10-scheduled-jobs.md.

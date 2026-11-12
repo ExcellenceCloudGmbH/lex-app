@@ -467,20 +467,105 @@ class Flow(dict):
         return {"v": FLOW_WIRE_VERSION, "steps": list(self._steps), "end": end}
 
 
+#: Query parameter the lex-app frontend puts on the URL of a dashboard it frames: its own origin.
+LEX_APP_ORIGIN_PARAM = "lex_app_origin"
+_LEX_APP_ORIGIN_STATE_KEY = "lex_app_origin"
+
+
+def _configured_frontends() -> List[str]:
+    return [url for url in (os.getenv("REACT_APP_URL"), os.getenv("LEX_FRONTEND_URL")) if url]
+
+
+def validated_lex_app_origin(raw: Any) -> Optional[str]:
+    """``raw`` as an origin, when this instance lists it as one of its app origins.
+
+    Accepted: an app host of ``LEX_INSTANCE_HOSTS`` (or its ``DOMAIN_HOSTED`` fallback), the
+    configured frontend (``REACT_APP_URL`` / ``LEX_FRONTEND_URL``), and loopback origins on an
+    instance that is not deployed. Anything else is ignored: the value arrives in the URL, and
+    an origin taken from it unchecked would let a link embed a foreign site in the dashboard --
+    and, with an ``on_*`` flag, accept its messages as events.
+    """
+    from lex.authentication.dashboards import sites
+
+    origin = sites.normalize_origin(raw)
+    if origin and sites.is_app_origin(origin, extra=_configured_frontends()):
+        return origin
+    return None
+
+
+def remember_lex_app_origin(query_params: Any = None) -> Optional[str]:
+    """Keep this page's ``lex_app_origin`` for the session, once validated; returns it.
+
+    Kept in ``st.session_state`` because Streamlit's page navigation drops query parameters,
+    while the session -- the frame the frontend opened -- keeps its frontend.
+    """
+    import streamlit as st
+
+    params = st.query_params if query_params is None else query_params
+    raw = params.get(LEX_APP_ORIGIN_PARAM)
+    if isinstance(raw, list):
+        raw = raw[0] if raw else None
+    if not raw:
+        return None
+    origin = validated_lex_app_origin(raw)
+    if origin is None:
+        logger.warning("Ignoring lex_app_origin %r: not an app origin of this instance", raw)
+        return None
+    st.session_state[_LEX_APP_ORIGIN_STATE_KEY] = origin
+    return origin
+
+
+def _session_lex_app_origin() -> Optional[str]:
+    try:
+        import streamlit as st
+
+        value = st.session_state.get(_LEX_APP_ORIGIN_STATE_KEY)
+    except Exception:  # outside a script run
+        return None
+    return value if isinstance(value, str) and value else None
+
+
 def _resolve_base_url() -> str:
     """
     Resolve the base URL of the React application.
 
     Priority:
-    1. ``REACT_APP_URL`` environment variable (explicit override)
-    2. ``LEX_FRONTEND_URL`` environment variable (framework convention)
-    3. Falls back to ``http://localhost:8000``
+    1. The ``lex_app_origin`` the frontend framing this dashboard named, once validated
+       (:func:`remember_lex_app_origin`) -- the origin the user is signed in on, same-site with
+       the dashboard, so the embedded page carries the user's session.
+    2. ``REACT_APP_URL`` environment variable (explicit override)
+    3. ``LEX_FRONTEND_URL`` environment variable (framework convention)
+    4. The application hostname on the same registrable domain as the hostname
+       this dashboard is canonically served on
+    5. Falls back to ``http://localhost:8000``
+
+    Step 4 is what makes this work on a deployed instance without anything
+    being set, and what keeps it working once a customer-owned domain is
+    attached. This frame is the *reverse* of the one lex-app draws around a
+    dashboard, and it has the same constraint: a frame whose origin is on a
+    different registrable domain from the page around it is a third-party
+    context, so a dashboard on ``streamlit.app.customer.com`` must frame
+    ``app.customer.com`` and not the platform hostname.
     """
-    return (
-        os.getenv("REACT_APP_URL")
-        or os.getenv("LEX_FRONTEND_URL")
-        or "http://localhost:8000"
-    ).rstrip("/")
+    from lex import hosts as lex_hosts
+
+    named = _session_lex_app_origin()
+    if named:
+        return named.rstrip("/")
+
+    explicit = (os.getenv("REACT_APP_URL") or os.getenv("LEX_FRONTEND_URL") or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+
+    # The dashboard's own canonical hostname names the site this process serves;
+    # there is no request here to read one from, and every hostname a dashboard
+    # answers on is under the application host by construction.
+    dashboard_host = lex_hosts.host_of(lex_hosts.canonical_url("streamlit"))
+    app_url = lex_hosts.same_site_url("app", dashboard_host) if dashboard_host else ""
+    if app_url and not lex_hosts.host_of(app_url).startswith("localhost"):
+        return app_url.rstrip("/")
+
+    return "http://localhost:8000"
 
 
 def lex_view(

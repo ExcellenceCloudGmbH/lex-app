@@ -45,3 +45,154 @@
 **Scenario range:** 10.82. **Test file:** `lex/test_project/tests/api_layer/test_10d_reflex_search_exclusion.py`. **Type:** I. **Status:** ✅ Complete (2026-09-28). Covers `lex/api/views/global_search_for_models/Search.py`. Batch: [10d](batches.md).
 
 ---
+
+---
+
+### 10o. Error bodies, OIDC redirects, unknown api/ paths, global search ?q=, one KeycloakManager ✅
+
+**What it tests:** error responses of the generic endpoints no longer carry a server traceback by default (`LEX_SEC_TRACEBACKS`, `LEX_API_TRACEBACKS`); `next`/`fail` on `/oidc/*` cannot send a signed-in user to a foreign site (`LEX_SEC_OIDC_REDIRECT`); an unknown endpoint below `api/` is a JSON 404 instead of the SPA's index.html with 200; the `?q=` form of the global search the bundled frontend calls is routed; requests share one KeycloakManager.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.83 | no traceback by default | create and a raising `permission_create` answer 500 with `error`, no `traceback` (the `run_step` probe went with the ProcessFlow endpoint — 10q) |
+| 10.84 | traceback when allowed | `LEX_API_TRACEBACKS=true`, legacy, DEBUG show it; `LEX_API_TRACEBACKS=false` wins over DEBUG |
+| 10.85 | redirect targets | relative, own host, `CSRF_TRUSTED_ORIGINS` (wildcard, :3000), CORS origins pass; foreign, `//`, `/\`, `javascript:`, look-alike, userinfo hosts 400 on authenticate, logout, total_logout; other paths not inspected; opt-out passes |
+| 10.86 | guard in the stack | installed before the session middleware; `/oidc/authenticate` and `/oidc/total_logout` with a foreign `next` answer 400 |
+| 10.87 | unknown api/ path | JSON 404 with `error`; `api/health` and a model list still 200 |
+| 10.88 | SPA catch-all | api paths 404, app routes index 200, also below `DJANGO_BASE_PATH`; legacy serves the index |
+| 10.89 | global search `?q=` | `?q=needle` and `/needle` find the row; empty `q` the sentinel |
+| 10.90 | one KeycloakManager | three token requests build one manager and get permissions and roles; no token builds none |
+
+**Scenario range:** 10.83 – 10.90. **Test file:** `lex/test_project/tests/api_layer/test_10o_error_and_route_hardening.py`. **Type:** E (10.85, 10.88, 10.90 U). **Status:** ✅ Complete (2026-10-18). Batch: [10o](batches.md).
+
+### 10p. File-download endpoints write an audit entry
+
+Four endpoints serve a file, each through its own machine, and ``file-download``
+branches again per ``STORAGE_TYPE``. Each is recorded as an ``AuditLog`` row with
+``action='download'`` — see [[history-and-audit/audit logs]].
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 10.91 | Local download | One entry naming the field, filename, byte size and `delivery: stream`, its generic relation pointing at the record so the download shows on that record's audit tab |
+| 10.92 | Refused download | Status `failure` with the refusing 404 and nothing attached — an attempt to take data out is recorded whether or not it succeeded |
+| 10.93 | GCS download | `delivery: url` — the caller received access, not bytes, and the trail tells the two apart |
+| 10.94 | SharePoint download | Own entry with `storage: SHAREPOINT`, `delivery: stream`; shares no code with `file-download` |
+| 10.95 | SharePoint share link | `delivery: share_link` plus the SharePoint document id — no bytes crossed the wire, but the file left the system's control |
+| 10.96 | SharePoint preview link | `delivery: preview_link`, distinguishable from the share link |
+
+**Scenario range:** 10.91 – 10.96. **Test file:** `lex/test_project/tests/api_layer/test_10p_file_download_audit.py`. **Type:** E. **Status:** ✅ Complete (2026-10-22). Batch: [10p](batches.md).
+
+---
+
+### 10q. The Process and ProcessFlow endpoints are gone from the route table ✅
+
+**What it tests:** the two public routes the Process feature owned — `api/run_step/<model>/<pk>` (the ProcessFlow `CreateOrUpdate` view) and `api/process/<process_name>` (the `ProcessStructure` view) — no longer reverse, no longer appear in the route table under their paths, and their view modules no longer import. The third scenario is the other half: the removal ran through the one url list the entire frontend is served from, so every neighbouring endpoint is checked to still resolve.
+
+**Why a regression matters:** `run_step` was a second write path into every model with its own copy of the permission checks; a route that comes back by accident is a write surface nobody audits. And a cascade that takes a neighbour out with it breaks every screen in a project.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.97 | `run_step` is not routed | `NoReverseMatch`, no `run_step` name or `api/run_step/` path, `lex.api.views.process_flow` raises `ModuleNotFoundError` |
+| 10.98 | process structure is not routed | `NoReverseMatch`, no `process` name or `api/process/` path, no `ProcessStructure` on either module |
+| 10.99 | the neighbours are untouched | `model-structure`, `project-info`, `calculationlog-tree`, `init-calculation-logs`, `clean-calculations`, `widget-structure`, `global-search-query`, `user-permissions`, `log` and `htmlreports` all still reverse |
+
+**Scenario range:** 10.97 – 10.99. **Test file:** `lex/test_project/tests/api_layer/test_10q_process_routes_removed.py`. **Type:** U. **Status:** ✅ Complete (2026-10-23). Batch: [10q](batches.md).
+
+### 10aa. lex's REST surface speaks the HTTP auth contract v2 ✅
+
+**What it tests:** what a client sees when authentication or authorization is the problem — 401 (session gone: re-authenticate), 403 with a code (refused or CSRF: stay signed in), 503 `auth_unavailable` (retry) — on lex's real routes: DRF's answers, `api/user/` from the validated sign-in, `api/auth/session`, `oidc/auth-complete`, the silent re-authentication round trip, the embedded-dashboard token, and every server case of the contract's shared fixtures.
+
+**Why a regression matters:** frontends route on these answers; a wrong one signs users out or strands them.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.152 | anonymous DRF → 401 | 401 + `WWW-Authenticate`, `code: not_authenticated` |
+| 10.153 | rejected bearer | `Bearer error="invalid_token"` |
+| 10.154 | CSRF stays on | a bearer header never switches CSRF off for a session |
+| 10.155 | refusals | 403 `permission_denied` / `csrf_failed` |
+| 10.156 | `api/user/` from the sign-in | profile + roles, no Keycloak call |
+| 10.157 | `api/user/` when unusable | 401 `session_expired` / 503 `auth_unavailable` |
+| 10.158 | `api/auth/session` | status + capabilities, 401 when signed out |
+| 10.159 | `oidc/auth-complete` | same-origin result message, no token |
+| 10.160 | silent re-auth round trip | `prompt=none` failure and success |
+| 10.161 | dashboard token | renewed before expiry; 401 after the end |
+| 10.162 | fixture `session_missing` | matches the contract |
+| 10.163 | fixture `session_expired` | matches the contract |
+| 10.164 | fixture `auth_unavailable` | matches, through refresh and UMA |
+| 10.165 | fixture `permission_denied` | matches the contract |
+| 10.166 | fixture `csrf_failed` | matches the contract |
+
+**Scenario range:** 10.152 – 10.166. **Test file:** `lex/test_project/tests/api_layer/test_10aa_auth_contract_v2.py`. **Type:** E. **Status:** ✅ Complete (2026-11-06). Batch: [10aa](batches.md).
+
+### 10ab. The app's half of the Streamlit hand-off ✅
+
+**What it tests:** `GET oidc/handoff` (plan "long-lived sessions" §6.3, item 2) -- a signed-in browser gets a single-use, 60-second code bound to its sign-in, the audience, the dashboard origin and the dashboard's `state`; without a sign-in a frame goes back with `error=login_required` (Keycloak never renders in a frame) and a page signs in first; only dashboard origins the instance lists are ever redirected to. And what `api/auth/*` says about it: `dashboard_handoff: ["streamlit"]` exactly while `LEX_STREAMLIT_AUTH` is `dual` or `handoff`, and a placeholder from `api/auth/streamlit-token/` in `handoff` mode.
+
+**Why a regression matters:** an open redirect on the sign-in path, a code sent to the wrong host, a Keycloak page in a frame, or a frontend choosing a path the server does not serve.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.167 | a bound single-use code | 302 to `<dashboard>/auth/handoff?code&state&next`; no-store, no-referrer; 60 s; refused for any other audience, origin or state |
+| 10.168 | no sign-in | frame → `error=login_required`; page → `oidc/authenticate?next=<hand-off>`; background → 401; no code |
+| 10.169 | ended sign-in | `login_required` in the frame (not the middleware's sign-in page); Django session signed out |
+| 10.170 | no open redirect | unlisted/relative return, bad state, other aud → 400 without Location; legacy → 404; loopback only locally |
+| 10.171 | Keycloak down | 503 `auth_unavailable` + Retry-After; no code; sign-in kept |
+| 10.172 | the capability | legacy → `[]`; dual, handoff → `["streamlit"]`; a typo → `[]` |
+| 10.173 | the placeholder | handoff → not-a-JWT placeholder, an hour, `dashboard_handoff: true`, no-store, no credential; dual → the real token; anonymous → 401 |
+| 10.174 | exact exemption | `/oidc/handoff[/]` answered by the view; `/oidc/handoffx`, `/api/oidc/handoff` → 401 |
+
+**Scenario range:** 10.167 – 10.174. **Test file:** `lex/test_project/tests/api_layer/test_10ab_dashboard_handoff_endpoint.py`. **Type:** E. **Status:** ✅ Complete (2026-11-06). Batch: [10ab](batches.md).
+
+---
+
+### 10r. `api/htmlreport/<name>` hands a report the request, and the Streamlit frame a credential ✅
+
+**What it tests:** the route every `HTMLReport` in a project is rendered through, and the one report the framework ships. The `Streamlit` report frames the project's dashboard, which lives on its own host behind the auth proxy; a cross-origin frame cannot authenticate itself, so the embedding page must hand it the bootstrap `auth_token` the proxy exchanges for a session cookie. The route supplies the request that makes this possible — but only to a report that declares a second parameter, so `HTMLReport`'s published `get_html(self, user)` is unchanged for every project that subclasses it.
+
+**Why a regression matters:** framed without a credential, the dashboard 401s, and a framed 401 is answered with a page that moves the *top* window to the dashboard host's login — so clicking **Streamlit** inside an instance took the whole browser tab out of it. And this route renders every report a project has, so widening the call signature for all of them would break them all at once.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.100 | the sidebar entry frames a dashboard that can let the user in | the frame is on `STREAMLIT_URL` carrying the session's access token as `auth_token`; the response answers `Cache-Control: no-store` |
+| 10.101 | nothing to hand it means nothing handed | no OIDC token on the session → no `auth_token` key at all, not an empty or placeholder one |
+| 10.102 | the published `get_html(self, user)` is unchanged | the one-parameter report renders untouched; the two-parameter one gets the request; a `TypeError` from inside a report is not read as a signature |
+
+**Scenario range:** 10.100 – 10.102. **Test file:** `lex/test_project/tests/api_layer/test_10r_html_report_request_and_streamlit_frame.py`. **Type:** E (10.102 also U). **Status:** ✅ Complete (2026-11-03). Batch: [10r](batches.md).
+
+### 10ad — `model_info` ships the project's per-column display options
+
+**What it tests:** a project writes how its own columns should look on its serializer
+(`Meta.lex_column_options`), and the endpoint the frontend blocks on before drawing any
+table carries it. LEX-1556: a customer asked for a narrower ID column, and `list_ui` could
+say exactly one thing (`hide_actions_column`) and nothing about a column.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.184 | the declaration reaches the frontend | `list_ui.columns` keyed by field name, carrying the declared options; `hide_actions_column` untouched |
+| 10.185 | a plain DRF serializer gets the same contract | a project's own non-`LexSerializer` class answers identically — one payload, one reader, no second code path |
+| 10.186 | a model declaring nothing answers the key | `columns: {}`, so "declared nothing" and "declared an empty thing" cannot diverge between readers |
+| 10.187 | a malformed declaration never breaks the endpoint | the response still arrives and the one usable declaration survives; a typo costs that option, not every list view of the model |
+
+**Scenario range:** 10.184 – 10.187. **Test file:** `lex/test_project/tests/api_layer/test_10ad_list_ui_column_options.py`. **Type:** U. **Status:** ✅ Complete (2026-11-10). Batch: [10ad](batches.md). Paired with [12p](../12-serializers/cluster.md) and frontend clusters F03p/F03q.
+
+---
+
+### 10ac. Scheduled jobs through the REST API ✅
+
+**What it tests:** Schedules are created, edited, switched off and run through the generic API and UI: every definition mistake answers 400 naming the field, a save records who the job runs as and moves its next slot, the ▶ button runs it now, a schedule declared in code can be switched off but not rewritten, and an edit never resets a scheduled job's status.
+
+**Why a regression matters:** Stored schedules that can never run, a job running as someone who never saved it, the UI and the code fighting over a declared schedule, or an edit hiding a running job from the overlap check.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.175 | create sets next slot and run-as | 201; next slot = next 06:00 UTC; `run_as` = the creator; enabled |
+| 10.176 | mistakes answer 400 naming the field | bad cron, seconds field, no / both schedules, past `run_at`, unknown zone, unknown / non-calculation / self model, missing record, unknown function; nothing stored |
+| 10.177 | an edit moves the slot and the run-as | a second person's cron edit moves the slot and becomes `run_as`; off → no slot; on → a future slot |
+| 10.178 | ▶ runs now | PATCH `calculate=true` runs the target; job SUCCESS; next slot unchanged |
+| 10.179 | code-declared schedules | a cron edit answers 400 pointing at `@lex_job`; `enabled=false` works |
+| 10.180 | bare model names | `scheduledtargetcalc` is stored as `lex_app.ScheduledTargetCalc` |
+| 10.181 | in the sidebar | `api/model-structure` lists `scheduledjob` |
+| 10.182 | an edit during a run | the edit is stored; the job stays IN_PROGRESS; a due slot is skipped; one run |
+| 10.183 | `reset_calculation_on_edit` | a model setting it `False` keeps SUCCESS through an edit (and says so); an ordinary model is still reset |
+
+**Scenario range:** 10.175 – 10.183. **Test file:** `lex/test_project/tests/api_layer/test_10ac_scheduled_jobs_api.py`. **Type:** E. **Status:** ✅ Complete (2026-11-10). Batch: [10ac](batches.md).

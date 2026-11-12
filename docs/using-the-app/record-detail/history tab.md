@@ -56,7 +56,8 @@ When viewing a historical record, a **Go to Live Data** button appears. Click it
 You don't need to do anything to create history — it's automatic. Every `LexModel` in Lex App tracks its changes via [django-simple-history](https://django-simple-history.readthedocs.io/). Every save, update, or delete creates a new historical version with a complete snapshot of all field values.
 
 This means:
-- History cannot be tampered with — it's append-only
+- Every save adds a version rather than overwriting the last one
+- You can correct *when* a version applied — its Valid From and Valid To, as [[start-here/tutorial/Part 6 — History in Action|Part 6 of the tutorial]] shows — and that correction is itself recorded in the system-time history, which can't be edited
 - No data is ever lost — even deleted records are preserved in history
 - You can always answer "what did this look like on date X?"
 

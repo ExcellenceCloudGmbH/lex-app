@@ -34,7 +34,7 @@ The `is_calculated` field is a state machine with clear transitions:
 ```mermaid
 stateDiagram-v2
     [*] --> NOT_CALCULATED : Record created
-    NOT_CALCULATED --> IN_PROGRESS : User clicks "Calculate"
+    NOT_CALCULATED --> IN_PROGRESS : User clicks "Calculate" (or the record was just created, with calculate_on_create)
     IN_PROGRESS --> SUCCESS : Completed without errors
     IN_PROGRESS --> ERROR : Exception occurred
     IN_PROGRESS --> CANCELLED : User cancels
@@ -56,6 +56,44 @@ stateDiagram-v2
 
 If you're using Celery workers, cancelling is immediate: the framework revokes the running worker task and marks the record as `CANCELLED`. `ABORTED` is different — it's used when the framework finds an old `IN_PROGRESS` row that never finished cleanly, for example after a worker or app process died. Those terminal status updates are saved as normal model changes, so they show up in History/Timeline just like in-process runs.
 
+## Closing a Record
+
+Some results must never change once they've been used: a valuation posted to SAP, a period that's been signed off. To stop a record from being calculated again, override `calculation_closed_reason()` and return the reason it's closed:
+
+```python title="CalculateNAV.py"
+class CalculateNAV(CalculationModel):
+    quarter = models.ForeignKey('Quarter', on_delete=models.CASCADE)
+    nav_value = models.DecimalField(max_digits=19, decimal_places=2, null=True)
+    sap_posted = models.BooleanField(default=False)
+
+    def calculation_closed_reason(self):
+        if self.sap_posted:
+            return "Already posted to SAP, so it can't be calculated again."
+
+    def calculate(self):
+        ...
+```
+
+While the method returns a reason, the record is closed. It isn't calculated again, and its status stays exactly as it is:
+
+- **The Calculate button is greyed out**, and hovering it shows your reason. If a click gets through anyway, from a page opened before the record was closed for instance, it's refused with the same message.
+- **Calculations that start other calculations skip it.** Setting a closed record to `IN_PROGRESS` and saving it runs nothing: the record keeps its status, the rest of the save goes through, and the calling calculation's log notes which record was skipped and why.
+- **Batch outputs can be closed too.** Give a [[calculations/batch calculations|batch model]] the same method, and its closed rows keep their values when the batch is generated again.
+- **Its other fields stay editable.** Closing stops only the calculation. Editing a closed record keeps its status, and so does closing it: setting the field your `calculation_closed_reason()` reads (`sap_posted` above) leaves a calculated record at `SUCCESS`. An edit to an open record still resets it to `NOT_CALCULATED`, so that it's recalculated with the new values.
+
+Return `None` (or nothing) while the record may still be calculated. Returning `True` instead of a reason closes the record with a generic message.
+
+> [!tip] A record that calculates only once
+> The method sees the record as it was before the run was asked for, so a record that should only ever be calculated once can close itself on its own status:
+>
+> ```python
+> def calculation_closed_reason(self):
+>     if self.is_calculated == self.SUCCESS:
+>         return "Already calculated."
+> ```
+
+The grid asks every row it shows whether it's closed, so keep the method quick: read fields of the record rather than running queries.
+
 ## What You Get Automatically
 
 You don't need to define or manage any of the following — they're inherited from `CalculationModel`:
@@ -67,7 +105,7 @@ You don't need to define or manage any of the following — they're inherited fr
   one**, and `is_calculated` becomes `ERROR` either way. `CalculationModel` adds
   only `is_calculated`; without a message field the detail is in the logs alone
 - **Auto-save** — the record is saved automatically after `calculate()` returns
-- **Non-blocking trigger** — clicking **Calculate** returns the record in `IN_PROGRESS`, then the UI updates again when the run finishes
+- **Non-blocking trigger** — clicking **Calculate** returns the record in `IN_PROGRESS`, then the UI updates again when the run finishes. With [[#Calculating New Records Automatically|calculate_on_create]], creating a record does the same
 - **Cancellation handling** — running Celery-backed calculations can be stopped cleanly from the UI/API
 - **[[calculations/celery and async calculations|Celery support]]** — dispatch to [Celery](https://docs.celeryq.dev/) workers for parallel execution
 - **System-save attribution** — any records you save inside `calculate()` won't have their `edited_by` / `edited_at` stamped with the triggering user; those saves are treated as system-triggered, not direct user edits
@@ -79,7 +117,10 @@ You don't need to define or manage any of the following — they're inherited fr
 > `calculate_hook()` carries **two** hooks — `@hook(AFTER_UPDATE)` and
 > `@hook(AFTER_CREATE)`, both conditioned on `is_calculated == IN_PROGRESS`. The
 > create hook is why a record that is *born* in `IN_PROGRESS` calculates too,
-> rather than only one edited into it.
+> rather than only one edited into it. It calculates inside the save that
+> created it, so a create request waits for the whole run; to start new
+> records' runs in the background, use
+> [[#Calculating New Records Automatically|calculate_on_create]].
 >
 > `IN_PROGRESS` is already committed before the hook runs — `save()` persists it
 > in its own transaction and then calls the hook outside that transaction, so
@@ -94,6 +135,52 @@ You don't need to define or manage any of the following — they're inherited fr
 > 7. On other exceptions: sets `is_calculated = ERROR`, writes the traceback to `calculation_error_message` if your model has one, and saves
 >
 > You never need to manage this yourself.
+
+## Calculating New Records Automatically
+
+To have new records calculate without anyone clicking **Calculate**, set
+`calculate_on_create`:
+
+```python title="CalculateNAV.py"
+class CalculateNAV(CalculationModel):
+    calculate_on_create = True
+
+    quarter = models.ForeignKey('Quarter', on_delete=models.CASCADE)
+    ...
+```
+
+A record created through the app (the create form, the REST API or an embedded
+form) then starts its calculation as soon as it exists, the same way a click on
+**Calculate** does:
+
+- The create answers straight away, with the record already `IN_PROGRESS`. The
+  form doesn't wait for the run.
+- The run goes to Celery when it's on, and the status pill and the log update
+  as they do after a click.
+- The audit log shows two entries: the create, and the run, as an update with
+  its own calculation id. If the run fails, the record stays created, in
+  `ERROR`, and the create's entry is still a success.
+
+Records created in code (scripts, [[model-your-data/initial data|initial data]],
+uploads, another calculation's `calculate()`) don't start a run. Code that
+creates records decides for itself when they calculate: a calculation that needs
+a new record's result can create it already `IN_PROGRESS`, which calculates it
+on the spot, before the code carries on.
+
+To decide per record, make it a property:
+
+```python
+    @property
+    def calculate_on_create(self):
+        return self.quarter.is_open
+```
+
+> [!warning] Don't start the calculation from an `AFTER_CREATE` hook
+> A hook that sets `is_calculated = IN_PROGRESS` runs the calculation inside the
+> request that created the record, so the create form waits for the whole run.
+> `calculate_on_create` starts the same run in the background instead.
+
+> [!note] Needs a lex-app release newer than 2.3.4.
 
 ## Another Example
 

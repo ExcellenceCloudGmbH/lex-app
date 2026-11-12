@@ -78,3 +78,163 @@ list itself — each fail exactly one of these scenarios. The rule for record gr
 must not open a check on the whole model.
 
 ---
+
+### Batch 4o — Secure defaults on the generic REST endpoints ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.80 – 4.100 |
+| Type | E (4.98–4.99 U) |
+| Files covered | `lex/core/security_flags.py`, `lex/api/security.py`, `lex/api/views/model_entries/{One,Many,History,filter_backends}.py`, `lex/api/views/global_search_for_models/Search.py`, `lex/api/views/file_operations/{ModelExport,FileDownload}.py`, `lex/api/filters/GenericFilters.py`, `lex/api/serializers/base_serializers.py`, `lex/process_admin/views/model_relation_views.py` (`Overview`) |
+| Test file | `lex/test_project/tests/permissions/test_4o_secure_defaults.py` |
+| Test classes | `TestCluster04o_FailClosedAndNotFound` (4.80–4.84), `TestCluster04o_EditEnforcement` (4.85–4.89), `TestCluster04o_ReadSurfaces` (4.91–4.95), `TestCluster04o_SignedOut` (4.100), `TestCluster04o_ReadOncePerRow` (4.96), `TestCluster04o_ApiKeyReadContext` (4.97), `TestCluster04o_SecurityFlags` (4.98), `TestCluster04o_SuperuserOrAdmin` (4.99) |
+| Fixtures | `RaisingReadItem`, `SecretDocument` (new in `permissions/models.py`), `ProtectedItem`, `FilterBackendItem`, `KeycloakItem`; `LEX_SEC_*`/`LEX_LEGACY_SECURITY` cleared per test |
+| Tests landed | **20 pass / 0 fail** — 4.90 retired 2026-10-22 with the ProcessFlow endpoint (see [10q](../10-api_layer/batches.md)); the id is not reused |
+| Also changed | 4.4 live again (BUG-010 resolved); 4.41 asserts 404 by default and the old `200 {}` under `LEX_LEGACY_SECURITY=true`; 10.47–10.54 mocks report a real `FileField` and stand in for the read check; 12h `AttachmentItem` opens read/edit |
+| Status | ✅ Complete — ported from #816 without `permission_read_queryset`, `permission_serializer`, `HTMLReport.permission_view`, `lex_strict_input`, `EXPOSE_AUTO_SERIALIZER` |
+
+---
+
+### Batch 4p — Internal tools, Django users, permission_list and history writes ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.101 – 4.110 |
+| Type | E |
+| Files covered | `lex/core/security_flags.py` (`is_superuser`, `superuser_only`), `lex/api/security.py` (`write_denial`, `list_denied`, `is_history_model`), `lex/api/views/sharepoint/DeleteUnusedFiles.py`, `lex/api/views/LexLoggerView/LexLoggerView.py`, `lex/api/views/model_entries/CalculationLogTreeView.py`, `lex/api/views/calculations/DownloadMarkdownPdf.py`, `lex/api/views/model_entries/{One,Many,List}.py`, `lex/api/views/model_entries/mixins/DestroyOneWithPayloadMixin.py` |
+| Test file | `lex/test_project/tests/permissions/test_4p_internal_tools_and_history.py` |
+| Test classes | `TestCluster04p_InternalTools` (4.101–4.105), `TestCluster04p_PermissionList` (4.106), `TestCluster04p_HistoryWrites` (4.107–4.110) |
+| Fixtures | `SECURE_DEFAULT_MODELS` (`ProtectedItem`, `FilterBackendItem`), `CalculationLog` rows with and without a record, `auth.User`; SharePoint cleanup, `LexLogger` and PDF rendering stubbed; `LEX_SEC_*`/`LEX_LEGACY_SECURITY` cleared per test |
+| Tests landed | **10 pass / 0 fail** — 2026-10-22: 4.105 creates through the CRUD endpoint and 4.108 dropped its `run_step` probe, the ProcessFlow endpoint having been removed (see [10q](../10-api_layer/batches.md)) |
+| Also changed | 10.61–10.66 drive the tree as a superuser and 15.32–15.38 download as one: their logs belong to no record, which only operators may read now |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-18-v2-security-hardening-internal-config.md) |
+
+---
+
+### Batch 4r — a raising permission hook denies on the remaining surfaces ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.116 – 4.120 |
+| Type | E (4.118, 4.120: I) |
+| Files covered | `lex/api/utils/helpers.py` (`can_read_from_payload`), `lex/api/serializers/base_serializers.py` (`_can_read_related_payload_reference`, audit-log payload filtering), `lex/api/views/file_operations/ModelExport.py` (`get_exportable_fields_for_object`), `lex/api/views/model_entries/mixins/PermissionAwareSerializerMixin.py` (`run_validation`) |
+| Test file | `lex/test_project/tests/permissions/test_4r_fail_closed_remaining_surfaces.py` |
+| Test classes | `TestCluster04r_AuditLogRead` (4.116–4.118), `TestCluster04r_Export` (4.119), `TestCluster04r_SerializerMixin` (4.120) |
+| Fixtures | `RaisingParent`, `RaisingChild`, `RaisingExportItem` (new in `permissions/models.py`), `RaisingReadItem`; `AuditLog` rows written directly; `LEX_SEC_*`/`LEX_LEGACY_SECURITY` cleared per test |
+| Tests landed | **5 pass / 0 fail** — all five fail without the change |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-23-fail-closed-remaining-surfaces.md) |
+
+---
+
+### Batch 4q — permission_create on the filled record ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.111 – 4.115 |
+| Type | E |
+| Files covered | `lex/core/security_flags.py` (`CREATE`), `lex/api/security.py` (`filled_record`, `ask_create`), `lex/api/views/model_entries/One.py` (`create`, `perform_create`, `_check_create_on_filled_record`) |
+| Test file | `lex/test_project/tests/permissions/test_4q_create_on_filled_record.py` |
+| Test classes | `TestCluster04q_CreateOnFilledRecord` (4.111–4.115) |
+| Fixtures | `CreateParent`, `ScopedCreateItem` (new in `permissions/models.py`); `LEX_SEC_*`/`LEX_LEGACY_SECURITY` cleared per test |
+| Tests landed | **5 pass / 0 fail** — 4.111–4.114 fail on lex-app-v2 `0ac01da8`, 4.115 (opt-out) passes on both |
+| Also changed | 4.98 lists the tenth flag |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-23-create-on-filled-record.md) |
+
+---
+
+### Batch 4x — per-user Keycloak calls stay with their user; forged tokens and look-alike paths ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.138 – 4.147 |
+| Type | U (4.138–4.143), I (4.144–4.147) |
+| Files covered | `lex/api/keycloak/uma_client.py` (new), `lex/api/views/authentication/KeycloakManager.py` (`get_uma_permissions`, `get_userinfo`, `get_user_permissions`), `lex/api/middleware/keycloak_permissions.py`, `lex/authentication/views/token_views.py`, `lex/streamlit_app.py` (`get_user_info`), `lex/lex_app/settings.py` (`OIDC_RP_SIGN_ALGOS_ALLOWED`, `OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS`) |
+| Test file | `lex/test_project/tests/permissions/test_4x_keycloak_call_isolation.py` |
+| Test classes | `TestCluster04x_ConcurrentUsersStayApart` (4.138–4.139), `TestCluster04x_KeycloakAnswersAreClassified` (4.140–4.143), `TestCluster04x_ForgedBearerTokens` (4.144), `TestCluster04x_AnchoredLoginExemptions` (4.145–4.147) |
+| Fixtures | a threaded stub Keycloak (`_StubKeycloak`) answering UMA and userinfo for whichever bearer token a request carries; an RSA key pair per module; explicit OP settings so the bearer backend starts without network; a 1 µs thread switch interval in 4.138–4.139, so the interleavings of a loaded server happen in the test too (at CPython's default 5 ms the race stays hidden) |
+| Tests landed | **10 pass / 0 fail** against django-oauth2-codeflow 2.1.0 — Mutation, with KeycloakManager.py, keycloak_permissions.py and settings.py put back to HEAD: 4.138 and 4.139 fail with other users' permissions and profiles; 4.140 (None, not []), 4.142 (an unreachable Keycloak goes unlogged), 4.144 (no RS256-only setting), 4.146 (6 look-alike paths skip sign-in) and 4.147 (14 unanchored patterns) fail too; 4.141, 4.143 and 4.145 pass. |
+| Also changed | `test_4g_user_permissions_api.py` 4.32/4.32b and `api_layer/test_10o_error_and_route_hardening.py` 10.90: their fake manager answers `get_userinfo`, because the middleware no longer reaches into the shared python-keycloak connection (`km.oidc`). Intent unchanged. |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-06-auth-hotfixes.md) |
+
+**Allocation note:** Letter x, not s-w: those are in flight on feat/multi-value-filters (s, t) and the feat/ext-* branches (s-w, scenarios up to 4.137). Same letter and IDs on lex-app-v2 and release/2.1.x.
+
+---
+
+### Batch 4y — the permission lookup is lazy, cached per token, single-flight and never a silent deny ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.148 – 4.158 |
+| Type | U (4.148–4.151, 4.155–4.157), E (4.152–4.154, 4.158) |
+| Files covered | `lex/api/middleware/keycloak_permissions.py` (rewritten: lazy attributes, `uma_permissions`, cache, single flight, `keycloak_uma` breaker, contract answers), `lex/api/keycloak/uma_client.py` (`KEYCLOAK_INTERNAL_URL`, issuer mismatch → configuration outage, `category`), `lex/api/security.py` (`is_auth_outage`, `guarded`), `lex/authentication/drf_exceptions.py` (`AuthUnavailable`, `SessionRejected`), `lex/authentication/identity.py`, `lex/core/models/LexModel.py` (`UserContext._extract_client_roles`), the fail-closed sites in `One.py`, `filter_backends.py`, `PermissionAwareSerializerMixin.py`, `DestroyOneWithPayloadMixin.py`, `ModelExport.py`, `base_serializers.py`, `api/utils/helpers.py` |
+| Test file | `lex/test_project/tests/permissions/test_4y_permission_lookup.py` |
+| Test classes | `TestCluster04y_LazyAndCached` (4.148–4.151), `TestCluster04y_BreakerAndRoles` (4.155–4.156), `TestCluster04y_OutagesAreNotDenials` (4.157), `TestCluster04y_KeycloakAnswersEndToEnd` (4.152–4.154), `TestCluster04y_FailClosedSitesPassOutagesThrough` (4.158) |
+| Fixtures | bearer `OIDCContext`s per token; `create_oidc_session` sign-ins; the UMA call patched at `lex.api.keycloak.uma_client`; an injectable cache clock; the library breaker's clock; `KeycloakItem` and the new `OutageItem` (`permissions/models.py`) |
+| Tests landed | **11 pass / 0 fail** against django-oauth2-codeflow 3.0.0 |
+| Also changed | 4g 4.31–4.34 (seam: a sign-in and the UMA call; 4.32b now expects `AuthUnavailable`, not `[]`; 4.33 role shapes from the token; 4.34: session tokens are never used — the old `cleanup_invalid_tokens` helper is gone with the session tokens), 4x 4.138 (bearer contexts; one settings override for all threads), 4.141/4.142 (401 `session_expired` / 503 instead of `[]`, by design), 4.144 (a `FakeOP` access token as the control; the forgery carries `iss`/`aud`/`typ`), 4.145–4.147 (a DRF 401 now carries `login_url` too; `OIDC_LOGIN_REQUIRED_EXEMPT_URL_PATTERNS`), 4o 4.98 (eleven flags), 4q 4.111 (the create refusal keeps its `message` and adds the contract's `detail` and `code: permission_denied`) |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-06-auth-long-sessions-core.md) |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.148 | lazy | no UMA call until `user_permissions` is read; one then; roles/profile never call |
+| 4.149 | cached per token | one call per token; another user's token its own answer; SHA-256 keys; mutation does not leak |
+| 4.150 | TTL | reused ≤ min(60 s, token lifetime), asked again after |
+| 4.151 | single flight | 16 concurrent requests, one call; a failure shared by all |
+| 4.152 | `access_denied` | `[]`; create 403 `permission_denied`; still signed in |
+| 4.153 | token rejected | 401 `session_expired` with `WWW-Authenticate`; write refused before the view |
+| 4.154 | Keycloak down | 503 `auth_unavailable` + `Retry-After` for permissions, list and create; nothing stored; still signed in |
+| 4.155 | UMA breaker | opens after failures, blocks calls, a probe closes it; token-endpoint breaker untouched; issuer mismatch = config outage; UMA on the internal URL |
+| 4.156 | roles from the sign-in | `request.client_roles`, `UserContext.client_roles` from `resource_access`; profile from claims; no userinfo call; stale session ignored |
+| 4.157 | `guarded()` | every auth outcome re-raised with `LEX_SEC_FAIL_CLOSED` on and off; ordinary errors still deny/allow |
+| 4.158 | fail-closed sites | list, detail, create, update, delete, export answer 503 (401 for an ended sign-in); nothing changed |
+
+**Why a regression matters:** an outage read as "no permission" shows signed-in users denials during a Keycloak blip (and frontends sign them out); a cache keyed wrongly hands one user another's permissions; an uncached lookup puts two or more Keycloak calls back on every request.
+
+**Allocation note:** Letter y: s–w are held by in-flight branches (see [4x](#batch-4x--per-user-keycloak-calls-stay-with-their-user-forged-tokens-and-look-alike-paths-)).
+
+---
+
+### Batch 4aa — the Streamlit token carries the caller's own Keycloak permissions ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.163 – 4.163 |
+| Type | E (U until lex-app 2.5) |
+| Files covered | `lex/authentication/views/token_views.py` (`StreamlitTokenView.post`; `_get_user_permissions` until lex-app 2.5) |
+| Test file | `lex/test_project/tests/permissions/test_4aa_streamlit_token_permissions.py` |
+| Test classes | `TestCluster04aa_StreamlitTokenPermissions` (4.163) |
+| Fixtures | two sign-ins through `lex.lex_app.tests.auth.sign_in` (different client roles); the UMA fetch patched to prove the view asks for nothing |
+| Tests landed | **1 pass / 0 fail** — Mutation: with the old relative import, 4.163 fails |
+| Also changed | lex-app 2.5 (#869): the view no longer mints a token with embedded permissions; it hands out the caller's own sign-in token. 4.163 was rewritten to the same intent: each caller gets exactly their own token, with their own roles, and the view asks Keycloak for nothing |
+| Status | ✅ Complete |
+
+**Allocation note:** Letter aa and 4.163: 4y (4.148–4.158) is lex-app #869's and 4z (to 4.162) is #880's.
+
+---
+
+
+---
+
+### Batch 4z — A schedule can do no more than the person who saved it ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.159 – 4.162 |
+| Type | E |
+| Files covered | `lex/scheduling/models.py` (`_calculate_denial`, `validate_definition`, `_real_user`) |
+| Test file | `lex/test_project/tests/permissions/test_4z_scheduled_job_permissions.py` |
+| Test classes | `TestCluster04z_ScheduledJobPermissions` (4.159–4.162) |
+| Fixtures | `ScheduledDeniedCalc` (readable, never editable), `ScheduledJobTestCase.scheduled_jobs_allowed()` |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete (2026-11-10) — scheduled jobs, paired with the other five scheduling batches (8f, 7x, 10ac, 6v, 4z, 1bn) |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.159 | a forbidden record | 400 on `target_model` saying the caller may not calculate it; nothing stored |
+| 4.160 | every record of a forbidden model | 400 on `target_model`; nothing stored |
+| 4.161 | code is trusted | a schedule created without a request for the same model is stored and scheduled |
+| 4.162 | no access to schedules | creating one without the grant is refused (401/403); nothing stored |
+
+**Why a regression matters:** Anyone with access to schedules could calculate records they could never calculate themselves.
+
+**Allocation note:** Allocated past the letters and scenario IDs that in-flight branches (feat/ext-*, feat/auth-long-sessions) already hold: the first letter absent from lex-app-v2 and every remote branch, and a range above the highest max_scenario on any branch, so neither side has to renumber on merge. Design: [`docs/superpowers/plans/2026-11-10-scheduled-jobs.md`](../../../../../docs/superpowers/plans/2026-11-10-scheduled-jobs.md).

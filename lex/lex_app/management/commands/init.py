@@ -440,29 +440,48 @@ class KeycloakSyncManager:
         self.default_scopes = ["list", "read", "create", "edit", "delete", "export"]
         self.exported_configs = None
 
+    #: Client settings ``lex init`` must leave as it found them. ``attributes`` carries the
+    #: sign-in hardening the platform sets per client -- ``pkce.code.challenge.method``,
+    #: ``post.logout.redirect.uris``, ``backchannel.logout.url`` and
+    #: ``backchannel.logout.session.required`` -- and ``frontchannelLogout`` must stay off
+    #: for back-channel logout to be the only logout channel.
+    SNAPSHOT_CLIENT_KEYS = (
+        "authorizationServicesEnabled",
+        "redirectUris",
+        "webOrigins",
+        "authenticationFlowBindingOverrides",
+        "protocol",
+        "publicClient",
+        "serviceAccountsEnabled",
+        "standardFlowEnabled",
+        "directAccessGrantsEnabled",
+        "frontchannelLogout",
+        "attributes",
+    )
+
     def _snapshot_client_settings(self) -> dict:
         client_id = self.kc_manager.client_uuid
         rep = self.kc_manager.admin.get_client(client_id)
-
-        keep = [
-            "authorizationServicesEnabled",
-            "redirectUris",
-            "webOrigins",
-            "authenticationFlowBindingOverrides",
-            "protocol",
-            "publicClient",
-            "serviceAccountsEnabled",
-            "standardFlowEnabled",
-            "directAccessGrantsEnabled",
-        ]
-        return {k: deepcopy(rep.get(k)) for k in keep if k in rep}
+        return {k: deepcopy(rep.get(k)) for k in self.SNAPSHOT_CLIENT_KEYS if k in rep}
 
     def _restore_client_settings(self, snapshot: dict) -> None:
+        """Put the snapshotted settings back where the import changed them.
+
+        ``attributes`` is merged, not replaced: every snapshotted attribute gets its value
+        back, and an attribute that appeared in the meantime stays.
+        """
         client_id = self.kc_manager.client_uuid
         rep = self.kc_manager.admin.get_client(client_id)
 
         changed = False
         for k, v in snapshot.items():
+            if k == "attributes" and isinstance(v, dict):
+                current = rep.get("attributes") if isinstance(rep.get("attributes"), dict) else {}
+                merged = {**current, **deepcopy(v)}
+                if merged != current:
+                    rep["attributes"] = merged
+                    changed = True
+                continue
             if rep.get(k) != v:
                 rep[k] = v
                 changed = True

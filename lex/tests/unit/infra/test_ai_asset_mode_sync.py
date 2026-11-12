@@ -9,6 +9,11 @@ from types import SimpleNamespace
 from unittest import mock
 import unittest
 
+import pytest
+
+# Every test here drives lex-mcp-local's dashboard and mode switch (lex.tools only re-exports them).
+pytest.importorskip("lex_mcp", reason="needs lex-mcp-local (lex setup-with-ai)")
+
 from lex.tools import ai_dashboard
 from lex.tools.verify_ai_assets import verify_directory
 

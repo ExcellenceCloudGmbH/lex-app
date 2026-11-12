@@ -5,7 +5,7 @@ from lex.process_admin.models.ModelCollection import ModelCollection
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework_api_key.permissions import HasAPIKey
+from lex.api.utils.api_key_requests import HasAPIKey
 
 #: How long a browser may reuse a metadata response, in seconds. ``0`` disables.
 #:
@@ -224,17 +224,6 @@ class Overview(APIView):
         html_report_class = self.HTML_reports[class_name]
         html = html_report_class().get_html(user)
         return Response(html)
-
-
-class ProcessStructure(APIView):
-    http_method_names = ["get"]
-    processes = None
-
-    def get(self, request, *args, **kwargs):
-        class_name = kwargs["process_name"]
-        process_class = self.processes[class_name]
-        process_structure = process_class().get_structure()
-        return Response(process_structure)
 
 
 # import copy

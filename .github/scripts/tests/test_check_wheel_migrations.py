@@ -260,9 +260,9 @@ def _planned(app: str, path: Path, change: str = "~ Alter field id on x") -> str
     return f"Migrations for '{app}':\n  {path}\n    {change}\n"
 
 
-def test_the_two_packages_lex_now_supplies_are_not_waved_through():
-    """lex supplies what oauth2_authcodeflow and the api-key fork lacked
-    (lex/lex_app/vendored); listing them again would hide a regression."""
+def test_the_two_fixed_packages_are_not_waved_through():
+    """django-oauth2-codeflow 3.0 and exc-djangorestframework-api-key 1.0.1 ship
+    what they lacked; listing them again would hide a regression."""
     assert "oauth2_authcodeflow" not in check.KNOWN_THIRD_PARTY_DRIFT
     assert "rest_framework_api_key" not in check.KNOWN_THIRD_PARTY_DRIFT
 
@@ -312,6 +312,26 @@ def test_known_third_party_drift_warns_and_carries_on(tmp_path, capsys, monkeypa
         assert app in out
     assert "site-packages" in out
     assert runner.lex_commands()[-1] == "migrate --check", "The init steps must still run."
+
+
+def test_oauth2_authcodeflow_is_no_longer_known_drift():
+    """django-oauth2-codeflow 3.0 pins its AppConfig.default_auto_field, so lex's
+    BigAutoField no longer makes `lex init` write a migration into it. Its entry is
+    gone, and a drift in it is a regression again."""
+    assert "oauth2_authcodeflow" not in check.KNOWN_THIRD_PARTY_DRIFT
+    assert check.KNOWN_THIRD_PARTY_DRIFT == {}
+
+
+def test_drift_in_oauth2_authcodeflow_fails_again(tmp_path, capsys):
+    """A migration django would write into oauth2_authcodeflow now fails the check."""
+    path = _site_packages(tmp_path) / "oauth2_authcodeflow" / "migrations" / "0007_alter_oidcsession_id.py"
+    runner = FakeRunner(fail_on="makemigrations --check --dry-run",
+                        failure_output=_planned("oauth2_authcodeflow", path))
+    code, out = _run(tmp_path, runner, capsys)
+
+    assert code == 1
+    assert "oauth2_authcodeflow" in out
+    assert "KNOWN_THIRD_PARTY_DRIFT" in out
 
 
 def test_new_third_party_drift_fails(tmp_path, capsys):

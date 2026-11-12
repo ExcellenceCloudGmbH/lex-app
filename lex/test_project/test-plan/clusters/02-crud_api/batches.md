@@ -111,3 +111,20 @@ closed once the edit is applied keeps its status; an open one, reopened ones inc
 before. Nothing else about edits changes: closing stops only the calculation.
 
 ---
+
+### Batch 2m — An API key in the `?api_key=` query parameter ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 2.117 – 2.121 |
+| Type | E |
+| Files covered | `lex/api/utils/api_key_requests.py` (`get_raw_api_key`, `LexKeyParser`, `HasAPIKey`), `lex/api/views/model_entries/One.py`, `lex/authentication/middleware.py` (`ApiKeyAwareLoginRequiredMiddleware`, unchanged, exercised for real) |
+| Test file | `lex/test_project/tests/crud_api/test_2m_api_key_query_param.py` |
+| Test classes | `TestCluster02m_ApiKeyQueryParam` — 2.117 a valid `?api_key=` alone creates an entry stamped with the API-key audit actor; 2.118 a wrong `Api-Key` header is refused even with a valid query key; 2.119 a valid header key wins over a wrong query key; 2.120 a wrong query key is refused; 2.121 an empty or blank query key is refused |
+| Fixtures | `SimpleItem` from `crud_api/models.py`; `E2ETestCase.authenticate_as_api_key` for a real `APIKey` row, header then cleared with `client.credentials()` |
+| Tests landed | **5 pass / 0 fail**; 2.117 fails without the `HasAPIKey` swap (the middleware lets the request through, the view's stock `HasAPIKey` reads headers only) |
+| Status | ✅ Complete |
+
+The 2j unit fakes (`MagicMock` requests) now carry an empty `GET`, as every real request does, since `get_raw_api_key` reads the query string last.
+
+---

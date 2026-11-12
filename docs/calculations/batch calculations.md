@@ -242,13 +242,17 @@ For each generated combination, the framework queries the database for an existi
 
 This means `create()` is **idempotent** — re-running it with the same inputs updates existing records rather than creating duplicates.
 
+An existing record that is closed is left as it is: it's neither recalculated nor saved. See [[calculations/calculation models#Closing a Record|Closing a Record]].
+
 ### Step 3 — Cluster into Groups
 
 `ModelClusterManager` groups the models based on `parallelizable_fields`. If empty, all models go into a single group. Otherwise, it builds a nested dictionary and flattens it into independent processing groups.
 
 ### Step 4 — Dispatch
 
-The framework checks `CELERY_ACTIVE` and whether `calculate()` has been decorated with `@lex_shared_task`. If both are true, it uses `CeleryTaskDispatcher` to dispatch each group as a separate Celery task inside a `WaitForTasks` context. Otherwise, everything runs synchronously via `calc_and_save_sync()`. In both paths, logging context is attached to the current model automatically while each child calculation runs.
+The framework checks `CELERY_ACTIVE` and whether `calculate()` has been decorated with `@lex_shared_task`. If both are true, it uses `CeleryTaskDispatcher` to dispatch each group as a separate Celery task inside a `WaitForTasks` context. Otherwise, everything runs synchronously via `calc_and_save_sync()`.
+
+Each generated row's log goes into a node of its own, under the calculation that called `create()`. This holds on every route: the streaming default, `calc_and_save_sync()`, a Celery task, and the synchronous retry after a failed task. See [[calculations/logging#Nested Calculations|Nested Calculations]].
 
 The dispatcher has **multi-level fallback for dispatch failures**: if a single group can't be dispatched, that group is processed synchronously while others continue on Celery. If Celery itself is unreachable, the entire batch falls back to synchronous processing.
 

@@ -17,6 +17,11 @@ Your app already has full [[history-and-audit/bitemporal history|bitemporal hist
 3. Change the amount from **€450.00** to **€380.00**
 4. Save
 
+> [!note]
+> If the Expense grid is empty, Part 4's `permission_read` is hiding the rows
+> from your login. Put yourself in the `cfo` group as shown in
+> [[start-here/tutorial/Part 4 — Validation & Permissions#Try It Yourself|Part 4]].
+
 ### Open the History Panel
 
 Click the **History icon** on the record. You'll see:
@@ -31,7 +36,7 @@ For the tutorial's expense the rows read like this:
 | v1 *(superseded)* | €450.00 | Jan 20, 2:30 PM | Feb 5, 10:15 AM | Anna Schmidt |
 
 > [!tip]
-> Both values are preserved. The original €450 entry is never deleted — it's superseded. This is exactly what auditors need: a complete, tamper-proof trail.
+> Both values are preserved. The original €450 entry is never deleted — it's superseded. This is what auditors need: a complete trail. Even the correction you're about to make to *when* a value applied is recorded, in a system-time history that can't be edited.
 
 ## Timeline Editing: Backdating the Correction
 
@@ -130,7 +135,7 @@ Now that you've completed the tutorial, explore the rest of the documentation:
 - [[home|All building blocks]] — everything Lex App gives you out of the box
 - [[calculations/calculation models|Calculations]] — deep-dive into the state machine and [Celery](https://docs.celeryq.dev/) support
 - [[history-and-audit/bitemporal history|Bitemporal History]] — understand the two-level architecture
-- [[access-and-dashboards/streamlit dashboards|Streamlit Dashboards]] — build more complex visualizations
+- [[access-and-dashboards/streamlit/index|Streamlit Dashboards]] — build more complex visualizations
 - [[model-your-data/serializers|Serializers]] — advanced API validation and multiple views
 - [[reference/CLI Commands|CLI Commands]] — every `lex` command at a glance
 

@@ -4,7 +4,8 @@ Shared base class for end-to-end tests.
 Provides:
 - Dynamic table creation for test models (main + History + MetaHistory)
 - Model registration with ``simple_history``
-- ``APIClient`` with session-authenticated user
+- ``APIClient`` signed in through OIDC (``oauth2_authcodeflow.testing.create_oidc_session``),
+  so every request runs the real OIDC session middleware and ``request.oidc``
 - URL helpers (create / detail / list / history / many)
 - Standard mocking of external boundaries (Celery, WebSocket, cache)
 - Cleanup of all tables and registered models on teardown
@@ -13,17 +14,22 @@ Provides:
 import os
 import sys
 from contextlib import suppress
-from datetime import timedelta
 from importlib import reload
 from unittest.mock import patch
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import connection
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, override_settings
 from django.urls import clear_url_caches
-from django.utils import timezone
 from lex.process_admin.utils.model_registration import ModelRegistration
 from rest_framework.test import APIClient
+
+
+# The sign-in helpers live in the shipped lex.lex_app.tests.auth, which downstream projects
+# use as well: one home for how a test signs in (OIDC backend, client id, token lifetime).
+from lex.lex_app.tests.auth import OIDC_BACKEND, oidc_test_settings  # noqa: E402,F401
+from lex.lex_app.tests.auth import create_sign_in as sign_in  # noqa: E402,F401
 
 
 class _MockContainer:
@@ -53,7 +59,8 @@ class E2ETestCase(TransactionTestCase):
         ``e2e_unpatch`` — names of default external-boundary patches to
             skip. The default patch list mocks ``store_message``,
             ``build_cache_key``, ``send_calculation_update``,
-            ``mark_in_progress``, ``ensure_terminal_calculation_audit``.
+            ``mark_in_progress``, ``ensure_terminal_calculation_audit``
+            and ``keycloak_uma`` (Keycloak's UMA answer: no permissions).
             Add a name to ``e2e_unpatch`` to let the real implementation
             run — or to install a ``MagicMock`` spy on it (see
             ``spy_on`` below). Clusters 6 and 9 rely on this to observe
@@ -166,15 +173,17 @@ class E2ETestCase(TransactionTestCase):
         self.user = User.objects.create_user(
             username="e2e_user", password="pw", email="e2e@test.local",
         )
-        self.client = APIClient()
-        self.client.force_login(self.user)
+        # Sign in through OIDC (an OIDCSession row, the session holding only its id) --
+        # the shape of every real browser session from django-oauth2-codeflow 3 on.
+        self._oidc_settings = override_settings(**oidc_test_settings())
+        self._oidc_settings.enable()
+        self.addCleanup(self._oidc_settings.disable)
+        from lex.api.middleware.keycloak_permissions import reset_uma_cache
 
-        # Inject OIDC session expiry so middleware doesn't redirect to login
-        session = self.client.session
-        session["oidc_expires_at"] = (
-            timezone.now() + timedelta(hours=1)
-        ).timestamp()
-        session.save()
+        reset_uma_cache()
+        self.addCleanup(reset_uma_cache)
+        self.client = APIClient()
+        self.oidc_session = sign_in(self.client, self.user)
 
         # Rebuild URL patterns
         self._rebuild_urls()
@@ -210,10 +219,18 @@ class E2ETestCase(TransactionTestCase):
                 "lex.audit_logging.utils.calculation_audit"
                 ".ensure_terminal_calculation_audit",
             ),
+            # Keycloak UMA: the signed-in client carries a real (test-signed) access
+            # token, and no test may send it to whatever Keycloak the environment
+            # names. Grants nothing by default, like a user without UMA permissions.
+            (
+                "keycloak_uma",
+                "lex.api.keycloak.uma_client.fetch_uma_permissions",
+            ),
         ]
         # Per-patch return_value overrides so the defaults stay drop-in.
         _return_values = {
             "build_cache_key": "test_key",
+            "keycloak_uma": [],
         }
         self._patch_objs = []
         self._patch_map: dict = {}  # short-name → started mock

@@ -27,14 +27,13 @@
 19. [Authentication & Keycloak](#19-authentication--keycloak)
 20. [Streamlit Integration](#20-streamlit-integration)
 21. [HTMLReport — Custom HTML Views](#21-htmlreport--custom-html-views)
-22. [Process — Abstract Workflow Definition](#22-process--abstract-workflow-definition)
-23. [CLI Commands](#23-cli-commands)
-24. [Settings & Environment Variables](#24-settings--environment-variables)
-25. [Import System — Module Aliasing](#25-import-system--module-aliasing)
-26. [Utilities & Decorators](#26-utilities--decorators)
-27. [Common Patterns & Conventions](#27-common-patterns--conventions)
-28. [Quick Reference — What to Import From Where](#28-quick-reference--what-to-import-from-where)
-29. [Complete Code Examples](#29-complete-code-examples)
+22. [CLI Commands](#22-cli-commands)
+23. [Settings & Environment Variables](#23-settings--environment-variables)
+24. [Import System — Module Aliasing](#24-import-system--module-aliasing)
+25. [Utilities & Decorators](#25-utilities--decorators)
+26. [Common Patterns & Conventions](#26-common-patterns--conventions)
+27. [Quick Reference — What to Import From Where](#27-quick-reference--what-to-import-from-where)
+28. [Complete Code Examples](#28-complete-code-examples)
 
 ---
 
@@ -755,7 +754,7 @@ FilterTree JSON → create_filter_queries_from_tree_paths() → Django ORM Q obj
 
 ### ProcessAdminSite (Singleton)
 
-Central registry for all models, HTML reports, processes, and structures. Accessed via:
+Central registry for all models, HTML reports and structures. Accessed via:
 
 ```python
 from lex.process_admin import processAdminSite
@@ -1314,34 +1313,7 @@ HTMLReports are registered via `processAdminSite.registerHTMLReport(name, report
 
 ---
 
-## 22. Process — Abstract Workflow Definition
-
-### Import
-
-```python
-from lex.core.models import Process
-```
-
-### Usage
-
-```python
-from lex.core.models import Process
-
-class DataPipeline(Process):
-    def get_structure(self):
-        """Return the process structure for the frontend."""
-        return {
-            "steps": [
-                {"name": "Upload Data", "model": "raw_data"},
-                {"name": "Validate", "model": "validated_data"},
-                {"name": "Calculate", "model": "results"},
-            ]
-        }
-```
-
----
-
-## 23. CLI Commands
+## 22. CLI Commands
 
 ### `lex` CLI
 
@@ -1386,7 +1358,7 @@ lex shell
 
 ---
 
-## 24. Settings & Environment Variables
+## 23. Settings & Environment Variables
 
 ### Key Environment Variables
 
@@ -1434,7 +1406,7 @@ lex shell
 
 ---
 
-## 25. Import System — Module Aliasing
+## 24. Import System — Module Aliasing
 
 Lex provides a custom import system that allows short-form imports in user projects.
 
@@ -1461,7 +1433,7 @@ Both resolve to the same class. Lex core modules (`lex.*`) are excluded from ali
 
 ---
 
-## 26. Utilities & Decorators
+## 25. Utilities & Decorators
 
 ### LexSingleton
 
@@ -1521,7 +1493,7 @@ with model_logging_context(my_model_instance):
 
 ---
 
-## 27. Common Patterns & Conventions
+## 26. Common Patterns & Conventions
 
 ### Model Hierarchy
 
@@ -1531,7 +1503,6 @@ django.db.models.Model
 │   └── LexModel (lex.core.models.base)
 │       ├── CalculationModel (status-tracked calculations)
 │       └── CalculatedModelMixin (combinatorial + parallel)
-├── Process (abstract workflow)
 └── HTMLReport (custom HTML views)
 ```
 
@@ -1582,12 +1553,12 @@ The framework never crashes on infrastructure failures:
 
 ---
 
-## 28. Quick Reference — What to Import From Where
+## 27. Quick Reference — What to Import From Where
 
 ### Core Models
 
 ```python
-from lex.core.models import LexModel, CalculationModel, HTMLReport, Process
+from lex.core.models import LexModel, CalculationModel, HTMLReport
 from lex.core.models import UserContext, PermissionResult
 ```
 
@@ -1661,7 +1632,7 @@ from lex.core.exceptions import (
 
 ---
 
-## 29. Complete Code Examples
+## 28. Complete Code Examples
 
 ### Example 1: Simple Data Model with Permissions
 

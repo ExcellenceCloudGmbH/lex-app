@@ -91,26 +91,27 @@ You never need to pass context manually.
 
 ## Nested Calculations
 
-When a parent calculation triggers a child, wrap the child execution in `model_logging_context` to preserve the log hierarchy:
+A child calculation's log nests under its parent on its own. That covers a `CalculationModel` saved as `IN_PROGRESS` (in-process or on Celery) and every row a `create()` generates. You don't need to wrap the child in anything:
 
 ```python
-from lex.audit_logging.utils.ModelContext import model_logging_context
-
 class ParentCalculation(CalculationModel):
     def calculate(self):
         LexLogger().add_text("Starting parent").log()
 
         child = CalculateNAV.objects.filter(quarter=self.quarter).first()
-        with model_logging_context(child):
-            child.is_calculated = "IN_PROGRESS"
-            child.save()
+        child.is_calculated = "IN_PROGRESS"
+        child.save()
 
         LexLogger().add_text("Child finished.").log()
 ```
 
-Pass a plain string instead of a model instance to create a labeled section node in the log tree:
+`model_logging_context(child)` still works if you pass it a model instance, but since lex-app 2.5.0 the framework does this for you. A model already on top is not pushed again, so an existing wrap does no harm.
+
+Pass a plain string to `model_logging_context` to create a labeled section node in the log tree:
 
 ```python
+from lex.audit_logging.utils.ModelContext import model_logging_context
+
 with model_logging_context("Data preparation"):
     LexLogger().add_text("Loading source data...").log()
 

@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 from click.testing import CliRunner
 
 from lex.bin.lex import lex
+from lex.tools import pytest_plugin
 from lex.tools.test_groups import LexTestConfig
 from lex.tools.test_groups import parse_lex_pytest_args
 
@@ -110,7 +111,7 @@ class LexPytestReportGenerationTests(TestCase):
             True,
         )
         write_pdf_report.assert_called_once()
-        pytest_main.assert_called_once_with(["Tests", "-q"], plugins=[plugin])
+        pytest_main.assert_called_once_with(["-p", "no:lex", "Tests", "-q"], plugins=[pytest_plugin, plugin])
         self.assertIn("Lex test report:", result.output)
         self.assertIn(
             f"Lex test coverage HTML: {config.coverage_html_dir / 'index.html'}",

@@ -12,6 +12,18 @@ import time
 from pathlib import Path
 import shutil
 
+# Ahead of every third-party import, because this one has to beat `websockets`
+# to the environment: the library fixes its header-line limit as
+# `websockets.http11` is imported and never re-reads it, and an access token is
+# one header line on the Streamlit handshake (see lex/ws_header_limits.py).
+# uvicorn only imports the library when a server actually starts, so there is
+# room to spare -- but an ordering no later edit can get wrong is worth the
+# odd-looking import.
+#
+# Bound by name rather than as `lex.ws_header_limits`: the Click group below is
+# itself called `lex` and would shadow the package.
+from lex import ws_header_limits  # noqa: F401  (imported for its side effect)
+
 import click
 import uvicorn
 from lex._version import __version__ as _LEX_APP_VERSION
@@ -265,7 +277,17 @@ def _forward_to_django(command_name, args):
         from django.core.management import execute_from_command_line
         execute_from_command_line(["manage.py", command_name, *args])
         return
-    call_command(command_name, *args)
+    from django.core.management.base import CommandError
+    try:
+        call_command(command_name, *args)
+    except CommandError as error:
+        # What manage.py does: the message and the command's exit code, not a traceback
+        # (`lex oidc_check` reporting a problem is an answer, not a crash). --traceback
+        # still shows it.
+        if "--traceback" in args:
+            raise
+        click.echo(f"CommandError: {error}", err=True)
+        sys.exit(getattr(error, "returncode", 1))
 
 def _install_dynamic_commands():
     # Only called for non-setup entry, so safe to initialize Django
@@ -475,6 +497,74 @@ def _safe_theme_flags(streamlit_args, tokens=None):
         )
         return []
 
+def _check_streamlit_auth_env() -> str:
+    """Validate ``LEX_STREAMLIT_AUTH`` and what the dashboard hand-off needs; return the mode.
+
+    Same reasoning as the durability check below: the proxy refuses an unknown mode at import,
+    inside the uvicorn thread, where nobody reads it -- so the CLI refuses first, readably.
+    ``dual`` and ``handoff`` send dashboards to ``<app host>/oidc/handoff`` and back, so a
+    deployed instance must name an app host and a dashboard host (``LEX_INSTANCE_HOSTS``, or
+    ``DOMAIN_HOSTED`` and ``STREAMLIT_URL``); in development the app defaults to
+    ``http://localhost:8000``. The dashboard cookies are ``Secure; SameSite=None; Partitioned``
+    over https; a deployed proxy that cannot tell it is behind https only warns, because
+    ``X-Forwarded-Proto`` from the ingress still makes it so per request.
+    """
+    import json as _json
+
+    from lex.authentication.dashboards import modes, sites
+    from lex.core.instance_hosts import ENV_VAR as _HOSTS_VAR, instance_hosts
+
+    try:
+        mode = modes.parse_streamlit_auth(os.getenv(modes.ENV_VAR))
+    except modes.InvalidStreamlitAuthMode as exc:
+        raise click.ClickException(str(exc)) from None
+    if not modes.handoff_enabled(mode):
+        return mode
+
+    raw_hosts = (os.getenv(_HOSTS_VAR) or "").strip()
+    if raw_hosts:
+        try:
+            parsed = _json.loads(raw_hosts)
+        except ValueError:
+            parsed = None
+        if not isinstance(parsed, dict):
+            click.echo(
+                f"Warning: {_HOSTS_VAR} is not a JSON object; the hand-off falls back to "
+                "DOMAIN_HOSTED and STREAMLIT_URL.",
+                err=True,
+            )
+
+    hosts = instance_hosts()
+    deployed = sites.is_deployed()
+    if not hosts.surface("app").endpoints:
+        if deployed:
+            raise click.ClickException(
+                f"LEX_STREAMLIT_AUTH={mode} hands dashboards off to the app, but no app host is "
+                f"known. Set {_HOSTS_VAR} (or DOMAIN_HOSTED)."
+            )
+        click.echo(
+            f"Note: no app host configured; dashboards hand off to {sites.DEV_APP_ORIGIN} "
+            "(development).",
+            err=True,
+        )
+    if deployed and not hosts.surface("streamlit").endpoints:
+        raise click.ClickException(
+            f"LEX_STREAMLIT_AUTH={mode}: no dashboard host is known, so the app would refuse to "
+            f"hand off to this one. Set {_HOSTS_VAR} (or STREAMLIT_URL)."
+        )
+
+    public_url = (os.getenv("STREAMLIT_URL") or os.getenv("BASE_URL") or "").strip().lower()
+    https_only = (os.getenv("SESSION_HTTPS_ONLY") or "").strip().lower() in ("1", "true", "yes", "y", "on")
+    if deployed and not public_url.startswith("https://") and not https_only:
+        click.echo(
+            "Warning: the dashboard cookies need https (Secure; SameSite=None; Partitioned). "
+            "Set STREAMLIT_URL to the https URL, or SESSION_HTTPS_ONLY=true behind a "
+            "TLS-terminating ingress.",
+            err=True,
+        )
+    return mode
+
+
 def _warn_if_sessions_are_not_durable() -> None:
     """Report session-durability problems on the main thread.
 
@@ -492,7 +582,14 @@ def _warn_if_sessions_are_not_durable() -> None:
     Those refuse. A per-process session key only means sessions do not survive
     a restart -- so it warns, because a guard that stops a dashboard starting
     is worse than the fragility it guards against.
+
+    ``LEX_STREAMLIT_AUTH=handoff`` keeps no token store (dashboards rest on the
+    app's sign-ins in the shared database), so neither the replica rule nor the
+    in-memory warning applies to it.
     """
+    streamlit_auth = _check_streamlit_auth_env()
+    token_store_used = streamlit_auth != "handoff"
+
     public_url = (os.getenv("STREAMLIT_URL") or os.getenv("BASE_URL") or "").rstrip("/")
     # Lowercased, because proxy.py derives the same fact through
     # ``httpx.URL(...).scheme``, which normalises case. Comparing
@@ -547,7 +644,7 @@ def _warn_if_sessions_are_not_durable() -> None:
         )
         replicated = False
 
-    if replicated and not has_redis:
+    if replicated and not has_redis and token_store_used:
         raise click.ClickException(
             f"LEX_PROXY_REPLICAS={replicas} but no TOKEN_REDIS_URL/REDIS_URL is set. "
             "The token store would be process-local, so a request routed to another "
@@ -561,7 +658,7 @@ def _warn_if_sessions_are_not_durable() -> None:
             "sessions will not survive a restart.",
             err=True,
         )
-    if not has_redis:
+    if not has_redis and token_store_used:
         click.echo(
             "Warning: no TOKEN_REDIS_URL/REDIS_URL set; the token store is in-memory "
             "and will not survive a restart.",
@@ -572,15 +669,17 @@ def _warn_if_sessions_are_not_durable() -> None:
 @lex.command(name="streamlit", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context
 def streamlit(ctx):
-    # ── uvloop / nest_asyncio fix ──────────────────────────────────────
+    # ── uvloop guard ───────────────────────────────────────────────────
     # uvloop (pulled in by `uv` or `uvicorn[standard]`) sets itself as
-    # the global event-loop policy.  Streamlit imports nest_asyncio which
-    # patches asyncio.run at import time, capturing the *current* policy.
-    # If uvloop is still active at that moment, nest_asyncio's patched
-    # asyncio.run will later call uvloop's get_event_loop(), which raises:
+    # the global event-loop policy. The failure this guards against came
+    # from nest_asyncio: its patched asyncio.run called uvloop's
+    # get_event_loop(), which raises
     #   RuntimeError: There is no current event loop in thread 'MainThread'
+    # lex no longer applies nest_asyncio (BUG-046), and Streamlit itself
+    # never did. The guard stays, so Streamlit keeps running on asyncio's
+    # own loop here, as it always has.
     #
-    # Fix: reset the policy and create a main-thread loop BEFORE importing
+    # Reset the policy and create a main-thread loop BEFORE importing
     # streamlit, and prevent uvloop from re-installing itself.
     asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
     asyncio.set_event_loop(asyncio.new_event_loop())
@@ -613,6 +712,19 @@ def streamlit(ctx):
         if _shortfall:
             logging.getLogger(__name__).warning("%s", _shortfall)
             print(f"\n  !  {_shortfall}\n", file=sys.stderr)
+    except Exception:
+        pass   # never let a diagnostic stop a launch
+
+    # Same bargain for the header-line ceiling installed at import time: it is
+    # only honoured from websockets 13, and an older one parses at a hard-coded
+    # 8192 while reporting nothing. That is how LEX-894 presented -- a dashboard
+    # that never loaded, an open socket, and no log line anywhere naming a
+    # header. Say so once at startup rather than leave it to be rediscovered.
+    try:
+        _ws_shortfall = ws_header_limits.websockets_line_limit_shortfall()
+        if _ws_shortfall:
+            logging.getLogger(__name__).warning("%s", _ws_shortfall)
+            print(f"\n  !  {_ws_shortfall}\n", file=sys.stderr)
     except Exception:
         pass   # never let a diagnostic stop a launch
 
@@ -995,97 +1107,22 @@ def pytest_cmd(ctx):
         else:
             coverage_error = "coverage.py is not available in this environment."
 
-    # Bootstrap Django after starting report coverage so app/model import-time
-    # code is included in the measured project coverage.
-    _bootstrap_django()
-
-    # Stand up Django's test database the same way `manage.py test` /
-    # DiscoverRunner.run_tests() does:
-    #   1. setup_test_environment() — installs the test client, RequestFactory
-    #      patches, deprecation-warning filter etc.
-    #   2. DiscoverRunner.setup_databases() — runs migrations and re-points
-    #      ``connection.settings_dict["NAME"]`` so any TestCase /
-    #      TransactionTestCase / SimpleTestCase subclass that touches the ORM
-    #      hits the configured test DB.
-    # Without this, every unittest.TestCase-derived test errors at setUp with
-    # `database "<prod name>" does not exist` because Django's runner machinery
-    # never ran.
-    #
-    # ``keepdb=True`` on purpose: the K8S/GCP/DOCKER settings set
-    # ``TEST["NAME"] == DATABASE_NAME`` (the instance's own DB), so on a
-    # deployed instance the "test DB" already exists — keepdb reuses it and
-    # runs migrations against it (no DROP/CREATE), matching the pre-cutover
-    # behaviour where pytest ran directly against the live/clone DB. This needs
-    # no CREATEDB / database-ownership privilege on the app role. In CI, where
-    # the DB is missing, setup_databases still CREATEs it (the CI Postgres user
-    # is a superuser). With ``keepdb=False`` Django instead force-drops and
-    # recreates ``DATABASE_NAME`` on every run, which requires CREATEDB +
-    # ownership the Terraform-provisioned app role does not have (and would be
-    # dropping the instance's own database) — see rc184 regression / af2a6ea.
-    from django.test.runner import DiscoverRunner
-    from django.test.utils import setup_test_environment, teardown_test_environment
-
-    setup_test_environment()
-    _db_runner = DiscoverRunner(verbosity=1, interactive=False, keepdb=True)
-    # Limit test-DB creation to the `default` alias. Django's own
-    # ``manage.py test`` path inspects every collected ``TestCase`` for
-    # its ``databases`` attribute (defaults to ``{"default"}``) and
-    # passes that set in here, so unused aliases like ``GCP`` / ``K8S``
-    # / ``DOCKER-COMPOSE`` are skipped. We bypass that discovery (pytest
-    # owns collection now), so without ``aliases=`` Django would try to
-    # CREATE test_<name> on every alias and fail on the ones whose host
-    # env vars aren't set in CI (e.g. ``GCP`` resolves to host
-    # ``envvar_not_existing`` → DNS error).
-    _old_db_config = _db_runner.setup_databases(aliases={"default"})
-
-    # Make ``register_converter`` idempotent for the duration of the pytest
-    # run. ``lex/process_admin/sites/process_admin_site.py:_get_urls`` calls
-    # ``register_converter(create_model_converter(...), "model")`` every time
-    # ``processAdminSite.urls`` is accessed, and Django's ``register_converter``
-    # raises ``ValueError: Converter 'model' is already registered.`` on the
-    # second call. With ``lex test`` only one cluster ran per invocation so
-    # the issue rarely surfaced, and ``E2ETestCase._rebuild_urls`` already
-    # installs a local idempotent patch around its own reload of
-    # ``lex_app.urls``. Pytest now runs every cluster in one process; a
-    # plain ``TestCase`` (e.g. ``TestCluster01p_UrlConfResolves``) calling
-    # ``reverse()`` after an E2E test reloaded ``lex_app.urls`` hits the
-    # unpatched register and aborts collection. Installing the patch at the
-    # runner level — once, around ``pytest.main()`` — covers every test
-    # class (E2E and plain alike) without modifying framework code, and
-    # matches the existing pattern in ``_e2e_test_case.py`` /
-    # ``test_user_model_registration.py`` / ``test_api_user_journey.py`` /
-    # ``test_bitemporal.py``.
-    from django.urls import converters as _django_converters
-    from django.urls.converters import REGISTERED_CONVERTERS as _REGISTERED_CONVERTERS
-    from unittest.mock import patch as _patch
-
-    _real_register_converter = _django_converters.register_converter
-
-    def _idempotent_register_converter(converter, type_name):
-        _REGISTERED_CONVERTERS.pop(type_name, None)
-        return _real_register_converter(converter, type_name)
-
-    _converter_patch = _patch(
-        "lex.process_admin.sites.process_admin_site.register_converter",
-        new=_idempotent_register_converter,
-    )
-    _converter_patch.start()
+    # lex's pytest plugin sets Django, the test environment and the test database
+    # up, and undoes them afterwards -- the code a plain pytest run (PyCharm's
+    # runner, VS Code) gets through the `pytest11` entry point. It is passed in
+    # directly so it runs even where that entry point is not installed (an editable
+    # install made before it existed); `-p no:lex` stops pytest loading the same
+    # module a second time through the entry point. django.setup() runs inside
+    # pytest.main(), after coverage started, so import-time code is still measured.
+    from lex.tools import pytest_plugin
 
     started_at = time.perf_counter()
     try:
-        exit_code = _pytest.main(forwarded, plugins=[plugin])
+        exit_code = _pytest.main(["-p", "no:lex", *forwarded], plugins=[pytest_plugin, plugin])
     except LexTestConfigError as exc:
         # Raised from pytest_collection_modifyitems on marker/group mismatch.
         raise click.ClickException(str(exc)) from exc
     finally:
-        try:
-            _converter_patch.stop()
-        except Exception:
-            pass
-        try:
-            _db_runner.teardown_databases(_old_db_config)
-        finally:
-            teardown_test_environment()
         plugin.run_duration = f"{time.perf_counter() - started_at:.1f} s"
         if coverage_runner is not None:
             try:

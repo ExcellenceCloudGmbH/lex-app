@@ -13,7 +13,13 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
         model = model_container.model_class
         if hasattr(model, 'modification_restriction'):
             pks = [obj.pk for obj in queryset if model.modification_restriction.can_be_read(instance=obj, user=request.user, violations=[])]
-            queryset.filter(pk__in=pks)
+            restricted = queryset.filter(pk__in=pks)
+            # The result used to be discarded, so can_be_read never restricted an
+            # export. Applied now; LEX_SEC_READ_SURFACES=false restores that.
+            from lex.core.security_flags import strict
+
+            if strict("READ_SURFACES"):
+                return restricted
         return queryset
 
 

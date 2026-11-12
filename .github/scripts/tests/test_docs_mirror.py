@@ -71,3 +71,37 @@ def test_check_readonly_allows_internal_and_source_edits(manifest, monkeypatch):
     monkeypatch.setattr(docs_mirror, "load_manifest", lambda *a, **k: manifest)
     args = type("A", (), {"files": ["docs/ci-cd/overview.md", "lex/core/x.py", "README.md"]})()
     assert docs_mirror.cmd_check_readonly(args) == 0
+
+
+# ── The workflow that opens the mirror PRs ───────────────────────────────
+
+def _pr_step() -> str:
+    import yaml
+
+    workflow = yaml.safe_load(
+        (SCRIPTS_DIR.parents[1] / ".github" / "workflows" / "sync_docs_from_lex_app_docs.yml").read_text()
+    )
+    steps = [step for job in workflow["jobs"].values() for step in job.get("steps", [])]
+    return next(step["run"] for step in steps if step.get("name") == "Create branch and PR")
+
+
+def test_an_open_mirror_pr_for_the_same_commit_is_found_by_its_branch():
+    """The titles read "docs: mirror from lex-app-docs@<sha>" and never said
+    "docs-sync", so searching titles for it found nothing. The run then adopted
+    the open PR's branch, failed to open a second PR for it, and went red every
+    morning the open one was current. Only the branch names carry docs-sync."""
+    run = _pr_step()
+    assert "in:title" not in run
+    assert "headRefName" in run
+    assert 'startswith(\\"docs-sync/${UPSTREAM_SHA}-\\")' in run
+
+
+def test_opening_a_mirror_pr_closes_the_ones_it_supersedes():
+    """Each sync mirrors the whole subset at the newest upstream commit, so an
+    older open mirror PR only conflicts once something else lands. Left open,
+    four piled up between 25 September and 10 October."""
+    run = _pr_step()
+    create = run.index("gh pr create")
+    close = run.index("gh pr close")
+    assert create < close, "Close the old ones only after the new one is open."
+    assert 'select(.headRefName != \\"${BRANCH}\\")' in run[close - 400:close], "Never close the new one."

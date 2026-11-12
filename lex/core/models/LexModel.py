@@ -99,17 +99,19 @@ class UserContext:
 
     @classmethod
     def _extract_client_roles(cls, request, user) -> FrozenSet[str]:
+        """The user's client roles: from the validated sign-in, plus any a project put on the user.
+
+        The sign-in's roles are those of the access token (``resource_access[<client id>].roles``,
+        read through ``request.oidc``); the permissions middleware exposes the same list as
+        ``request.client_roles``. Nothing is read from the session: tokens and userinfo no
+        longer live there, so a value found in an old session could only be stale.
+        """
         role_sources = []
 
-        request_userinfo = getattr(request, "userinfo", None)
-        if isinstance(request_userinfo, Mapping):
-            role_sources.append(request_userinfo.get("client_roles"))
-
-        session = getattr(request, "session", None)
-        if session:
-            session_userinfo = session.get("oidc_userinfo")
-            if isinstance(session_userinfo, Mapping):
-                role_sources.append(session_userinfo.get("client_roles"))
+        django_request = getattr(request, "_request", request)
+        oidc_context = getattr(django_request, "oidc", None)
+        if oidc_context is not None:
+            role_sources.append(oidc_context.client_roles())
 
         role_sources.append(getattr(request, "client_roles", None))
         role_sources.append(getattr(user, "client_roles", None))

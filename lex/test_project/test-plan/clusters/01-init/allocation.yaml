@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 392
+max_scenario: 680
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1114,7 +1114,7 @@ letters:
     scenarios: 1.357-1.369
     status: complete
     tests:
-      pass: 16
+      pass: 22
       skip: 0
       xfail: 0
     note: >-
@@ -1132,8 +1132,9 @@ letters:
       because Django's close() inside a transaction marks it rather than nulling it. It now pins
       closed_in_transaction, needs_rollback and a query in the same transaction. 1.366 compiles the
       real lex.reflex_app once per process in setUpClass -- the auth plugin binds itself to the process
-      and refuses a second compile -- and 1.368 runs in a subprocess because nest_asyncio patches
-      asyncio process-wide. Verified end to end outside the suite against a mock OIDC provider in a
+      and refuses a second compile -- and 1.368 runs in a subprocess because it checks process-wide
+      asyncio state (rewritten for BUG-046 with 1bo: ready() no longer applies nest_asyncio, so
+      1.368 now asserts that setup on uvloop patches nothing). Verified end to end outside the suite against a mock OIDC provider in a
       browser: login redirect and return, record/table/structure dashboards, embed mode, sign-out, and a
       cross-site frame signing in through the popup.
 
@@ -1251,22 +1252,454 @@ letters:
       Mutations: reading the version from the package metadata fails 1.384; dropping --version from the
       set main() answers without Django fails both, because Django setup crashes in that directory.
   av:
-    title: '`lex init` writes migrations for the project only, never into site-packages'
-    scenarios: 1.386-1.392
+    title: Startup hardening — nested project root, broken lex_config.py, cache tables, CORS origins
+    scenarios: 1.386-1.392, 1.405
     status: complete
     tests:
       pass: 8
       skip: 0
       xfail: 0
     note: >-
-      `lex init` ran makemigrations for every installed app, so two packages whose models their own
-      migrations don't match got a migration written into site-packages on every install:
-      oauth2_authcodeflow, whose id became a bigint under lex's BigAutoField default, and the api-key
-      fork exc-djangorestframework-api-key 1.0.0, whose model widened id and hashed_key to 150 characters
-      without a migration. The package's next migration under the same number would conflict and stop
-      `lex init`. Now `lex init` makes migrations for the project's app only (1.386-1.388); lex ships the
-      api-key widening through MIGRATION_MODULES under the name `lex init` generated, so databases that
-      applied it see it as applied and new ones store the fork's 145-character ids (1.390, 1.391); and
-      oauth2_authcodeflow gets the default_auto_field its migrations were made with (1.392). 1.389 runs
-      makemigrations --check for every installed app. Mutations: four of four fail a test; the widening
-      one needs a fresh test database, as the reused one keeps the widened columns.
+      v2 security hardening. The nearest folder with lex_config.py is the project root below the git
+      toplevel (1.386-1.387, 1.405; no project settings.py is loaded). A lex_config.py that fails to
+      import or gives INITIAL_DATA, PROJECT_GROUPS, DEFAULT_SERIALIZER_NAME or TAB_DISPLAY_NAMES the
+      wrong type raises ImproperlyConfigured at ready() (1.388-1.389). createcachetable runs after
+      every migrate and before the initial-data load (1.390-1.391). LEX_CORS_ALLOWED_ORIGINS
+      (1.392). Ported reduced from #825, #823, #815; E2 is new.
+  aw:
+    title: A plain pytest run -- PyCharm, VS Code, a terminal -- is set up like `lex pytest`
+    scenarios: 1.393-1.404
+    status: complete
+    tests:
+      pass: 18
+      skip: 0
+      xfail: 0
+    note: >-
+      PyCharm's runner calls pytest.main() directly, so none of `lex pytest`'s setup ran and
+      its test tree showed one collection error ("settings are not configured") instead of the
+      tests; projects copied the setup into a root conftest.py. lex/tools/pytest_plugin.py,
+      the pytest11 entry point `lex`, now does it in any project with a lex_test_config.yaml,
+      and `lex pytest` / `lex pytest-groups` pass the same module with `-p no:lex`. The
+      child-process scenarios run `python -m pytest` without the suite's environment, with
+      the entry point registered through a temporary dist-info, so they take pytest's
+      autoload path whatever is installed. pytest runs pytest_load_initial_conftests inside
+      warnings.catch_warnings(), which drops the warning policy the settings install there,
+      so the plugin reinstalls those filters in pytest_configure (1.393, third half). 1av
+      (1.386-1.392) is reserved by an open PR, hence aw.
+  ax:
+    title: The Process model feature removed from the framework's public surface
+    scenarios: 1.406-1.409
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      Process (the abstract workflow model) and its registry are gone. lex.core.models no longer
+      imports or advertises Process (1.406); processAdminSite keeps no processes dict,
+      registerProcess or get_process_structure_func, and ModelRegistration no longer carries
+      _register_process_model, while the HTMLReport equivalents all survive (1.407); 'Process' left
+      _RESERVED_CLASS_NAMES, so a project may now call its own model Process while LexModel /
+      CalculationModel / HTMLReport and the Historical* prefix stay reserved (1.408); the
+      model-structure payload types nodes Model / HTMLReport / Folder only, never Process (1.409).
+      Each scenario checks the kept HTMLReport sibling too, so a broken registration cannot pass as
+      a clean removal. The routes that served the feature are pinned by 10q.
+  bo:
+    title: A project's startup leaves asyncio unpatched and async_to_sync usable (BUG-046)
+    scenarios: 1.665-1.666
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      LexAppConfig.ready() no longer calls nest_asyncio.apply(), which replaced asyncio.run with one
+      that never closes its loop and so made the second async_to_sync in any thread of a downstream
+      process wait forever. A real downstream project (a temporary folder holding lex_config.py) is
+      set up in a fresh interpreter with no running loop (1.665), and by importing lex_app.asgi
+      inside a running asyncio loop as uvicorn does (1.666). asyncio.run stays the standard
+      library's, and two async_to_sync calls with thread-sensitive work both return. A watchdog in
+      the child turns a hang into a failure with every thread's stack. 1aq's 1.368 was rewritten to
+      the same contract on granian's uvloop. All three fail on v2.4.2.
+  bc:
+    title: A deployed pod refuses the published secret key; sign-ins outlive Keycloak's idle window; PKCE on both relying parties
+    scenarios: 1.481-1.489
+    status: complete
+    tests:
+      pass: 9
+      skip: 0
+      xfail: 0
+    note: >-
+      Deployed pods (DEPLOYMENT_ENVIRONMENT set) refuse to start without their own DJANGO_SECRET_KEY
+      or on the key published in this package (1.481-1.483, fresh interpreters). The session cookie
+      lives LEX_SESSION_COOKIE_AGE_DAYS (default 31) days and the OIDC library's clock 30 days, inside
+      it as the library requires, so Django no longer ends a sign-in before Keycloak's 30-day idle
+      window; unusable values stop startup (1.484-1.486). Django's /oidc/authenticate and the
+      dashboard proxy's /auth/login both send a PKCE S256 challenge and keep the verifier server-side;
+      the code exchange proves it and still sends the confidential client's secret (1.487-1.489).
+      Letter bc, not ay/az/ba/bb: those are held by in-flight branches (ay on
+      fix/streamlit-report-frames-unauthenticated and others, az/ba on release/2.1.x, ba/bb on
+      feat/fleet-metrics-calculation-events), which also claim scenarios up to 1.480. The same letter
+      and scenario IDs are used on lex-app-v2 and release/2.1.x, so a merge between the lines is a
+      no-op.
+  bd:
+    title: lex-app 2.5 runs django-oauth2-codeflow 3.0 - middleware order, internal discovery with the public issuer, strict CORS, LEX_INSTANCE_HOSTS, visible sign-out events, contract routes
+    scenarios: 1.490-1.500
+    status: complete
+    tests:
+      pass: 11
+      skip: 0
+      xfail: 0
+    note: >-
+      The settings and bootstrap half of plan P4 (long-lived, secure sessions). The middleware runs
+      in the library's order with BearerAuthMiddleware and OIDCSessionMiddleware before the login
+      policy and the permission lookup, the 2.x refresh aliases are gone and the library's E001 check
+      passes (1.490). Discovery follows KEYCLOAK_INTERNAL_URL while OIDC_OP_ISSUER stays the public
+      realm; PKCE with client_secret_post (1.491). KEYCLOAK_VERIFY_SSL defaults to on when deployed;
+      OIDC_TOKEN_ENCRYPTION_KEYS from the environment (1.492). CORS is strict by default behind the
+      new CORS security flag - DOMAIN_HOSTED, LEX_INSTANCE_HOSTS and LEX_CORS_ALLOWED_ORIGINS,
+      localhost only when not deployed, never "*", LEX_SEC_CORS=false the opt-out (1.493) - and on
+      the wire a foreign origin gets no CORS grant (1.494); the sign-in follows next only to those
+      hosts (1.495). lex.core.instance_hosts parses LEX_INSTANCE_HOSTS with its fallback and survives
+      bad input (1.496). event=oidc.session.* lines reach stdout at INFO whatever LOG_LEVEL says
+      (1.497). api/auth/session and oidc/auth-complete are routed ahead of the oidc/ include, also
+      under the process-admin site, and login-exempt (1.498). lex init keeps the client's
+      attributes (merged) and frontchannelLogout (1.499), and writes no migration into
+      oauth2_authcodeflow any more (1.500). Letter bd: az, ba and bb are held by in-flight branches
+      (see bc). Also updated for 3.0, intent unchanged: 1bc 1.484-1.488 (no library clock; the PKCE
+      verifier lives in the pending sign-in; the code exchange is checked against FakeOP), 1aa
+      1.217-1.219 (the token comes from the sign-in, not the session), and 1av 1.392 (strict CORS
+      by default; LEX_CORS_ALLOWED_ORIGINS adds origins).
+  be:
+    title: Streamlit dashboards sign in through the app - the Django-anchored hand-off, the handle cookie, the broker, LEX_STREAMLIT_AUTH legacy/dual/handoff, the Streamlit process's 401/503 rules
+    scenarios: 1.501-1.540
+    status: complete
+    tests:
+      pass: 40
+      skip: 0
+      xfail: 0
+    note: >-
+      Plan P5 section 6.3. A framed dashboard without a handle hands off, with a state nonce in
+      __Host-lex_dash_hs, to the app host its frontend is on (lex_app_origin, when listed), else to
+      the listed app host same-site with it (1.501-1.502); the round trip
+      through the real oidc/handoff view ends with the __Host-lex_dash handle (HttpOnly; Secure;
+      SameSite=None; Partitioned; Path=/; 30 days) on a binding of the user's OIDCSession (1.503), and
+      only Authorization (the sign-in's current token) plus identity reach Streamlit (1.504). A code
+      is bound to its browser's state, single-use (a replay revokes what it produced) and valid 60 s
+      (1.505-1.506). An ended sign-in revokes the binding at its next use (1.507); Keycloak down keeps
+      the still-valid token, then identity only with X-Lex-Auth-Degraded, never a 401 (1.508).
+      WebSockets get the same, refused with 4401 after accept() (1.509); /auth/token answers 401 only
+      for an ended sign-in and 503 when unavailable (1.510); logout and sign_out revoke the binding
+      (1.511); blocked cookies end on a page, not a loop (1.512); the frame tells the frontend with
+      the v2 required message, pinned origins only (1.513-1.514); concurrent hand-offs, daily cookie
+      re-set (1.515-1.516); dual and handoff modes, legacy untouched (1.517-1.519); client-supplied
+      identity headers dropped in every mode, BUG-037 (1.520); the flag strict at the proxy and in
+      lex streamlit (1.521-1.522); the Streamlit process, iframe sandboxes and lex_view's validated
+      lex_app_origin (1.523-1.528); prune command, digests only, ALLOWED_HOSTS from LEX_INSTANCE_HOSTS,
+      no migration drift (1.529-1.532). Also changed: 1ac 1.238-1.239 (Streamlit's own refresh,
+      _post_refresh, is deleted by the plan). Seven mutations of the proxy, cookie and Streamlit code
+      each fail their scenario. Security review (2026-11-06), 1.533-1.540: a socket from another
+      origin (or `null`) is refused 4403 before any credential is read, in every mode - BUG-039,
+      shipped in v2.4.2 (1.533); dual lets a dead handle fall through to the legacy session, which
+      clears it and keeps renewing (1.534); no Location, refresh or script target leaves the
+      dashboard origin for a path decoding to //host - BUG-040, shipped (1.535); a redeem locks only
+      its code row (1.536); the daily cookie re-set is claimed only by an answer that can set it
+      (1.537); the token pull ignores the unprefixed cookie on an https proxy (1.538); /auth/status
+      and the page's sign-in watcher end a frame whose socket dropped (1.539); a deactivated user is
+      signed out (1.540). 1.524 rewritten: the recovery used to navigate the dashboard document from
+      its sandboxed component frame, which browsers refuse - it now runs in the dashboard document,
+      and 1.524/1.539 run the scripts under node against a stand-in of that rule. Accepted, no
+      change: concurrent hand-offs rewrite the whole nonce cookie (bounded to five, frozen name
+      kept). Fifteen mutations of these fixes each fail their scenario.
+  bf:
+    title: MCP embeds sign in with a single-use lex_embed_ticket, redeemed into the read-only __Host-lex_embed cookie that ends with the MCP token
+    scenarios: 1.541-1.556
+    status: complete
+    tests:
+      pass: 16
+      skip: 0
+      xfail: 0
+    note: >-
+      Plan P5 section 6.5 (MCP embed). A valid MCP token buys an opaque, 60-second ticket while the
+      token stays server-side in a refresh-less OIDCSession, encrypted (1.541); anything else gets
+      none (1.550). The frame's first GET trades the ticket for the cookie, whose Max-Age never
+      outlives the token, and a clean URL (1.542); a ticket works once (a replay ends the first
+      embed), for 60 s, on its own frontend, and never through a write (1.543-1.545, 1.553). The
+      cookie reads as the MCP user with the token's roles (1.546), never writes - 403
+      permission_denied before the view (1.547) - dies with the token or a back-channel logout
+      (1.548, 1.552), and never demotes a real sign-in (1.549). The lex_embed_view tool puts the
+      ticket in the URL and no token anywhere (1.551; the MCP runtime and fastmcp are not on this
+      line, so the tool runs against stand-ins for exactly the names it imports). Five mutations each
+      fail their scenario. Security review (2026-11-06): the ticketed URL goes only into the tool
+      result's _meta, which hosts hand to the widget and never to the model (1.551 rewritten); the
+      ticket's clean-URL redirect never leaves the app origin (1.554); the frame holding an embed may
+      present its ticket again without losing it, anyone else's replay still revokes (1.555); a HEAD
+      never spends a ticket (1.556; 1.553 now says GET only). Accepted, no change: a ticket is not
+      bound to a browser - whoever opens the URL within 60 s gets the read-only embed (documented).
+      Four mutations of these fixes each fail their scenario.
+  bg:
+    title: Reflex dashboards stay signed in as long as Keycloak keeps the session - at_hash, refresh error taxonomy, single-flight across tabs and replicas, cooldown, 30-day cookies, back-channel coherence
+    scenarios: 1.561-1.591
+    status: complete
+    tests:
+      pass: 28
+      skip: 3
+      xfail: 0
+    note: >-
+      Plan "long-lived sessions" section 6.4 (workstream lex-surfaces-reflex-ws). LexKeycloakAuthState checks an ID token
+      against the access token held now (1.561-1.562), signs out only on invalid_grant and keeps the tokens with
+      back-off on configuration and transient errors, userinfo 401 -> one refresh, outage -> cached profile
+      (1.563-1.568), refreshes once per refresh token with the others adopting the encrypted published set
+      (1.569-1.571, 1.575-1.576), suppresses a second refresh within 30 s (1.572), has 30-day cookies scoped to its own
+      class and warns on another reflex-enterprise release (1.573-1.574), and signs out on Keycloak's back-channel
+      logout via lex:kc_sid_ended:{sid} (1.577-1.579). Security review 2026-11-06 (1.566 revised, 1.580-1.590 added):
+      an access token that expired and cannot be renewed serves no identity, permissions or token and /login waits
+      for the renewal -- never a sign-out (1.566, 1.580-1.581); a userinfo outage serves only the same user's cached
+      profile (1.582); a refresh answer is verified before it is stored, with 30 s leeway and one key-set refetch
+      for an unknown kid (1.583-1.584, BUG-050/BUG-051); a kept refresh re-arms the timer (1.585); the lock lasts
+      while its leader works, in process memory and in Redis (1.586, 1.591); a published set is adopted only for its refresh token, user and Keycloak
+      session (1.587); process memory is swept and capped (1.588); a clock stepped back suppresses nothing (1.589);
+      a back-channel sign-out is audited once (1.590). 1.576, 1.579 and 1.591 need a real Redis and are opt-in
+      (LEX_REFLEX_REDIS_TEST_URL); with it all 31 pass. Range reserved up to 1.600; 1.592-1.600 unused.
+  bh:
+    title: lex.lex_app.tests.auth - the shipped sign-in helper for tests (OIDC sign-in with client roles, Keycloak UMA stub, cleanup)
+    scenarios: 1.601-1.606
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      Downstream test suites signed in with force_login plus hand-made session["oidc_*"] keys; from
+      2.5 roles come only from the OIDC sign-in and a signed-in write asks Keycloak for UMA
+      permissions first. The public helper sign_in(test_case, client, user, client_roles=...,
+      uma_permissions=...) gives the request exactly those roles (1.601), keeps writes away from
+      Keycloak with the session's own token reaching the stub (1.602), hands the stubbed UMA answer
+      to lex (1.603), undoes settings, patch and UMA cache (1.604), also when the test method has its
+      own @override_settings, which ends before the cleanups and used to leak back in (1.606); 1.605
+      pins why it exists. The two internal _e2e_test_case modules re-export it, so there is one
+      home. Added by the coordinator. 1.606 fails against the old cleanup (mutant).
+  bi:
+    title: The lex CLI answers a failing management command like manage.py - one CommandError line and its exit code, no traceback
+    scenarios: 1.607-1.608
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      Found while running the documented sign-in operating commands end to end: `lex oidc_check`
+      reporting a problem (an answer, not a crash) printed a Python traceback, because the CLI
+      forwards management commands through call_command, which lets CommandError escape. Now
+      `lex <command>` prints `CommandError: <message>` on stderr and exits with the command's code
+      (1.607); --traceback still raises it (1.608). Shipped behaviour of every lex release up to
+      2.4.2, cosmetic (the exit code was 1 either way). 1.607 fails against the old forwarding
+      (mutant). Added by the coordinator.
+  bp:
+    title: A frame another application put on screen does not get to move that tab
+    scenarios: 1.667-1.673
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      The amplifier behind the Streamlit sidebar report sending the whole browser tab to the
+      dashboard host. The proxy answers a framed 401 with the breakout page, whose first act was
+      an unconditional window.top navigation to its own login; with a live SSO session the round
+      trip completes instantly and the tab is parked on the dashboard origin. The automatic layer
+      now runs only when Sec-Fetch-Site says this origin is also the embedder (1.669), or when a
+      client names no embedder at all, which is the pre-existing behaviour scenario 1.214 already
+      pins (1.670). A sibling origin (1.667, the React shell) and an unrelated site (1.668) get the
+      same 401, the same lex-auth-required postMessage -- the channel the shell recovers through --
+      and the same target="_top" link, but no scripted navigation. 1.671 pins the header read.
+      The frame is never redirected to the IdP in any branch, so the "refused to connect" wall the
+      breakout exists for cannot return. Cluster 1z's six scenarios are unchanged and still pass.
+      1.672 and 1.673 are the join: the URL the real Streamlit report builds, loaded as a framed
+      document against the real proxy app. With a token the proxy banks it, redirects the frame
+      to the same place without it and serves the dashboard upstream -- the expected behaviour
+      in the ticket. Without one the frame still 401s, but the 401 moves no window, so the tab
+      stays on the instance.
+      Mutation: against the pre-fix source 1.672 and 1.673 both fail, reproducing the report;
+      restoring the unconditional navigation fails 1.667, 1.668 and 1.671.
+  az:
+    title: A machine endpoint on the dashboard origin cannot take over the user's tab
+    scenarios: 1.415-1.422
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      LEX-1477, reported against 2.1.11 as "clicking a model that has a streamlit embedding
+      sends the whole browser tab to the streamlit site". The frontend frames a hidden,
+      zero-sized /_lex/theme-relay; 2.1.11's proxy had no such route (added in 2.2.0 by
+      8780a119), so the frame fell into the authenticated catch-all, 401'd, and was answered
+      with the frame-breakout page - whose job is to send the TOP window to a login. Keycloak
+      had a live SSO session, so the callback came straight back and honoured
+      next=/_lex/theme-relay, parking the whole tab on a blank storage shim. The route exists
+      now, so these scenarios defend the consequence rather than the one cause. A utility path
+      is no longer a valid return target, on the way in or out of the OIDC round trip (1.415,
+      1.416, 1.417); a framed utility path gets a plain 401 instead of the breakout, so nothing
+      invisible can ask the shell to move the tab (1.418) while a framed dashboard still
+      recovers exactly as before (1.419); and a tab that reaches the relay anyway - bookmark,
+      history, an older proxy in the chain - is sent back to the configured frontend (1.420)
+      without inventing a localhost destination when none is configured (1.421), with the
+      framed relay itself unchanged (1.422). 1ay (1.410-1.414) is reserved by open PR #853,
+      hence az. Frontend twin is process-admin-general-client batch F12u, which sandboxes the
+      relay frame and makes the shell attribute a re-auth request to the dashboard frame
+      rather than to its origin.
+  ay:
+    title: ALLOWED_HOSTS accepts the instance's own backend Service name in the cluster
+    scenarios: 1.410-1.414
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: A lex instance is several pods sharing one database, and the non-backend pods reach
+      the backend by its Kubernetes Service name so the traffic stays inside the cluster, off the
+      ingress and off TLS. ALLOWED_HOSTS held only DOMAIN_HOSTED, the loopback pair and POD_IP,
+      so CommonMiddleware answered DisallowedHost before any view, permission class or model code
+      ran - measured on a customer instance 2026-10-25, where every service-to-service file write
+      failed on this alone with a valid registered API key and a correct route. The short Service
+      name (1.410) and the three longer Kubernetes DNS forms (1.411) are now accepted; a checkout
+      with no instance identifier gains nothing (1.412); an unreadable namespace degrades to the
+      short name (1.413); and the namespace file is read without raising off-cluster (1.414),
+      which matters because settings are imported before anything can catch an error. The
+      namespace comes from the mounted serviceaccount file, not an env var - POD_NAMESPACE is not
+      set in the platform's pods - so no new required variable is introduced.
+  bj:
+    title: The initial-data load at server start survives restarts and a second server process
+    scenarios: 1.609-1.618
+    status: complete
+    tests:
+      pass: 10
+      skip: 0
+      xfail: 0
+    note: >-
+      Production lost part of its seed (5 quarters, 8 funds, 89 of 179 companies) and never loaded
+      again. The load thread inherited daemon=True from the lex-async-ready thread (7abf2a69), so the
+      --reload restart (terminate, then an unbounded join, which waited for a non-daemon load before)
+      killed it mid-write, and the next process read the partial rows as existing data. Now:
+      lex/lex_app/initial_data_load.py runs the decision and the load in a non-daemon thread, under a
+      PostgreSQL session advisory lock (a second process waits, then decides on the finished
+      database), and records running/completed/failed in lex_initial_data_load_state, so a load
+      killed outright is reported as interrupted at the next start instead of silently skipped.
+      Letters 1ay-1bi and scenarios up to 1.608 are taken by open branches, hence 1bj / 1.609.
+      Mutations: an inherited daemon flag fails 1.609, 1.613 and 1.614; no lock fails 1.610-1.612.
+  bk:
+    title: The Streamlit handshake stays inside everyone's header budget
+    scenarios: 1.619-1.625
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      LEX-898, the lex-app half of the LEX-894 (lex-1483) Streamlit incident. The proxy puts the
+      user's access token on the WebSocket handshake, so the token is a header line, and websockets
+      refuses one over WEBSOCKETS_MAX_LINE_LENGTH (8192 by default) by neither answering nor closing
+      -- an open socket, a page that never loads, nothing in any log. lex/ws_header_limits.py raises
+      that ceiling to 65536 by setdefault (1.619) without overwriting a deployment's own value
+      (1.620), and is imported before uvicorn in lex/bin/lex.py and before websockets in
+      lex/proxy.py, asserted on the source because the library reads the variable once at import and
+      a correct value applied one import too late is indistinguishable from none (1.621). The
+      variable only exists from websockets 13, so `lex streamlit` warns when the installed release
+      parses at a lower hard-coded limit -- a ceiling that is not in force must say so (1.625). The
+      proxy now forwards the token once, as Authorization, instead of also as
+      X-Forwarded-Access-Token and X-Streamlit-Access-Token (1.622, 1.624), which is what makes
+      `authorization` in _HOP_BY_HOP load-bearing rather than housekeeping (1.623): two
+      Authorization headers reach the upstream joined by a comma. The root cause is removed in
+      LEX_TERRAFORM_MODULES (the per-instance Keycloak client no longer runs with full scope);
+      these are the guards under it. Mutations against lex-app-v2: 1.621, 1.622 and 1.624 fail.
+      Letter and range taken well clear of ay-bj, which open branches hold.
+  bl:
+    title: More than one hostname per instance (LEX_EXTRA_ALLOWED_HOSTS)
+    scenarios: 1.630-1.631
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      DOMAIN_HOSTED is a single name, so ALLOWED_HOSTS held exactly one real host and every
+      other hostname pointing at the same pod got a 400 from Django while the ingress routed
+      it happily. LEX_EXTRA_ALLOWED_HOSTS (comma-separated) appends those names and carries
+      them into CSRF_TRUSTED_ORIGINS, where a leading-dot host becomes the https://*.domain
+      wildcard an origin must be written as (1.630); "*" raises ImproperlyConfigured on a
+      deployed instance, because a pod that accepts any Host accepts Host-header poisoning
+      (1.631). USE_X_FORWARDED_HOST is on, so Django judges the host the client asked for and
+      an ingress-side rewrite cannot substitute for the list — which is what makes this the
+      only place a second hostname can be admitted. Both scenarios read the settings module in
+      a fresh interpreter, since ALLOWED_HOSTS is built once at import.
+  bm:
+    title: Custom domains -- every attached hostname is accepted, and a dashboard is framed same-site
+    scenarios: 1.632-1.653
+    status: complete
+    tests:
+      pass: 22
+      skip: 0
+      xfail: 0
+    note: >-
+      A customer-owned domain attached by the Instance Controller makes an instance answer on
+      more than one hostname per role, and the pods have to know all of them. lex/hosts.py reads
+      LEX_APP_HOSTS / LEX_STREAMLIT_HOSTS / LEX_REFLEX_HOSTS (written by the lex-instance
+      terraform module only when a domain is attached) and falls back to DOMAIN_HOSTED /
+      STREAMLIT_URL / REFLEX_URL, which is the whole behaviour for every other instance
+      (1.632-1.633, 1.641, 1.646). Those hostnames reach ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS,
+      read in a child process because both are resolved while settings.py imports (1.640); the
+      Streamlit proxy builds its OIDC callback from the request's own host, allow-listed so a
+      forged Host header cannot steer the redirect_uri (1.642-1.643), and trusts every attached
+      app host as a token-renewal origin (1.644); Reflex's websocket CORS lists every attached
+      reflex host (1.645), and an instance hardened with LEX_CORS_ALLOWED_ORIGINS keeps its own
+      hostnames in that list rather than refusing its own new domain (1.647). The same-site half -- registrable_domain, same_site_url and
+      CurrentHostMiddleware (1.634-1.637) -- is what keeps the dashboards' iframes first-party:
+      a shell on app.customer.com frames streamlit.app.customer.com, not the platform host whose
+      cookies Safari would block (1.638-1.639), and lex_view()'s frame -- the reverse direction --
+      points back at the app host on that same domain instead of the localhost it used to fall
+      back to (1.648). 1.649-1.651 drive /auth/login and /auth/adopt through the whole proxy app
+      behind the ingress's X-Forwarded-* headers, which is where the hostname actually reaches
+      the application; 1.652 reads reflex's own SAME_DOMAIN_HOSTNAMES off disk, since the whole
+      multi-host Reflex design rests on its frontend rewriting a localhost backend URL. 1.653
+      came out of fuzzing the module with degenerate hostnames: urlsplit(...).port raises for a
+      port it cannot parse, and that runs on every report render, so a typo in one variable
+      would have been a 500 naming neither the variable nor the value.
+  bn:
+    title: 'Scheduler bootstrap — the clock in the served backend, code-declared schedules, `run_scheduler`'
+    scenarios: 1.654-1.664
+    status: complete
+    tests:
+      pass: 11
+      skip: 0
+      xfail: 0
+    note: >-
+      Every instance gets a scheduler with no configuration and no extra pod: the clock starts
+      only in the process serving the app, is on by default (off is a WARNING), survives failing
+      passes; `@lex_job(schedule=...)` declarations become schedule rows kept in step with the
+      code; `lex run_scheduler --once` does the same on demand; `ScheduledJob` is registered
+      like any model and kept out of history. Allocated past the letters and scenario IDs that
+      in-flight branches (feat/ext-*, feat/auth-long-sessions) already hold: the first letter
+      absent from lex-app-v2 and every remote branch, and a range above the highest max_scenario
+      on any branch, so neither side has to renumber on merge. Design:
+      docs/superpowers/plans/2026-11-10-scheduled-jobs.md.
+  bq:
+    title: '`lex init` writes migrations for the project only, never into site-packages'
+    scenarios: 1.674-1.680
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      `lex init` ran makemigrations for every installed app, so a package whose models its own
+      migrations don't match got a migration written into site-packages on every install (until 2.5:
+      oauth2_authcodeflow's id under lex's BigAutoField default, and the api-key fork's widened id and
+      hashed_key). The package's next migration under the same number would conflict and stop `lex
+      init`. Now `lex init` makes migrations for the project's app only (1.674-1.676). Both packages are
+      fixed upstream on lex-app-v2 (django-oauth2-codeflow 3.0 pins default_auto_field; exc-djangorestframework-api-key
+      1.0.1 ships the widening under the name `lex init` generated), so lex overrides neither: 1.679 and
+      1.680 hold that, 1.678 creates a 145-character API key on a migrated database, and 1.677 runs
+      makemigrations --check for every installed app. Allocated as 1av (1.386-1.392) on its branch;
+      renumbered on merging lex-app-v2, where 1av was taken, to the first letter free on every branch
+      and a range above the highest max_scenario.
