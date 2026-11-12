@@ -700,6 +700,10 @@ def lex_shared_task(_func=None, **task_opts):
                 # the same guard the undecorated ``calc_and_save`` path uses.
                 # Without it, saves inside a decorated calculate() body would
                 # stamp edited_at/edited_by (a calculation is not a user edit).
+                #
+                # Nothing is pushed here: CalculationModel.calculate_hook puts
+                # the model on top of the stack before it dispatches, so what
+                # a decorated calculate() logs is filed under the model itself.
                 if context or model_context:
                     from lex.core.models.CalculationModel import (
                         calculation_execution_context,
@@ -883,9 +887,8 @@ def calc_and_save(models: List[Model], group_index: Optional[int] = None, *args,
             continue
         try:
             logger.info(f"Processing model {model}")
-            from lex.audit_logging.utils.ModelContext import model_logging_context
-            from lex.core.models.CalculationModel import calculation_execution_context
-            with calculation_execution_context():
+            from lex.core.models.CalculationModel import child_calculation_context
+            with child_calculation_context(model):
                 model.lex_func()(*args)
                 logger.info(f"Finished calculating model {model}")
                 model.save()

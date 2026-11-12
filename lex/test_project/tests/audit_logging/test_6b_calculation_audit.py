@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import unittest
 
+from lex.api.utils import operation_context
+from lex.api.utils.Context import _build_context
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.audit_logging.utils.calculation_audit import (
@@ -51,6 +53,20 @@ class TestCluster06b_CalculationAudit(E2ETestCase):
     e2e_framework_models = [AuditLog, AuditLogStatus]
     # Let the real function run — it writes to the live tables above.
     e2e_unpatch = {"ensure_terminal_calculation_audit"}
+
+    def setUp(self):
+        super().setUp()
+        # ensure_terminal_calculation_audit records the AuditLog it wrote as
+        # the context's `audit_log_temp`. A run does that in a context that
+        # ends with it; called directly here, it would outlive the test in the
+        # runner's thread and hand every later test an AuditLog row the flush
+        # has deleted. Cluster 15 then failed 23 tests in whole-suite runs
+        # (BUG-030).
+        self._operation_context_token = operation_context.set(_build_context())
+
+    def tearDown(self):
+        operation_context.reset(self._operation_context_token)
+        super().tearDown()
 
     def test_6_5_calc_success_terminal_audit(self) -> None:
         """

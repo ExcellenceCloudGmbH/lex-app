@@ -5,7 +5,6 @@ import sys
 import threading
 import traceback
 
-import nest_asyncio
 from asgiref.sync import sync_to_async
 from django.apps import apps
 from django.contrib.admin.apps import AdminConfig
@@ -102,23 +101,6 @@ def _create_audit_logger_for_task(audit_logging_enabled=None):
 
 
 
-def _apply_nest_asyncio():
-    """``nest_asyncio.apply()``, unless this process's event loop cannot be patched.
-
-    nest_asyncio patches asyncio's own pure-Python loop and refuses any other. A
-    server running on uvloop -- granian, which serves `lex reflex`, picks uvloop
-    whenever it is installed -- has already installed a uvloop policy when Django
-    is set up, so ``apply()`` raises ``ValueError`` inside ``ready()`` and takes
-    ``django.setup()`` down with it. Such a process does not need the patch: lex's
-    synchronous code reaches the database from worker threads there, and a worker
-    thread has no running loop to nest into.
-    """
-    try:
-        nest_asyncio.apply()
-    except ValueError as exc:
-        logger.info("nest_asyncio not applied (%s); this process's loop runs as it is.", exc)
-
-
 def should_load_data(auth_settings):
     """
     Check whether the initial data should be loaded.
@@ -141,7 +123,12 @@ class LexAppConfig(GenericAppConfig):
             generic_app_models = {f"{model.__name__}": model for model in
                                   set(list(apps.get_app_config(repo_name).models.values())
                                       + list(apps.get_app_config(repo_name).models.values())) if model.__name__.count("Historical") != 1}
-            _apply_nest_asyncio()
+
+            # No nest_asyncio here or anywhere in lex. It patched asyncio for
+            # the whole process, which stopped asyncio.run from closing its
+            # loop, and then the second async_to_sync in any thread could wait
+            # forever (BUG-046). Nothing in this startup needs a re-entrant
+            # loop: async_ready runs on a thread of its own, below.
 
             # Run the initial-data check (config load + are_all_models_empty()
             # DB query) OFF the ready() critical path so django.setup() returns

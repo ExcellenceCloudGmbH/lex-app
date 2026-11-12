@@ -12,6 +12,7 @@ from uuid import uuid4
 from django.contrib.contenttypes.models import ContentType
 
 from lex.api.utils import operation_context
+from lex.api.utils.Context import _build_context
 from lex.audit_logging.handlers.LexLogger import LexLogger
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
@@ -37,10 +38,11 @@ def _seed_operation_context_and_audit_log() -> Tuple[str, AuditLog, "object"]:
         action="calculate",
         author="cluster-15-tests",
     )
-    current = dict(operation_context.get() or {})
-    current["calculation_id"] = calc_id
-    current.setdefault("request_obj", None)
-    token = operation_context.set(current)
+    # A fresh context, not a copy of the current one: an earlier test in this
+    # thread can leave keys behind. A stale `audit_log_temp` (an AuditLog row
+    # the flush has since deleted) wins over the lookup by calculation_id, and
+    # every log write of the test then fails (BUG-030).
+    token = operation_context.set(_build_context(calculation_id=calc_id))
     return calc_id, audit_log, token
 
 
