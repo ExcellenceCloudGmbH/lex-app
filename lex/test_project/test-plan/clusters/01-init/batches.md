@@ -1814,22 +1814,22 @@ config each fail 1.404.
 
 ---
 
-### Batch 1ay — more than one hostname per instance ✅
+### Batch 1bl — more than one hostname per instance ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.410 – 1.411 |
+| Scenario range | 1.630 – 1.631 |
 | Type | U |
 | Files covered | `lex/lex_app/settings.py` (`_lex_extra_allowed_hosts`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, the `DEPLOYMENT_ENVIRONMENT` guard) |
-| Test file | `lex/test_project/tests/init/test_1ay_extra_allowed_hosts.py` |
-| Test classes | `TestCluster01ay_ExtraAllowedHosts` (1.410–1.411) |
+| Test file | `lex/test_project/tests/init/test_1bl_extra_allowed_hosts.py` |
+| Test classes | `TestCluster01bl_ExtraAllowedHosts` (1.630–1.631) |
 | Fixtures | none — each scenario imports the settings module in a fresh interpreter with `PYTHONPATH` on this checkout, because `ALLOWED_HOSTS` is built once at import |
 | Tests landed | **2 pass / 0 fail** |
 | Status | ✅ Complete |
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.410 | the extra hosts land in both settings | unset, `ALLOWED_HOSTS` is the four entries it always held and `CSRF_TRUSTED_ORIGINS` the two; set, each name is appended trimmed and without a trailing slash, and reaches `CSRF_TRUSTED_ORIGINS` as `https://host` — a leading-dot host as `https://*.domain`, the only wildcard an origin may be written with; the baseline entries are byte-identical either way |
-| 1.411 | a deployed instance refuses `*` | `DEPLOYMENT_ENVIRONMENT` set and `LEX_EXTRA_ALLOWED_HOSTS=*` raises `ImproperlyConfigured` naming the variable; a real hostname imports cleanly; off a deployed instance `*` is not the framework's business and startup is unaffected |
+| 1.630 | the extra hosts land in both settings | unset, `ALLOWED_HOSTS` is the four entries it always held and `CSRF_TRUSTED_ORIGINS` the two; set, each name is appended trimmed and without a trailing slash, and reaches `CSRF_TRUSTED_ORIGINS` as `https://host` — a leading-dot host as `https://*.domain`, the only wildcard an origin may be written with; the baseline entries are byte-identical either way |
+| 1.631 | a deployed instance refuses `*` | `DEPLOYMENT_ENVIRONMENT` set and `LEX_EXTRA_ALLOWED_HOSTS=*` raises `ImproperlyConfigured` naming the variable; a real hostname imports cleanly; off a deployed instance `*` is not the framework's business and startup is unaffected |
 
 **Why a regression matters:** `DOMAIN_HOSTED` is one name, so before this every other hostname reaching the pod — a customer domain attached but not yet promoted, a vanity host in front of one public route — was routed by the ingress and then refused by Django with a 400 that names nothing. `USE_X_FORWARDED_HOST` is on, so Django judges the host the *client* asked for and no ingress-side rewrite (`upstream-vhost` and friends) can stand in for this list: drop it and the only remaining fix is one canonical hostname per instance. The `*` guard is the other half — a list that may be widened arbitrarily is a Host-header poisoning switch, and it has to fail at startup rather than at review.

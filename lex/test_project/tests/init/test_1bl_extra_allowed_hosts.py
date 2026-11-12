@@ -15,7 +15,7 @@ Intent
   accepts Host-header poisoning, and the refusal has to come from startup
   rather than from a reviewer noticing.
 
-Cluster 1ay — scenarios 1.410–1.411. Type: U.
+Cluster 1bl — scenarios 1.630–1.631. Type: U.
 Covers: lex/lex_app/settings.py (``_lex_extra_allowed_hosts``, ``ALLOWED_HOSTS``,
 ``CSRF_TRUSTED_ORIGINS``, the ``DEPLOYMENT_ENVIRONMENT`` guard).
 
@@ -93,13 +93,13 @@ def _fresh(code: str, **env_overrides) -> list:
     return json.loads(result.stdout.strip().splitlines()[-1])
 
 
-class TestCluster01ay_ExtraAllowedHosts(SimpleTestCase):
+class TestCluster01bl_ExtraAllowedHosts(SimpleTestCase):
     """D1: LEX_EXTRA_ALLOWED_HOSTS."""
 
-    # -- 1.410 ---------------------------------------------------------
-    def test_1_410_extra_hosts_reach_allowed_hosts_and_csrf(self) -> None:
+    # -- 1.630 ---------------------------------------------------------
+    def test_1_630_extra_hosts_reach_allowed_hosts_and_csrf(self) -> None:
         """
-        Scenario 1.410: the listed hosts are added to ALLOWED_HOSTS and trusted for CSRF.
+        Scenario 1.630: the listed hosts are added to ALLOWED_HOSTS and trusted for CSRF.
         Given: a fresh interpreter with and without LEX_EXTRA_ALLOWED_HOSTS
         When: lex's settings module is imported
         Then: without it ALLOWED_HOSTS is exactly the four it always held and
@@ -129,10 +129,10 @@ class TestCluster01ay_ExtraAllowedHosts(SimpleTestCase):
         self.assertEqual(after_hosts[: len(before_hosts)], before_hosts)
         self.assertEqual(after_csrf[: len(before_csrf)], before_csrf)
 
-    # -- 1.411 ---------------------------------------------------------
-    def test_1_411_a_deployed_instance_refuses_the_star(self) -> None:
+    # -- 1.631 ---------------------------------------------------------
+    def test_1_631_a_deployed_instance_refuses_the_star(self) -> None:
         """
-        Scenario 1.411: "*" is refused on a deployed instance, a named host is not.
+        Scenario 1.631: "*" is refused on a deployed instance, a named host is not.
         Given: DEPLOYMENT_ENVIRONMENT and DOMAIN_HOSTED set, Redis configured
         When: LEX_EXTRA_ALLOWED_HOSTS is "*", and then a real hostname
         Then: the first raises ImproperlyConfigured naming the variable; the
