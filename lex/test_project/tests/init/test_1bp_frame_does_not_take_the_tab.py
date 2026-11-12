@@ -29,10 +29,10 @@ gesture and always permitted. The frame is never redirected to the IdP, so the
 A client that sends no ``Sec-Fetch-Site`` keeps the pre-existing behaviour, the
 same safe default scenario 1.214 pins for the rest of this routing.
 
-Cluster 1ay — scenarios 1.410–1.416. Type: U.
+Cluster 1bp — scenarios 1.667–1.673. Type: U.
 Covers: lex/proxy.py (_frame_may_move_the_tab, _frame_breakout_response, proxy),
 lex/lex_app/streamlit/Streamlit.py (get_html) at the join.
-Run: python -m lex pytest lex/test_project/tests/init/test_1ay_frame_does_not_take_the_tab.py -v
+Run: python -m lex pytest lex/test_project/tests/init/test_1bp_frame_does_not_take_the_tab.py -v
 """
 
 from __future__ import annotations
@@ -81,8 +81,8 @@ def _framed_request(site: str | None, path: str = "/", query: str = "") -> Reque
     )
 
 
-class TestCluster01ay_FrameDoesNotTakeTheTab(SimpleTestCase):
-    """Cluster 1ay: who the breakout page is allowed to navigate."""
+class TestCluster01bp_FrameDoesNotTakeTheTab(SimpleTestCase):
+    """Cluster 1bp: who the breakout page is allowed to navigate."""
 
     def setUp(self) -> None:
         # Derive the login URL from the request rather than PUBLIC_URL, so the
@@ -97,10 +97,10 @@ class TestCluster01ay_FrameDoesNotTakeTheTab(SimpleTestCase):
         self.assertEqual(resp.status_code, 401, msg="the breakout is a 401")
         return resp.body.decode()
 
-    # -- 1.410 ---------------------------------------------------------
-    def test_1_410_the_shell_s_frame_cannot_move_the_shell_s_tab(self) -> None:
+    # -- 1.667 ---------------------------------------------------------
+    def test_1_667_the_shell_s_frame_cannot_move_the_shell_s_tab(self) -> None:
         """
-        Scenario 1.410: the dashboard framed by lex-app's own shell leaves the tab alone.
+        Scenario 1.667: the dashboard framed by lex-app's own shell leaves the tab alone.
         Given: an unauthenticated iframe document load framed from the instance
                hostname beside this one (Sec-Fetch-Site: same-site)
         When:  the proxy builds the unauthenticated response
@@ -129,10 +129,10 @@ class TestCluster01ay_FrameDoesNotTakeTheTab(SimpleTestCase):
             msg="and it must point at this proxy's login",
         )
 
-    # -- 1.411 ---------------------------------------------------------
-    def test_1_411_an_unrelated_site_framing_this_cannot_move_its_tab_either(self) -> None:
+    # -- 1.668 ---------------------------------------------------------
+    def test_1_668_an_unrelated_site_framing_this_cannot_move_its_tab_either(self) -> None:
         """
-        Scenario 1.411: the rule is about ownership, not about which host it is.
+        Scenario 1.668: the rule is about ownership, not about which host it is.
         Given: an unauthenticated iframe document load framed from an unrelated site
                (Sec-Fetch-Site: cross-site)
         When:  the proxy builds the unauthenticated response
@@ -146,10 +146,10 @@ class TestCluster01ay_FrameDoesNotTakeTheTab(SimpleTestCase):
         self.assertIn("lex-auth-required", body)
         self.assertIn('target="_top"', body)
 
-    # -- 1.412 ---------------------------------------------------------
-    def test_1_412_a_frame_this_origin_put_there_still_navigates(self) -> None:
+    # -- 1.669 ---------------------------------------------------------
+    def test_1_669_a_frame_this_origin_put_there_still_navigates(self) -> None:
         """
-        Scenario 1.412: the proxy framing its own page keeps the automatic navigation.
+        Scenario 1.669: the proxy framing its own page keeps the automatic navigation.
         Given: an unauthenticated iframe document load framed by this same origin
                (Sec-Fetch-Site: same-origin)
         When:  the proxy builds the unauthenticated response
@@ -165,10 +165,10 @@ class TestCluster01ay_FrameDoesNotTakeTheTab(SimpleTestCase):
         )
         self.assertIn("lex-auth-required", body)
 
-    # -- 1.413 ---------------------------------------------------------
-    def test_1_413_a_client_that_names_no_embedder_keeps_the_old_behaviour(self) -> None:
+    # -- 1.670 ---------------------------------------------------------
+    def test_1_670_a_client_that_names_no_embedder_keeps_the_old_behaviour(self) -> None:
         """
-        Scenario 1.413: an absent Sec-Fetch-Site is the pre-existing behaviour, as 1.214 has it.
+        Scenario 1.670: an absent Sec-Fetch-Site is the pre-existing behaviour, as 1.214 has it.
         Given: a framed document load from a client that sends no Sec-Fetch-Site
         When:  the proxy builds the unauthenticated response
         Then:  the automatic navigation is still there -- a client too old or too
@@ -183,10 +183,10 @@ class TestCluster01ay_FrameDoesNotTakeTheTab(SimpleTestCase):
             msg="absent Sec-Fetch-* must keep the pre-existing behaviour (cf. scenario 1.214)",
         )
 
-    # -- 1.414 ---------------------------------------------------------
-    def test_1_414_the_detector_reads_the_embedder_case_insensitively(self) -> None:
+    # -- 1.671 ---------------------------------------------------------
+    def test_1_671_the_detector_reads_the_embedder_case_insensitively(self) -> None:
         """
-        Scenario 1.414: the embedder check is a header read, so casing cannot defeat it.
+        Scenario 1.671: the embedder check is a header read, so casing cannot defeat it.
         Given: Sec-Fetch-Site in mixed case, and the two values that keep the navigation
         When:  _frame_may_move_the_tab inspects them
         Then:  SAME-SITE and Cross-Site are both refused; same-origin and an absent
@@ -213,8 +213,8 @@ class _Upstream:
         return httpx.Response(200, content=b"<html>the dashboard</html>")
 
 
-class TestCluster01ay_TheReportedJourney(SimpleTestCase):
-    """Cluster 1ay: the URL the sidebar report builds, loaded against the real proxy.
+class TestCluster01bp_TheReportedJourney(SimpleTestCase):
+    """Cluster 1bp: the URL the sidebar report builds, loaded against the real proxy.
 
     The two halves of this fix live in different processes -- the report is
     Django, the frame's destination is the Starlette proxy -- so each cluster
@@ -247,10 +247,10 @@ class TestCluster01ay_TheReportedJourney(SimpleTestCase):
             follow_redirects=False,
         )
 
-    # -- 1.415 ---------------------------------------------------------
-    def test_1_415_the_frame_the_report_builds_is_let_in(self) -> None:
+    # -- 1.672 ---------------------------------------------------------
+    def test_1_672_the_frame_the_report_builds_is_let_in(self) -> None:
         """
-        Scenario 1.415: the dashboard the sidebar entry frames actually loads.
+        Scenario 1.672: the dashboard the sidebar entry frames actually loads.
         Given: the URL the real Streamlit report builds for a session holding an
                access token, and a proxy that accepts that token
         When:  a browser loads it as an iframe document, from the shell's origin
@@ -300,10 +300,10 @@ class TestCluster01ay_TheReportedJourney(SimpleTestCase):
         )
         self.assertTrue(_Upstream.calls, msg="which means the request reached upstream at all")
 
-    # -- 1.416 ---------------------------------------------------------
-    def test_1_416_without_a_token_the_tab_is_still_not_taken(self) -> None:
+    # -- 1.673 ---------------------------------------------------------
+    def test_1_673_without_a_token_the_tab_is_still_not_taken(self) -> None:
         """
-        Scenario 1.416: the fault and the amplifier, observed together.
+        Scenario 1.673: the fault and the amplifier, observed together.
         Given: the URL the report builds when the session has no access token --
                what every deployment before this fix sent to the browser
         When:  a browser loads it as an iframe document, from the shell's origin

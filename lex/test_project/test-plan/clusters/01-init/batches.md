@@ -1814,15 +1814,15 @@ config each fail 1.404.
 
 ---
 
-### Batch 1ay — a frame another application put on screen does not get to move that tab ✅
+### Batch 1bp — a frame another application put on screen does not get to move that tab ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.410 – 1.416 |
+| Scenario range | 1.667 – 1.673 |
 | Type | U |
 | Files covered | `lex/proxy.py` (`_frame_may_move_the_tab`, `_frame_breakout_response`, `proxy`), `lex/lex_app/streamlit/Streamlit.py` (`get_html`) at the join |
-| Test file | `lex/test_project/tests/init/test_1ay_frame_does_not_take_the_tab.py` |
-| Test classes | `TestCluster01ay_FrameDoesNotTakeTheTab` (1.410–1.414), `TestCluster01ay_TheReportedJourney` (1.415–1.416) |
+| Test file | `lex/test_project/tests/init/test_1bp_frame_does_not_take_the_tab.py` |
+| Test classes | `TestCluster01bp_FrameDoesNotTakeTheTab` (1.667–1.671), `TestCluster01bp_TheReportedJourney` (1.672–1.673) |
 | Fixtures | a hand-built Starlette `Request` parameterised by `Sec-Fetch-Site`; for the join, the real `Streamlit` report's own output driven against `proxy.app` through `TestClient`, with `validate_jwt_token` and `_upstream_send` stubbed (the Keycloak and Streamlit boundaries) |
 | Tests landed | **7 pass / 0 fail** |
 | Also run | cluster 1z (1.211–1.216), unchanged and still 6 pass — the breakout itself is not narrowed, only who may script the navigation |
@@ -1830,12 +1830,12 @@ config each fail 1.404.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.410 | the shell's frame leaves the shell's tab alone | `Sec-Fetch-Site: same-site` → no `window.top.location`, but still 401, still `lex-auth-required`, still `target="_top"` at this proxy's login |
-| 1.411 | an unrelated embedder has no more claim | `Sec-Fetch-Site: cross-site` → the same |
-| 1.412 | this origin's own frame still recovers | `Sec-Fetch-Site: same-origin` → the automatic navigation is kept |
-| 1.413 | a client that names no embedder is unchanged | no `Sec-Fetch-Site` → pre-existing behaviour, as scenario 1.214 has it for the rest of this routing |
-| 1.414 | the embedder check is a header read | `SAME-SITE` / `Cross-Site` refused, `same-origin` and absent allowed |
-| 1.415 | the frame the report builds is let in | the URL the real `Streamlit` report produces, loaded as a framed document against the real proxy app, banks the token, is redirected without it and ends on the dashboard's own bytes |
-| 1.416 | the fault and the amplifier, observed together | the URL the report produces with no session token still 401s, and that 401 moves no window |
+| 1.667 | the shell's frame leaves the shell's tab alone | `Sec-Fetch-Site: same-site` → no `window.top.location`, but still 401, still `lex-auth-required`, still `target="_top"` at this proxy's login |
+| 1.668 | an unrelated embedder has no more claim | `Sec-Fetch-Site: cross-site` → the same |
+| 1.669 | this origin's own frame still recovers | `Sec-Fetch-Site: same-origin` → the automatic navigation is kept |
+| 1.670 | a client that names no embedder is unchanged | no `Sec-Fetch-Site` → pre-existing behaviour, as scenario 1.214 has it for the rest of this routing |
+| 1.671 | the embedder check is a header read | `SAME-SITE` / `Cross-Site` refused, `same-origin` and absent allowed |
+| 1.672 | the frame the report builds is let in | the URL the real `Streamlit` report produces, loaded as a framed document against the real proxy app, banks the token, is redirected without it and ends on the dashboard's own bytes |
+| 1.673 | the fault and the amplifier, observed together | the URL the report produces with no session token still 401s, and that 401 moves no window |
 
-**Why a regression matters:** this is the amplifier, not the fault. Batch 10r stops the Streamlit report framing its dashboard without a credential, so the 401 that started the reported tab takeover no longer happens — but any frame that cannot authenticate, for any reason, could still move a window belonging to the page the user was reading. LEX-1477 fixed this one path at a time (`/_lex/*`, `/_stcore/*`); naming the embedder fixes the class. The counterweight is 1.412 and 1.413: withhold the navigation from everything and the dashboard's own recovery goes with it.
+**Why a regression matters:** this is the amplifier, not the fault. Batch 10r stops the Streamlit report framing its dashboard without a credential, so the 401 that started the reported tab takeover no longer happens — but any frame that cannot authenticate, for any reason, could still move a window belonging to the page the user was reading. LEX-1477 fixed this one path at a time (`/_lex/*`, `/_stcore/*`); naming the embedder fixes the class. The counterweight is 1.669 and 1.670: withhold the navigation from everything and the dashboard's own recovery goes with it.
