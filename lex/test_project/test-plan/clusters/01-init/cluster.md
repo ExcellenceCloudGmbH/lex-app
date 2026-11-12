@@ -524,3 +524,14 @@ does not remove user launch configurations.
 | 1.422 | the framed relay is untouched | 200, the shared key, `frame-ancestors <frontend>` |
 
 **Scenario range:** 1.415 – 1.422. **Test file:** `lex/test_project/tests/init/test_1az_proxy_tab_takeover.py`. **Type:** U. **Status:** ✅ Complete (2026-10-26). Batch: [1az](batches.md). Frontend twin: `process-admin-general-client` batch F12u.
+### 1ay — `ALLOWED_HOSTS` accepts the instance's own backend Service name
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.410 | short Service name accepted | `lex-backend-<instance>` is among the derived hosts |
+| 1.411 | the three longer DNS forms accepted | `.<ns>`, `.<ns>.svc` and `.<ns>.svc.cluster.local` are all present |
+| 1.412 | nothing added off-cluster | no instance identifier yields `[]`, whatever the namespace says |
+| 1.413 | unreadable namespace degrades | an empty namespace yields exactly the short name, and does not raise |
+| 1.414 | the namespace file is read safely | `_k8s_namespace` on a missing path returns `""` rather than raising |
+
+**Scenario range:** 1.410 – 1.414. **Test file:** `lex/test_project/tests/init/test_1ay_allowed_hosts_in_cluster.py`. **Type:** U. **Status:** ✅ Complete (2026-10-25). Batch: [1ay](batches.md).

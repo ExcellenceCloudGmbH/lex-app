@@ -1823,6 +1823,17 @@ config each fail 1.404.
 | Test classes | `TestCluster01az_WhereALoginMayReturnTo` (1.415–1.417), `TestCluster01az_WhoMayMoveTheTopWindow` (1.418–1.419), `TestCluster01az_LandingOnTheRelayAnyway` (1.420–1.422) |
 | Fixtures | none — a hand-built Starlette `Request` per case; `PUBLIC_URL`, `_THEME_RELAY_CONFIGURED` and `_THEME_RELAY_ALLOWED` patched per scenario, `_put_tokens`/`oauth.oidc` stubbed for the callback |
 | Tests landed | **8 pass / 0 fail** (13 subtests) |
+### Batch 1ay — `ALLOWED_HOSTS` accepts the instance's own backend Service name ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.410 – 1.414 |
+| Type | U |
+| Files covered | `lex/lex_app/settings.py` (`K8S_NAMESPACE_FILE`, `BACKEND_SERVICE_PREFIX`, `_k8s_namespace`, `_cluster_service_hosts`, `ALLOWED_HOSTS`) |
+| Test file | `lex/test_project/tests/init/test_1ay_allowed_hosts_in_cluster.py` |
+| Test classes | `TestCluster1ay_AllowedHostsAcceptsTheInClusterService` (1.410–1.414) |
+| Fixtures | none — the two helpers are pure, so no settings re-import and no environment patching is needed |
+| Tests landed | **5 pass / 0 fail** |
 | Status | ✅ Complete |
 
 | Scenario | Title | Asserts |
@@ -1841,3 +1852,12 @@ config each fail 1.404.
 **Why the route existing is not the fix:** adding `/_lex/theme-relay` removes the one 401 that was observed. It does not remove the rule that produced the outcome — *whatever* 401s inside a frame may move the top window, and *whatever* path 401'd becomes where the browser is left afterwards. Both halves are now bounded by what the path is: only a page may escalate, and only a page may be returned to. 1.419 is the counterweight that keeps the narrowing honest — withhold the breakout from everything and an expired dashboard shows Keycloak's "refused to connect" wall again, which is the failure the breakout was written for in the first place (1.211).
 
 **Frontend twin:** `process-admin-general-client` batch F12u (F12.104–F12.108) closes the same hole from the other side — the relay frame is sandboxed so nothing served there can navigate the tab at all, and the shell attributes a `lex-auth-required` message to the dashboard frame rather than to its origin, which is what let an invisible frame on that origin drive a full-page navigation.
+| 1.410 | short Service name accepted | `lex-backend-<instance>` is among the derived hosts |
+| 1.411 | the three longer DNS forms accepted | `.<ns>`, `.<ns>.svc` and `.<ns>.svc.cluster.local` are all present |
+| 1.412 | nothing added off-cluster | no instance identifier yields `[]`, whatever the namespace says |
+| 1.413 | unreadable namespace degrades | an empty namespace yields exactly the short name, and does not raise |
+| 1.414 | the namespace file is read safely | `_k8s_namespace` on a missing path returns `""` rather than raising |
+
+**Why a regression matters:** Django compares `Host:` against `ALLOWED_HOSTS` in `CommonMiddleware`, before any view, permission class or model code runs — so a Service name missing from the list is not a permission failure and not a routing failure, it is a `DisallowedHost` with nothing downstream reached. It breaks every service-to-service call an instance makes while leaving the browser-facing surface working, which is exactly how it was found: on a customer instance on 2026-10-25 every file write failed with `OSError` and the backend logged `Invalid HTTP_HOST header: 'lex-backend-armira-self-servi-prod-1492:7000'`, with a valid registered API key and a correct route. `POD_IP`, already in the list, does not cover it — it is the reading pod's own address, so it says nothing about how other pods address the backend by name, and a caller has no way to learn it.
+
+**Why the namespace comes from a file:** `POD_NAMESPACE` is not set in the platform's pods (measured), while `/var/run/secrets/kubernetes.io/serviceaccount/namespace` is mounted in every pod with a service account. Reading it introduces no new required environment variable — which matters here, because `settings.py` already refuses to start when `DOMAIN_HOSTED` is missing, and a second such variable would turn a missing value into a crash-loop rather than a fix.
