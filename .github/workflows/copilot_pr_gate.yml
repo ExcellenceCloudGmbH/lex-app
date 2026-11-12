@@ -86,7 +86,7 @@ jobs:
         with:
           # Match showcase_tests.yml so the gate runs against the same
           # interpreter the project itself targets.
-          python-version: "3.12.0"
+          python-version: "3.12"
 
       - name: Install system dependencies
         # pycairo + weasyprint dependencies build from source without
