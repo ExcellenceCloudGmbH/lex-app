@@ -21,7 +21,8 @@ audit log's traceback button stayed disabled after every failed run.
 Cluster 6u — scenarios 6.168–6.172. Type: E.
 Covers: lex/audit_logging/serializers/AuditLogSerializer.py
 (``get_error_traceback``), lex/audit_logging/models/AuditLogStatus.py
-(``permission_read``).
+(``permission_read``), lex/core/security_flags.py (what ``READ_SURFACES``
+says it does).
 Run: python -m lex pytest lex/test_project/tests/audit_logging/test_6u_calculation_failure_traceback_visibility.py -v
 """
 

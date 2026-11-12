@@ -24,6 +24,12 @@ The two branches below this one guard themselves with ``has_can_read`` /
 15.59 is the guard the other way: the remembered decision is still consulted
 for a model that *does* declare ``can_read``, so the fix costs the per-request
 memo nothing.
+
+Cluster 15m — scenarios 15.56–15.60. Type: E.
+Covers: lex/api/serializers/base_serializers.py (``LexSerializer.to_representation``,
+the remembered-decision branch), read through the ``model_entries`` detail,
+AG Grid and ``many`` endpoints.
+Run: python -m lex pytest lex/test_project/tests/calculation_logging/test_15m_calculation_log_read_surfaces.py -v
 """
 from __future__ import annotations
 
