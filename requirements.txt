@@ -43,7 +43,7 @@ django-db-views
 pre-commit
 factory-boy
 coverage
-django-oauth2-codeflow
+django-oauth2-codeflow==2.1.0
 psycopg2-binary
 django-celery-beat
 pytest

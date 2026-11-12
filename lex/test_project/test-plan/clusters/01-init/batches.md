@@ -453,3 +453,22 @@ Also fixed here: a **duplicated block in this test file** that shadowed scenario
 **Why a regression matters:** this is the amplifier, not the fault. Batch 10o stops the Streamlit report framing its dashboard without a credential, so the 401 that started the reported tab takeover no longer happens — but any frame that cannot authenticate, for any reason, could still move a window belonging to the page the user was reading. 1az fixed this one path at a time (`/_lex/*`, `/_stcore/*`, `/auth/token`, `/auth/adopt`); naming the embedder fixes the class, including the dashboard's own landing page, which is the path this report took. The counterweight is 1.425 and 1.426: withhold the navigation from everything and the dashboard's own recovery goes with it.
 
 **Allocation note:** letter `ba`, not `ay`. This release line already spent `az` on the 1477 backport, and mainline holds `ay` for the same batch there; letters are never renumbered, so the backport takes the next free pair on its own branch.
+
+---
+
+### Batch 1bc — deployed secret key, session lifetime and PKCE ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.481 – 1.489 |
+| Type | U (1.481–1.486, 1.489), I (1.487–1.488) |
+| Files covered | `lex/lex_app/settings.py` (`PUBLISHED_DEFAULT_SECRET_KEY` + deployed check, `SESSION_COOKIE_AGE`, `OIDC_MIDDLEWARE_SESSION_TIMEOUT_SECONDS`, `OIDC_RP_USE_PKCE`, `OIDC_RP_FORCE_SECRET_WITH_PKCE`), `lex/proxy.py` (OIDC client registration: `code_challenge_method`) |
+| Test file | `lex/test_project/tests/init/test_1bc_auth_settings_hardening.py` |
+| Test classes | `TestCluster01bc_DeployedSecretKey` (1.481–1.483), `TestCluster01bc_SessionLifetime` (1.484–1.486), `TestCluster01bc_DjangoSignInUsesPkce` (1.487–1.488), `TestCluster01bc_ProxySignInUsesPkce` (1.489) |
+| Fixtures | fresh interpreters importing the settings; an RSA key pair per module; the token endpoint mocked at `oauth2_authcodeflow.auth.request_post`; authlib server metadata patched on the proxy's client |
+| Tests landed | **9 pass / 0 fail** against django-oauth2-codeflow 2.1.0 |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-06-auth-hotfixes.md) |
+
+**Allocation note:** Letter bc, not ay/az/ba/bb: those are held by in-flight branches (ay on fix/streamlit-report-frames-unauthenticated and others, az/ba on release/2.1.x, ba/bb on feat/fleet-metrics-calculation-events), which also claim scenarios up to 1.480. The same letter and scenario IDs are used on lex-app-v2 and release/2.1.x, so a merge between the lines is a no-op.
+
+---

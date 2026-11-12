@@ -481,13 +481,17 @@ def get_user_info(access_token: str):
     if not keycloak_url or not realm_name:
         return None
 
-    userinfo_url = f"{keycloak_url}/realms/{realm_name}/protocol/openid-connect/userinfo"
+    from lex.api.keycloak import uma_client
+
+    endpoints = uma_client.KeycloakEndpoints(
+        token_url=f"{keycloak_url.rstrip('/')}/realms/{realm_name}/protocol/openid-connect/token",
+        userinfo_url=f"{keycloak_url.rstrip('/')}/realms/{realm_name}/protocol/openid-connect/userinfo",
+    )
     try:
-        headers = {"Authorization": f"Bearer {access_token}"}
-        response = requests.get(userinfo_url, headers=headers, timeout=10)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
+        # The shared per-call client: the token travels on this request only.
+        # TLS stays verified here, as it always was for this call.
+        return uma_client.fetch_userinfo(access_token, endpoints=endpoints, verify=True)
+    except uma_client.KeycloakCallError as e:
         logger.error(f"Failed to get user info: {e}")
         return None
 

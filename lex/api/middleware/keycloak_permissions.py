@@ -74,11 +74,13 @@ class KeycloakPermissionsMiddleware:
                 logger.error(f"Failed to fetch Keycloak UMA permissions: {e}")
 
             try:
-                if kc_manager.oidc:
-                    userinfo = kc_manager.oidc.userinfo(access_token)
-                    if isinstance(userinfo, dict):
-                        request.userinfo = userinfo
-                        request.client_roles = self._extract_client_roles(userinfo)
+                # Through the manager's stateless path: the token rides on this
+                # one request, never on the process-wide python-keycloak connection
+                # (which let concurrent users receive each other's profile).
+                userinfo = kc_manager.get_userinfo(access_token)
+                if isinstance(userinfo, dict):
+                    request.userinfo = userinfo
+                    request.client_roles = self._extract_client_roles(userinfo)
             except Exception as e:
                 logger.warning(f"Failed to fetch Keycloak userinfo: {e}")
 
