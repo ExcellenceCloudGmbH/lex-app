@@ -64,10 +64,12 @@ These govern how the framework recovers tasks from dead workers and how idle wor
 | Variable                                                     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
 | `IS_STREAMLIT_ENABLED`                                       | `true` to enable the Streamlit toolbar icon in the frontend. See [[access-and-dashboards/streamlit/index                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Streamlit Dashboards]]. |
+| `LEX_STREAMLIT_AUTH`                                         | How embedded dashboards sign in. `legacy` (default): the frontend hands the proxy the user's token, as before 2.5. `handoff`: the dashboard signs in through the app and holds no token; it stays signed in as long as the app does. `dual`: both, for a rollout. Set the **same value on the backend and on the Streamlit pod**; setting it back is the rollback. Any other value stops `lex streamlit` and the proxy. See [[access-and-dashboards/streamlit/sessions and authentication\|Sessions & Authentication]]. |
 | `STREAMLIT_URL` / `BASE_URL`                                 | The dashboard's canonical public URL, used by the embedded dashboard proxy. When this is HTTPS, Lex App defaults to secure cross-site cookies for the iframe. On a hosted instance with a customer-owned domain attached, `LEX_STREAMLIT_HOSTS` below lists every hostname the dashboard also answers on.                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `LEX_APP_HOSTS` / `LEX_STREAMLIT_HOSTS` / `LEX_REFLEX_HOSTS` | Every hostname the instance answers on for that role, comma separated, canonical first. Written by the hosting platform when a customer-owned domain is attached; absent otherwise, when `DOMAIN_HOSTED`, `STREAMLIT_URL` and `REFLEX_URL` are the whole truth. They reach `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS`, the dashboard proxy's sign-in callback and renewal allow-list, and Reflex's websocket CORS — and decide which dashboard hostname a page frames, so that the iframe stays on the viewer's own registrable domain. See [[ship-and-operate/custom domains\|Custom domains]].                                                                                                                                                                 |
 | `LEX_PROXY_PORT`                                             | Port exposed by the local Streamlit proxy when running `lex streamlit`. Default `8501`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `LEX_PROXY_INTERNAL_URL`                                     | Full base URL the dashboard uses to reach the proxy when it is not `http://127.0.0.1:$LEX_PROXY_PORT`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `LEX_PROXY_DB_THREADS`                                       | With `LEX_STREAMLIT_AUTH` `handoff` or `dual`: the worker threads, each with its own database connection, through which the dashboard proxy reads sign-ins. Default `8`. |
 | `UPSTREAM` / `STREAMLIT_UPSTREAM`                            | Internal Streamlit server URL behind the proxy. Default `http://localhost:8080`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `UPSTREAM_TIMEOUT_SECONDS`                                   | Timeout for proxy requests to Streamlit. Default `30`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `SESSION_SECRET`                                             | Signing key for dashboard session cookies. Optional: when unset, the key is derived from `DJANGO_SECRET_KEY`, which every deployment already has and which is stable across restarts and identical on every replica. `SESSION_KEY` and `SESSION_SECRET_KEY` are accepted aliases.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -103,6 +105,35 @@ These govern how the framework recovers tasks from dead workers and how idle wor
 
 `OIDC_ISSUER` and `OIDC_VERIFY_SSL` apply to the Reflex sign-in too, with the same meaning as for the Streamlit proxy.
 
+## Embedding
+
+Which sites may show Lex App inside a frame: a Streamlit dashboard's [[access-and-dashboards/streamlit/embedding app pages|embedded pages]] and [[access-and-dashboards/streamlit/embedding app controls|app controls]], or any other page that embeds it.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `LEX_EMBED_ALLOWED_ORIGINS` | unset | The sites allowed to embed Lex App, as a comma-separated list of origins: `https://dashboards.example.com,http://localhost:8501`. Only these sites can use an embedded table's filter channel — the `filter` event and the filters `lex_view` sends into the frame — and once it is set, no other site may frame Lex App at all. See [[access-and-dashboards/streamlit/embedding app pages#Allowed sites\|Allowed sites]]. |
+
+How each entry is read:
+
+- **An origin and nothing more.** `http` or `https`, a host, and a port only when it isn't the scheme's default. A path, a query, a fragment, a user name or a wildcard (`https://*.example.com`) refuses the entry; a single trailing `/` is accepted.
+- **Written as the browser writes it.** Scheme and host are lower-cased, `:443` on `https` and `:80` on `http` are dropped, and a duplicate counts once, so `HTTPS://Dashboards.Example.com:443/` becomes `https://dashboards.example.com`. An international domain name is IDNA-encoded: `müller.example` becomes `xn--mller-kva.example`.
+- **A strict host.** After encoding, the host may hold only letters, digits, hyphens and dots, as a hostname or an IPv4 address does. Two kinds of host are refused even though they look valid:
+  - an IPv6 literal, such as `http://[::1]:8501`;
+  - a host containing `ß`, `ς`, a zero-width joiner or a zero-width non-joiner. Python and the browser encode these differently, so the entry could name a different site from the one the browser reports.
+- **Refused entries are dropped,** and a warning in the server log names them. A blank item from a stray comma is skipped.
+
+What the setting changes:
+
+| Value | Who may frame Lex App's pages | The `filter` channel |
+|---|---|---|
+| Unset or blank | Unchanged — no `frame-ancestors` directive is added | Off |
+| At least one valid origin | Lex App itself and the listed sites: `Content-Security-Policy: frame-ancestors 'self' <origins>` | On, for the listed sites |
+| Set, but no valid origin | Lex App itself only: `frame-ancestors 'self'`, with a warning in the server log | Off |
+
+The last row fails closed: a list that is all typos never leaves Lex App open to framing by every site.
+
+For a Streamlit dashboard, list the origin the browser shows for the dashboard page: on a deployment the origin of `STREAMLIT_URL` (or `BASE_URL`), and locally `http://localhost:8501`.
+
 ## Keycloak / OIDC
 
 | Variable                         | Purpose                                                                                                                                                                                                                                                                      |
@@ -118,6 +149,8 @@ These govern how the framework recovers tasks from dead workers and how idle wor
 | `KEYCLOAK_AUTHZ_REQUEST_TIMEOUT` | Timeout, in seconds, for calls to Keycloak's authorization endpoints. Raise it if `lex init` times out against a slow or distant realm.                                                                                                                                      |
 | `INSTANCE_CONTROLLER_BASE_URL`   | Base URL of the instance-controller service that `lex init --bootstrap` opens in the browser.                                                                                                                                                                                |
 | `KEYCLOAK_SETUP_CALLBACK_URL`    | URL that bootstrap flow calls back with the credentials it obtained. Both of these have working defaults — set them only against a self-hosted controller.                                                                                                                   |
+| `KEYCLOAK_INTERNAL_URL`          | In-cluster base URL of Keycloak, e.g. `http://keycloak-release-keycloakx-http.default.svc.cluster.local`, for the server's own calls: discovery, token exchange and refresh, signing keys. Tokens still name the public issuer from `KEYCLOAK_URL`, and the browser is still sent to the public URL. Keycloak must run with a full public hostname URL and dynamic back-channel URLs for this to work; `lex oidc_check` confirms it. A mismatch answers `503 auth_unavailable` and signs nobody out; unset the variable to go back. On the platform the Instance Controller sets it for instances on the in-cluster Keycloak. Unset: every call goes to `KEYCLOAK_URL`. |
+| `KEYCLOAK_VERIFY_SSL`            | TLS verification of lex's own calls to Keycloak (permissions, admin API, management commands): `true`, `false`, or the path of a CA bundle. Default: `true` on a deployed instance (`DEPLOYMENT_ENVIRONMENT` set), `false` locally. |
 | `OIDC_ISSUER`                    | Expected `iss` claim when the dashboard proxy validates a token. Defaults to the realm URL derived from `KEYCLOAK_URL` and `KEYCLOAK_REALM`; set it only when the issuer the tokens carry differs from the URL you reach Keycloak on (a split-horizon DNS setup, typically). |
 
 `lex setup` writes a starting set of these into `.env` and `lex init --bootstrap`
@@ -135,11 +168,15 @@ than constructing the list by hand.
 
 Keycloak decides how long a sign-in lasts: the realm's SSO session idle and
 maximum lifetimes (app realms on the platform: 30 days idle, 90 days at most).
-The app must not end a sign-in earlier than Keycloak does.
+The app must not end a sign-in earlier than Keycloak does. See
+[[access-and-dashboards/sign-in and sessions|Sign-in & Sessions]].
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `LEX_SESSION_COOKIE_AGE_DAYS` | `31` | Lifetime of the app's session cookie, in days. The cookie is renewed while the user is active, so this is how long a sign-in survives *without activity* in this app. Keep it above the realm's idle timeout. A value below `2`, or one that is not a whole number, stops the app at startup. |
+| `LEX_INSTANCE_HOSTS` | unset | Where the instance is reachable, as JSON with one entry per surface: `{"app": {"canonical": "acme.lex.example", "extra": ["app.acme.com"], "platform": "acme.lex.example"}, "streamlit": {...}, "reflex": {...}}`. `canonical` is the host users are sent to, `extra` the further hosts the surface answers on (custom domains), `platform` the host the platform generated. Every key is optional; a value is a host (`app.acme.com`, `localhost:8501`) or a URL. It feeds the CORS origins, the allowed sign-in redirect targets and the dashboard hand-off. The platform sets it. Unset, or for a surface it leaves out, the hosts come from `DOMAIN_HOSTED`, `STREAMLIT_URL` and `REFLEX_URL`. A malformed value is dropped with a warning, never a crash. |
+| `OIDC_TOKEN_ENCRYPTION_KEYS` | unset | Comma-separated Fernet keys that encrypt the sign-ins' tokens in the database, newest first: the first encrypts, all decrypt. To rotate, put a new key first, run `lex oidc_rotate_keys`, and remove the old key later. Unset, the key is derived from `DJANGO_SECRET_KEY` (and `SECRET_KEY_FALLBACKS`). That works, but ties the two secrets together, and the system check says so (`oauth2_authcodeflow.W001`). Switching to a key of your own signs nobody out: tokens written with the derived key stay readable, and `lex oidc_rotate_keys` moves them onto your key. Generate a key with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. |
+| `LEX_WS_AUTH` | `log` | What the app's live WebSockets (calculations, logs, record updates) do with a socket that has no sign-in. `off`: serve it, as before 2.5. `log`: serve it, and log one warning per socket naming the consumer and the close code it would get. `enforce`: accept it, then close it with `4401` (sign in again), `4403` (not allowed) or `4503` (sign-in cannot be checked; try again). Any other value stops the app at startup. `ws/health` is always public. |
 
 ## Mail
 
@@ -308,7 +345,8 @@ What each flag does:
 - `NOT_FOUND` — a record the caller may not read answers 404 on the record,
   history and bulk endpoints (it used to answer 200 with `{}`); a bulk read
   leaves unreadable ids out; `permission_list` returning false makes the list
-  404; an unknown path under `api/` is a JSON 404, not the app's index page.
+  and its value lists 404; an unknown path under `api/` is a JSON 404, not the
+  app's index page.
 - `READ_SURFACES` — history, global search, export and file download apply read
   permission.
 - `EDIT` — `permission_edit`, `permission_delete` and `permission_create` run on
@@ -317,7 +355,8 @@ What each flag does:
   `CREATE_NOT_ALLOWED`), never a 403: bundled frontends released before the
   sign-out fix signed the user out on any 403.
 - `FILTERS` — list filters and ordering only on fields the caller can see; the
-  primary key is always allowed. Otherwise 400 `FILTER_NOT_ALLOWED`.
+  primary key is always allowed. Otherwise 400 `FILTER_NOT_ALLOWED`. A column the
+  caller may not filter by has no value list either.
 - `TRACEBACKS` — no server traceback in error responses unless `DEBUG` or
   `LEX_API_TRACEBACKS=true`.
 - `OIDC_REDIRECT` — `next` and `fail` on `/oidc/*` (sign-in, logout,
@@ -332,6 +371,11 @@ What each flag does:
 - `HISTORY_WRITE` — history rows can be changed or deleted only by superusers
   (400 `EDIT_NOT_ALLOWED` otherwise); their `lex_reserved_scopes` say so to the
   client.
+- `CORS` — credentialed cross-origin requests are accepted only from the
+  instance's own origins: `https://<DOMAIN_HOSTED>`, the hosts in
+  `LEX_INSTANCE_HOSTS`, and `LEX_CORS_ALLOWED_ORIGINS`; locally also the dev
+  servers on `localhost`. Never `*`: with credentials it would let any site act
+  as the signed-in user. Off, any origin is accepted again, as before 2.5.
 
 ## Behaviour switches
 

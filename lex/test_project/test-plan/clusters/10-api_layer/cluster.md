@@ -196,3 +196,15 @@ say exactly one thing (`hide_actions_column`) and nothing about a column.
 | 10.183 | `reset_calculation_on_edit` | a model setting it `False` keeps SUCCESS through an edit (and says so); an ordinary model is still reset |
 
 **Scenario range:** 10.175 – 10.183. **Test file:** `lex/test_project/tests/api_layer/test_10ac_scheduled_jobs_api.py`. **Type:** E. **Status:** ✅ Complete (2026-11-10). Batch: [10ac](batches.md).
+
+
+### 10ae. The fields endpoint's value_list flag, and no filter bar
+
+| # | Scenario | What We Assert | Status |
+|---|----------|----------------|--------|
+| 10.188 | `value_list` on the fields endpoint | True for char, integer, boolean, date, FK and choice columns; false for TextField, decimal, JSON, credential-shaped, write-only and renamed fields, and for every column of an opted-out model | ✅ |
+| 10.189 | No filter bar (spec Amendment 18) | `list_ui` has no `filter_bar` key, though the model and the serializer declare one; every field still carries `value_list` | ✅ |
+
+**Scenario range:** 10.188-10.189. **Test file:** `lex/test_project/tests/api_layer/test_10ae_fields_value_list_flag.py`. **Type:** U. **Status:** ✅ Complete (2026-10-16; the filter bar withdrawn 2026-10-20). Covers `lex/api/views/model_info/Fields.py` (`Fields.get`'s `value_list` and `list_ui`, `create_list_ui_info`), `lex/api/serializers/base_serializers.py` (`get_list_ui_options`), `lex/api/utils/filterable_fields.py` (`value_list_field`). Batch: [10ae](batches.md).
+
+---

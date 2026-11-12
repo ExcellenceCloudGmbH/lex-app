@@ -25,6 +25,8 @@ class AuditLog(LexModel):
     edited_by = None
 
     modification_restriction = AdminReportsModificationRestriction()
+    # No value lists: read access is decided per entry, so a count would evaluate every audit row.
+    lex_value_lists = False
     date = models.DateTimeField(auto_now_add=True)
     author = models.CharField(max_length=255)
     resource = models.CharField(max_length=255)

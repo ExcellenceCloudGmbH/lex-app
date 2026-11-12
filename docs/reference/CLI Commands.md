@@ -125,6 +125,21 @@ no migration, or a re-register after editing the realm by hand.
 > [!note]
 > The standalone `lex-generate-configs` console script (note the hyphen, not `lex generate-configs`) regenerates the PyCharm run configurations under `.run/` and VS Code launch configurations under `.vscode/launch.json`. You usually don't need to call it directly — `lex setup` and `lex setup-with-ai` run it for you. There is no `lex generate-configs` subcommand.
 
+## Sign-in Commands
+
+These come with django-oauth2-codeflow, Django's session framework and lex-app; the CLI
+runs them like any other management command. See
+[[access-and-dashboards/sign-in and sessions#Operating it|Sign-in & Sessions]].
+
+| Command | What It Does |
+| ------- | ------------ |
+| `lex oidc_check` | Check the sign-in configuration against Keycloak: the endpoints in use (public or `KEYCLOAK_INTERNAL_URL`), that the issuer is the public one, the signing keys, and that the token endpoint answers. Exits non-zero on a problem; `--json` for machines. |
+| `lex oidc_cleanup` | End sign-ins whose refresh token expired or whose session is gone, and delete ended ones after `--ended-older-than` days (default 7). Run it daily, with `lex clearsessions`; `--dry-run` shows what it would do. |
+| `lex clearsessions` | Django's own: delete expired sessions from the database. |
+| `lex oidc_rotate_keys` | Re-encrypt every stored token with the first key of `OIDC_TOKEN_ENCRYPTION_KEYS`. Run it after putting a new key first, before removing the old one. |
+| `lex oidc_urls <host> --secure` | Print the URLs to enter on the Keycloak client: redirect URI, post-logout redirect URI and back-channel logout URL. |
+| `lex prune_dashboard_sessions` | Delete dashboard sign-in records that can never be used again: expired hand-off codes, and dashboard or embed sign-ins that were signed out, whose app sign-in ended, whose token expired, or whose cookie has expired in every browser. Safe at any time; run it daily with `lex oidc_cleanup`. `--dry-run` counts without deleting. |
+
 ## Database Commands
 
 | Command                         | What It Does                                                                                                                                                                                                                                  |

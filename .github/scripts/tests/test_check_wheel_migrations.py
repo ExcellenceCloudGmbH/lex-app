@@ -260,6 +260,13 @@ def _planned(app: str, path: Path, change: str = "~ Alter field id on x") -> str
     return f"Migrations for '{app}':\n  {path}\n    {change}\n"
 
 
+def test_the_two_fixed_packages_are_not_waved_through():
+    """django-oauth2-codeflow 3.0 and exc-djangorestframework-api-key 1.0.1 ship
+    what they lacked; listing them again would hide a regression."""
+    assert "oauth2_authcodeflow" not in check.KNOWN_THIRD_PARTY_DRIFT
+    assert "rest_framework_api_key" not in check.KNOWN_THIRD_PARTY_DRIFT
+
+
 def test_planned_migrations_reads_what_django_would_write():
     output = (
         "Skipping migration optimization for oauth2_authcodeflow\n"
@@ -288,10 +295,10 @@ def test_framework_drift_in_the_wheel_fails(tmp_path, capsys):
     assert runner.models_written_before.get("makemigrations --noinput") is None, "The project steps must not run."
 
 
-def test_known_third_party_drift_warns_and_carries_on(tmp_path, capsys):
-    """An installed package already ships models its migrations do not
-    match. That is known and tracked: it is reported on every run, and does
-    not block the check of lex's own migrations."""
+def test_known_third_party_drift_warns_and_carries_on(tmp_path, capsys, monkeypatch):
+    """A package the team has decided to live with is reported on every run,
+    with its reason, and does not block the check of lex's own migrations."""
+    monkeypatch.setattr(check, "KNOWN_THIRD_PARTY_DRIFT", {"somepkg": "it is waiting on upstream"})
     packages = _site_packages(tmp_path)
     output = "".join(
         _planned(app, packages / app / "migrations" / "0099_drift.py") for app in check.KNOWN_THIRD_PARTY_DRIFT
@@ -312,7 +319,7 @@ def test_oauth2_authcodeflow_is_no_longer_known_drift():
     BigAutoField no longer makes `lex init` write a migration into it. Its entry is
     gone, and a drift in it is a regression again."""
     assert "oauth2_authcodeflow" not in check.KNOWN_THIRD_PARTY_DRIFT
-    assert list(check.KNOWN_THIRD_PARTY_DRIFT) == ["rest_framework_api_key"]
+    assert check.KNOWN_THIRD_PARTY_DRIFT == {}
 
 
 def test_drift_in_oauth2_authcodeflow_fails_again(tmp_path, capsys):
@@ -348,9 +355,10 @@ def test_a_failing_check_that_plans_no_migration_fails(tmp_path, capsys):
     assert "ImproperlyConfigured" in out
 
 
-def test_known_drift_that_is_gone_asks_to_be_removed(tmp_path, capsys):
+def test_known_drift_that_is_gone_asks_to_be_removed(tmp_path, capsys, monkeypatch):
     """Once a package is fixed, its entry must go, or a real regression in it
     would later be waved through as known."""
+    monkeypatch.setattr(check, "KNOWN_THIRD_PARTY_DRIFT", {"somepkg": "it is waiting on upstream"})
     code, out = _run(tmp_path, FakeRunner(), capsys)
 
     assert code == 0

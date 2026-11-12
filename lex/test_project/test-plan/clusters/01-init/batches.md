@@ -2216,3 +2216,184 @@ threads, now has to apply it itself.
 **Why a regression matters:** Instances with no scheduler, clocks in the wrong processes, declared schedules drifting from the code, or a history table growing on every run.
 
 **Allocation note:** Allocated past the letters and scenario IDs that in-flight branches (feat/ext-*, feat/auth-long-sessions) already hold: the first letter absent from lex-app-v2 and every remote branch, and a range above the highest max_scenario on any branch, so neither side has to renumber on merge. Design: [`docs/superpowers/plans/2026-11-10-scheduled-jobs.md`](../../../../../docs/superpowers/plans/2026-11-10-scheduled-jobs.md).
+
+### Batch 1bq — `lex init` writes migrations for the project only, never into site-packages ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.674 – 1.680 |
+| Type | U / I |
+| Files covered | `lex/lex_app/management/commands/init.py` (`project_app_label`, `execute_migrations`), `lex/lex_app/settings.py` (`INSTALLED_APPS`, `MIGRATION_MODULES`) |
+| Test file | `lex/test_project/tests/init/test_1bq_init_project_only_migrations.py` |
+| Test classes | `TestCluster01bq_InitMakesProjectMigrationsOnly` (1.674–1.676), `TestCluster01bq_NoAppDriftsFromItsMigrations` (1.677, 1.679, 1.680), `TestCluster01bq_ApiKeysFitTheirColumns` (1.678) |
+| Fixtures | none; 1.677 runs `lex makemigrations --check --dry-run` in a child process, as 1.147 does; 1.678 uses the test database |
+| Tests landed | **8 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.674 | no file in site-packages | with a project app installed, `lex init`'s migration step asks makemigrations about that app only; `project_app_label()` is the project folder's app when settings installed it |
+| 1.675 | the command line still decides | an app named on `--makemigrations-args` is what makemigrations gets |
+| 1.676 | a framework checkout | without a project app, makemigrations runs for every app, as before |
+| 1.677 | no app drifts | `lex makemigrations --check --dry-run` for every installed app finds nothing to generate |
+| 1.678 | wide enough for a real key | an API key created on the migrated test database is stored with its 145-character id and found again by its key |
+| 1.679 | one history, not two | lex overrides none of the api-key fork's migrations (no `MIGRATION_MODULES` entry), and the fork's own `0002` widens `id` and `hashed_key` to 150 under the name `lex init` used to generate |
+| 1.680 | the id its migrations made | oauth2_authcodeflow's app config (django-oauth2-codeflow 3.0's own) pins `default_auto_field` to `AutoField`, and `BlacklistedToken`'s id is one |
+
+**Why the api-key widening matters.** Making migrations for the project only would leave new databases
+with the fork's 100-character columns if nothing else widened them, and its keys need 145: an 8-character
+prefix, a dot, and `"sha512$$"` before a 128-character digest. The widening used to come from the file
+`lex init` wrote into site-packages. On its branch this batch shipped it from lex (`lex/lex_app/vendored`,
+through `MIGRATION_MODULES`) and pinned oauth2_authcodeflow's `default_auto_field` with an app config of
+its own. lex-app-v2 meanwhile moved to exc-djangorestframework-api-key 1.0.1, which ships the same
+`0002_alter_apikey_hashed_key_alter_apikey_id`, and to django-oauth2-codeflow 3.0, whose app config pins
+`AutoField`; so the merge dropped the vendored package, as its own note asked once the fork shipped the
+widening. Keeping the override would have hidden the fork's next migration.
+
+**Mutations (on the branch): four of four fail a test.** Not scoping makemigrations fails 1.674. Scoping
+it even when the caller named an app fails 1.675. Dropping the widening fails 1.677 and 1.678, on a fresh
+test database: the reused one keeps the widened columns.
+
+**Allocation note:** Allocated as 1av (1.386 – 1.392) on its branch; renumbered on merging lex-app-v2,
+where 1av was taken, to the first letter absent from lex-app-v2 and every remote branch, and a range
+above the highest `max_scenario` on any branch.
+
+
+## Batch 1br — lex_view filters and on_filter (1.681-1.689)
+
+- **Type:** U
+- **Files covered:** `lex/lex_app/streamlit/embed.py`, `lex/lex_app/streamlit/_lex_view_component/__init__.py`,
+  `lex/lex_app/streamlit/_lex_view_component/frontend/filter_sync.js`, `…/frontend/index.html`
+- **Test file:** `lex/test_project/tests/init/test_1br_lex_view_filters.py`
+- **Test classes:** `TestCluster1ay_LexViewFilters`
+- **Fixtures:** none
+- **Status:** complete — 12 pass (node-dependent tests skip without node)
+- **Final review (1.688-1.689):** every frame load resets what the frame is taken to hold to the
+  filters its URL carried (`filter_sync.afterLoad`, run from one persistent load handler), so the
+  host's filters are re-posted when they differ; a filters token over 2,000 characters stays out of
+  the URL (`url_filters_token`) and is delivered by message only.
+- **Native column filters (2026-10-20, spec Amendment 18):** the filter bar is withdrawn, so
+  `lex_view` has no `filter_bar` parameter and sends no `filter_bar` URL parameter. 1.683 now pins
+  that passing `filter_bar` is a `TypeError`, as for any unknown keyword, before anything renders (it
+  pinned `filter_bar=a,b` in the URL); 1.685 lost its two `filter_bar` cases. 14 → 12 tests. See the
+  [session note](../../progress/sessions/2026-10-20-native-column-filters.md).
+
+---
+
+### Batch 1bs — `LEX_EMBED_ALLOWED_ORIGINS`: named sites only may embed lex-app and use its filter bridge ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.690 – 1.694 |
+| Type | U |
+| Files covered | `lex/runtime_config.py` (`parse_embed_allowed_origins`, `_normalise_origin`, `embed_origins_configured`, `frame_ancestors_directive`, `merge_frame_ancestors`), `lex/lex_app/settings.py` (`LEX_EMBED_ALLOWED_ORIGINS`, `LEX_EMBED_ORIGINS_CONFIGURED`), `lex/core/middleware/embed_xframe.py` (`EmbedXFrameOptionsMiddleware.process_response`), `lex/react/views.py` (`serve_react`'s `config.js` rewrite and its own document responses' `_apply_embed_csp`) |
+| Test file | `lex/test_project/tests/init/test_1bs_embed_allowed_origins.py` |
+| Test classes | `TestCluster01bs_MiddlewareAddsFrameAncestors` (1.690), `TestCluster01bs_EmptyAllowListIsANoOp` (1.691), `TestCluster01bs_ConfigJsEmbedOrigins` (1.692), `TestCluster01bs_ParseEmbedAllowedOrigins` + `TestCluster01bs_SettingReadsEnvVar` (1.693), `TestCluster01bs_SpaDocumentCsp` (1.694) |
+| Fixtures | `config_js_build` / `config_js_build_without_placeholder` / `spa_build` (`tmp_path`-based synthetic build dirs, matching the 1ag config.js/caching tests) |
+| Tests landed | **38 pass / 0 fail** (9 subtests) |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.690 | CSP added on every exempt path | `embed=true`, the OIDC path, and the `_lex_embed` cookie path each get `Content-Security-Policy: frame-ancestors 'self' <origins>`; a non-exempt response gets none; merging preserves an existing header's other directives and replaces a stale `frame-ancestors` directive instead of duplicating it; **configured but nothing valid** still gets exactly `frame-ancestors 'self'` (fail closed) |
+| 1.691 | Unset/empty changes nothing | With `LEX_EMBED_ALLOWED_ORIGINS == []` and `LEX_EMBED_ORIGINS_CONFIGURED == False`, no CSP is added, `X-Frame-Options` is still stripped, and the session/CSRF cookies are still patched to `SameSite=None; Secure` — the pre-existing contract, untouched |
+| 1.692 | `config.js` carries the setting | `window.REACT_APP_EMBED_ALLOWED_ORIGINS` is the comma-joined list escaped with `json.dumps` (never breaking out of the JS string literal, even for an adversarial-looking value), `""` when empty, and absent entirely when the build predates the placeholder |
+| 1.693 | Parsing, normalisation, and the real setting | A path, a wildcard, an `ftp` scheme, embedded credentials, a query string, a fragment, and plain garbage are each dropped; one WARNING names every dropped entry from a single call; valid origins are lower-cased and de-duplicated; a stray/trailing comma is skipped without logging; `lex.lex_app.settings.LEX_EMBED_ALLOWED_ORIGINS` is confirmed (via a real module reload, not just the helper) to equal `parse_embed_allowed_origins(os.getenv("LEX_EMBED_ALLOWED_ORIGINS"))`. **Security fix round:** an IDN host is accepted as punycode; a bracketed/IPv6-shaped host, the `[v1.x https:]` injection shape, and hosts carrying `;`, a space, a quote, a backslash or `%` are all rejected; `:443`/`:80` normalise away; a lone trailing `/` is accepted; a duplicate revealed by port-normalisation still collapses to one; a wildcard-only value fails closed with a dedicated WARNING naming the "limited to the app itself" outcome; `embed_origins_configured` and `LEX_EMBED_ORIGINS_CONFIGURED` are each proven directly |
+| 1.694 | The SPA document itself carries `frame-ancestors` | The SPA fallback (`index.html`, reached by any client-routed path with no matching file) and a literal, non-fallback `.html`/`.htm` file (`embed.html`, case-insensitively) both get `Content-Security-Policy: frame-ancestors 'self' <origins>`; merging into an existing CSP header on that response preserves its other directives; a hashed asset and `config.js` get none; with the setting unset, the SPA fallback gets no added CSP; **configured but nothing valid** still gets exactly `frame-ancestors 'self'` |
+
+**Settings access, corrected from the original note above.** `serve_react`'s two `LEX_EMBED_*`
+lookups now read `django.conf.settings` (imported as `django_settings`), the same as the
+middleware — not the plain `lex.lex_app.settings` module `settings.repo_name` still uses a few
+lines away in the same function. The original note here said these were "three different
+patterns" across the file requiring `mock.patch.object` for `serve_react`'s tests specifically;
+that was true before this fix round and is not any more — every `LEX_EMBED_*`-related test in this
+file now uses `override_settings`. `django.conf.settings._wrapped` and the `lex.lex_app.settings`
+module remain two independently-imported objects in this codebase (confirmed empirically, not an
+assumption), which is still why `TestCluster01bs_SettingReadsEnvVar` proves the setting's own
+derivation by reloading `lex.lex_app.settings` after patching `os.environ` instead of using
+`override_settings` there — that class is specifically testing what the module-level assignment in
+`lex/lex_app/settings.py` computes, not what a deployment's `django.conf.settings` holds at
+request time.
+
+**Follow-up (1.694, same session): the SPA document, not the unregistered middleware, is what
+actually makes lex-app frameable.** `serve_react` is decorated `@xframe_options_exempt`, which
+bypasses Django's own `XFrameOptionsMiddleware` for every response that view returns — unrelated to
+whether `EmbedXFrameOptionsMiddleware` is registered. A `frame-ancestors` restriction therefore has
+to sit on `serve_react`'s own document responses to take effect at all, as this repo ships today.
+`merge_frame_ancestors` moved out of the middleware module into `lex/runtime_config.py` (next to
+`parse_embed_allowed_origins`, the other function this feature's two call sites share) so both the
+middleware and `serve_react` merge the directive the same way instead of duplicating the logic.
+`serve_react` applies it to exactly two response shapes — the SPA fallback (`index.html`) and any
+other real `.html` file it serves (e.g. `embed.html`, a second Vite entry point) — and nowhere else:
+hashed assets and `config.js` are not documents and keep behaving exactly as before. The middleware's
+own CSP step (1.690/1.691) is unchanged, since it still matters for any deployment that does register
+it.
+
+**Known pre-existing gap (not this batch's scope, corrected from the original note above):**
+`EmbedXFrameOptionsMiddleware` is not currently listed in `lex_app/settings.py`'s `MIDDLEWARE`, in
+this repo or its docs. The original note here said this meant the middleware's CSP step "has no
+effect" without saying what, if anything, filled the gap — in fact `serve_react`'s own
+`@xframe_options_exempt` makes the SPA document frameable regardless of the middleware's
+registration status, which is why 1.694 was added in the same session to put the restriction on
+`serve_react` directly. The middleware remains unregistered and untouched beyond that; flagged for
+whoever owns turning the embed feature on end to end at the middleware layer too (session cookies,
+CSRF, the OIDC round-trip).
+
+**Fix round 2, same session (security review): `urlsplit` alone was not safe to splice into a
+header.** Two independent problems, both in `_normalise_origin`:
+
+1. A non-ASCII host (`müller.de`) either produces non-ASCII header bytes (dropping the whole CSP)
+   or, worse, a crafted bracketed host with an embedded space — `https://[v1.x https:]` — joins
+   into the directive as a second, bare `https:` CSP source token, widening who may frame lex-app
+   to *every* https site. `_normalise_origin` now rejects any bracketed host outright, IDNA-encodes
+   the rest (`müller.de` → `xn--mller-kva.de`; a `UnicodeError` drops the entry), and checks the
+   ASCII result against a strict lowercase hostname grammar — IDNA's nameprep step does not reject
+   `;`, a space, a quote, a backslash or `%`, so the grammar check is what actually blocks them.
+   Also added: the scheme's default port (`:443`/`:80`) is dropped to match a browser's own
+   `location.origin`, and a lone trailing `/` is accepted (any further path is still invalid) —
+   both needed so an origin written either way normalises to the same, single CSP entry.
+2. `LEX_EMBED_ALLOWED_ORIGINS` set to only invalid entries (a wildcard, say) parsed to `[]`,
+   indistinguishable from unset — framing silently went unrestricted the moment every configured
+   origin happened to be invalid. A new `LEX_EMBED_ORIGINS_CONFIGURED` setting
+   (`embed_origins_configured` in `runtime_config.py`) distinguishes "unset" from "set but nothing
+   validated"; the latter now fails closed to `frame-ancestors 'self'` on both the middleware and
+   `serve_react`, via a new shared `frame_ancestors_directive(origins)` (empty `origins` → `'self'`
+   only). `parse_embed_allowed_origins` logs this case once, separately from the
+   "dropping invalid origin(s)" warning, naming it explicitly ("framing is limited to the app
+   itself").
+
+Minors from the same review, folded into this batch rather than a separate one: `merge_frame_ancestors`
+now matches a directive's name exactly (its first whitespace-separated token) instead of by prefix,
+and documents that it does not support a comma-joined multi-policy CSP value;
+`test_1_694_existing_csp_on_spa_fallback_keeps_other_directives`'s docstring now says plainly that
+the state it mocks (`static_serve` returning a response with a CSP header already on it) cannot
+occur through `serve_react`'s own normal flow — nothing runs between `static_serve` and
+`_apply_embed_csp` — and that `_apply_embed_csp`'s own docstring records the real consequence: a
+deployment enabling Django's native `SECURE_CSP` would have `ContentSecurityPolicyMiddleware` skip
+its own header on every SPA document once this setting is configured, since one is already present
+by the time that middleware's response phase runs; `serve_react`'s document check is now
+case-insensitive and also matches `.htm`; the two `LEX_EMBED_*` lookups in `serve_react` moved from
+the plain `lex.lex_app.settings` module to `django.conf.settings` so `override_settings` reaches
+them, and every test that previously needed `mock.patch.object` to work around that was rewritten
+to use `override_settings`; the middleware's own "why this CSP step exists" comment (previously
+backwards about what stops what) and `settings.py`'s comment (previously naming only the
+unregistered middleware as the mechanism) were both corrected.
+
+No scenario IDs were added — 1.690 and 1.694 each gained one "configured but all invalid" case, and
+1.693 gained cases for every invalid host shape plus the fail-closed warning and
+`embed_origins_configured` itself, all under their existing numbers.
+
+**Fix round 3, same session (re-review): one further host-validation gap.** Python's stdlib IDNA2003
+codec and a browser's WHATWG/UTS46 (non-transitional) domain-to-ASCII disagree on four code points —
+sharp s, final sigma, ZWJ and ZWNJ — each folding or dropping here in a way a browser does not, so
+the two sides compute different Punycode for the same typed host (`fußball.de` → `fussball.de` here,
+`xn--fuball-cta.de` in a browser). These previously passed with no warning. `_normalise_origin` now
+rejects a host containing any of the four outright, before encoding — dropped and named in the
+existing WARNING, no round-trip check added (one would reject valid Punycode input). Also:
+`_HOSTNAME_RE` now uses `.fullmatch()` with no anchors instead of `.match()` + a trailing `$`, which
+tolerates a newline immediately before it (verified: not independently reachable through
+`_normalise_origin` today, since `urlsplit` already strips `\n`/`\r`/`\t` from the whole candidate
+string before this point — the fix is correct defensive practice regardless of today's reachability).
+Test fix: 1.693's `;`-carrying host case also carried a `*`, so the existing wildcard pre-check was
+rejecting it before the grammar check ever ran; changed to a host with only the semicolon. One new
+test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenario IDs.

@@ -13,6 +13,8 @@ from django.db.models import (
 )
 from lex.api.serializers import ID_FIELD_NAME, SHORT_DESCR_NAME
 from lex.api.serializers.list_ui_columns import build_column_options
+from lex.api.utils.filterable_fields import value_list_field
+from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import resolve_serializer_class
 from lex.api.views.permissions.UserPermission import UserPermission
 from lex.core.fields import PDFField, XLSXField
 from rest_framework import serializers as drf_serializers
@@ -185,7 +187,19 @@ class Fields(APIView):
                 }
             )
 
-        serializer = serializers_map[serializer_name]()
+        serializer_class = serializers_map[serializer_name]
+        serializer = serializer_class()
+
+        # The class the list / filter_values actually render through for this
+        # model -- e.g. UserModelSerializer, swapped in for every User subclass
+        # regardless of `serializer_name` (LEX-702) -- used only to decide
+        # value_list below, via the same resolver filter_values calls. Everything
+        # else in this payload keeps describing `serializer` above, unchanged.
+        # Same class for every non-User model, so reuse the instance already
+        # built rather than building a second one.
+        list_serializer_class = resolve_serializer_class(model, serializers_map, serializer_name)
+        list_serializer = serializer if list_serializer_class is serializer_class else list_serializer_class()
+
         fields_info = []
 
         # hide internal-only fields
@@ -202,6 +216,7 @@ class Fields(APIView):
             source = drf_field.source or fname
 
             # 1) Try Django model field first
+            model_backed = True
             try:
                 mfield = model._meta.get_field(source)
                 info = create_field_info(mfield)
@@ -211,6 +226,7 @@ class Fields(APIView):
                 info["is_groupable"] = True
 
             except Exception:
+                model_backed = False
                 # 2) Fallback: derive entirely from the DRF field
                 # Determine type
                 ftype = DEFAULT_TYPE_NAME
@@ -261,6 +277,16 @@ class Fields(APIView):
                         info["target"] = drf_field.queryset.model._meta.model_name
                     except Exception:
                         pass
+
+            # Whether filter_values lists this field's values -- through
+            # list_serializer, the class the list/filter_values actually use
+            # (not necessarily `serializer` above, e.g. for a User subclass),
+            # via the same resolver and for the same caller, so the frontend
+            # offers a Set or Multi value list only where the endpoint answers.
+            # A field with no column behind it never has one.
+            info["value_list"] = model_backed and (
+                value_list_field(list_serializer, model, fname, request=request) is not None
+            )
 
             fields_info.append(info)
 
