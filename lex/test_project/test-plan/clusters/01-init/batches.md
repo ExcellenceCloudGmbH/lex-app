@@ -1839,3 +1839,89 @@ config each fail 1.404.
 (8d). Streamlit, Reflex, Celery and Channels never use it. Downstream code that relied on its side
 effects, such as a nested `run_until_complete` or `get_event_loop()` creating loops in worker
 threads, now has to apply it itself.
+### Batch 1bc — deployed secret key, session lifetime and PKCE ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.481 – 1.489 |
+| Type | U (1.481–1.486, 1.489), I (1.487–1.488) |
+| Files covered | `lex/lex_app/settings.py` (`PUBLISHED_DEFAULT_SECRET_KEY` + deployed check, `SESSION_COOKIE_AGE`, `OIDC_MIDDLEWARE_SESSION_TIMEOUT_SECONDS`, `OIDC_RP_USE_PKCE`, `OIDC_RP_FORCE_SECRET_WITH_PKCE`), `lex/proxy.py` (OIDC client registration: `code_challenge_method`) |
+| Test file | `lex/test_project/tests/init/test_1bc_auth_settings_hardening.py` |
+| Test classes | `TestCluster01bc_DeployedSecretKey` (1.481–1.483), `TestCluster01bc_SessionLifetime` (1.484–1.486), `TestCluster01bc_DjangoSignInUsesPkce` (1.487–1.488), `TestCluster01bc_ProxySignInUsesPkce` (1.489) |
+| Fixtures | fresh interpreters importing the settings; an RSA key pair per module; the token endpoint mocked at `oauth2_authcodeflow.auth.request_post`; authlib server metadata patched on the proxy's client |
+| Tests landed | **9 pass / 0 fail** against django-oauth2-codeflow 2.1.0 |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-06-auth-hotfixes.md) |
+
+**Allocation note:** Letter bc, not ay/az/ba/bb: those are held by in-flight branches (ay on fix/streamlit-report-frames-unauthenticated and others, az/ba on release/2.1.x, ba/bb on feat/fleet-metrics-calculation-events), which also claim scenarios up to 1.480. The same letter and scenario IDs are used on lex-app-v2 and release/2.1.x, so a merge between the lines is a no-op.
+
+---
+### Batch 1bp — a frame another application put on screen does not get to move that tab ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.667 – 1.673 |
+| Type | U |
+| Files covered | `lex/proxy.py` (`_frame_may_move_the_tab`, `_frame_breakout_response`, `proxy`), `lex/lex_app/streamlit/Streamlit.py` (`get_html`) at the join |
+| Test file | `lex/test_project/tests/init/test_1bp_frame_does_not_take_the_tab.py` |
+| Test classes | `TestCluster01bp_FrameDoesNotTakeTheTab` (1.667–1.671), `TestCluster01bp_TheReportedJourney` (1.672–1.673) |
+| Fixtures | a hand-built Starlette `Request` parameterised by `Sec-Fetch-Site`; for the join, the real `Streamlit` report's own output driven against `proxy.app` through `TestClient`, with `validate_jwt_token` and `_upstream_send` stubbed (the Keycloak and Streamlit boundaries) |
+| Tests landed | **7 pass / 0 fail** |
+| Also run | cluster 1z (1.211–1.216), unchanged and still 6 pass — the breakout itself is not narrowed, only who may script the navigation |
+### Batch 1az — a machine endpoint on the dashboard origin cannot take over the user's tab ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.415 – 1.422 |
+| Type | U |
+| Files covered | `lex/proxy.py` (`_NON_LANDING_PREFIXES`, `_NON_LANDING_PATHS`, `_is_landing_path`, `_safe_next_path`, `_unauthenticated_response`, `_is_top_level_document_request`, `theme_relay`, `_THEME_RELAY_CONFIGURED`) |
+| Test file | `lex/test_project/tests/init/test_1az_proxy_tab_takeover.py` |
+| Test classes | `TestCluster01az_WhereALoginMayReturnTo` (1.415–1.417), `TestCluster01az_WhoMayMoveTheTopWindow` (1.418–1.419), `TestCluster01az_LandingOnTheRelayAnyway` (1.420–1.422) |
+| Fixtures | none — a hand-built Starlette `Request` per case; `PUBLIC_URL`, `_THEME_RELAY_CONFIGURED` and `_THEME_RELAY_ALLOWED` patched per scenario, `_put_tokens`/`oauth.oidc` stubbed for the callback |
+| Tests landed | **8 pass / 0 fail** (13 subtests) |
+### Batch 1ay — `ALLOWED_HOSTS` accepts the instance's own backend Service name ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.410 – 1.414 |
+| Type | U |
+| Files covered | `lex/lex_app/settings.py` (`K8S_NAMESPACE_FILE`, `BACKEND_SERVICE_PREFIX`, `_k8s_namespace`, `_cluster_service_hosts`, `ALLOWED_HOSTS`) |
+| Test file | `lex/test_project/tests/init/test_1ay_allowed_hosts_in_cluster.py` |
+| Test classes | `TestCluster1ay_AllowedHostsAcceptsTheInClusterService` (1.410–1.414) |
+| Fixtures | none — the two helpers are pure, so no settings re-import and no environment patching is needed |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.667 | the shell's frame leaves the shell's tab alone | `Sec-Fetch-Site: same-site` → no `window.top.location`, but still 401, still `lex-auth-required`, still `target="_top"` at this proxy's login |
+| 1.668 | an unrelated embedder has no more claim | `Sec-Fetch-Site: cross-site` → the same |
+| 1.669 | this origin's own frame still recovers | `Sec-Fetch-Site: same-origin` → the automatic navigation is kept |
+| 1.670 | a client that names no embedder is unchanged | no `Sec-Fetch-Site` → pre-existing behaviour, as scenario 1.214 has it for the rest of this routing |
+| 1.671 | the embedder check is a header read | `SAME-SITE` / `Cross-Site` refused, `same-origin` and absent allowed |
+| 1.672 | the frame the report builds is let in | the URL the real `Streamlit` report produces, loaded as a framed document against the real proxy app, banks the token, is redirected without it and ends on the dashboard's own bytes |
+| 1.673 | the fault and the amplifier, observed together | the URL the report produces with no session token still 401s, and that 401 moves no window |
+
+**Why a regression matters:** this is the amplifier, not the fault. Batch 10r stops the Streamlit report framing its dashboard without a credential, so the 401 that started the reported tab takeover no longer happens — but any frame that cannot authenticate, for any reason, could still move a window belonging to the page the user was reading. LEX-1477 fixed this one path at a time (`/_lex/*`, `/_stcore/*`); naming the embedder fixes the class. The counterweight is 1.669 and 1.670: withhold the navigation from everything and the dashboard's own recovery goes with it.
+| 1.415 | a utility path is never a return target | `_safe_next_path` rejects `/_lex/theme-relay`, `/_stcore/health`, `/_stcore/host-config`, `/auth/token`, `/auth/adopt` and `/_lex/theme-relay?mode=dark`; `/`, a deep view and one with query + fragment survive unchanged |
+| 1.416 | a stashed utility path lands on `/` | `auth_callback` with `/_lex/theme-relay` in the session redirects to `/` |
+| 1.417 | no return target for a top-level utility visit | an unauthenticated `Sec-Fetch-Dest: document` load of `/auth/token` redirects to a bare `/auth/login`, with no `next` |
+| 1.418 | a hidden utility frame gets a 401, not a breakout | a framed load of each utility path returns `JSONResponse` 401 whose body carries no `window.top.location` |
+| 1.419 | a framed dashboard still breaks out | a framed load of `/?model=Period` is still the 401 HTML breakout, still attempting top-nav, still carrying `next=%2F%3Fmodel%3DPeriod` |
+| 1.420 | a top-level visit is sent back to the frontend | with `_THEME_RELAY_CONFIGURED`, `theme_relay` answers a `document` request with a 303 to that origin |
+| 1.421 | an unconfigured deployment does not bounce to localhost | with nothing configured, the same request is served the relay (200), not redirected |
+| 1.422 | the framed relay is untouched | a `Sec-Fetch-Dest: iframe` request still gets 200, the shared storage key, and `frame-ancestors <frontend>` |
+
+**Why a regression matters:** this is LEX-1477, and the shape of the failure is why it took a customer to find it. Nothing errors. The frontend frames a hidden, zero-sized `/_lex/theme-relay`; on 2.1.11 the proxy had no such route (it arrived in 2.2.0 with `8780a119`), so that frame fell into the authenticated catch-all, 401'd, and was handed the frame-breakout page — whose entire purpose is `window.top.location = <login>`. Keycloak had a live SSO session, so the round trip returned immediately and `auth_callback` honoured `next=/_lex/theme-relay`. The result was a tab that, intermittently and only when clicking a model with an embedded dashboard, left the instance frontend and parked on a blank storage document at `https://<instance>-streamlit.../\_lex/theme-relay`, with no error, no log line the user could see, and nothing to connect it to a theme shim.
+
+**Why the route existing is not the fix:** adding `/_lex/theme-relay` removes the one 401 that was observed. It does not remove the rule that produced the outcome — *whatever* 401s inside a frame may move the top window, and *whatever* path 401'd becomes where the browser is left afterwards. Both halves are now bounded by what the path is: only a page may escalate, and only a page may be returned to. 1.419 is the counterweight that keeps the narrowing honest — withhold the breakout from everything and an expired dashboard shows Keycloak's "refused to connect" wall again, which is the failure the breakout was written for in the first place (1.211).
+
+**Frontend twin:** `process-admin-general-client` batch F12u (F12.104–F12.108) closes the same hole from the other side — the relay frame is sandboxed so nothing served there can navigate the tab at all, and the shell attributes a `lex-auth-required` message to the dashboard frame rather than to its origin, which is what let an invisible frame on that origin drive a full-page navigation.
+| 1.410 | short Service name accepted | `lex-backend-<instance>` is among the derived hosts |
+| 1.411 | the three longer DNS forms accepted | `.<ns>`, `.<ns>.svc` and `.<ns>.svc.cluster.local` are all present |
+| 1.412 | nothing added off-cluster | no instance identifier yields `[]`, whatever the namespace says |
+| 1.413 | unreadable namespace degrades | an empty namespace yields exactly the short name, and does not raise |
+| 1.414 | the namespace file is read safely | `_k8s_namespace` on a missing path returns `""` rather than raising |
+
+**Why a regression matters:** Django compares `Host:` against `ALLOWED_HOSTS` in `CommonMiddleware`, before any view, permission class or model code runs — so a Service name missing from the list is not a permission failure and not a routing failure, it is a `DisallowedHost` with nothing downstream reached. It breaks every service-to-service call an instance makes while leaving the browser-facing surface working, which is exactly how it was found: on a customer instance on 2026-10-25 every file write failed with `OSError` and the backend logged `Invalid HTTP_HOST header: 'lex-backend-armira-self-servi-prod-1492:7000'`, with a valid registered API key and a correct route. `POD_IP`, already in the list, does not cover it — it is the reading pod's own address, so it says nothing about how other pods address the backend by name, and a caller has no way to learn it.
+
+**Why the namespace comes from a file:** `POD_NAMESPACE` is not set in the platform's pods (measured), while `/var/run/secrets/kubernetes.io/serviceaccount/namespace` is mounted in every pod with a service account. Reading it introduces no new required environment variable — which matters here, because `settings.py` already refuses to start when `DOMAIN_HOSTED` is missing, and a second such variable would turn a missing value into a crash-loop rather than a fix.
