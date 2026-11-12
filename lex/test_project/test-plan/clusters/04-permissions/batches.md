@@ -159,3 +159,21 @@ must not open a check on the whole model.
 **Allocation note:** Letter x, not s-w: those are in flight on feat/multi-value-filters (s, t) and the feat/ext-* branches (s-w, scenarios up to 4.137). Same letter and IDs on lex-app-v2 and release/2.1.x.
 
 ---
+
+### Batch 4aa — the Streamlit token carries the caller's own Keycloak permissions ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.163 – 4.163 |
+| Type | U |
+| Files covered | `lex/authentication/views/token_views.py` (`StreamlitTokenView._get_user_permissions`) |
+| Test file | `lex/test_project/tests/permissions/test_4aa_streamlit_token_permissions.py` |
+| Test classes | `TestCluster04aa_StreamlitTokenPermissions` (4.163) |
+| Fixtures | none — `RequestFactory` requests; `KeycloakManager` patched |
+| Tests landed | **1 pass / 0 fail** — Mutation: with the old relative import, 4.163 fails |
+| Status | ✅ Complete |
+
+**Allocation note:** Letter aa and 4.163: 4y (4.148–4.158) is lex-app #869's and 4z (to 4.162) is #880's.
+
+---
+

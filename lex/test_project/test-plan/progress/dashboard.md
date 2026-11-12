@@ -13,7 +13,7 @@
 | 1. Init — Project Bootstrap | 54 | 673 | 486 | 0 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
-| 4. Permissions | 19 | 147 | 73 | 2 | 0 |
+| 4. Permissions | 20 | 163 | 74 | 2 | 0 |
 | 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
 | 6. Audit Logging | 20 | 167 | 35 | 3 | 0 |
 | 7. Calculation State Machine | 21 | 237 | 94 | 0 | 0 |
@@ -133,6 +133,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | Batch | Title | Scenarios | Status | Pass | Skip | Xfail | Note |
 |---|---|---|---|---|---|---|---|
 | 4a |  | 4.1-4.9 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 4aa | The Streamlit token carries the caller's own Keycloak permissions | 4.163-4.163 | complete | 1 | 0 | 0 | StreamlitTokenView imported KeycloakManager relative to lex/authentication/views, where no such module exists; the ImportError was swallowed, so every Streamlit token carried no permissions. It now uses lex.api.views.authentication.KeycloakManager (the per-request UMA client of 4x) and maps None to []. Mutation: with the relative import back, 4.163 fails. Letter aa and 4.163, not y/z or 4.148-4.162: those belong to open PRs #869 (4y) and #880 (4z). |
 | 4b |  | 4.4-4.6 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 4c |  | 4.7-4.12 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 4d |  | 4.10-4.11 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |

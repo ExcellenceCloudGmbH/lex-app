@@ -157,3 +157,14 @@
 | 4.147 | anchors | every `OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS` entry starts with `^` and ends with `$` or `(?:/\|$)` |
 
 **Scenario range:** 4.138 – 4.147. **Test file:** `lex/test_project/tests/permissions/test_4x_keycloak_call_isolation.py`. **Type:** U (4.138–4.143), I (4.144–4.147). **Status:** ✅ Complete (2026-11-06). Batch: [4x](batches.md).
+
+### 4aa. The Streamlit token carries the caller's own Keycloak permissions ✅
+
+**Gap:** `StreamlitTokenView` imported `KeycloakManager` from a module that does not exist; the error was swallowed and every Streamlit token carried no permissions.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.163 | the token view asks Keycloak with the caller's token | the caller's bearer token reaches `get_uma_permissions` and its answer is returned; `None` and a missing token give `[]` |
+
+**Scenario range:** 4.163 – 4.163. **Test file:** `lex/test_project/tests/permissions/test_4aa_streamlit_token_permissions.py`. **Type:** U. **Status:** ✅ Complete (2026-11-12). Batch: [4aa](batches.md).
+

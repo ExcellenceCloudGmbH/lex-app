@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 147
+max_scenario: 163
 letters:
   a:
     title: ''
@@ -243,3 +243,17 @@ letters:
       patterns) fail too; 4.141, 4.143 and 4.145 pass. Letter x, not s-w: those are in flight on
       feat/multi-value-filters (s, t) and the feat/ext-* branches (s-w, scenarios up to 4.137). Same
       letter and IDs on lex-app-v2 and release/2.1.x.
+  aa:
+    title: The Streamlit token carries the caller's own Keycloak permissions
+    scenarios: 4.163-4.163
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      StreamlitTokenView imported KeycloakManager relative to lex/authentication/views, where no such
+      module exists; the ImportError was swallowed, so every Streamlit token carried no permissions.
+      It now uses lex.api.views.authentication.KeycloakManager (the per-request UMA client of 4x) and
+      maps None to []. Mutation: with the relative import back, 4.163 fails. Letter aa and 4.163, not
+      y/z or 4.148-4.162: those belong to open PRs #869 (4y) and #880 (4z).
