@@ -1,7 +1,7 @@
 cluster: 8
 slug: celery_async
 title: Celery & Async
-max_scenario: 156
+max_scenario: 163
 letters:
   a:
     title: a — Post-task warm shutdown honours the idle-shutdown master switch (Session 85 — June 26)
@@ -152,6 +152,27 @@ letters:
       because a failed calculation rolls its writes back (pinned so a future partial-commit change
       cannot silently reintroduce the leak). 8.153 pins the boundary - a decorated calculate() with Celery OFF is clean, so the trigger is decoration AND Celery dispatch, not decoration alone. Fixture note - the decorated tasks need explicit Celery
       task names; all three calculate methods share one module and would otherwise collide.
+  e:
+    title: create(*args) reach calculate() on every route, Celery included (BUG-054)
+    scenarios: 8.157-8.163
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      The Celery task calc_and_save called model.lex_func()() with no arguments, so
+      create(*args) reached calculate() on the sync routes and was dropped on the Celery
+      route. Each group message is (group, group_index, *create_args); the task now names
+      the group_index slot and passes the rest on. The message keeps its shape, so a
+      message queued, redelivered or requeued by worker recovery before an upgrade is read
+      the same way by an old and a new worker (8.159). Routes: Celery (8.157, and 8.158 with
+      no arguments), a worker running a group message (8.159), the task's other sender
+      dispatch_calculation_task (8.160), sync streaming (8.161), sync materialising (8.162),
+      Celery with the fallback after a failed task (8.163). 8.157, 8.159 and 8.163 fail on
+      v2.4.2. Mutation-checked: passing the index on fails 8.157-8.159 and 8.163; moving the
+      index to a keyword fails 8.159. Letter d and 8.154-8.156 belong to PR #865, so 8e
+      starts at 8.157.
   d:
     title: The startup reset works on every route and leaves asyncio usable (BUG-046)
     scenarios: 8.154-8.156

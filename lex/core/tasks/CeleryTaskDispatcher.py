@@ -171,6 +171,10 @@ class CeleryTaskDispatcher:
         Attempts to create and dispatch a Celery task for the given group.
         If dispatch fails, the group is processed synchronously as a fallback.
 
+        The message is ``calc_and_save(group, group_index, *args)``: the task
+        names the index slot and passes ``args`` on to every ``calculate()``.
+        Keep that shape; see ``calc_and_save``.
+
         Args:
             group: List of models to process as a single task
             group_index: Index of the group for logging purposes
