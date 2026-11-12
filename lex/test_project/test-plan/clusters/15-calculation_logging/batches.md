@@ -68,7 +68,7 @@ matching shortest-first fails 15.41 and nothing else.
 | Scenario range | 15.47 – 15.50 |
 | Files covered | `lex/audit_logging/models/CalculationLog.py` (`keep_rolled_back_log`), `lex/core/models/CalculationModel.py` (both failure paths) |
 | Test file | `lex/test_project/tests/calculation_logging/test_15j_failed_run_keeps_its_log.py` (4) |
-| Tests landed | **4 pass / 0 fail** |
+| Tests landed | **5 pass / 0 fail** |
 | Status | ✅ Complete |
 | Paired with | process-admin-general-client F12 `12r` |
 
@@ -113,6 +113,41 @@ purged. It does nothing when the run's rows survived, and it never raises. 15.47
 
 ---
 
+### Batch 15q — The calculation-log table is readable again ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 15.78 – 15.82 |
+| Type | E |
+| Files covered | `lex/api/serializers/base_serializers.py` (`LexSerializer.to_representation`, the remembered-decision branch) |
+| Test file | `lex/test_project/tests/calculation_logging/test_15q_calculation_log_read_surfaces.py` |
+| Test classes | `TestCluster15q_CalculationLogReadSurfaces` (15.78 detail endpoint; 15.79 AG Grid endpoint; 15.80 `many`; 15.81 a `LexModel` still serves the remembered decision; 15.82 the log drawer's own audit query) |
+| Fixtures | `_CalcLogTestCase` — `e2e_user` is a plain Django user, which is what every Keycloak/OIDC user is |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete — on untouched `lex-app-v2` 15.78–15.80 fail on the 500 and 15.82 fails with `error_traceback` `None`; 15.81 passes on both |
+
+**One 500, read twice.** `to_representation` asked `type(instance).can_read` before asking
+whether the model declares one. `CalculationLog` is a plain `django.db.models.Model` — the
+only model served through `model_entries` that is not a `LexModel` — so every read of the
+calculation-log table raised `AttributeError`. The two branches beneath it guard themselves
+with `has_can_read` / `has_permission_read`; this one ran first and raised before they could.
+
+**What the reporter saw.** The log drawer's **Details** tab mounts react-admin's `<Show>` on
+`calculationlog`; its default `onError` notifies and `redirect('list', resource)`, which is the
+"it sends me to the CalculationLog table" half. AG Grid's server-side row model renders a block
+it could not load as `ERR` in every cell, which is the other half. 15.80 covers the third
+reader, `many`, which is how the log tree fetches each node's own text — with it failing, a run's
+log rendered as a tree of titled, empty sections.
+
+**15.81 is the guard against fixing this by deleting the branch.** BUG-011: the list filter has
+already asked `permission_read` for every row it returns, and the serializer must not ask again
+once per row.
+
+**15.82 is the drawer's own read**, the half of [6u](../06-audit_logging/batches.md) that cluster 6
+does not cover: `useLastAuditedRun` asks for the newest audit entry whose *terminal* status is
+the one the row ended with, under the `<model>_<pk>_` prefix, and reads `error_traceback` off it.
+Both filters are load-bearing — without the trailing underscore record 1 matches record 11's
+runs, and without the status filter a later ordinary edit of the same row hides the failure.
 ### Batch 15m — A generated row's log is filed under that row: synchronous routes ✅
 
 | Property | Value |
