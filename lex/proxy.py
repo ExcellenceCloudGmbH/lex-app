@@ -259,7 +259,11 @@ oauth.register(
     client_id=os.getenv("OIDC_RP_CLIENT_ID"),
     client_secret=os.getenv("OIDC_RP_CLIENT_SECRET"),
     server_metadata_url=f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration",
-    client_kwargs={"scope": "openid email profile", "verify": OIDC_VERIFY_SSL},
+    # PKCE (S256) on top of the client secret: a stolen authorization code is
+    # useless without the verifier kept in this browser's session, and every
+    # relying party on the shared Keycloak client sends PKCE, so the client can
+    # later be set to require it.
+    client_kwargs={"scope": "openid email profile", "verify": OIDC_VERIFY_SSL, "code_challenge_method": "S256"},
 )
 
 # -----------------------------------------------------------------------------
