@@ -205,7 +205,7 @@ class TestCluster10i_CreateListUIInfo(SimpleTestCase):
         class SNoMeta:
             pass
 
-        # `columns` joined this payload with cluster 10r (per-column display
+        # `columns` joined this payload with cluster 10ad (per-column display
         # options declared on the serializer, LEX-1556). The flag assertions
         # below are unchanged; what changed is that this scenario no longer
         # also asserts that NOTHING ELSE is in `list_ui`, which was never its

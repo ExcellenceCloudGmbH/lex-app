@@ -98,7 +98,7 @@ branches again per ``STORAGE_TYPE``. Each is recorded as an ``AuditLog`` row wit
 
 **Scenario range:** 10.97 – 10.99. **Test file:** `lex/test_project/tests/api_layer/test_10q_process_routes_removed.py`. **Type:** U. **Status:** ✅ Complete (2026-10-23). Batch: [10q](batches.md).
 
-### 10r — `model_info` ships the project's per-column display options
+### 10ad — `model_info` ships the project's per-column display options
 
 **What it tests:** a project writes how its own columns should look on its serializer
 (`Meta.lex_column_options`), and the endpoint the frontend blocks on before drawing any
@@ -107,9 +107,9 @@ say exactly one thing (`hide_actions_column`) and nothing about a column.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 10.100 | the declaration reaches the frontend | `list_ui.columns` keyed by field name, carrying the declared options; `hide_actions_column` untouched |
-| 10.101 | a plain DRF serializer gets the same contract | a project's own non-`LexSerializer` class answers identically — one payload, one reader, no second code path |
-| 10.102 | a model declaring nothing answers the key | `columns: {}`, so "declared nothing" and "declared an empty thing" cannot diverge between readers |
-| 10.103 | a malformed declaration never breaks the endpoint | the response still arrives and the one usable declaration survives; a typo costs that option, not every list view of the model |
+| 10.184 | the declaration reaches the frontend | `list_ui.columns` keyed by field name, carrying the declared options; `hide_actions_column` untouched |
+| 10.185 | a plain DRF serializer gets the same contract | a project's own non-`LexSerializer` class answers identically — one payload, one reader, no second code path |
+| 10.186 | a model declaring nothing answers the key | `columns: {}`, so "declared nothing" and "declared an empty thing" cannot diverge between readers |
+| 10.187 | a malformed declaration never breaks the endpoint | the response still arrives and the one usable declaration survives; a typo costs that option, not every list view of the model |
 
-**Scenario range:** 10.100 – 10.103. **Test file:** `lex/test_project/tests/api_layer/test_10r_list_ui_column_options.py`. **Type:** U. **Status:** ✅ Complete (2026-11-10). Batch: [10r](batches.md). Paired with [12p](../12-serializers/cluster.md) and frontend clusters F03p/F03q.
+**Scenario range:** 10.184 – 10.187. **Test file:** `lex/test_project/tests/api_layer/test_10ad_list_ui_column_options.py`. **Type:** U. **Status:** ✅ Complete (2026-11-10). Batch: [10ad](batches.md). Paired with [12p](../12-serializers/cluster.md) and frontend clusters F03p/F03q.

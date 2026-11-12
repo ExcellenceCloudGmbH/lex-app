@@ -1,13 +1,13 @@
 ---
 date: 2026-11-10
 clusters: [10, 12]
-tests_added: "12 new scenarios (10.100-10.103, 12.66-12.72); 10.25 and 12.35 stop asserting that `list_ui` has nothing else in it"
+tests_added: "12 new scenarios (10.184-10.187, 12.66-12.72); 10.25 and 12.35 stop asserting that `list_ui` has nothing else in it"
 suite_tally: "serializers + api_layer: 180 pass / 0 fail / 1 xfail"
 ---
 
-# Batches 10r + 12p — a project declares how its columns look
+# Batches 10ad + 12p — a project declares how its columns look
 
-See [10r](../../clusters/10-api_layer/batches.md) and
+See [10ad](../../clusters/10-api_layer/batches.md) and
 [12p](../../clusters/12-serializers/batches.md).
 
 LEX-1556 (Lund Consulting, via support): the grid's ID column is too wide. The only answer
@@ -29,7 +29,7 @@ about the garbage and only 12.66 is the happy path.
 
 Two surfaces that are easy to miss, and each got a scenario rather than an assumption:
 `create_list_ui_info` serves a project's **plain DRF serializer** as well as a
-`LexSerializer` (10.101), and a hand-written `ModelSerializer` registered as
+`LexSerializer` (10.185), and a hand-written `ModelSerializer` registered as
 `api_serializers["default"]` is **wrapped** before use (12.72) — the path a project that
 cares about column widths is most likely to be on.
 

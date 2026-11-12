@@ -162,4 +162,4 @@ not load.
 | 12.71 | the contract carries both `list_ui` answers | `get_list_ui_options()` always reports `hide_actions_column` *and* `columns` |
 | 12.72 | options survive the wrapping of a custom serializer | a hand-written `ModelSerializer` registered as `api_serializers["default"]` is wrapped before use; the declaration must come through |
 
-**Scenario range:** 12.66 – 12.72. **Test file:** `lex/test_project/tests/serializers/test_12p_list_ui_column_options.py`. **Type:** U. **Status:** ✅ Complete (2026-11-10). Batch: [12p](batches.md). Paired with [10r](../10-api_layer/cluster.md).
+**Scenario range:** 12.66 – 12.72. **Test file:** `lex/test_project/tests/serializers/test_12p_list_ui_column_options.py`. **Type:** U. **Status:** ✅ Complete (2026-11-10). Batch: [12p](batches.md). Paired with [10ad](../10-api_layer/cluster.md).

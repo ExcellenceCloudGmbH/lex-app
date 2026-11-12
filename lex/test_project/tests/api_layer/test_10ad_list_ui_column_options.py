@@ -1,5 +1,5 @@
 """
-Sub-cluster 10r — ``model_info`` ships the project's per-column display options.
+Sub-cluster 10ad — ``model_info`` ships the project's per-column display options.
 
 Intent: LEX-1556. The frontend learns everything it knows about a table from
 ``/api/<model>/fields/?serializer=…`` before it draws a single column. A
@@ -27,7 +27,7 @@ Two properties are worth a scenario each:
 No database: ``Fields.get`` walks ``serializer.fields`` and ``model._meta``,
 both hand-rolled here as the sibling 10i scenarios do.
 
-Scenarios 10.100 – 10.103.
+Scenarios 10.184 – 10.187.
 """
 
 from __future__ import annotations
@@ -71,9 +71,9 @@ def _list_ui_for(serializer_class, *, model_name="widget"):
     return response.data["list_ui"]
 
 
-class TestCluster10r_ListUiColumnOptions(SimpleTestCase):
-    # 10.100 ----------------------------------------------------------
-    def test_10_100_declared_column_options_reach_the_frontend(self):
+class TestCluster10ad_ListUiColumnOptions(SimpleTestCase):
+    # 10.184 ----------------------------------------------------------
+    def test_10_184_declared_column_options_reach_the_frontend(self):
         """What the project wrote on its serializer is what the grid is told.
 
         The narrow ID column the customer asked for is this value arriving:
@@ -100,8 +100,8 @@ class TestCluster10r_ListUiColumnOptions(SimpleTestCase):
         # The older half of the payload is untouched — one reader, one shape.
         self.assertIs(list_ui["hide_actions_column"], False)
 
-    # 10.101 ----------------------------------------------------------
-    def test_10_101_a_plain_drf_serializer_gets_the_same_contract(self):
+    # 10.185 ----------------------------------------------------------
+    def test_10_185_a_plain_drf_serializer_gets_the_same_contract(self):
         """A project's own non-Lex serializer declares columns the same way.
 
         The endpoint serves both kinds. A frontend that had to know which one
@@ -122,8 +122,8 @@ class TestCluster10r_ListUiColumnOptions(SimpleTestCase):
         self.assertEqual(list_ui["columns"], {"id": {"max_width": 120}})
         self.assertIs(list_ui["hide_actions_column"], True)
 
-    # 10.102 ----------------------------------------------------------
-    def test_10_102_a_model_declaring_nothing_reports_an_empty_map(self):
+    # 10.186 ----------------------------------------------------------
+    def test_10_186_a_model_declaring_nothing_reports_an_empty_map(self):
         """Every response answers the key, so no reader has to guess.
 
         ``columns`` absent and ``columns`` empty would mean the same thing to
@@ -139,8 +139,8 @@ class TestCluster10r_ListUiColumnOptions(SimpleTestCase):
 
         self.assertEqual(_list_ui_for(WidgetSerializer)["columns"], {})
 
-    # 10.103 ----------------------------------------------------------
-    def test_10_103_a_malformed_declaration_never_breaks_the_endpoint(self):
+    # 10.187 ----------------------------------------------------------
+    def test_10_187_a_malformed_declaration_never_breaks_the_endpoint(self):
         """A project's typo costs them the option, not the whole grid.
 
         This payload is fetched before the frontend can draw a table at all.
@@ -165,8 +165,8 @@ class TestCluster10r_ListUiColumnOptions(SimpleTestCase):
         # The response arrives, and the one usable declaration survives.
         self.assertEqual(list_ui["columns"], {"ref": {"hidden": True}})
 
-    # 10.103 (edge) ---------------------------------------------------
-    def test_10_103b_a_declaration_of_the_wrong_type_is_simply_absent(self):
+    # 10.187 (edge) ---------------------------------------------------
+    def test_10_187b_a_declaration_of_the_wrong_type_is_simply_absent(self):
         """``lex_column_options = ["id"]`` is not a mapping and says nothing."""
 
         class ListSerializer(LexSerializer):

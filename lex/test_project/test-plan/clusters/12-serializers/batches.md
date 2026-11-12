@@ -131,7 +131,7 @@
 | Test classes | `ListUiColumnOptionsTests` |
 | Fixtures | cluster-12 `WideItem` (12.72, through `_wrap_custom_serializer`) |
 | Tests landed | **7 pass / 0 fail** |
-| Status | ✅ Complete — LEX-1556; paired with [10r](../10-api_layer/batches.md) and frontend F03p/F03q |
+| Status | ✅ Complete — LEX-1556; paired with [10ad](../10-api_layer/batches.md) and frontend F03p/F03q |
 
 LEX-1556, customer feedback: the grid's ID column is too wide, and the only answer the
 framework had was "resize it and save a view" — which does not survive a read-only System

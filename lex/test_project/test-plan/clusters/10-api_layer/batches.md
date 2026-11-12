@@ -121,15 +121,15 @@
 
 ---
 
-### Batch 10r — `model_info` ships the project's per-column display options ✅
+### Batch 10ad — `model_info` ships the project's per-column display options ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 10.100 – 10.103 |
+| Scenario range | 10.184 – 10.187 |
 | Type | U |
 | Files covered | `lex/api/views/model_info/Fields.py` (`create_list_ui_info`), `lex/api/serializers/list_ui_columns.py` |
-| Test file | `lex/test_project/tests/api_layer/test_10r_list_ui_column_options.py` |
-| Test classes | `TestCluster10r_ListUiColumnOptions` (10.100–10.103) |
+| Test file | `lex/test_project/tests/api_layer/test_10ad_list_ui_column_options.py` |
+| Test classes | `TestCluster10ad_ListUiColumnOptions` (10.184–10.187) |
 | Fixtures | none — hand-rolled `model._meta` / serializer stand-ins, as 10i does |
 | Tests landed | **5 pass / 0 fail** |
 | Also changed | 10.25 and 12.35 no longer assert that `list_ui` has nothing else in it — their claims (the `hide_actions_column` flag is reflected, and survives wrapping) are unchanged |
@@ -137,16 +137,16 @@
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 10.100 | the declaration reaches the frontend | `list_ui.columns` keyed by field name with the declared options; `hide_actions_column` still answered |
-| 10.101 | a plain DRF serializer gets the same contract | a non-`LexSerializer` class answers identically, flag and columns |
-| 10.102 | a model declaring nothing answers the key | `columns: {}` |
-| 10.103 | a malformed declaration never breaks the endpoint | the response arrives; the one usable declaration survives; a non-mapping declaration is simply absent |
+| 10.184 | the declaration reaches the frontend | `list_ui.columns` keyed by field name with the declared options; `hide_actions_column` still answered |
+| 10.185 | a plain DRF serializer gets the same contract | a non-`LexSerializer` class answers identically, flag and columns |
+| 10.186 | a model declaring nothing answers the key | `columns: {}` |
+| 10.187 | a malformed declaration never breaks the endpoint | the response arrives; the one usable declaration survives; a non-mapping declaration is simply absent |
 
 **Why a regression matters:** this payload is fetched before the frontend can draw a table
 at all. An exception raised while describing a **display preference** would take down every
 list view of that model — catastrophically out of proportion to the mistake that caused it.
-That is why 10.103 exists and why the normaliser validates rather than passes through.
+That is why 10.187 exists and why the normaliser validates rather than passes through.
 
-10.101 is the surface most likely to be missed: the endpoint serves both `LexSerializer`
+10.185 is the surface most likely to be missed: the endpoint serves both `LexSerializer`
 subclasses and a project's own hand-written DRF class, and it is the hand-written kind that
 a project reaching for column options is most likely to have.

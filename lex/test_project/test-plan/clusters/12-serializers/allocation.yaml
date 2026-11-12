@@ -179,7 +179,7 @@ letters:
     status: complete
     tests: {pass: 7, skip: 0, xfail: 0}
     note: >-
-      LEX-1556, the serializer side of cluster 10r. Letter p, not l: 12l is reserved for
+      LEX-1556, the serializer side of cluster 10ad. Letter p, not l: 12l is reserved for
       the 12.54-12.57 batch that is not on this branch (see 12n / 12o). ``Meta.lex_column_options`` is validated
       into ``list_ui.columns``; nothing in that path may raise, because it runs while answering
       ``model_info``, which the whole frontend blocks on before drawing anything.
