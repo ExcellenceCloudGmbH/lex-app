@@ -119,3 +119,38 @@
 | Status | ✅ Complete — companion of [4p](../04-permissions/batches.md) |
 
 ---
+
+### Batch 12p — A project declares how its columns look, on the serializer ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 12.66 – 12.72 |
+| Type | U |
+| Files covered | `lex/api/serializers/list_ui_columns.py` (new), `lex/api/serializers/base_serializers.py` (`LexSerializer.get_list_ui_options`) |
+| Test file | `lex/test_project/tests/serializers/test_12p_list_ui_column_options.py` |
+| Test classes | `ListUiColumnOptionsTests` |
+| Fixtures | cluster-12 `WideItem` (12.72, through `_wrap_custom_serializer`) |
+| Tests landed | **7 pass / 0 fail** |
+| Status | ✅ Complete — LEX-1556; paired with [10ad](../10-api_layer/batches.md) and frontend F03p/F03q |
+
+LEX-1556, customer feedback: the grid's ID column is too wide, and the only answer the
+framework had was "resize it and save a view" — which does not survive a read-only System
+View, has to be redone per model, and says nothing to the users who never read the
+identifier at all. The frontend already recognises three owners of how a table looks (the
+user's own Settings, a saved view, and **the developer**); the developer's layer could say
+exactly one thing. `Meta.lex_column_options` is the missing one.
+
+Most of the batch is the garbage paths, because the happy path would be noticed
+immediately and the refusal to explode would not — this is read while answering
+`model_info`, which the whole frontend blocks on before drawing any table. 12.69 is the
+Python-specific trap: `bool` is an `int` subclass, so a naive check reads `{"width": True}`
+as a one-pixel column, which looks to the user like the column vanished.
+
+12.72 covers the second execution path, and the one a project that cares about column
+widths is most likely to be on: a hand-written `ModelSerializer` registered as
+`api_serializers["default"]` is **wrapped** in a generated subclass before use. The wrapper
+inherits from the project's `Meta`, so the declaration does survive — but nothing said so,
+and anything that path drops is lost for exactly the serializers that were customised on
+purpose.
+
+---

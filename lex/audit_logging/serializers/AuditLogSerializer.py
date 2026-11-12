@@ -85,12 +85,13 @@ class AuditLogDefaultSerializer(AuditLogReadOnlySerializerMixin, serializers.Mod
         record = self._get_latest_status_record(obj)
         if record is None:
             return None
-        # A traceback is server internals; only a superuser reads it (LEX_SEC_READ_SURFACES).
-        from lex.core.security_flags import is_superuser, strict
-
-        request = (getattr(self, "context", None) or {}).get("request")
-        if strict("READ_SURFACES") and not is_superuser(request):
-            return None
+        # The traceback follows the entry: whoever may read this entry (under
+        # LEX_SEC_READ_SURFACES, whoever may read its record) reads why it
+        # failed. It is the only lasting diagnostic of a failed calculation,
+        # and the record's readers already get the same text through the
+        # record's calculation_error_message and the calculation_error
+        # broadcast. A superuser-only rule hid it from every Keycloak user,
+        # since none of them is a Django superuser (LEX-1555).
         return record.error_traceback
 
     def get_status_created_at(self, obj):
