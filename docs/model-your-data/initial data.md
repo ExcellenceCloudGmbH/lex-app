@@ -216,6 +216,46 @@ not triggered due to existence of objects of Model: …`.
 > lex start --reload --loop asyncio lex_app.asgi:application
 > ```
 
+## Restarts and More Than One Server Process
+
+From 2.5, the load survives a restart and a second server process. This
+matters whenever more than one process runs over the load's lifetime: a
+`--reload` restart, `--workers`, a second replica, or a replaced pod.
+
+- **A stopping process finishes the load first.** The load runs in its own
+  thread, and the process waits for it before it exits. A `--reload` restart
+  during the load waits until the load is done.
+- **One process decides at a time.** On PostgreSQL, the "all models empty?"
+  check and the load run under a database lock. A second process waits for the
+  first to finish, then checks the finished database. It does not load a second
+  copy. While it waits, it prints `Initial data load is in progress in another
+  server process`. A process that dies releases the lock with its connection.
+- **The outcome is recorded.** Each load is written to the table
+  `lex_initial_data_load_state` as `running`, `completed` or `failed`. Lex App
+  creates the table itself; it needs no migration.
+
+What the next start does with that record:
+
+| The database | The record | What happens |
+|---|---|---|
+| All referenced models empty | any, or none | The load runs. A load that died before writing a row is simply run again. |
+| Has rows | none, or `completed` | The load is skipped, as before: `Loading Initial Data not triggered …` |
+| Has rows | `running` | The earlier load was killed mid-load (SIGKILL, out of memory, a grace period ran out). The start logs an `ERROR` naming the partial models and does not load over them. |
+| Has rows | `failed` | The earlier load raised. The start logs an `ERROR` with that error and does not load over the rows. |
+
+To recover from either `ERROR`, fix the cause, empty the database and start
+again. The message suggests `lex create_db`, then `lex init`; `lex flush` works
+too.
+
+> [!note]
+> On SQLite, the local default, there is no lock. The load runs as it did
+> before 2.5. Run one server process at a time there.
+
+> [!warning]
+> A database that was left half-loaded **before** 2.5 has no record. It still
+> looks like existing data, so the load is skipped without an error. Empty it
+> once to load the seed completely.
+
 ## Execution Order
 
 1. The top-level JSON is read and all `subprocess` references are **recursively resolved** into a flat list of action objects

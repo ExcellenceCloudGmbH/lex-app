@@ -86,3 +86,15 @@ A file field shows the current attachment with controls to work with it:
 - **Remove** it by clearing the field and saving — the attachment is deleted and the field
   is left empty. (Leaving a file field untouched keeps the current file; only an explicit
   remove or replace changes it.)
+
+### Large files
+
+A file of 32 MiB or more is sent to the server in pieces, one after the other. You
+choose and save it the same way as any other file, when you create a record or edit
+one; saving just takes longer. Keep the
+page open until the save finishes.
+
+If the connection drops for a moment, the app sends the missing piece again by itself.
+Files of several hundred megabytes, which used to fail with *Failed to fetch*, now go
+through. There is still an upper limit, which your team sets (5 GiB unless they changed
+it).

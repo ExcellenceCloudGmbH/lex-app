@@ -157,18 +157,23 @@ Rows of calculation models carry the reason as `lex_reserved_calculation_closed_
 
 ## Nested Calculations
 
-When a parent calculation triggers a child, wrap the child execution in `model_logging_context` to preserve the log hierarchy:
+When a parent calculation saves a child as `IN_PROGRESS`, the child's log nests under the parent on its own:
 
 ```python
-from lex.audit_logging.utils.ModelContext import model_logging_context
-
 class ParentReport(CalculationModel):
     def calculate(self):
         child = ChildReport.objects.get(pk=self.child_id)
-        with model_logging_context(child):
-            child.is_calculated = "IN_PROGRESS"
-            child.save()
+        child.is_calculated = "IN_PROGRESS"
+        child.save()
 ```
+
+`calculate_hook()` puts the child on top of the model context before it runs the child in-process or dispatches it to Celery, and takes it off when the run ends. So:
+
+- The child's log lines go into a node of its own, under the parent's node. This is the same in-process and on Celery, with or without `@lex_shared_task`. The task is shipped the context with the child on top.
+- The frame also covers the end-of-run bookkeeping and the failure handling. Both decide from the context whether a run is the root. A child that finishes or fails is never taken for the root, so it leaves the run's live log alone.
+- A model already on top is not pushed again: the record a **Calculate** click runs, or a child a caller wrapped in `model_logging_context` itself.
+
+Before lex-app 2.5.0 this page told you to wrap the child's save in `model_logging_context(child)`. That is no longer needed, and it still does no harm. See [[calculations/logging#Nested Calculations|Nested Calculations]] for where each kind of child shows up in the execution tree.
 
 ## Batch Generation with CalculatedModelMixin
 

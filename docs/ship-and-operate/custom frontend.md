@@ -14,7 +14,7 @@ Your frontend is served on the instance's own host, so it talks to the lex-app b
 | [Setting it up in the Instance Controller](#setting-it-up-in-the-instance-controller) | Turning on the frontend build, and choosing it on an instance |
 | [Build secrets](#build-secrets) | Private registries and other tokens the build needs |
 | [What your app is given at runtime](#what-your-app-is-given-at-runtime) | `window.__LEX_ENV__`, and the keys in it |
-| [Talking to lex-app](#talking-to-lex-app) | Signing in, the REST API, websockets |
+| [Talking to lex-app](#talking-to-lex-app) | Signing in, the REST API, websockets, large files |
 | [Releases](#releases) | How a release carries the frontend along |
 
 ## What the repository needs
@@ -120,6 +120,21 @@ export async function lexFetch(route: string, init: RequestInit = {}) {
 ```
 
 Files under `/assets/` — Vite's content-hashed output — are cached for a year; everything else, `index.html` included, is not cached, so a release is picked up on the next page load.
+
+### Large files
+
+A request body above about 100 MB never reaches the backend. Cloudflare, the Ingress and the web application firewall each stop it, and the browser reports only `Failed to fetch`. From 2.5, lex-app takes a large file in pieces first. The standard interface does this for every file of 32 MiB or more; your frontend has to do it itself. The routes sit with the other REST routes, so `lexFetch('chunked-uploads/', …)` above reaches the first one:
+
+| Route | Does |
+|---|---|
+| `POST chunked-uploads/` with JSON `{filename, size}` | Starts an upload. Answers `upload_id`, `token`, `chunk_size` and `chunk_count`. |
+| `POST chunked-uploads/<upload_id>/chunks/<index>`, multipart field `chunk` | Stores one piece. Pieces may arrive in any order; sending one again replaces it. |
+| `GET chunked-uploads/<upload_id>` | Lists the pieces received (`received`, `complete`), so an upload can resume. |
+| `DELETE chunked-uploads/<upload_id>` | Discards the upload. |
+
+Cut the file into pieces of exactly `chunk_size` bytes; only the last may be shorter. Then send the create or update request as usual, with `token` (`lex-chunked-upload:<upload_id>`) as the file field's value in place of the file. The backend joins the pieces, and the record saves as with a direct upload. Delete the upload when the request has finished, whether it succeeded or not.
+
+An upload belongs to the user who started it; anyone else gets `404`. A file may be at most 5 GiB. An upload nobody deletes is removed after 24 hours.
 
 ## Releases
 
