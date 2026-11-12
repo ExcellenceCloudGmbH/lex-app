@@ -21,7 +21,7 @@
 | 9. Signals & WebSocket | 7 | 43 | 15 | 0 | 0 |
 | 10. API Layer | 17 | 99 | 49 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
-| 12. Serializer Contract | 14 | 65 | 29 | 0 | 0 |
+| 12. Serializer Contract | 15 | 80 | 37 | 0 | 0 |
 | 13. Export Endpoint | 9 | 51 | 21 | 0 | 0 |
 | 14. AG Grid Query Endpoint | 8 | 44 | 11 | 0 | 0 |
 | 15. Calculation Logging Surface | 12 | 55 | 36 | 0 | 0 |
@@ -303,6 +303,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 12m | A closed record does not offer Calculate, and says why | 12.58-12.62 | complete | 5 | 0 | 0 | 12.58 a closed record's lex_reserved_scopes.edit leaves out is_calculated, which greys its Calculate button, and keeps the fields the user may edit; 12.59 an open record still lists it; 12.60 grid rows and the record page carry the model's reason in lex_reserved_calculation_closed_reason, for the greyed button's tooltip; 12.61 an open record's row carries null; 12.62 the reason survives a read permission that hides other fields. Follows 12l (12.54-12.57). |
 | 12n | The list serializer builds the read context once per request (BUG-011) | 12.63 | complete | 1 | 0 | 0 | With the list filter switched off the serializer decides every row itself; it builds LexModel.can_read's context from the one it caches per request, so the auth_group queries do not grow with the rows. Letter n, not l: 12m refers to a 12l (12.54-12.57) that is not on this branch, so l is skipped to avoid a collision when it lands. |
 | 12o | History rows are read-only in lex_reserved_scopes for non-superusers | 12.64-12.65 | complete | 2 | 0 | 0 | LEX_SEC_HISTORY_WRITE (companion of 4.107-4.110): a serialized Historical* row says edit [] and delete false to non-superusers (single read and list), export as computed; superusers and the opt-out keep the computed scopes. Letter o, not l: 12l is reserved (see 12n). |
+| 12q | Files larger than one request body are uploaded in pieces | 12.73-12.80 | complete | 8 | 0 | 0 | Every request body is capped at about 100 MB before Django sees it (Cloudflare, the Ingress, ModSecurity), so a 606 MB claims CSV failed in the browser as "Failed to fetch". The client now uploads such a file in pieces to api/chunked-uploads/ and sends lex-chunked-upload:<id> as the file field's value; LexClearableFileField joins the pieces into one file. 12.73 create through a token, pieces sent out of order; 12.74 update, whose path validates the payload more than once; 12.75 an incomplete upload is a 400 and creates nothing; 12.76 another user gets 404 on every route and the token fails for them; 12.77 a piece of the wrong size or index is refused; 12.78 the size cap is a 413 and a path-like id a 404; 12.79 DELETE removes the pieces; 12.80 expired uploads are swept when a new one starts. Letter q, past 12p (#878) and the 12l reserved for the feat/ext-* branches; first drafted as 12i (12.42-12.49), which lex-app-v2 already holds. |
 
 ## 13. Export Endpoint (`exports`)
 

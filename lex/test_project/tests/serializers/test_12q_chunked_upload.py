@@ -1,4 +1,4 @@
-"""Cluster 12i — files larger than one request body, uploaded in pieces.
+"""Cluster 12q — files larger than one request body, uploaded in pieces.
 
 Intent: a user must be able to attach a file larger than the ~100 MB every
 request body is capped at before it reaches Django (Cloudflare, the nginx
@@ -7,10 +7,10 @@ fetch" (claim_validation, 2026-11-11) without any trace on the backend. The
 client now uploads such a file in pieces to ``api/chunked-uploads/`` and sends
 ``lex-chunked-upload:<id>`` as the file field's value; ``LexClearableFileField``
 joins the pieces and the record is saved as if the file had come in directly.
-Cluster 12i — scenarios 12.42–12.49. Type: E.
+Cluster 12q — scenarios 12.73–12.80. Type: E.
 Covers: lex/api/views/file_operations/ChunkedUpload.py,
         lex/api/serializers/base_serializers.py (LexClearableFileField).
-Run: python -m lex pytest lex/test_project/tests/serializers/test_12i_chunked_upload.py -v
+Run: python -m lex pytest lex/test_project/tests/serializers/test_12q_chunked_upload.py -v
 """
 
 from __future__ import annotations
@@ -40,8 +40,8 @@ pytestmark = pytest.mark.serializers
 PIECE = 4  # bytes per piece in these tests
 
 
-class TestCluster12i_ChunkedUpload(E2ETestCase):
-    """Cluster 12i: pieces in, one file out; only for the user who sent them."""
+class TestCluster12q_ChunkedUpload(E2ETestCase):
+    """Cluster 12q: pieces in, one file out; only for the user who sent them."""
 
     e2e_models = ALL_MODELS
 
@@ -102,9 +102,9 @@ class TestCluster12i_ChunkedUpload(E2ETestCase):
 
     # -- scenarios -------------------------------------------------------
 
-    def test_12_42_create_with_a_chunked_upload_stores_the_whole_file(self) -> None:
+    def test_12_73_create_with_a_chunked_upload_stores_the_whole_file(self) -> None:
         """
-        Scenario 12.42: pieces sent out of order become the record's file.
+        Scenario 12.73: pieces sent out of order become the record's file.
         Given: a file uploaded as 4 pieces, the last one short, in reverse order
         When: POST create with the upload token as the file field
         Then: the record stores the original bytes under the original name
@@ -122,9 +122,9 @@ class TestCluster12i_ChunkedUpload(E2ETestCase):
         self.assertEqual(self._stored(item), content)
         self.assertIn("claims", item.document.name)
 
-    def test_12_43_update_with_a_chunked_upload_replaces_the_file(self) -> None:
+    def test_12_74_update_with_a_chunked_upload_replaces_the_file(self) -> None:
         """
-        Scenario 12.43: the update path, which validates its payload more than
+        Scenario 12.74: the update path, which validates its payload more than
         once (edit permission check, no-op check, save), gets the file intact.
         """
         item = AttachmentItem(name="upd")
@@ -143,9 +143,9 @@ class TestCluster12i_ChunkedUpload(E2ETestCase):
         item.refresh_from_db()
         self.assertEqual(self._stored(item), content)
 
-    def test_12_44_an_incomplete_upload_is_refused(self) -> None:
+    def test_12_75_an_incomplete_upload_is_refused(self) -> None:
         """
-        Scenario 12.44: a token whose pieces are not all there fails validation
+        Scenario 12.75: a token whose pieces are not all there fails validation
         with a message naming the gap, and no record is created.
         """
         content = b"0123456789"
@@ -161,9 +161,9 @@ class TestCluster12i_ChunkedUpload(E2ETestCase):
         self.assertIn("incomplete", str(resp.content))
         self.assertFalse(AttachmentItem.objects.filter(name="partial").exists())
 
-    def test_12_45_another_user_cannot_use_or_extend_the_upload(self) -> None:
+    def test_12_76_another_user_cannot_use_or_extend_the_upload(self) -> None:
         """
-        Scenario 12.45: an upload belongs to the user who started it.
+        Scenario 12.76: an upload belongs to the user who started it.
         Given: a finished upload of user A
         When: user B sends a piece to it, reads it, deletes it, or uses its token
         Then: every one of those is refused as if the upload did not exist
@@ -187,9 +187,9 @@ class TestCluster12i_ChunkedUpload(E2ETestCase):
         # The owner's upload is untouched.
         self.assertTrue(self.client.get(detail).json()["complete"])
 
-    def test_12_46_pieces_of_the_wrong_size_or_index_are_refused(self) -> None:
+    def test_12_77_pieces_of_the_wrong_size_or_index_are_refused(self) -> None:
         """
-        Scenario 12.46: a piece must have exactly its expected length and an
+        Scenario 12.77: a piece must have exactly its expected length and an
         index inside the upload, so a joined file always has the declared size.
         """
         started = self._start(b"0123456789")  # pieces of 4, 4, 2
@@ -199,9 +199,9 @@ class TestCluster12i_ChunkedUpload(E2ETestCase):
         self.assertEqual(self._send(upload_id, 3, b"89").status_code, 400)
         self.assertEqual(self._send(upload_id, 2, b"89").status_code, 200)
 
-    def test_12_47_the_size_cap_and_bad_ids_are_enforced(self) -> None:
+    def test_12_78_the_size_cap_and_bad_ids_are_enforced(self) -> None:
         """
-        Scenario 12.47: a file above LEX_CHUNKED_UPLOAD_MAX_SIZE is refused up
+        Scenario 12.78: a file above LEX_CHUNKED_UPLOAD_MAX_SIZE is refused up
         front with 413, and an upload id that is not ours (e.g. a path) is 404.
         """
         with patch.object(ChunkedUpload, "MAX_UPLOAD_SIZE", 10):
@@ -214,9 +214,9 @@ class TestCluster12i_ChunkedUpload(E2ETestCase):
         resp = self.client.get(self._url("chunked-upload-detail", upload_id="..%2F..%2Fetc"))
         self.assertEqual(resp.status_code, 404)
 
-    def test_12_48_delete_removes_the_pieces(self) -> None:
+    def test_12_79_delete_removes_the_pieces(self) -> None:
         """
-        Scenario 12.48: DELETE by the owner removes the upload and its token
+        Scenario 12.79: DELETE by the owner removes the upload and its token
         stops working.
         """
         started = self._upload(b"abcdefgh")
@@ -227,9 +227,9 @@ class TestCluster12i_ChunkedUpload(E2ETestCase):
             default_storage.exists(ChunkedUpload._manifest_path(started["upload_id"]))
         )
 
-    def test_12_49_expired_uploads_are_swept_when_a_new_one_starts(self) -> None:
+    def test_12_80_expired_uploads_are_swept_when_a_new_one_starts(self) -> None:
         """
-        Scenario 12.49: an upload older than the TTL is deleted the next time
+        Scenario 12.80: an upload older than the TTL is deleted the next time
         anyone starts one; a fresh upload is left alone.
         """
         old = self._upload(b"abcdefgh")
