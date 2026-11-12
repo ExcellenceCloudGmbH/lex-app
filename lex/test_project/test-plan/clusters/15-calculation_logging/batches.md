@@ -113,6 +113,19 @@ purged. It does nothing when the run's rows survived, and it never raises. 15.47
 
 ---
 
+### Batch 15r — The calculation-log PDF covers one step, a branch, or the whole calculation ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 15.83 – 15.89 |
+| Type | E |
+| Files covered | `lex/api/views/calculations/DownloadMarkdownPdf.py` (`resolve_scope`, `collect_calculation`, `build_subtree_markdown(title_roots=)`, `DownloadMarkdownPdf.get`) |
+| Test file | `lex/test_project/tests/calculation_logging/test_15r_pdf_download_scopes.py` |
+| Test classes | `TestCluster15r_PdfDownloadScopes` (15.83 `scope=calculation` from a leaf → every log of the tree in tree order, `_calculation.pdf`; 15.84 two roots both titled, another calculation's log absent; 15.85 `scope=subtree` and `include_descendants=true` give the same branch-only document; 15.86 `scope=node` wins over the old flag; 15.87 an unknown scope → audited 400 recording what was asked; 15.88 the whole-calculation audit payload — scope, section count, filename, size; 15.89 the cap cuts the document visibly and records `truncated: true`) |
+| Fixtures | `_CalcLogTestCase` as a superuser (same footing as 15l); `MAX_SUBTREE_NODES` patched to 3 for 15.89 |
+| Tests landed | **7 pass / 0 fail** (15h + 15l re-run alongside: 11 pass / 0 fail) |
+| Coverage gain | the endpoint's `scope` parameter, its whole-calculation path and its 400 path |
+| Status | ✅ Complete — LEX-1554; see [session note](../../progress/sessions/2026-11-10-lex-1554-calc-log-pdf-scopes.md) |
 ### Batch 15q — The calculation-log table is readable again ✅
 
 | Property | Value |
