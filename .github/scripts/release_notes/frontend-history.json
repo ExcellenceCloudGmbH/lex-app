@@ -13,5 +13,10 @@
     "pac_sha": "22c16f913663c5a4841e6c623c7cb50cc3667be6",
     "method": "hash-proof",
     "note": "Rebuilt PAC at 22c16f9; emitted index-BD1SQUOi.js, index-isLX8XQ_.css, index.es-Cta2lik9.js, purify.es-Bf0oSh3b.js — identical to the committed bundle. Covers v2.1.4 through v2.1.7 and any release until a new bundle lands."
+  },
+  "148d1283a35c72725b832cc39389e110528198c5": {
+    "pac_sha": "b1b53fd59469762c030c06c17b7483a3a1aefbd7",
+    "method": "hash-proof",
+    "note": "Rebuilt PAC at b1b53fd; emitted index-DMLDxN6j.js, index-isLX8XQ_.css, index.es-D1xOt0Lv.js, purify.es-Bf0oSh3b.js — byte-identical to the committed bundle (diff -r over lex/react/build/). Covers v2.1.10 through v2.1.13 on release/2.1.x."
   }
 }
