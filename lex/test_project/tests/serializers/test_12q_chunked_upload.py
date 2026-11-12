@@ -9,7 +9,9 @@ client now uploads such a file in pieces to ``api/chunked-uploads/`` and sends
 joins the pieces and the record is saved as if the file had come in directly.
 Cluster 12q — scenarios 12.73–12.80. Type: E.
 Covers: lex/api/views/file_operations/ChunkedUpload.py,
-        lex/api/serializers/base_serializers.py (LexClearableFileField).
+        lex/api/serializers/base_serializers.py (LexClearableFileField),
+        lex/process_admin/sites/process_admin_site.py (the three api/chunked-uploads/ routes,
+        reached here by name through self._url).
 Run: python -m lex pytest lex/test_project/tests/serializers/test_12q_chunked_upload.py -v
 """
 
