@@ -525,3 +525,51 @@ does not remove user launch configurations.
 | 1.489 | proxy sign-in | `/auth/login` redirects with an S256 challenge and no verifier |
 
 **Scenario range:** 1.481 – 1.489. **Test file:** `lex/test_project/tests/init/test_1bc_auth_settings_hardening.py`. **Type:** U (1.481–1.486, 1.489), I (1.487–1.488). **Status:** ✅ Complete (2026-11-06). Batch: [1bc](batches.md).
+---
+
+### 1bp. A frame another application put on screen does not get to move that tab ✅
+
+**What it tests:** who the proxy's framed-401 page is allowed to navigate. The breakout exists because Keycloak refuses to be framed, so an unauthenticated frame must not be redirected to the IdP; it answers with a 401 page carrying three layers — an automatic top-level navigation, a `lex-auth-required` `postMessage`, and a `target="_top"` link. The automatic layer now runs only when `Sec-Fetch-Site` says this origin is also the one framing it (or when a client names no embedder, the pre-existing behaviour 1.214 pins). A frame on someone else's page keeps the 401, the message and the link, and takes nothing.
+
+**Why a regression matters:** the top window belongs to the page the user is reading. A frame that cannot authenticate has learned something about itself, not about that page — and moving the window anyway is how a sidebar click inside an instance ended up parked on the dashboard host with an SSO round trip already completed. Narrowing it too far is the opposite failure: 1.669 and 1.670 are the counterweight, because withholding the navigation from everything strands the dashboard's own recovery.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.667 | the shell's frame leaves the shell's tab alone | `same-site` → no `window.top.location`; still 401, `lex-auth-required`, `target="_top"` |
+| 1.668 | an unrelated embedder has no more claim | `cross-site` → the same |
+| 1.669 | this origin's own frame still recovers | `same-origin` → the automatic navigation is kept |
+| 1.670 | a client that names no embedder is unchanged | absent `Sec-Fetch-Site` → pre-existing behaviour |
+| 1.671 | the embedder check is a header read | casing cannot defeat it |
+| 1.672 | the frame the report builds is let in | the URL the real `Streamlit` report produces, loaded as a framed document against the real proxy app, banks the token, is redirected without it and ends on the dashboard's own bytes |
+| 1.673 | the fault and the amplifier, observed together | the URL the report produces with no session token still 401s, and that 401 moves no window |
+
+**Scenario range:** 1.667 – 1.673. **Test file:** `lex/test_project/tests/init/test_1bp_frame_does_not_take_the_tab.py`. **Type:** U. **Status:** ✅ Complete (2026-11-03). Batch: [1bp](batches.md).
+### 1az — a machine endpoint on the dashboard origin cannot take over the user's tab
+
+**What it tests:** the Streamlit proxy serves pages a person looks at and endpoints that exist only for code, on one host. Its re-auth machinery — whose purpose is to move the *top* window and then return the browser to whatever 401'd — may now only be reached by the first kind.
+
+**Why a regression matters:** LEX-1477. A hidden, zero-sized `/_lex/theme-relay` frame 401'd on a proxy that did not serve that route yet, got the frame-breakout page, and sent the whole tab to `/auth/login?next=/_lex/theme-relay`; the OIDC round trip then parked it on a blank storage document. Intermittent, silent, and unconnectable to a theme shim by anyone looking at it.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.415 | a utility path is never a return target | `_safe_next_path` rejects `/_lex/*`, `/_stcore/*`, `/auth/token`, `/auth/adopt`; pages with query and fragment survive |
+| 1.416 | a stashed utility path lands on `/` | `auth_callback` re-validates and falls back rather than honouring it |
+| 1.417 | no return target for a top-level utility visit | the login redirect carries no `next` |
+| 1.418 | a hidden utility frame gets a 401, not a breakout | JSON 401, no `window.top.location` anywhere in it |
+| 1.419 | a framed dashboard still breaks out | the 401 HTML breakout, still carrying the view as `next` |
+| 1.420 | a top-level visit is sent back to the frontend | 303 to the configured frontend origin |
+| 1.421 | an unconfigured deployment does not bounce to localhost | the relay is served instead |
+| 1.422 | the framed relay is untouched | 200, the shared key, `frame-ancestors <frontend>` |
+
+**Scenario range:** 1.415 – 1.422. **Test file:** `lex/test_project/tests/init/test_1az_proxy_tab_takeover.py`. **Type:** U. **Status:** ✅ Complete (2026-10-26). Batch: [1az](batches.md). Frontend twin: `process-admin-general-client` batch F12u.
+### 1ay — `ALLOWED_HOSTS` accepts the instance's own backend Service name
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.410 | short Service name accepted | `lex-backend-<instance>` is among the derived hosts |
+| 1.411 | the three longer DNS forms accepted | `.<ns>`, `.<ns>.svc` and `.<ns>.svc.cluster.local` are all present |
+| 1.412 | nothing added off-cluster | no instance identifier yields `[]`, whatever the namespace says |
+| 1.413 | unreadable namespace degrades | an empty namespace yields exactly the short name, and does not raise |
+| 1.414 | the namespace file is read safely | `_k8s_namespace` on a missing path returns `""` rather than raising |
+
+**Scenario range:** 1.410 – 1.414. **Test file:** `lex/test_project/tests/init/test_1ay_allowed_hosts_in_cluster.py`. **Type:** U. **Status:** ✅ Complete (2026-10-25). Batch: [1ay](batches.md).
