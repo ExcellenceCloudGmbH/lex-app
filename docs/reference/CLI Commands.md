@@ -89,18 +89,42 @@ lex pytest -m "creation or validation"   # union of two groups
 lex pytest -m "not slow"                 # exclude a group
 ```
 
-Test groups, recipients, and the tests entry point are configured in `lex_test_config.yaml` at your project root. Use `lex pytest-groups` to inspect what groups are registered and which tests belong to each.
+Test groups, report recipients and the tests entry point are configured in `lex_test_config.yaml` at your project root. Use `lex pytest-groups` to inspect what groups are registered and which tests belong to each.
+
+### Running tests in PyCharm or VS Code
+
+In any project with a `lex_test_config.yaml`, a plain `pytest` run gets the same setup as `lex pytest`, so your IDE's own test runner works: PyCharm's test tree, the run button next to each test, **Run pytest in …** and rerunning failed tests, with nothing to add to your project. The setup comes from a pytest plugin that lex-app installs; pass `-p no:lex` to switch it off for a run.
+
+`lex setup` (or `lex-generate-configs`) writes a **Tests** run configuration for the whole suite and one for each group, named after it (**Tests: invoices**, for example), for PyCharm and for VS Code. They set `CELERY_ACTIVE=False`, so calculations run in the test process instead of waiting for a Celery worker.
+
+Keep using `lex pytest` for `--report` and `--report-and-email`, and in CI.
+
+> [!tip]
+> If your project copied this setup into its own `conftest.py` to get PyCharm's test tree, it keeps working after you upgrade — the built-in setup runs first and your copy stands down — and you can delete it.
 
 ### `lex_test_config.yaml` at a glance
 
-The file is a small YAML document at your project root. The most useful keys:
+The file is a small YAML document at your project root:
 
-| Key                 | Purpose                                                                                                                                  |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests_root`        | Directory pytest discovers tests in (relative to project root)                                                                           |
-| `groups`            | Mapping of group name → list of test files / nodeids. The group name is what you pass to `pytest -m` and what `lex pytest-groups` lists. |
-| `report.recipients` | List of email addresses that receive the PDF when `--report-and-email` is passed                                                         |
-| `report.sender`     | "From" address on the report email (falls back to your SendGrid sender)                                                                  |
+| Key                 | Purpose                                                                                                                                                                                                                                                               |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests_entrypoint`  | Required. The directory `lex pytest` collects tests from when you name no target, relative to the project root. It must exist.                                                                                                                                        |
+| `groups`            | Required, at least one. A list of `name` / `description` entries. Every name is a pytest marker: `@pytest.mark.<name>` puts a test in the group and `lex pytest -m <name>` runs it. A marker that is not a group stops the run. A group can list its own `receivers`. |
+| `receivers`         | Who receives the PDF report from `--report-and-email`: a list of `name` / `email` entries.                                                                                                                                                                            |
+| `email`             | The report email's `from_email` (required for `--report-and-email`), `from_name`, `reply_to` and `subject_prefix`.                                                                                                                                                    |
+| `report.output_dir` | Where the PDF report and the coverage HTML are written, relative to the project root. Default `reports`.                                                                                                                                                              |
+
+```yaml title="lex_test_config.yaml"
+tests_entrypoint: tests
+groups:
+  - name: invoices
+    description: Invoice creation and posting
+  - name: year_end
+    description: The year-end rollover
+receivers: []
+report:
+  output_dir: reports
+```
 
 > [!note]
 > `--report` (and `--report-and-email`) require coverage data. If coverage cannot be collected, the command stops with an error instead of producing a report with missing coverage.
