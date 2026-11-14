@@ -99,13 +99,8 @@ We recommend using [PyCharm](https://www.jetbrains.com/pycharm/) as your primary
 1. Open PyCharm → **File → Open** → select your TeamBudget folder
 2. When prompted, set the Python interpreter to the `python` inside your `.venv`
 
-You'll see the run configurations appear in the top-right dropdown:
-
-> [!example]- 🎬 Video — The run configurations `lex setup` generates
-> <video controls width="100%">
->   <source src="../../videos/pycharm-configs.mp4" type="video/mp4">
-> </video>
-> Opening the dropdown in the top-right toolbar and picking a configuration.
+You'll see the run configurations appear in the top-right dropdown. Pick one there and
+click ▶️ to run it.
 
 This tutorial uses five of the eleven:
 

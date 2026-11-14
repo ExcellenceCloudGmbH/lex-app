@@ -87,6 +87,40 @@ def report() -> rx.Component:
 
 Every page requires sign-in, whether or not it says so; `rxe.page` is Reflex Enterprise's `rx.page`, which also lets a page narrow who may see it. [[access-and-dashboards/reflex/sessions and authentication|Sessions & Authentication]] covers both.
 
+## Framed by Lex App
+
+Lex App's **Reflex** sidebar entry opens the dashboards at `/?lex_embed=1`. Two query parameters decide what the page draws around your dashboard, and a frame of your own can send either:
+
+| Parameter | Effect |
+|---|---|
+| `lex_embed` | `1`, `true`, `yes` or `on`: the page is framed, and leaves out the signed-in user and **Sign out** |
+| `is_logout_enabled` | `0`, `false`, `no`, `n` or `off`: the page keeps the user's name but drops **Sign out** |
+
+Your own components can follow the same URL through `LexDashboardState`, which `lex.lex_app.reflex` exports:
+
+| Var | Holds |
+|---|---|
+| `LexDashboardState.embedded` | `True` when `lex_embed` says the page is framed |
+| `LexDashboardState.logout_enabled` | `False` only when `is_logout_enabled` turns sign-out off |
+| `LexDashboardState.view` | What `/` shows: `"structure"` (your `main()`), `"record"`, `"table"`, or `"missing_model"`, `"missing_record"`, `"unsupported_record"`, `"unsupported_table"`; `""` while it is still deciding |
+| `LexDashboardState.model` | The model the URL names, as its lowercase name |
+| `LexDashboardState.pk` | The primary key the URL names |
+
+```python title="_reflex_structure.py"
+import reflex as rx
+
+from lex.lex_app.reflex import LexDashboardState
+
+
+def main() -> rx.Component:
+    return rx.vstack(
+        rx.cond(LexDashboardState.embedded, rx.fragment(), rx.heading("Northwind Analytics")),
+        rx.text("The dashboard itself."),
+    )
+```
+
+`embedded` and `logout_enabled` only restate the URL, and are public. `view`, `model` and `pk` are set once the viewer has signed in, like any other state.
+
 ## Start from one that works
 
 `lex/lex_app/reflex/examples/_reflex_structure.py` in your installed copy of lex-app is a complete, maintained example: an overview of every model in the project and how many rows it holds, read through `run_orm`; the Keycloak resources the viewer holds a permission on; the viewer's name; and a second page with a **Sign out** button. Copy it to `<your_repo>/_reflex_structure.py` and delete what you do not need.

@@ -47,6 +47,10 @@ A hands-on, step-by-step series that walks you through every aspect of convertin
 > [!tip]
 > Start with Part 1 and work through in order. Each part builds on the previous one and includes side-by-side comparisons of old vs. new code.
 
+## Moving the Data
+
+The refactoring changes the code. [[migrating-from-v1/migrating the database|Migrating the Database]] moves a V1 database to the new schema with `lex full_migration_workflow` — the steps it runs, its flags, dry runs and rollback.
+
 ## Reference
 
 - [[migrating-from-v1/import migration|Import Migration]] — systematic import update walkthrough

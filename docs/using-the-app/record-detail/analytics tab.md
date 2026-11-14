@@ -33,7 +33,7 @@ Lex App supports two kinds of dashboards, and the Analytics tab handles both:
 
 | Dashboard Type | What It Shows | Where It Appears |
 |---|---|---|
-| **Table-level** | Overview metrics for the entire model (all records) | [[using-the-app/the-grid/index\|The Grid]] toolbar or sidebar |
+| **Table-level** | Overview metrics for the entire model (all records) | The **Analytics** button in [[using-the-app/the-grid/index#The Toolbar\|the grid's toolbar]], which then reads **Back to Records** |
 | **Record-level** | Deep-dive analytics for a single specific record | **Analytics Tab** on the record detail page |
 
 The distinction is automatic: when the dashboard receives a record ID (`pk`), it shows record-level analytics. Without one, it shows the table-level overview.
@@ -73,6 +73,17 @@ If the Streamlit server isn't running or is unreachable, the Analytics tab shows
 > `[Retry Connection]`
 
 Click **Retry Connection** to check again. This ensures you're never stuck — the rest of the record detail (Summary, Timeline, History, Audit Log) works independently of the analytics server.
+
+## Other Messages
+
+While the dashboard loads, the tab says *Authenticating...* and then *Connecting to
+Analytics Server...*. When something stops it, it says what:
+
+| Message | What it means | What to do |
+|---|---|---|
+| **Session expired** — *Your dashboard session could not be renewed automatically.* | Your sign-in for the dashboard ran out and renewing it failed more than once | Click **Sign in again**, or **Reload dashboard** — whichever button the message shows |
+| **Authentication Failed** | The dashboard couldn't be signed in | Reload the page |
+| **Analytics not configured** — *No Streamlit URL is configured for this deployment (REACT_APP_STREAMLIT_URL).* | The application was deployed without a dashboard address | Ask whoever runs your instance; reloading won't help |
 
 ## Seamless Authentication
 

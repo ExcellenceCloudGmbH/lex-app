@@ -9,14 +9,16 @@ What a Lex App installation runs, and what each process needs. How you schedule 
 | Process | Command | Needed when |
 |---|---|---|
 | **Web** | `lex start --loop asyncio --host 0.0.0.0 --port 8000 lex_app.asgi:application` | Always |
-| **Celery workers** | `lex celery-workers --count N` | The application has calculations that dispatch asynchronously |
+| **Celery workers** | `lex celery-workers N` | The application has calculations that dispatch asynchronously |
 | **Streamlit** | `lex streamlit` | The application has dashboards |
 | **Reflex** | `lex reflex run --env prod` | The application has [[access-and-dashboards/reflex/index\|Reflex dashboards]] — see [[access-and-dashboards/reflex/running and deploying\|Running & Deploying]] for what production mode needs |
-| **Recovery supervisor** | `lex-recovery-supervisor` | Long-running calculations that must survive a worker dying |
-| **Recovery beat** | `lex-recovery-beat` | Alongside the supervisor |
+| **Recovery supervisor** | `lex-recovery-supervisor` | Long-running calculations that must survive a worker dying. Needs `CELERY_ACTIVE=true` and `LEX_TASK_RECOVERY_ENABLED=true`, on it and on the workers |
+| **Recovery beat** | `lex-recovery-beat` | Instead of the supervisor, not beside it: the same sweep, scheduled by an embedded Celery beat. One of the two is enough — see [[calculations/celery and async calculations#Running the recovery driver\|Running the recovery driver]] |
 | **Flower** | `lex flower` | Optional; a web view of the Celery queues |
 
 Drop `--reload` for anything that is not a developer's laptop.
+
+`lex celery-workers N` starts `N` worker processes, each running one task at a time. Arguments after the count go to every worker, and when one worker exits, the others are stopped too.
 
 Keep `lex_app.asgi:application` the **last** argument of the web command. The web process loads initial data and starts the [[calculations/scheduled jobs|scheduled-jobs]] clock only when it is; with flags after it, neither happens. There is no separate scheduler process to deploy. `lex run_scheduler` exists for setups that need one.
 
@@ -24,11 +26,11 @@ Keep `lex_app.asgi:application` the **last** argument of the web command. The we
 
 ## Migrations at deploy time
 
-`lex_migrate` runs `makemigrations`, then `migrate`, then `createcachetable`. Generating migrations at deploy time is deliberate: an application's models live in its own repository, and a framework upgrade can require a migration in *your* app that nobody wrote by hand.
+`lex lex_migrate` runs `makemigrations`, then — when anything is left to apply — `migrate` and `createcachetable`. Generating migrations at deploy time is deliberate: an application's models live in its own repository, and a framework upgrade can require a migration in *your* app that nobody wrote by hand.
 
 ```bash
-lex_migrate                     # makemigrations + migrate + createcachetable
-lex_migrate --no-makemigrations # only migrate + createcachetable
+lex lex_migrate                     # makemigrations + migrate + createcachetable
+lex lex_migrate --no-makemigrations # only migrate + createcachetable
 ```
 
 > [!warning] `--no-makemigrations` is not a safe default
@@ -38,19 +40,29 @@ lex_migrate --no-makemigrations # only migrate + createcachetable
 > first row that needs the extra width. [[ship-and-operate/upgrading|Upgrading]]
 > has a worked example of exactly this.
 
+> [!warning] Read the output, not the exit code
+> `lex lex_migrate` catches every error, prints `✗ Migration failed: …` and
+> `✗ Migration step failed. See logs for details.`, and exits `0`. `lex create_db`
+> does the same with an `Operational Error`. A deploy script that checks `$?` —
+> or a container command such as `lex lex_migrate && lex start …` — carries on
+> after a failed migration. Look for `✓ Migration step completed successfully.`
+> (`lex init`, by contrast, stops with an error.)
+
 ## Startup probes
 
-The web process runs migrations and registers every model before it answers. On a large database that is minutes, not seconds.
+The web process runs no migrations. Before it answers, `lex start` runs `collectstatic` (on a deployed instance) and then uvicorn, which sets Django up and registers every model; the initial-data load and the scheduled-jobs clock run in the background and do not hold it up. Migrations run wherever your deployment runs `lex lex_migrate` or `lex init` — and when that is the same pod, before `lex start`, the pod cannot answer until they have finished. On a large database that is minutes, not seconds.
 
-Size the **startup** probe against the slowest migration you expect, not against a healthy boot. A startup probe that expires mid-migration kills the pod, the next one starts the same migration from the beginning, and the deployment fails in a way that reads like a crash loop rather than a timeout. Measured on one instance: a 340-second migration against a 600-second budget — comfortable until the database grew.
+Size the **startup** probe against everything that runs before the web process answers — with migrations in the pod, the slowest migration you expect — not against a healthy boot. A startup probe that expires mid-migration kills the pod, the next one starts the same migration from the beginning, and the deployment fails in a way that reads like a crash loop rather than a timeout. Measured on one instance: a 340-second migration against a 600-second budget — comfortable until the database grew.
 
 Liveness and readiness are a different question and can be tight; see [[ship-and-operate/monitoring and health|Monitoring & health]].
 
 ## The interface
 
-The web interface is a built bundle vendored into the `lex-app` package, and a hosted installation serves it from a **separate pod**. That has one consequence worth internalising:
+The web interface is a separate Python package, `lex-app-frontend`, built from its own repository. Each `lex-app` release pins the interface it ships with — 2.5.0 requires `lex-app-frontend~=2.3.0` — so installing `lex-app` installs that interface too, and `lex start` serves it; `pip show lex-app-frontend` says which one an environment has. With neither the package nor a bundle from a source checkout, the web process prints `No frontend bundle found…` on stderr as it boots, and every page answers `404`.
 
-**Upgrading `lex-app` does not upgrade the interface.** The two are versioned and deployed independently, and an older interface serving a newer backend is a supported, common state. A feature that spans both — a new control that calls a new endpoint — arrives only when both sides have moved.
+A hosted installation serves the interface from a **separate pod** instead — the interface's own image, on the version the platform deploys. That has one consequence worth internalising:
+
+**Upgrading `lex-app` does not upgrade the interface there.** The two are versioned and deployed independently, and an older interface serving a newer backend is a supported, common state. A feature that spans both — a new control that calls a new endpoint — arrives only when both sides have moved.
 
 ```mermaid
 flowchart TB
@@ -75,10 +87,15 @@ can ship its own Vite app in a folder of its repository, built and released with
 the backend, and an instance can serve that instead, on the same host and
 against the same API. See [[ship-and-operate/custom frontend|Custom frontend]].
 
+An interface on a host of its own, rather than the instance's, is named to the
+dashboards with `REACT_APP_URL` or `LEX_FRONTEND_URL`; see
+[[reference/Environment Variables#Streamlit|Environment Variables]].
+
 ## Live updates and sign-in
 
 The live channels — `ws/calculations`, `ws/calculation_status_update`, `ws/calculation_logs/…`,
-`ws/model_data_update` and `ws/logs` — carry calculation results, log lines and record changes.
+`ws/model_data_update` and `ws/logs` — carry calculation results, log lines and record changes;
+[[reference/REST API#WebSockets|REST API → WebSockets]] has what each one sends.
 From 2.5 they can be limited to signed-in users, with `LEX_WS_AUTH`:
 
 | Value | A socket without a sign-in |
@@ -89,6 +106,10 @@ From 2.5 they can be limited to signed-in users, with `LEX_WS_AUTH`:
 
 Roll it out in two steps. Deploy with the default `log`, and watch for `would be closed with`
 lines. When they show only what you expect, set `LEX_WS_AUTH=enforce`.
+
+A socket is signed in by the browser's session cookie and nothing else. An API key or a bearer
+token does not sign a socket in, so under `enforce` a script that connects with one is closed
+with `4401`.
 
 Under `log` the check never breaks a socket: when it cannot be made — the database connection
 dropped, say — the socket is served and the log says so; under `enforce` that is `4503`. A

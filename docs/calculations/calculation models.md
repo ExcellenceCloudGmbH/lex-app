@@ -37,7 +37,7 @@ stateDiagram-v2
     NOT_CALCULATED --> IN_PROGRESS : User clicks "Calculate" (or the record was just created, with calculate_on_create)
     IN_PROGRESS --> SUCCESS : Completed without errors
     IN_PROGRESS --> ERROR : Exception occurred
-    IN_PROGRESS --> CANCELLED : User cancels
+    IN_PROGRESS --> CANCELLED : Run cancelled
     IN_PROGRESS --> ABORTED : Framework recovers stuck run
     ERROR --> IN_PROGRESS : Retry
     SUCCESS --> IN_PROGRESS : Recalculate
@@ -51,10 +51,10 @@ stateDiagram-v2
 | `IN_PROGRESS` | Calculation is currently running |
 | `SUCCESS` | Completed without errors |
 | `ERROR` | An exception occurred (details stored in `calculation_error_message`) |
-| `CANCELLED` | A user stopped a running calculation |
+| `CANCELLED` | A running calculation was stopped |
 | `ABORTED` | The framework recovered a calculation that got stuck in progress |
 
-If you're using Celery workers, cancelling is immediate: the framework revokes the running worker task and marks the record as `CANCELLED`. `ABORTED` is different — it's used when the framework finds an old `IN_PROGRESS` row that never finished cleanly, for example after a worker or app process died. Those terminal status updates are saved as normal model changes, so they show up in History/Timeline just like in-process runs.
+If you're using Celery workers, cancelling is immediate: the framework revokes the running worker task and marks the record as `CANCELLED`. The interface has no cancel control: cancel from code with `CalculationModel.cancel(record)`, or over REST with a `PATCH` of the record whose body is `{"cancel": true}`. A calculation running in-process can't be cancelled from outside. See [[reference/CalculationModel Internals#Cancelling a Running Calculation|Cancelling a Running Calculation]]. `ABORTED` is different — it's used when the framework finds an old `IN_PROGRESS` row that never finished cleanly, for example after a worker or app process died. Those terminal status updates are saved as normal model changes, so they show up in History/Timeline just like in-process runs.
 
 ## Closing a Record
 
@@ -104,9 +104,10 @@ You don't need to define or manage any of the following — they're inherited fr
   model's `calculation_error_message` (or `error_message`) field **if you declare
   one**, and `is_calculated` becomes `ERROR` either way. `CalculationModel` adds
   only `is_calculated`; without a message field the detail is in the logs alone
-- **Auto-save** — the record is saved automatically after `calculate()` returns
+- **Auto-save** — the record is saved automatically after `calculate()` returns. The one exception is a `calculate()` decorated with `@lex_shared_task` that runs on Celery: it must call `self.save()` itself. See [[reference/CalculationModel Internals#Saving the Result|Saving the Result]]
+- **Rollback** — in-process, `calculate()` runs inside a database transaction (unless the model sets `is_atomic = False`), so a failure undoes what it wrote. On Celery there is no transaction. See [[reference/CalculationModel Internals#Atomic vs Non-Atomic|Atomic vs Non-Atomic]]
 - **Non-blocking trigger** — clicking **Calculate** returns the record in `IN_PROGRESS`, then the UI updates again when the run finishes. With [[#Calculating New Records Automatically|calculate_on_create]], creating a record does the same
-- **Cancellation handling** — running Celery-backed calculations can be stopped cleanly from the UI/API
+- **Cancellation handling** — running Celery-backed calculations can be stopped cleanly from code or over the REST API (the interface has no cancel control)
 - **[[calculations/celery and async calculations|Celery support]]** — dispatch to [Celery](https://docs.celeryq.dev/) workers for parallel execution
 - **System-save attribution** — any records you save inside `calculate()` won't have their `edited_by` / `edited_at` stamped with the triggering user; those saves are treated as system-triggered, not direct user edits
 
@@ -133,6 +134,8 @@ You don't need to define or manage any of the following — they're inherited fr
 > 5. On success: sets `is_calculated = SUCCESS` and saves
 > 6. On cancellation: sets `is_calculated = CANCELLED`
 > 7. On other exceptions: sets `is_calculated = ERROR`, writes the traceback to `calculation_error_message` if your model has one, and saves
+>
+> That is the in-process route, where step 4 runs inside `transaction.atomic()` unless `is_atomic = False`. On Celery, a worker runs `calculate()` and its task callbacks write the terminal state; see [[reference/CalculationModel Internals#Saving the Result|Saving the Result]].
 >
 > You never need to manage this yourself.
 

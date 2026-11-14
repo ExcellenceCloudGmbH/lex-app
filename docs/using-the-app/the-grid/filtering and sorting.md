@@ -26,7 +26,7 @@ Every column header has a built-in filter. Click the menu icon on any column to 
 
 A value list applies as you pick: each value shows as a tag with its own **×**, and picking a value, removing a tag, or clearing them all refreshes the table at once — the list stays open the whole time. A condition waits for **Apply**: type it, then click **Apply** (or press Enter) and the table refreshes — nothing reloads while you're still typing. **Reset** clears it. The date-and-time filter needs no Apply either: it applies as soon as you pick a date, and has its own **Clear Filter** button.
 
-The **Filters** tab on the grid's right edge holds the same filters, column by column, so you can set several without opening each column's menu.
+The **Filters** tab on the grid's right edge holds the same filters, column by column, so you can set several without opening each column's menu. The **Columns** tab beside it shows and hides columns — see [[using-the-app/the-grid/index#Columns, Copying and Pasting|Columns, Copying and Pasting]].
 
 ### Text Filters
 
@@ -94,12 +94,8 @@ The sort indicators show the priority number next to each sorted column header.
 
 ## Combining Filters
 
-Filters stack. Apply a date filter, then a category filter, then sort by amount — each filter narrows the dataset further. The grid shows the total visible row count in the status bar, so you always know how much data you're looking at.
+Filters stack. Apply a date filter, then a category filter, then sort by amount — each filter narrows the dataset further. The bar at the bottom of the grid shows how many rows match — *1 to 5 of 5*, for example — so you always know how much data you're looking at.
 
 This is especially powerful with [[using-the-app/the-grid/saved views|saved views]]: set up a complex filter combination once, save it, and switch to it instantly whenever you need it.
 
-> [!example]- 🎬 Video — Building a multi-filter view
-> <video controls width="100%">
->   <source src="../../videos/grid-multi-filter.mp4" type="video/mp4">
-> </video>
-> Build up a view step by step: apply a date range, then category filter, then sort by amount.
+If your filters leave nothing, the grid says *No rows match the current filters*, with a **Clear filters** button that removes them all.

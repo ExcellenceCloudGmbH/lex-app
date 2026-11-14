@@ -27,6 +27,34 @@ class UserContext:
 within one access-token lifetime (5 minutes), without signing in again. See
 [[access-and-dashboards/sign-in and sessions#Roles and permission changes|Roles and permission changes]].
 
+### Callers with an API key
+
+A script that sends an [[access-and-dashboards/sign-in and sessions#API keys|API key]] instead of signing in gets a
+`UserContext` of its own: `client_roles` is exactly `{"api_key"}`, `groups` is empty, `is_superuser` is `False`,
+`email` is empty, and `user` is a stand-in named after the key, not a Django user. `keycloak_scopes` holds all six
+[scopes](#access-scopes) when one record is asked about — a create, an edit, a delete, a record read by its id — but
+is empty when a list judges its rows: there each row's scopes come from the caller's Keycloak UMA permissions, and a
+key has none. So:
+
+- the default methods let a key create, edit, delete and read a record it names, but a list of a model that keeps the
+  default `permission_read` comes back empty for it, and so does everything built on that list —
+  [[reference/REST API#API keys|REST API]] has which;
+- a method that grants by group, by superuser or by email grants a key nothing;
+- a create or a single delete that a method refuses answers a key `401 not_authenticated`, not `403`: a key is not a
+  signed-in user.
+
+To let keys list a model, or to treat them differently anywhere, test the role:
+
+```python
+def permission_read(self, user_context: UserContext) -> PermissionResult:
+    if user_context.client_roles == {"api_key"}:
+        return PermissionResult.allow_all()
+    return self.keycloak_fallback(user_context, "read")
+```
+
+An overridden `permission_read` is asked row by row, where the default filters the list in the database, so keep it
+cheap.
+
 ## Basic Example
 
 ```python title="MyModel.py"
@@ -81,17 +109,65 @@ class MyModel(LexModel):
 
 ### Built-in Helpers
 
-For common patterns, `LexModel` provides ready-made helpers you can call directly from a permission method instead of building a `PermissionResult` by hand:
+For common patterns, `LexModel` provides ready-made helpers you can call directly from a permission method instead of building a `PermissionResult` by hand. Each takes the `user_context` first and — all but `keycloak_fallback` — an optional `reason=`:
 
-| Helper                          | What It Does                                                                 |
-| ------------------------------- | ---------------------------------------------------------------------------- |
-| `allow_all_if_superuser`        | Grant full access when `user_context.is_superuser` is true                   |
-| `allow_all_if_in_groups`        | Grant full access when the user is in any of the given groups                |
-| `allow_fields_if_owner`         | Grant a field subset when the user owns the record (configurable owner field) |
-| `keycloak_fallback`             | Defer to a [Keycloak](https://www.keycloak.org/documentation) scope check    |
-| `allow_all_except_sensitive`    | Allow everything except a configured set of sensitive fields                 |
+| Helper | What it returns |
+| --- | --- |
+| `allow_all_if_superuser(user_context)` | `allow_all()` for a superuser, else `None` |
+| `allow_all_if_in_groups(user_context, groups)` | `allow_all()` when the user is in any of `groups` (one name or a set), else `None` |
+| `allow_fields_if_owner(user_context, owner_field="owner", fields=None, excluded_fields=None)` | For the record's owner: `allow_fields(fields)` when `fields` is given, else `allow_all_except(excluded_fields)` when that is, else `allow_all()`. `None` for anyone else |
+| `keycloak_fallback(user_context, scope)` | `allow_all()` when `scope` is in `user_context.keycloak_scopes`, else `deny()` — a [Keycloak](https://www.keycloak.org/documentation) scope check |
+| `allow_all_except_sensitive(user_context, sensitive_fields=None)` | `allow_all_except(sensitive_fields)`; left out, `{"password", "social_security", "ssn", "credit_card", "bank_account"}` |
+| `allow_public_fields(user_context)` | `allow_fields({"id", "name", "title", "description", "created_at", "edited_at", "updated_at"})` |
+| `allow_basic_fields(user_context)` | `allow_fields({"id", "name", "email", "created_at"})` |
+
+The first three answer `None` when they do not apply, so chain them with `or` and end on one that always answers:
+
+```python
+def permission_read(self, user_context: UserContext) -> PermissionResult:
+    return (
+        self.allow_all_if_superuser(user_context)
+        or self.allow_fields_if_owner(user_context, fields={"name", "amount", "status"})
+        or self.keycloak_fallback(user_context, "read")
+    )
+```
+
+The last three never look at the user: they choose the fields, and grant them to whoever is asking.
+
+`allow_fields_if_owner` compares the owner field with `user_context.user`, the signed-in Django user, so the field has
+to be a foreign key to the user model: `owner = models.ForeignKey(settings.AUTH_USER_MODEL, …)`, which is the name it
+looks for unless you pass `owner_field=`. `created_by` will not do: Lex App fills it with the user's name as text,
+which never equals a user, so the helper never grants. An API-key caller owns nothing.
 
 See [[reference/LexModel Internals]] for the full signatures and parameter lists.
+
+## Which record a method sees
+
+`self` is not always a saved row. Questions about the model as a whole are asked on a blank record, `Model()`, whose
+fields hold their defaults and whose foreign keys are empty:
+
+| Method | Asked on |
+| --- | --- |
+| `permission_read`, `permission_edit`, `permission_export`, `permission_delete` | The record in question |
+| `permission_create` | A blank record first: may this caller create one at all? Then, before anything is saved, the record filled from the request — foreign keys set, many-to-many not, `pre_validation` not run yet |
+| `permission_list` | A blank record |
+| `permission_read`, for the fields a list may be filtered or ordered by | A blank record: fields it withholds there cannot be filtered on; a denial there limits nothing |
+
+The second `permission_create` is the `CREATE` security switch, on by default like all of them. A refusal at either
+check answers 401 or 403, as above, and nothing is stored. The interface asks the blank-record questions too: whether
+it offers **Create** comes from `permission_create` on a blank record, and whether it offers bulk delete from
+`permission_delete`.
+
+So a `permission_create` that reads field values sees empty ones first. One that refuses on an empty value refuses
+everyone — **Create** is greyed out and every create is refused — before any value arrives. Let the blank record
+through and decide on the filled one:
+
+```python
+def permission_create(self, user_context: UserContext) -> bool:
+    if self.fund_id is None:  # the blank record: may this user create any?
+        return "create" in user_context.keycloak_scopes
+    return self.fund.manager_email == user_context.email  # the filled one: for this fund?
+```
 
 ## Real-World Examples
 
@@ -125,8 +201,13 @@ class ExpenseReport(LexModel):
             return PermissionResult.allow_all()
         if self.employee_email == user_context.email:
             return PermissionResult.allow_all()
-        return PermissionResult.allow_fields(set())  # row hidden
+        return PermissionResult.deny()  # row hidden
 ```
+
+`deny()` is what hides a row: the list leaves it out, and asking for it by id answers `404`.
+`allow_fields(set())` looks similar and is not — it admits the row with no fields. The row is still counted in the
+table's row count, but its empty entry is dropped from the page (so a page can come up a row short) and the value
+lists skip it; its detail answers `200 {}`.
 
 ## Keycloak Integration
 
@@ -184,7 +265,7 @@ sequenceDiagram
 
 The `SessionAuthGate` component handles this transparently — including redirect-loop protection, automatic retries, and a clear unauthorized page for users without assigned roles.
 
-For non-browser clients (for example scripts, integrations, or dashboards calling the API directly), you can authenticate with an `Authorization: Bearer <access token>` header. Lex App will resolve roles and scopes from that token even when there is no browser session. Only access tokens are accepted; an ID token is refused.
+For non-browser clients (for example scripts, integrations, or dashboards calling the API directly), you can authenticate with an `Authorization: Bearer <access token>` header. Lex App will resolve roles and scopes from that token even when there is no browser session. Only access tokens are accepted; an ID token is refused. A script with no Keycloak user of its own can send an [[access-and-dashboards/sign-in and sessions#API keys|API key]] instead; how permission methods see it is under [Callers with an API key](#callers-with-an-api-key).
 
 For the embedded Quackback feedback widget, Lex App exposes `POST /api/quackback-widget-token` for logged-in users. It returns a short-lived (5-minute) `ssoToken` carrying the user's id, email, and name, signed with `QUACKBACK_WIDGET_SECRET`, so the widget can identify the user without a second login. The frontend wires this up automatically — you only need to set the secret.
 
@@ -208,7 +289,7 @@ These scopes are synced to Keycloak when you run `lex init`, enabling centralize
 Permissions are enforced at every layer:
 
 - **Grid cells** — fields the user can't read are hidden; fields they can't edit are read-only
-- **Action buttons** — the Create and Delete buttons are hidden if the user doesn't have those permissions
+- **Action buttons** — **Create**, and each row's **Edit** and **Delete**, stay on screen but are greyed out when the user may not use them; hovering **Create** says why. Bulk delete of selected rows is offered only to users who may delete
 - **Inline editing** — attempting to edit a restricted field shows it as disabled
 - **Exports** — restricted fields are excluded from exported files
 

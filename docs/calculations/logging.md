@@ -25,7 +25,7 @@ def calculate(self):
 ```
 
 > [!warning]
-> Always call `.log()` at the end of your chain. Without it, nothing is written to the database.
+> Always call `.log()` at the end of your chain. Until you do, nothing is written — and the lines are not dropped either. `LexLogger()` returns the same logger everywhere in a process, so lines left in it go out with the next `.log()`, in whichever log that is. Build each entry in one chain that ends with `.log()`; see [[reference/LexLogger API#One Logger per Process|One Logger per Process]].
 
 ## Tables and DataFrames
 
@@ -68,9 +68,36 @@ LexLogger().add_text("Current Configuration:") \
            .log()
 ```
 
+## Lists, Quotes, Links and Raw Markdown
+
+```python
+LexLogger().add_heading("Checks", level=2) \
+           .add_list(["Schemas OK", "No missing funds"]) \
+           .add_list(["Load", "Validate", "Aggregate"], ordered=True) \
+           .add_quote("Figures are preliminary until sign-off.") \
+           .add_link("Fund handbook", "https://example.com/handbook") \
+           .add_horizontal_rule() \
+           .add_raw_markdown("**Done.** All checks passed.") \
+           .log()
+```
+
+`add_list()` writes one bullet per item; `ordered=True` numbers them instead. `add_raw_markdown()` takes any Markdown the other methods don't cover. The full list is in the [[reference/LexLogger API|LexLogger API reference]].
+
 ## Context-Aware Logging
 
 LexLogger automatically resolves the current execution context. You don't need to pass IDs manually — it figures out which calculation is running and which model instance is executing.
+
+## When the Log Is Stored
+
+`.log()` sends each entry two ways: to the live stream the interface shows while the run is going, and to the `CalculationLog` table that the finished log is read from. When an entry reaches the table depends on where `.log()` is called. Runs the app starts — the Calculate button, `calculate_on_create`, a scheduled job — always have a calculation in the context; code you run yourself may not:
+
+| Where `.log()` is called | What happens to the entry |
+|---|---|
+| With no calculation in the context: in `lex shell`, a script or a management command, including a calculation such code starts by saving a record as `IN_PROGRESS` | Nothing is stored |
+| Inside a database transaction: an in-process calculation, unless the model sets `is_atomic = False` | Stored when the transaction commits, at the end of a successful run |
+| Outside a transaction: a model with `is_atomic = False`, or a run on a Celery worker | Stored straight away |
+
+When an in-process run inside a transaction fails, its entries go with the rollback. The framework then stores the text the live stream showed as one entry on the root record: the same lines, but flat, without the sections and child nodes they had.
 
 ## Nested Calculations
 
@@ -198,7 +225,8 @@ For the complete method list, see the [[reference/LexLogger API|LexLogger API re
 
 LexLogger output is rendered in the frontend in real-time:
 
-- **Calculation Log Panel** — a slide-out drawer during calculation showing live Markdown-rendered output as the calculation progresses, including background calculations after an initial HTTP `202` response
+- **The log popup** — the log icon next to a row's status opens the log of the run the row last started, in a popup. While the run is going it streams the output live; once the run has ended it shows the log tree below. A failed run opens on its traceback, with the log a tab away. See [[using-the-app/the-grid/calculations|Running a calculation]]
+- **The log tree** — the finished log of a calculation: its execution tree beside the consolidated log, with **Log** and **Details** tabs and a *Copy full log* button
 - **Execution tree** — the left pane lists every node — model instances *and* the string sections above — so you can click straight to the part of the log you care about
 - **Collapsible sections** — in the consolidated log, any section can be folded away; collapsing a heading hides its whole sub-tree, so you can focus on one phase of a long run at a time
 - **PDF Export** — the calculation log can be exported as a PDF that renders just like the on-screen view: headings, tables, fenced code blocks and even strikethrough survive the export, which makes it usable as compliance evidence. You choose how much goes into it — one step, a step and everything under it, or the whole calculation (see [[#Downloading the log as PDF]] below)

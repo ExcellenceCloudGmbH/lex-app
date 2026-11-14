@@ -42,8 +42,10 @@ flowchart TD
 Not every installation runs all of them. An application with no calculations needs no workers; one with no dashboards needs no Streamlit or Reflex process.
 
 > [!important] The interface is a separate deployment
-> The web interface ships as a built bundle inside the `lex-app` package, but
-> in a hosted installation the frontend and backend run as **separate pods**.
-> An older interface can serve a newer backend perfectly well — which means a
-> feature that is half interface and half backend does not arrive just because
-> you upgraded `lex-app`. See [[ship-and-operate/upgrading|Upgrading]].
+> The web interface is a package of its own, `lex-app-frontend`, which every
+> `lex-app` release pins — 2.5.0 installs 2.3.x — and the web process serves.
+> In a hosted installation, though, the frontend and backend run as **separate
+> pods**, each on its own version. An older interface can serve a newer backend
+> perfectly well — which means a feature that is half interface and half
+> backend does not arrive just because you upgraded `lex-app`. See
+> [[ship-and-operate/upgrading#The interface upgrades separately|Upgrading]].

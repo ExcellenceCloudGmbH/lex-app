@@ -25,7 +25,7 @@ flowchart LR
 Field-level and row-level access control, integrated with [Keycloak](https://www.keycloak.org/documentation). Define `permission_read()`, `permission_edit()`, and `permission_delete()` methods directly on your model — the framework enforces them on every API request and frontend interaction.
 
 ### [[access-and-dashboards/sign-in and sessions|Sign-in & Sessions]]
-How long a user stays signed in (weeks, as long as Keycloak's session lives), what ends a sign-in and what never does, what a frontend or script sees (401, 403, 503), and the commands that keep it tidy.
+How long a user stays signed in (weeks, as long as Keycloak's session lives), what ends a sign-in and what never does, what a frontend or script sees (401, 403, 503), API keys for scripts with no sign-in, and the commands that keep it tidy.
 
 ### [[access-and-dashboards/streamlit/index|Streamlit Dashboards]]
 Interactive [Streamlit](https://docs.streamlit.io/) dashboards, in both directions: Lex App shows your dashboard, and your dashboard embeds Lex App's own pages and controls. A section of its own, in reading order:
@@ -38,7 +38,7 @@ Interactive [Streamlit](https://docs.streamlit.io/) dashboards, in both directio
 | [[access-and-dashboards/streamlit/embedding app controls\|Embedding App Controls]] | `lex_widgets()` — the real Calculate button, its status and its live log |
 | [[access-and-dashboards/streamlit/sessions and authentication\|Sessions & Authentication]] | Who the dashboard runs as, and what to configure before deploying |
 
-There is a [complete project](https://github.com/ExcellenceCloudGmbH/DemoNorthwindAnalytics) you can clone and run that demonstrates every one of them.
+There is a [complete project](https://github.com/ExcellenceCloudGmbH/DemoNorthwindAnalytics) you can clone and run that shows the first four at work.
 
 ### [[access-and-dashboards/reflex/index|Reflex Dashboards]]
 Dashboards written in [Reflex](https://reflex.dev/docs/) — Python compiled to a React app — beside or instead of Streamlit, with the same place in Lex App: the same `?model=&pk=` links, the Django ORM, and sign-in against the same Keycloak through [Reflex Enterprise](https://reflex.dev/docs/enterprise/auth/overview/), with no proxy in front. A section of its own, in reading order:

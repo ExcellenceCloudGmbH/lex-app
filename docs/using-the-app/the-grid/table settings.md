@@ -6,27 +6,32 @@ aliases:
 
 Every table has a **gear** beside it. What's behind it is the set of choices that are
 yours rather than the application's — which columns stay pinned,
-how a number is formatted. Lex App remembers them for you, on that table, and they follow
-you from one visit to the next.
+how a number is formatted. Lex App remembers them in your browser, for that table, from
+one visit to the next.
 
 ## Opening it
 
-Click the gear in the table's toolbar. The panel says *Saved for you on this table*, which
-is exactly what it does: your choices apply to this model's table and nobody else's
-account.
+Click the gear (**Settings**) in the table's toolbar. The panel is titled **Table
+settings** and says *Saved for you on this table*. "For you" means this browser: the
+choices are stored in it, for this table only. Another browser or another computer
+starts from the defaults, and anyone who uses the same browser profile sees your
+choices.
 
-![The table settings panel — every change applies immediately, which is why there is no Save button](images/the-grid/table-settings.svg)
+![The table settings panel — display, column and format changes are kept the moment you make them; density is kept with the view](images/the-grid/table-settings.svg)
 
 > [!tip] There is no Save button, and that's deliberate
-> Changes take effect and are stored the moment you make them. Earlier versions kept these
-> choices in the [[using-the-app/the-grid/saved views|view]], which meant they needed an
-> explicit save — and views like `default` are read-only, so in practice the settings
-> could never stick at all. Keeping look-and-feel separate from view data is what lets
-> shared views stay protected while your own preferences survive a reload.
+> Display, column and format changes take effect and are stored the moment you make
+> them. Earlier versions kept these choices in the
+> [[using-the-app/the-grid/saved views|view]], which meant they needed an explicit save —
+> and views like `default` are read-only, so in practice the settings could never stick
+> at all. Keeping look-and-feel separate from view data is what lets shared views stay
+> protected while your own preferences survive a reload. Density is the one exception:
+> it is still kept with the view.
 
 ## Density
 
-Three row heights — **Compact**, **Standard** and **Comfortable**. See
+Three row heights — **Compact**, **Standard** and **Comfortable**. **Compact** is the
+default. A density change belongs to the open view, so save the view to keep it. See
 [[using-the-app/the-grid/density and display|Density & Display]] for what each is good for.
 
 ## Display
@@ -70,8 +75,8 @@ Worth knowing, because it explains why some choices follow you and others follow
 
 | Choice | Stored | Consequence |
 |---|---|---|
-| Display and column toggles, column formats | Per user, per table | They follow you, on this table, and are not affected by which view you're in |
-| Density | With the [[using-the-app/the-grid/saved views\|view]] | A compact view for scanning and a comfortable one for review are two views you can switch between |
+| Display and column toggles, column formats | In this browser, per table | They stay on this table in this browser, whichever view is open. Another browser starts from the defaults |
+| Density | With the [[using-the-app/the-grid/saved views\|view]] | A compact view for scanning and a comfortable one for review are two views you can switch between. A density picked on a read-only system view is lost on reload |
 | Column format defaults | Declared by the application | The starting point for everyone, until a user overrides it |
 
 ## Selecting a range

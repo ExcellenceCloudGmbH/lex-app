@@ -7,7 +7,7 @@ aliases:
 
 `lex_view()` puts a real Lex App page — a table, a form, a record — inside a [Streamlit](https://docs.streamlit.io/) script.
 
-**Four pages of [Northwind Analytics](https://github.com/ExcellenceCloudGmbH/DemoNorthwindAnalytics) run everything below against real data:** _A route, embedded_, _Narrowing with a serializer_, _Reacting to events_ — which prints the live envelope beside the table — and _Chaining forms with Flow_.
+**Three pages of [Northwind Analytics](https://github.com/ExcellenceCloudGmbH/DemoNorthwindAnalytics) run `lex_view` against real data:** _The table_, _A narrower view_ — `serializer=` with the toolbar and actions hidden — and _Reacting to the table_, which shows the event `lex_view` returns. Flows have no page there; the examples below show them.
 
 ![lex_view embedding the application's own table inside a Streamlit page](images/streamlit/lex-view.png)
 
@@ -207,7 +207,9 @@ that quietly never happens.
 > dict like the first example is passed on as it is, and so is anything merged into a
 > `Flow` with `|=` — a delete rule written either way ships and is ignored.
 
-For the simpler single-hop case you don't need a flow table at all — `redirect_after`, `redirect_after_create`, and `redirect_after_update` each take a single route (with the same `{resource}` / `{id}` tokens).
+For the simpler single-hop case you don't need a flow table at all — `redirect_after`, `redirect_after_create`, and `redirect_after_update` each take a single route (with the same `{resource}` / `{id}` tokens), or `STAY`.
+
+When more than one applies to a save, a `flow` rule wins over `redirect_after_create` and `redirect_after_update`, and those win over `redirect_after`. With none of them, a save returns to the saved model's table.
 
 ### When the order matters
 
@@ -279,6 +281,17 @@ Flow().create("investor").create("vehicle").loop()   # cycle the pair forever
 place. `loop()` restarts from step one and **clears the bindings** on each pass,
 so a `ref` cannot reach back into the previous lap — an iteration is a fresh run.
 
+#### At run time
+
+- A sequence with no ending ends as `.table()` does: on the table of the last step
+  that names a resource.
+- A save that matches no step — the user opened another form inside the frame and
+  saved it — is not routed by the flow. It goes where it would without one:
+  `redirect_after…` if you set it, else the saved model's table.
+- Once its ending has been reached, a flow stays finished for the rest of the browser
+  tab's session, reloads included: a later save that matches a step does not start
+  it again. A flow with different steps is a new flow and starts fresh.
+
 > [!warning] The two forms cannot be mixed
 > Adding a step to a flow that already holds mapping rules raises `FlowError`,
 > and so does adding anything after an ending. A step fires at its position and a
@@ -346,6 +359,11 @@ filters and the **Filters** tab. `on_filter`, and any change to `filters` after 
 table's first load, also need one setting on the Lex App side: see
 [Allowed sites](#allowed-sites).
 
+> [!note] `filters` and `on_filter` need interface 2.3.0
+> Both take effect with lex-app-frontend 2.3.0 and later, the interface lex-app 2.5
+> installs. With an older interface the table opens without your filters, no
+> `filter` event arrives, and nothing raises in Python.
+
 ### Setting the filters
 
 `filters` maps a column name to the values to pick:
@@ -401,7 +419,7 @@ them:
 | `resource` | The table's model, e.g. `"invoice"` |
 | `filters` | The value-list selections: column name to the picked keys, e.g. `{"status": ["open", "overdue"]}` |
 | `filter_model` | The table's whole filter state, conditions included, in AG Grid's filter-model format |
-| `row_count` | How many rows the table has with these filters, or `None` if it couldn't tell |
+| `row_count` | How many rows the table has with these filters, or `None` if it couldn't tell. On a table grouped by a column it counts the top-level groups, not the rows |
 
 The keys in `filters` are strings — a related record's id arrives as `"42"`, a yes/no
 value as `"true"` — and `None` stands for *(Blank)*. They can go straight into another
@@ -468,6 +486,19 @@ Locally that is usually `http://localhost:8501`, where `lex streamlit` serves th
 dashboard. Write the host exactly as the browser does: `localhost` and `127.0.0.1` are
 different origins. If your dashboards share Lex App's own address, list that address.
 
+An instance with a [[ship-and-operate/custom domains|custom domain]] serves its
+dashboard on more than one hostname — `streamlit.app.customer.com` beside its
+canonical one, as `LEX_STREAMLIT_HOSTS` lists them. Lex App uses
+`LEX_EMBED_ALLOWED_ORIGINS` exactly as written and adds none of those hosts for you,
+so list the origin of every hostname users open the dashboard on:
+
+```bash
+LEX_EMBED_ALLOWED_ORIGINS=https://dashboards.example.com,https://streamlit.app.customer.com
+```
+
+A dashboard on a hostname left out can no longer frame `lex_view` or the controls,
+and gets no `filter` event.
+
 The setting does more than open this channel. Once it is set, browsers show Lex App's
 pages in a frame only inside Lex App itself and on the sites it lists — so list every
 site that embeds Lex App. For your dashboards, their one address covers `lex_view` and
@@ -497,9 +528,10 @@ decided by the user's permissions, and both options leave that untouched. Nor
 does either hide the column filters or the **Filters** tab, which belong to the
 grid, not the toolbar.
 
-> [!note] `hide_actions` needs a newer interface
-> It takes effect with a lex-app-frontend release newer than 2.2.0. Up to 2.2.0
-> the parameter reaches the page and the Actions column stays.
+> [!note] `hide_actions` needs interface 2.3.0
+> It takes effect with lex-app-frontend 2.3.0 and later, the interface lex-app 2.5
+> installs. With an older interface the parameter reaches the page and the Actions
+> column stays.
 
 ### `extra_params`
 
@@ -516,13 +548,25 @@ lex_view("investor", extra_params={"my_flag": "true"})
 
 ### Where the frame points
 
-The frame's address starts from `base_url` when you pass one, and otherwise from
-the `REACT_APP_URL` environment variable, then `LEX_FRONTEND_URL`, then the
-application's own hostname, and finally `http://localhost:8000`.
+The frame's address starts from `base_url` when you pass one. Otherwise it is the
+first of these:
 
-That third step is what a deployed dashboard normally uses, and it is not simply
-`DOMAIN_HOSTED`: it is the application hostname on the **same registrable domain
-as the dashboard you are in**. A dashboard served at
+1. **The Lex App the dashboard was opened from.** With `LEX_STREAMLIT_AUTH` at
+   `handoff` or `dual`, Lex App puts its own origin in the address of a dashboard it
+   frames, as `lex_app_origin`. The dashboard keeps it for the session if it is one of
+   the instance's app origins — a host in `LEX_INSTANCE_HOSTS` (or `DOMAIN_HOSTED`),
+   `REACT_APP_URL` or `LEX_FRONTEND_URL`, or a local address on an instance that is
+   not deployed — and ignores any other value, with a warning in the log.
+2. The `REACT_APP_URL` environment variable, then `LEX_FRONTEND_URL`.
+3. The application's own hostname.
+4. `http://localhost:8000`.
+
+`lex_widgets` and the flat controls frame the same address, and take no `base_url`.
+
+The first step is the user's own Lex App, so the frame is on the site they are
+signed in on. The third is what a deployed dashboard otherwise uses, and
+it is not simply `DOMAIN_HOSTED`: it is the application hostname on the **same
+registrable domain as the dashboard you are in**. A dashboard served at
 `streamlit.app.customer.com` frames `app.customer.com`, not the platform
 hostname — a frame whose origin is on a different registrable domain from the
 page around it is a third-party context, and the browser withholds its cookies,
@@ -541,12 +585,15 @@ Neither mistake raises anything in Python.
 
 ## Light and dark
 
-You don't need to pass anything. The embedded page takes its light/dark mode from the
-host page and stays in step with Lex App in both directions, without a reload — see
-[[using-the-app/themes|Themes]].
+You don't need to pass anything. An embedded table, form or record follows Lex App's
+own light/dark choice — the one the user last made in Lex App — and stays in step
+when it changes in another Lex App tab, without a reload; it does not take the mode
+of the Streamlit page around it. Only the
+[[access-and-dashboards/streamlit/embedding app controls|app controls]] of
+`lex_widgets` follow the host page. See [[using-the-app/themes|Themes]].
 
 > [!warning] Don't pass `theme`
-> The embedded app never reads it — it follows the host page instead. But
+> The embedded app never reads it — it follows Lex App's own choice instead. But
 > `lex_view()` still checks it, so it is not harmless: anything other than
 > `"light"` or `"dark"` raises `ValueError`, and that includes `None`, `"auto"` and
 > `"Dark"`. Code that forwards a computed theme should leave the argument out —

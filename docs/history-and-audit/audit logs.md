@@ -4,7 +4,7 @@ aliases:
   - "features/tracking/audit logs"
 ---
 
-Every API operation in Lex App — create, update, delete, export, download — is automatically recorded in an `AuditLog` table. This happens transparently via `AuditLogMixin` for the operations that change data and `FileOperationAuditMixin` for the ones that hand it out, both hooking into the [Django REST Framework](https://www.django-rest-framework.org/) view layer. You don't need to configure or enable anything — audit logging is always active.
+Every API operation in Lex App — create, update, delete, export, download — is automatically recorded in an `AuditLog` table. This happens transparently via `AuditLogMixin` for the operations that change data and `FileOperationAuditMixin` for the ones that hand it out, both hooking into the [Django REST Framework](https://www.django-rest-framework.org/) view layer. The framework records some of its own work in the same table: loading initial data, the outcome of every calculation, and the reset of calculations a restart interrupted. You don't need to configure or enable anything — audit logging is always active.
 
 ## What Gets Recorded
 
@@ -18,6 +18,16 @@ Every time a user creates, updates, deletes, exports, or downloads through the A
 | `action` | `create`, `update`, `delete`, `export`, or `download` |
 | `payload` | The full serialized data at the time of the operation — for exports and downloads, what was asked for and what was served |
 | `content_type` + `object_id` | A [generic relation](https://docs.djangoproject.com/en/stable/ref/contrib/contenttypes/) linking back to the affected record |
+
+### Entries the framework writes
+
+Not every entry comes from a request:
+
+| Source | Entry |
+|---|---|
+| Loading [[model-your-data/initial data\|initial data]] | One `create`, `update` or `delete` entry per action, with the author `system (initial_data_upload)`. `INITIAL_DATA_AUDIT_LOGGING=false` turns these off |
+| A calculation finishing | The run's outcome is written to the entry of the request that started it — or to a new `update` entry when there is none — with a snapshot of the record as the payload. Only the outermost calculation of a run gets one |
+| A restart | A calculation the startup finds still `IN_PROGRESS`, with no recovery owning it, is set to `ABORTED` — and its entry to `aborted`, when the startup can still tell which run it was |
 
 ## How It Works
 
@@ -42,7 +52,17 @@ sequenceDiagram
     API-->>User: 200 OK
 ```
 
-The key insight: the audit log is created **before** the actual operation, with a `pending` status. For normal synchronous requests, the status is updated to `success` right away when the operation finishes. For calculations accepted with HTTP `202`, the status stays `pending` until the background calculation completes, then moves to `success` or `failure`. If an operation fails immediately, the status becomes `failure` and the error traceback is stored. This means even failed operations are recorded — critical for security auditing.
+The key insight: the audit log is created **before** the actual operation, with a `pending` status. For normal synchronous requests, the status is updated to `success` right away when the operation finishes. For calculations accepted with HTTP `202`, the status stays `pending` until the background calculation completes, then moves to its outcome. If an operation fails immediately, the status becomes `failure` and the error traceback is stored. This means even failed operations are recorded — critical for security auditing.
+
+| Status | Meaning |
+|---|---|
+| `pending` | The operation has begun — for a calculation, it is still running |
+| `success` | It completed |
+| `failure` | It failed. The status row keeps the traceback in `error_traceback` |
+| `cancelled` | A calculation someone cancelled |
+| `aborted` | A calculation that was still running when the instance restarted, and that the startup gave up on |
+
+Only `failure` keeps a traceback: a `cancelled` or `aborted` status row has none.
 
 ## Audit Log vs. Bitemporal History
 
@@ -52,10 +72,10 @@ These two systems serve different but complementary purposes:
 |---|---|---|
 | **What it tracks** | Who did what, when | What the data looked like over time |
 | **Granularity** | Operation-level (create/update/delete) | Field-level (every value change) |
-| **Scope** | API operations only | All changes (API, hooks, calculations) |
+| **Scope** | API operations, plus initial data, calculation outcomes and startup resets | All changes made through `save()` and `delete()` (API, hooks, calculations) |
 | **Time dimensions** | One (system time) | Two (valid time + system time) |
 | **Primary use** | Security auditing, compliance | Time-travel queries, corrections |
-| **Failure tracking** | Yes (pending/success/failure) | No (only successful changes) |
+| **Failure tracking** | Yes (`pending` → `success`, `failure`, `cancelled`, `aborted`) | No (only successful changes) |
 
 Together, they provide a complete audit trail: bitemporal history tells you *what changed*, audit logs tell you *who requested the change and whether it succeeded*.
 
@@ -70,11 +90,11 @@ Five endpoints produce these entries:
 
 | Endpoint | Action | What the payload says |
 |---|---|---|
-| `POST api/<model>/export` | `export` | `mode` (`ag_grid` / `filtered` / `legacy`), the AG Grid `filter_model`, `selected_row_count`, `as_of`, `timezone`, then `rows`, `columns`, `size_bytes` and the `export_path` that wrote the file |
-| `GET api/<model>/file-download` | `download` | `pk`, `field`, `storage` (`LOCAL` / `GCS` / `SHAREPOINT`), `filename`, `size_bytes` |
+| `POST api/<model>/export` | `export` | `format: "xlsx"`, `delivery: "stream"`, `mode` (`ag_grid` / `filtered` / `legacy`), `selected_row_count`, `as_of`, `timezone`; in `ag_grid` mode also the AG Grid `filter_model`, `row_group_cols`, `pivot_mode` and `selected_group_count`; then the `export_path` that wrote the file, `rows`, `columns`, and `size_bytes` (streamed exports) or `sheet_name` (the others) |
+| `GET api/<model>/file-download` | `download` | `pk`, `field`, `storage` (`LOCAL` / `GCS` / `SHAREPOINT`), `filename`, `size_bytes`, `delivery` — `"stream"`, or `"url"` on GCS, where the answer is a link to the file |
 | `GET api/<model>/sharepoint-file-download` | `download` | the same, with `delivery: "stream"` |
 | `GET api/<model>/sharepoint-file-share-link` / `…-preview-link` | `download` | `delivery: "share_link"` / `"preview_link"` and the SharePoint document id |
-| `GET api/download-pdf/<pk>/` | `download` | `format: "pdf"`, `include_descendants`, `section_count`, `filename`, `size_bytes` |
+| `GET api/download-pdf/<pk>/` | `download` | `format: "pdf"`, `delivery: "stream"`, `scope` (`node` / `subtree` / `calculation`), `include_descendants`; for a subtree or a whole calculation `section_count` and `truncated`; then `filename`, `size_bytes` |
 
 Two details are worth knowing:
 
@@ -143,6 +163,6 @@ The audit system includes built-in resilience:
 Audit logs aren't just a database table — they're surfaced directly in the interface:
 
 - **[[using-the-app/record-detail/audit log tab|Audit Log Tab]]** — every record detail page includes an Audit Log tab showing all operations that affected that specific record
-- **[[using-the-app/record-detail/timeline tab|Timeline Tab]]** — the audit feed view at the bottom of the timeline integrates audit events with the visual change history
+- **AuditLog** in the sidebar — a [[model-your-data/model structure#Built-In Groups|built-in group]] listing the entries the user may see, across all records
 
 See [[using-the-app/record-detail/index|Record Detail]] for the full user-facing documentation.

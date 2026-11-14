@@ -4,12 +4,13 @@ aliases:
   - "interface/record-detail/index"
 ---
 
-Click any row in the grid, and you're taken to its full story. The record detail page is where a single entry goes from a line of data to a living document — with its current state, embedded analytics, visual history, and a complete audit trail.
+Open a record from the grid, and you're taken to its full story. The record detail page is where a single entry goes from a line of data to a living document — with its current state, embedded analytics, visual history, and a complete audit trail.
 
-> [!tip] A quicker look from the grid
-> The **View** button in a grid row opens the record in a side panel first, with its
-> files and fields. **Open full view** in that panel brings you to this page. To open this
-> page directly, ⌘-click or Ctrl-click **View**. See
+> [!tip] Getting here from the grid
+> Clicking a row doesn't open it. The eye icon (**Show**) in a row's **Actions** column
+> opens the record in a side panel first, with its files and fields; **Open full view**
+> in that panel brings you to this page. To open this page directly, ⌘-click or
+> Ctrl-click the eye icon. See
 > [[using-the-app/the-grid/index#Viewing a Record|Viewing a Record]].
 
 ## The Five Tabs
@@ -30,19 +31,25 @@ flowchart LR
 ```
 
 ### [[using-the-app/record-detail/summary tab|Summary]]
-The record's current values displayed as a clean card layout. Choose how many columns to show, switch between serializer presets for different field sets, and export the record as PDF.
+The record's current values, one field per row. Choose how many columns to show, switch between view presets for different field sets, and export a one-page PDF snapshot.
 
 ### [[using-the-app/record-detail/analytics tab|Analytics]]
 An embedded [Streamlit](https://docs.streamlit.io/) dashboard scoped to this specific record. Charts, KPIs, custom visualizations — all computed live and displayed without leaving the page.
 
 ### [[using-the-app/record-detail/timeline tab|Timeline]]
-A visual timeline of every change this record has gone through. See who changed what, when, and compare versions side-by-side in a detail drawer.
+Every version of this record as a bar on a time axis. Click one to see who changed what, and how it differs from the version before. The **As Of** control time-travels: it shows the timeline as the system knew it at any moment in the past.
 
 ### [[using-the-app/record-detail/history tab|History]]
-The full history of all versions of this record, displayed in a grid. Use the **As Of** control to time-travel — see what this record looked like at any point in the past.
+The full history of all versions of this record, displayed in a grid you can filter and sort.
 
 ### [[using-the-app/record-detail/audit log tab|Audit Log]]
 All operations (create, update, delete) that have been performed on this record, with the author, timestamp, and full payload for each event.
+
+Tabs appear only where they apply. Timeline and History need history tracking on the
+model; Analytics and Audit Log are left out on legacy tables. A past version's page —
+opened from the History tab, or from **Full history** on the table — has no History tab;
+it has a **Live Data** tab instead, whose **Go to Live Data** takes you to the record as
+it is now.
 
 ## The Toolbar
 
@@ -51,9 +58,9 @@ Above the tabs, a toolbar gives you quick access to:
 | Control | What It Does |
 |---|---|
 | **View Preset** | Switch between serializer presets (like different zoom levels on the same record) |
-| **Column Layout** | Toggle between 1, 2, or 3 column layouts for the Summary tab |
-| **Edit** | Jump to the edit form for this record |
-| **Export to PDF** | Download the current Summary tab as a PDF document |
+| **Column Layout** (1 · 2 · 3) | How many fields sit side by side on the Summary tab. Shown on the Summary tab only |
+| **Edit** | Opens the full-page edit form for this record |
+| **Export Summary** | Saves a one-page PDF snapshot of the Summary tab. Shown on the Summary tab only |
 
 ![The record page: the five tabs, and what each one answers](images/record-detail/tabs.svg)
 
@@ -79,10 +86,14 @@ Both keys are optional — omit one to keep the built-in label for that tab. Mod
 
 ## Navigating Between Records
 
-Use the breadcrumbs at the top to navigate back to the grid. The breadcrumb trail always shows your full path:
+Use the breadcrumbs at the top to navigate back to the grid. On a record page the trail
+names the model by its internal, lower-case name, followed by `show`:
 
 ```
-Home › Teams & People › Expense › #42
+⌂ › expense › show
 ```
 
-Click **Expense** to return to the grid — your filters, grouping, and scroll position are preserved, so you pick up right where you left off.
+Click **expense** to return to the grid. It opens with its saved view: filters, sorting
+or grouping you changed and didn't save are gone, and you start at the top again. To
+keep your place in the grid, look at records in the side panel the eye icon opens
+instead — the grid stays as it was underneath.

@@ -263,7 +263,7 @@ too.
 3. For each action, the model class is looked up from the registered models
 4. `tag:` and `datetime:` values in `parameters` (or `filter_parameters`) are resolved
 5. The action (`create`, `update`, or `delete`) is executed
-6. If [audit logging](https://docs.djangoproject.com/en/stable/topics/logging/) is enabled, each operation is recorded in the audit trail
+6. Each operation is recorded in the [[history-and-audit/audit logs|audit log]], with the author `system (initial_data_upload)`, unless `INITIAL_DATA_AUDIT_LOGGING` is set to `false`
 
 > [!important]
 > Order matters. If Employee references Team via `tag:team_design`, the Team `create` action must appear **before** the Employee action — either in the same file or in an earlier subprocess.

@@ -18,7 +18,7 @@ Either way you get four things without writing any code:
 
 - **No second sign-in** — the user does not log in again for Streamlit.
 - **Identity you can trace** — actions in the dashboard are linked to the user's [Keycloak](https://www.keycloak.org/documentation) identity.
-- **The viewer's permissions** — the dashboard can call the Lex App API as them, and [[access-and-dashboards/permissions|permissions]] apply exactly as they do in the grid.
+- **The viewer's permissions** — the dashboard can [call the Lex App API as them](#calling-the-lex-app-api-as-them), and [[access-and-dashboards/permissions|permissions]] apply exactly as they do in the grid.
 - **Dashboards that stay open** — tokens are renewed in the background, and disconnected Streamlit sessions are kept long enough to survive re-authentication or a network blip.
 
 Defining the dashboard methods is the whole of the developer's part.
@@ -30,7 +30,7 @@ With `handoff`, the dashboard's first load goes through the app, inside the fram
 - **The dashboard stays signed in as long as the app does** — weeks, not minutes. See [[access-and-dashboards/sign-in and sessions|Sign-in & Sessions]].
 - **Signing out ends it.** Signing out of the app, Keycloak ending the session, or an administrator deactivating the user ends the dashboard's sign-in too. The frame then asks the app to sign the user in again: within a minute while the dashboard is visible, at once when it becomes visible again — also when its connection had dropped, without a reload.
 - **An outage does not.** When Keycloak cannot be reached, the dashboard keeps the token it has while that is valid, then runs with the user's identity alone until Keycloak answers again. Nobody is signed out.
-- **Your code gets only what it needs:** the access token and the user's identity, never a refresh token.
+- **Your code gets only what it needs:** the access token and the user's identity, never a refresh token — see [Who is signed in](#who-is-signed-in).
 
 The cookie slides with use: the dashboard's own pages renew it, at most once a day. In `dual`, a dashboard whose hand-off sign-in has ended keeps working through the old sign-in, and the dead cookie is cleared.
 
@@ -45,6 +45,63 @@ In every mode, `legacy` included, the proxy accepts a dashboard's live connectio
 Access tokens are short-lived and dashboards often stay open longer than one lasts. With `legacy`, Lex App renews the token in the background through the proxy, without reloading the dashboard, so widgets and `st.session_state` keep their state across a renewal and across normal Streamlit script re-runs.
 
 Sessions still follow Keycloak's maximum lifetime, and a revoked Keycloak session stops working immediately. When renewal genuinely cannot continue, the embedded dashboard asks the surrounding app to re-authenticate and returns the user to the same view. A proxy that does not answer is treated as an outage: the dashboard waits and asks again, and does not sign the user out.
+
+## Who is signed in
+
+Lex App keeps the viewer in `st.session_state`, where any of your code can read it:
+
+| Key | Holds |
+|---|---|
+| `user_info` | The viewer's claims, a dict: Keycloak's userinfo answer — `sub`, `email`, `preferred_username`, `name` and whatever else the realm returns — or only the first three until Keycloak has answered |
+| `user_id` | Keycloak's stable user ID, `sub` — or the email when the sign-in carries no `sub` |
+| `user_email` | The email |
+| `user_username` | `preferred_username`; without one, the part of the email before `@`, until Keycloak's user info answers with a `preferred_username` or `name` |
+| `permissions` | The viewer's Keycloak UMA permissions: a list with one `{"rsname": …, "scopes": […]}` entry per resource, asked for again with each new access token. Empty until Keycloak has answered, and when it grants nothing or cannot be asked |
+| `access_token` | The viewer's Keycloak access token, a string, renewed in the background; `""` when there is none |
+| `auth_method` | How the proxy signed the dashboard in: `"handoff"`, `"session"` or `"jwt"` |
+
+```python
+import streamlit as st
+
+
+def main():
+    me = st.session_state.user_info
+    st.caption(f"Signed in as {me.get('name') or me.get('preferred_username')}")
+
+    resources = sorted({p["rsname"] for p in st.session_state.permissions})
+    st.write("Keycloak resources you hold a permission on:", resources)
+```
+
+A record's `streamlit_main(user)` receives `user_info` as `user`; `streamlit_class_main()` and `main()` receive nothing, so they read the keys above.
+
+## What they may see
+
+The ORM reads as the dashboard, **not** as the viewer. Lex App's [[access-and-dashboards/permissions|permission methods]] — `permission_read` and the rest — guard the API and the grid; `Fund.objects.all()` in a dashboard returns every fund, whoever is looking. Decide what a viewer may see from `permissions` — a model's resource is named `<app_label>.<ModelName>` — or read the data through the API as them.
+
+## Calling the Lex App API as them
+
+Send `access_token` as a bearer token, and the Lex App API answers as the viewer, with their permissions applied exactly as in the grid:
+
+```python
+import httpx
+import streamlit as st
+
+
+def main():
+    token = st.session_state.access_token
+    if not token:
+        st.warning("Your sign-in cannot be checked right now. Try again in a moment.")
+        return
+    response = httpx.get(
+        "http://localhost:8000/api/model_entries/fund/list",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    st.dataframe(response.json())
+```
+
+`http://localhost:8000` is `lex start` locally; in production it is wherever the dashboard reaches the Lex App backend. Without `perPage` the list answers a plain array of every row the viewer may read — see [[reference/REST API#The list endpoint|The list endpoint]].
+
+The token never reaches the browser. While Keycloak cannot be reached under `handoff` there may be no usable one: a dashboard opened during the outage has `""`, and one opened before it keeps its last token, which the API refuses once it has expired. Read a refusal then as "try again later", not as signed out.
 
 ## Before you deploy
 

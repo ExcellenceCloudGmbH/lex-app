@@ -96,4 +96,4 @@ Work through these in order:
 3. [[start-here/tutorial/Part 3 — Calculations & Logging|Part 3 — Calculations & Logging]] — build `BudgetSummary` as a `CalculationModel` with `LexLogger`
 4. [[start-here/tutorial/Part 4 — Validation & Permissions|Part 4 — Validation & Permissions]] — add `pre_validation()`, `post_validation()`, and `permission_*` methods
 5. [[start-here/tutorial/Part 5 — Streamlit Dashboards|Part 5 — Streamlit Dashboards]] — attach interactive dashboards to your models
-6. [[start-here/tutorial/Part 6 — History in Action|Part 6 — History in Action]] — explore the bitemporal history panel
+6. [[start-here/tutorial/Part 6 — History in Action|Part 6 — History in Action]] — explore a record's History and Timeline tabs, and backdate a correction

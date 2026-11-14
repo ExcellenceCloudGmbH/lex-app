@@ -9,12 +9,12 @@ In regulated environments — finance, healthcare, compliance — you can't just
 ```mermaid
 flowchart TB
     A["Any model change
-    (save, update, delete)"] --> B["History
+    (through save or delete)"] --> B["History
     (what changed)"]
     B --> C["Bitemporal History
     (what changed + when we learned it)"]
-    D["Any API operation
-    (create, update, delete)"] --> E["Audit Logs
+    D["Any API operation, initial data,
+    calculation outcomes"] --> E["Audit Logs
     (who did what)"]
 ```
 
@@ -27,7 +27,7 @@ Every `LexModel` automatically records a full snapshot on every create, update, 
 On top of standard history, Lex App adds a second layer — **MetaHistory** — that tracks *system time* independently of *valid time*. This lets you answer not just "what changed" but "what did the system *believe* at a specific point in time?" Critical for backdated corrections, regulatory compliance, and financial auditing.
 
 ### [[history-and-audit/audit logs|Audit Logs]]
-Every API operation — create, update, delete — is automatically recorded with the user, timestamp, resource, action, and full payload. Operations are tracked with a status lifecycle (`pending` → `success` or `failure`), so even failed operations are preserved. Built into the [Django REST Framework](https://www.django-rest-framework.org/) view layer via `AuditLogMixin`.
+Every API operation — create, update, delete, export, download — is automatically recorded with the user, timestamp, resource, action, and full payload, and so are initial-data loads and the outcome of every calculation. Operations are tracked with a status lifecycle (`pending` → `success`, `failure`, `cancelled` or `aborted`), so even failed operations are preserved, a failure with its traceback. Built into the [Django REST Framework](https://www.django-rest-framework.org/) view layer via `AuditLogMixin`.
 
 ## How They Work Together
 

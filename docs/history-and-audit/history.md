@@ -52,7 +52,7 @@ Each history row contains all of your model's fields, plus these tracking fields
 | `valid_to` | `DateTimeField` (nullable) | When this version was superseded. `NULL` = still current |
 | `history_type` | `CharField(1)` | `+` Created · `~` Changed · `-` Deleted |
 | `history_user` | `ForeignKey(User)` | The user who made the change |
-| `history_change_reason` | `TextField` | Optional explanation for the change |
+| `history_change_reason` | `CharField(max_length=100)` | Optional explanation for the change |
 
 > [!note]
 > Standard django-simple-history uses a single `history_date` field. Lex App's `StandardHistory` replaces that with `valid_from` and adds `valid_to`, renaming the time dimension to match the bitemporal model. The `valid_to` fields are automatically chained — each row's `valid_to` is set to the next row's `valid_from`, forming a continuous timeline.
@@ -62,12 +62,20 @@ Each history row contains all of your model's fields, plus these tracking fields
 You don't call any history API. Every time Django's ORM executes a `save()` or `delete()` on your model, django-simple-history intercepts it and creates a history row automatically. This includes:
 
 - Direct `model.save()` calls
-- `Model.objects.create()`
-- QuerySet `.update()` (with bulk history enabled)
-- Admin changes, API calls, lifecycle hooks — anything that touches the ORM
+- `Model.objects.create()`, and `Model.objects.bulk_create()`, which saves the objects one by one
+- Admin changes, API calls, lifecycle hooks — anything that ends in `save()` or `delete()`
 - Calculation status callbacks and recovery sweeps, so async terminal states (like `SUCCESS`, `ERROR`, or `ABORTED`) appear in the same history stream — with the recovery reason recorded on the entry
 
-The history row is created in the **same database transaction** as the change itself, so it's impossible for a change to succeed without its history being recorded.
+The history row is created in the **same database transaction** as the change itself, so a change made through `save()` or `delete()` cannot succeed without its history being recorded.
+
+Writes that go around `save()` record no history:
+
+- `QuerySet.update()` and `bulk_update()` — which also skip the model's hooks, `pre_validation()` and the `edited_*` stamps;
+- `bulk_create(objs, skip_history=True)`, a raw insert;
+- saves after `untrack()`, and `save_without_historical_record()` — see [[reference/LexModel Internals#History Tracking Control|History Tracking Control]];
+- raw SQL.
+
+To change many rows and keep their history, save them one by one.
 
 ## Querying History
 
@@ -154,7 +162,7 @@ untracked_models:
   expenseupload: null
 ```
 
-See [[model-your-data/model structure|Model Structure]] for details.
+See [[model-your-data/model structure|Model Structure]] for details — including `tracked_models`, which names the models that should have history instead.
 
 When a model is untracked, no `Historical*` table is created and no history overhead is incurred.
 

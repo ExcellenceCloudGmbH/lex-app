@@ -29,7 +29,7 @@ flowchart LR
     H --> I
 ```
 
-The key design principle: **Celery is optional**. If the broker is down or Celery isn't configured, the framework falls back to synchronous processing automatically. Your calculations still run — just sequentially instead of in parallel.
+The key design principle: **Celery is optional**. With `CELERY_ACTIVE` off — or the `celery` package not importable — calculations run in-process: sequentially instead of in parallel, but they run. The variable is the whole switch: lex-app does not check the broker first, so with `CELERY_ACTIVE=true` and the broker down, a run is still sent to Celery and fails there instead of falling back.
 
 ## Prerequisites: Redis (or Memurai on Windows)
 
@@ -84,12 +84,26 @@ class HeavyReport(CalculationModel):
 
 For root `CalculationModel` runs, the decorator is now optional. If `CELERY_ACTIVE=true` and Celery is reachable, the framework dispatches the calculation to a worker either way. Decorated methods are sent directly; undecorated ones are wrapped automatically.
 
+The two are not saved the same way. On a worker, the generic task saves an undecorated `calculate()`'s record after it returns. A decorated `calculate()` is not saved by the framework: the success callback writes the status fields only, so whatever it assigns to `self` is lost unless it calls `self.save()`. End a decorated `calculate()` with one. See [[reference/CalculationModel Internals#Saving the Result|Saving the Result]].
+
+`lex_shared_task` passes keyword arguments on to Celery's `shared_task`, so any Celery task option can be set, such as `name=`. Celery names a task after its module and function, so two decorated functions of the same name in one module — two models' `calculate()` methods, say — get the same task name, and one runs the other's body. Give each its own:
+
+```python
+class HeavyReport(CalculationModel):
+    @lex_shared_task(name="reports.heavy_report.calculate")
+    def calculate(self):
+        ...
+        self.save()
+```
+
+Called synchronously — with `CELERY_ACTIVE` off, or outside a `WaitForTasks` / `FireAndForget` block — a decorated function returns a tuple `(result, args)`: its own return value and the positional arguments it was called with — for a decorated `calculate()`, the first of them is the record itself. Dispatched, it returns Celery's `AsyncResult`.
+
 ### The Dispatch Flow
 
 When a user clicks **Calculate ▶️**, the framework decides whether to use Celery or keep the work in-process:
 
 1. Is `CELERY_ACTIVE=true` set in the environment?
-2. Is Celery available and the broker reachable?
+2. Can the `celery` package be imported? (lex-app does not check that the broker answers.)
 
 If **both** are true, the calculation is dispatched to a Celery worker — decorated methods (`@lex_shared_task`) go directly, undecorated ones are wrapped for you. Otherwise, it runs in-process on the app server. In both cases, the record moves to `IN_PROGRESS` right away so the frontend can keep showing progress while the calculation finishes.
 
@@ -118,6 +132,10 @@ class ParentCalculation(CalculationModel):
 The same rule applies when a calculation is **already running inside a worker** and triggers further work of its own. That nested fan-out is dispatched across the worker pool by default — it does *not* collapse onto the single slot the parent occupies. The parent still blocks until its children finish: if you've wrapped the work in a `WaitForTasks` context the framework reuses it, and if not it opens one for you and waits. This worker-in-worker wait path is now handled safely, so nested fan-out no longer trips Celery's "Never call result.get() within a task!" guard and drops back to a full synchronous rerun.
 
 This matters for large combinatorial calculations. A parent that expands into, say, 50 clusters over tens of thousands of rows spreads those clusters across every available worker instead of grinding through them one at a time on a single slot. You don't have to opt in — write the same `calculate()` and the children parallelise on their own.
+
+### When a Run Fails on a Worker
+
+On a worker, `calculate()` runs with no transaction, whatever `is_atomic` says, so the rows it wrote before the failure stay. The record is saved as `ERROR` from the copy the dispatching process held, and the worker writes the error message without a traceback. See [[reference/CalculationModel Internals#Atomic vs Non-Atomic|Atomic vs Non-Atomic]] for the details, and for making a Celery run all-or-nothing.
 
 ## Environment Variables
 
@@ -205,20 +223,24 @@ When a callback or recovery sweep moves a calculation to a terminal status, that
 
 #### Running the recovery driver
 
-In a multi-worker deployment the sweep runs in its own process alongside your normal workers. Two standalone console scripts are available (note: these are separate executables, not `lex` subcommands):
+In a multi-worker deployment the sweep runs in its own process alongside your normal workers. Run **one** of two standalone console scripts — either is enough (note: these are separate executables; the supervisor's loop also runs as `lex run_recovery_supervisor`):
 
-- `lex-recovery-supervisor` — runs the sweep in a dedicated always-on loop.
+- `lex-recovery-supervisor` — runs the sweep in a dedicated always-on loop, every `LEX_TASK_SUPERVISOR_SCAN_INTERVAL` seconds. `--once` runs a single pass and exits.
 - `lex-recovery-beat` — runs a lightweight Celery worker with an embedded scheduler, so the sweep schedule is **visible in the Django admin** instead of baked into the process.
 
 ```bash
 IS_RUNNING_IN_CELERY=true CELERY_ACTIVE=true lex-recovery-beat
 ```
 
-Either driver listens on a dedicated `recovery` queue, so the periodic sweep never inflates the main work queue your autoscaler watches. When it finds stranded work it re-queues that work onto the **normal** queue — so your standard workers do the actual recalculation, and the recovery process only detects and re-dispatches. Keep your regular workers running as usual.
+Both run the same sweep. Running both does no harm — each dead task is claimed with a lock before anything acts on it — but gains nothing.
+
+The beat driver's scheduler puts each sweep on a dedicated `recovery` queue, which only that worker consumes, so the periodic sweep never inflates the main work queue your autoscaler watches. The supervisor uses no queue: it calls the sweep in its own loop. When either finds stranded work, it re-queues that work onto the queue it came from — the **normal** queue — so your standard workers do the actual recalculation, and the recovery process only detects and re-dispatches. Keep your regular workers running as usual.
+
+Either driver does real work only when `CELERY_ACTIVE` and `LEX_TASK_RECOVERY_ENABLED` are both `true`. With either off, the supervisor still starts, warns, and every pass does nothing.
 
 ## Cancelling a Running Calculation
 
-If a calculation is running on a Celery worker, the UI/API can cancel it immediately. The framework revokes the running task, marks the record as `CANCELLED`, and also stops any active child calculations that belong to the same calculation tree.
+If a calculation is running on a Celery worker, you can cancel it immediately: from code with `CalculationModel.cancel(record)`, or over REST with a `PATCH` of the record whose body is `{"cancel": true}`. The interface has no cancel control. The framework revokes the running task, marks the record as `CANCELLED`, and also stops any active child calculations that belong to the same calculation tree. See [[reference/CalculationModel Internals#Cancelling a Running Calculation|Cancelling a Running Calculation]] for the report `cancel()` returns.
 
 This cascade works **across worker pods**. When a batch calculation fans out into many tasks spread over several workers, each task registers its ID in a shared Redis cancel index. Cancelling the parent discovers every descendant task in that index and revokes it — you don't have to chase down individual workers. Alongside the revoke, the framework sets a cooperative cancel marker, so a task that hasn't started yet (or is sitting between two models in a batch) sees the marker and self-aborts rather than waiting to be force-killed.
 
@@ -228,13 +250,13 @@ If the calculation is running synchronously in the web process, there's nothing 
 
 ## `WaitForTasks` and `FireAndForget`
 
-The framework provides two context managers for advanced dispatch control. You typically don't need these — the framework uses them internally — but they're available for custom task orchestration.
+The framework provides two context managers for advanced dispatch control. You typically don't need these — the framework uses them internally — but they're available for custom task orchestration. With `CELERY_ACTIVE` off, both do nothing, and every call runs synchronously.
 
 > **Legacy names:** `RunInCelery`, `AwaitDispatch` and `UnblockCelery` still work as aliases for `WaitForTasks`/`FireAndForget`. They have no removal date set, but new code should prefer the canonical names — you'll get a deprecation warning before they're removed.
 
 ### `WaitForTasks`
 
-Dispatches `@lex_shared_task`-decorated calls to Celery workers and **blocks on exit** until every dispatched task has finished. Without this context, tasks run synchronously in the current thread.
+Dispatches plain calls of `@lex_shared_task`-decorated functions to Celery workers and **blocks on exit** until every task it dispatched has finished. Without this context, those calls run synchronously in the current thread.
 
 ```python
 from lex.lex_app.celery_tasks import WaitForTasks
@@ -246,19 +268,34 @@ with WaitForTasks():
 # Execution reaches here only after BOTH tasks have completed
 ```
 
-#### Selective dispatch
-
-You can control which tasks get dispatched and which stay synchronous:
+Only plain calls are tracked. `.delay()` dispatches a task without registering it with the context, so nothing waits for it. To have the block wait for a task you dispatched with `.delay()`, pass its result to `register_task_with_context()`:
 
 ```python
-# Only dispatch calc_and_save — everything else runs synchronously
-with WaitForTasks(include_tasks={"calc_and_save"}):
+from lex.lex_app.celery_tasks import WaitForTasks, register_task_with_context
+
+with WaitForTasks():
+    register_task_with_context(my_task.delay(data))
+```
+
+A child calculation saved as `IN_PROGRESS` inside the block is dispatched and registered too: `child.save()` returns at once, and the block waits for the child on exit.
+
+On exit, `WaitForTasks` waits for its tasks in the order they were dispatched. If one of them failed, it re-raises that task's exception and stops waiting — tasks dispatched after the failed one keep running, and nothing waits for them.
+
+#### Selective dispatch
+
+`include_tasks` and `exclude_tasks` choose which plain calls are dispatched; the rest run synchronously. Both hold Celery task names: the `name=` you gave `lex_shared_task`, or Celery's default, `<module>.<function>`.
+
+```python
+# Dispatch only build_report — every other decorated call runs synchronously
+with WaitForTasks(include_tasks={"reports.build_report"}):
     ...
 
-# Dispatch everything EXCEPT initial_data_upload
-with WaitForTasks(exclude_tasks={"initial_data_upload"}):
+# Dispatch everything except send_digest, which runs synchronously
+with WaitForTasks(exclude_tasks={"reports.send_digest"}):
     ...
 ```
+
+The sets filter plain calls only. `.delay()` and the framework's own dispatch of calculations are not filtered.
 
 #### Nesting
 
@@ -266,15 +303,15 @@ with WaitForTasks(exclude_tasks={"initial_data_upload"}):
 
 ```python
 with WaitForTasks():                    # outer scope
-    compute_portfolio.delay(fund_a)     # dispatched, tracked by outer
-    compute_portfolio.delay(fund_b)     # dispatched, tracked by outer
+    compute_portfolio(fund_a)           # dispatched, tracked by outer
+    compute_portfolio(fund_b)           # dispatched, tracked by outer
 
     with WaitForTasks():                # inner scope
-        compute_nav.delay(q1)           # dispatched, tracked by inner
-        compute_nav.delay(q2)           # dispatched, tracked by inner
+        compute_nav(q1)                 # dispatched, tracked by inner
+        compute_nav(q2)                 # dispatched, tracked by inner
     # ← blocks here until q1 and q2 finish
 
-    generate_report.delay(fund_a)       # dispatched, tracked by outer
+    generate_report(fund_a)             # dispatched, tracked by outer
 
 # ← blocks here until fund_a, fund_b, and the report finish
 ```
@@ -303,16 +340,30 @@ When nested inside a `WaitForTasks` block, it **overrides** the blocking behavio
 from lex.lex_app.celery_tasks import WaitForTasks, FireAndForget
 
 with WaitForTasks():
-    compute_nav.delay(q1)               # dispatched, parent WILL wait
+    compute_nav(q1)                     # dispatched, parent WILL wait
 
     with FireAndForget():
         send_report_email(report)       # dispatched, parent WON'T wait
         notify_slack_channel(report)    # dispatched, parent WON'T wait
 
-    compute_nav.delay(q2)               # dispatched, parent WILL wait
+    compute_nav(q2)                     # dispatched, parent WILL wait
 
 # Blocks until q1 and q2 finish. Emails/Slack may still be in flight.
 ```
+
+Like `WaitForTasks`, `FireAndForget` takes two sets of Celery task names:
+
+- `force_tasks` — only these are fired and forgotten (default: every task). Other calls follow the enclosing `WaitForTasks`, or run synchronously without one.
+- `exclude_tasks` — these run synchronously, in the calling thread.
+
+```python
+with WaitForTasks():
+    with FireAndForget(force_tasks={"reports.send_report_email"}):
+        send_report_email(report)       # dispatched, parent WON'T wait
+        compute_nav(q3)                 # dispatched, parent WILL wait
+```
+
+A child calculation saved as `IN_PROGRESS` inside a `FireAndForget` block is dispatched and not waited for, whatever the sets say.
 
 #### When to use `FireAndForget`
 

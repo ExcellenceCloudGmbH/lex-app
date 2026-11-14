@@ -20,9 +20,9 @@ the fold; Comfortable shows two and leaves room to read them.
 
 ### Compact
 
-Row height: **25px**
+Row height: **25px** · 100 rows per page · the default
 
-Maximum density. Rows are tightly packed — you see the most data on screen at once. Best for:
+Maximum density. Rows are tightly packed — you see the most data on screen at once. Every table starts here. Best for:
 - Large datasets where you need to scan quickly
 - Models with many records (hundreds or thousands)
 - Identifying outliers at a glance
@@ -30,9 +30,9 @@ Maximum density. Rows are tightly packed — you see the most data on screen at 
 
 ### Standard
 
-Row height: **100px**
+Row height: **100px** · 25 rows per page
 
-The balanced default. Rows have enough space for comfortable reading while still showing multiple records at once. Best for:
+The middle step. Rows have enough space for comfortable reading while still showing multiple records at once. Best for:
 - Day-to-day work with moderate data volumes
 - Models with longer text fields or descriptions
 - Mixed use — some scanning, some reading
@@ -40,7 +40,7 @@ The balanced default. Rows have enough space for comfortable reading while still
 
 ### Comfortable
 
-Row height: **200px**
+Row height: **200px** · 12 rows per page
 
 Maximum breathing room. Each row has generous space, making it easy to read multi-line content and review data carefully. Best for:
 - Detailed review or data validation tasks
@@ -51,6 +51,8 @@ Maximum breathing room. Each row has generous space, making it easy to read mult
 ## Remembering Your Preference
 
 When you [[using-the-app/the-grid/saved views|save a view]], the density setting is saved with it. This means you can have a compact view for scanning and a comfortable view for detailed review — and switch between them instantly. Density is one of the few look-and-feel choices that lives in the view rather than with your other [[using-the-app/the-grid/table settings|table settings]], and that is why: it is useful to switch density by switching view.
+
+The other side of that: a density picked on a read-only system view such as **Default** can't be saved, and the table is back at the view's density after a reload. Create a preset of your own to keep it.
 
 > [!tip]
 > Try Compact mode for tables with many numeric fields (like financial data), and Standard or Comfortable for tables with text-heavy descriptions.

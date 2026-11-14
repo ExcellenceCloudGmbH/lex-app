@@ -44,22 +44,17 @@ The first two are downward, the next two are upward, and the last applies to all
 
 **[ExcellenceCloudGmbH/DemoNorthwindAnalytics](https://github.com/ExcellenceCloudGmbH/DemoNorthwindAnalytics)** is a complete, public Lex App project written for exactly this section. Five funds, their positions and one calculation that values a fund — enough data for every page to show something real, and small enough to read in a sitting.
 
-Its `_streamlit_structure.py` is a ten-page dashboard, and its sidebar is organised the same way this section is — by which way round the embedding goes. Every page on this site has a page there that runs it:
+Its `_streamlit_structure.py` is a dashboard of five pages, picked from its sidebar. Each shows the code it runs beside the live result:
 
 | Its page | What it calls | Documented in |
 |---|---|---|
-| Overview | `st.metric`, `st.bar_chart` and `lex_widgets` in one layout | — |
-| A route, embedded | `lex_view("fund")`, and every plain-embed argument | [[access-and-dashboards/streamlit/embedding app pages\|Embedding App Pages]] |
-| Narrowing with a serializer | `lex_view(serializer="summary")` | [[model-your-data/serializers\|Serializers]] |
-| Reacting to events | all six `on_*` flags, with the live envelope beside the table | [[access-and-dashboards/streamlit/embedding app pages\|Embedding App Pages]] |
-| Chaining forms with Flow | `flow=` as a mapping and as a sequence, each with its wire form | [[access-and-dashboards/streamlit/embedding app pages\|Embedding App Pages]] |
-| The three widgets | `calculation`, `calculation_log`, `calculation_log_tree` | [[access-and-dashboards/streamlit/embedding app controls\|Embedding App Controls]] |
-| Shaping a control | every argument `page.calculation()` takes, rendered live | [[access-and-dashboards/streamlit/embedding app controls\|Embedding App Controls]] |
-| Reacting to a run | `on_status=True` and the status envelope | [[access-and-dashboards/streamlit/embedding app controls\|Embedding App Controls]] |
-| Layout and cost | width, `min_height`, and one block versus many | [[access-and-dashboards/streamlit/embedding app controls\|Embedding App Controls]] |
-| Record and table dashboards | `streamlit_main` and `streamlit_class_main` | [[access-and-dashboards/streamlit/dashboards on your models\|Dashboards on Your Models]] |
+| Overview | `st.metric`, `st.bar_chart` and a `lex_widgets` block with one **Revalue** control, in one layout | [[access-and-dashboards/streamlit/embedding app controls\|Embedding App Controls]] |
+| The table | `lex_view("fund")` — the application's own table | [[access-and-dashboards/streamlit/embedding app pages\|Embedding App Pages]] |
+| A narrower view | `lex_view("fund", serializer="summary", hide_toolbar=True, hide_actions=True)` | [[model-your-data/serializers\|Serializers]], [[access-and-dashboards/streamlit/embedding app pages\|Embedding App Pages]] |
+| Reacting to the table | `lex_view(…, on_select=True, on_update=True)`, with the event it returns | [[access-and-dashboards/streamlit/embedding app pages\|Embedding App Pages]] |
+| Calculations | `page.calculation`, `page.calculation_log` and `page.calculation_log_tree` in one `lex_widgets()` block | [[access-and-dashboards/streamlit/embedding app controls\|Embedding App Controls]] |
 
-Each of those pages follows the same four beats — what it shows, the code, the live thing, what to notice. It also carries a real `Fund.streamlit_main`, which is what the [[using-the-app/record-detail/analytics tab|Analytics tab]] renders, and the serializer that makes `serializer="summary"` resolve. Clone it and run it; the pages here explain what you are looking at.
+It also carries a real `Fund.streamlit_main`, which is what the [[using-the-app/record-detail/analytics tab|Analytics tab]] renders when you open a fund — see [[access-and-dashboards/streamlit/dashboards on your models|Dashboards on Your Models]] — and the serializer that makes `serializer="summary"` resolve. Flows, the other `on_*` flags and the options of a single control have no page there; the examples on this site's pages show them. Clone it and run it; the pages here explain what you are looking at.
 
 ## Which one runs
 

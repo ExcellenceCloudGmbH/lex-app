@@ -22,9 +22,29 @@ Set `IS_REFLEX_ENABLED=true` in `.env` and restart `lex start`, and Lex App's si
 
 ### What the first run does
 
-- **Writes `rxconfig.py`** at the project root — the file Reflex reads its configuration from — and says so. It holds one call, `config = lex_config()`; commit it. Later runs leave it alone, so it is yours to edit: `lex_config()` takes any Reflex configuration option, e.g. `lex_config(show_built_with_reflex=False)`. Settings that differ between environments — the public URLs below — belong in environment variables instead.
+- **Writes `rxconfig.py`** at the project root — the file Reflex reads its configuration from — and says so. It holds one call, `config = lex_config()`; commit it. Later runs leave it alone, so it is yours to edit: `lex_config()` takes any `rx.Config` or `rxe.Config` option and it replaces lex-app's default of the same name, e.g. `lex_config(show_built_with_reflex=False)`; a `REFLEX_<OPTION>` environment variable overrides both. Settings that differ between environments — the public URLs below — belong in environment variables instead.
 - **Prepares the project for Reflex**, which is Reflex's own start-up rather than Lex App's: it downloads Reflex's JavaScript toolchain and packages — so the first run needs network access — builds the frontend into `.web/`, creates `.states/` and `assets/external/`, and adds those to `.gitignore`. Commit the `.gitignore` change; `.web/` is rebuilt whenever it is missing.
 - **Appends `reflex==<version>` to `requirements.txt`**, when the file does not name Reflex. Lex App already requires the Reflex version it supports, and a second pin will conflict with it on the next upgrade. Replace the line with a bare `reflex`: Reflex only checks that the file names it.
+
+> [!warning] `plugins` replaces the whole list
+> Sign-in is a plugin. `lex_config()` puts two in the list — `lex_auth_plugin()`, the Keycloak sign-in, and
+> `rx.plugins.RadixThemesPlugin()`, the theme Reflex's components are drawn with — and a `plugins=` you pass
+> replaces that list rather than adding to it. Leave `lex_auth_plugin()` out and the dashboards stop requiring
+> sign-in. To add a plugin, list lex-app's two first — in the generated `rxconfig.py`, below its
+> `prepare_environment()` call, which loads the project's `.env`:
+>
+> ```python
+> import reflex as rx
+>
+> from lex.lex_app.reflex.config import lex_auth_plugin, lex_config
+>
+> config = lex_config(
+>     plugins=[lex_auth_plugin(), rx.plugins.RadixThemesPlugin(), rx.plugins.TailwindV4Plugin()],
+> )
+> ```
+>
+> `lex_auth_plugin()` takes the sign-in's own options — see
+> [[access-and-dashboards/reflex/sessions and authentication#Options of the sign-in|Options of the sign-in]].
 
 ### Hot reload
 
@@ -61,7 +81,15 @@ Production mode builds an optimised frontend and serves it and the backend on **
 
 Behind a reverse proxy, forward the public scheme and host — the sign-in builds its callback from them — and let WebSocket upgrades through on `/_event`, the channel every event travels on.
 
-Reflex keeps each user's page state on its backend. One replica needs nothing more; more than one needs a shared Redis, `REFLEX_REDIS_URL`, so that a user's next event can reach any of them. The sign-in itself keeps nothing on the server.
+Reflex keeps each user's page state on its backend. One replica needs nothing more; more than one needs a shared Redis, `REFLEX_REDIS_URL`, so that a user's next event can reach any of them.
+
+The sign-in uses a Redis of its own: the instance's, the one Celery uses — `REDIS_HOST`, with `REDIS_USERNAME` and `REDIS_PASSWORD`, on a deployed instance. It keeps the refresh locks there, the token sets a renewal obtained (encrypted) for the other tabs to take, and the marks back-channel logout leaves for ended Keycloak sessions. Without it each Reflex process does the same for its own tabs only, and logs a warning — see [[access-and-dashboards/reflex/sessions and authentication#Staying signed in|Staying signed in]].
+
+### One port for a development run
+
+`--env prod` serves everything on one port; a development run has two servers. Reflex Enterprise's single-port mode puts a development run behind one port too: with `REFLEX_USE_SINGLE_PORT=true` — its `use_single_port` option — the backend answers its own routes and passes every other request on to the frontend server. The platform serves hosted dashboards this way, because a pod exposes one port.
+
+Reflex Enterprise reads the variable, not lex-app. Lex App's part is in `lex_auth_plugin()`, which `lex_config()` calls: it mounts Reflex Enterprise's proxy on the Reflex backend itself, where requests reach it. An `rxconfig.py` that calls neither leaves the proxy where Reflex Enterprise puts it, and in single-port mode every page answers `404`.
 
 The _Built with Reflex_ badge Reflex adds in production can be switched off (`lex_config(show_built_with_reflex=False)`) on the Team and Enterprise tiers.
 

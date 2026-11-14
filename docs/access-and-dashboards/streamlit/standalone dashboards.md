@@ -4,7 +4,7 @@ title: Standalone Dashboards
 
 Some dashboards are not about one model. A monthly report spans several; a control panel drives a workflow; an overview page is the first thing a user should see. Those get a **standalone dashboard** — an app of its own, with no host page around it.
 
-**[Northwind Analytics](https://github.com/ExcellenceCloudGmbH/DemoNorthwindAnalytics) is one**, end to end: its `_streamlit_structure.py` is a ten-page dashboard where each page demonstrates one API on this list.
+**[Northwind Analytics](https://github.com/ExcellenceCloudGmbH/DemoNorthwindAnalytics) is one**, end to end: its `_streamlit_structure.py` is a dashboard of five pages, each built around one call — `lex_view` or `lex_widgets` — and its arguments.
 
 It takes one file. Put `_streamlit_structure.py` at your project root, give it a `main()`, and the Streamlit process serves it when no `model` is in the query string.
 
@@ -47,7 +47,7 @@ You do not have to write the file from scratch. Two starting points ship with th
 
 **The reference dashboard in the package.** `lex/lex_app/streamlit/examples/_streamlit_structure.py` in your installed copy of lex-app is a complete, maintained example — one control, several controls, a log with room, a row composed with Streamlit columns, reading a result back, a whole page, and a multi-step flow. Copy it to `<your_repo>/_streamlit_structure.py` and delete what you do not need.
 
-**A whole project you can run.** [DemoNorthwindAnalytics](https://github.com/ExcellenceCloudGmbH/DemoNorthwindAnalytics) is a public Lex App project built around its Streamlit surface: models, data, a calculation, and a five-page `_streamlit_structure.py` where each page demonstrates one API. Use the package example to copy a snippet; use this one when you want to see the parts working together against real data.
+**A whole project you can run.** [DemoNorthwindAnalytics](https://github.com/ExcellenceCloudGmbH/DemoNorthwindAnalytics) is a public Lex App project built around its Streamlit surface: models, data, a calculation, and a `_streamlit_structure.py` whose pages each demonstrate one API. Use the package example to copy a snippet; use this one when you want to see the parts working together against real data.
 
 ## Several pages
 
@@ -87,10 +87,20 @@ def main():
 
 Whichever you use, lex-app adds two things around it: its logo at the top of the
 sidebar, above your pages, and a bar at the top of the page with the signed-in
-user and **Log out**. Nothing of lex-app's sits below your navigation. When the
-dashboard is opened from inside lex-app, neither appears — lex-app draws its
-own — and the sidebar starts collapsed, so your navigation is one click away
-rather than gone.
+user and **Log out**. Nothing of lex-app's sits below your navigation.
+
+Inside lex-app it depends on the way in. As the home page, and on a record's
+Analytics tab or a table's dashboard, lex-app opens the dashboard with
+`lex_embed=true` and `is_logout_enabled=false`: neither the logo nor the bar
+appears — lex-app draws its own — and the sidebar starts collapsed, so your
+navigation is one click away rather than gone. The **Streamlit** entry in
+lex-app's sidebar passes neither. There the dashboard keeps its logo, its
+sidebar and its bar, and that **Log out** signs the user out of lex-app as well.
+
+| Query parameter | Effect |
+|---|---|
+| `lex_embed` | `1`, `true`, `yes` or `on`: no logo, no bar, the sidebar collapsed |
+| `is_logout_enabled` | `0`, `false`, `no`, `n` or `off`: the bar has no **Log out** |
 
 ## Related
 

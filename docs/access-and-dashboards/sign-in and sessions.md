@@ -83,10 +83,32 @@ origin. If Keycloak has no session, `ok` is `false` with `error: "login_required
 (`m=popup`), or the full sign-in in the tab. Keycloak's sign-in page is never shown inside a frame.
 
 **Scripts and integrations** send `Authorization: Bearer <access token>`. Only access tokens are accepted, never ID
-tokens.
+tokens. A script with no Keycloak user of its own sends an [API key](#api-keys) instead.
 
 The exact wire format, with fixtures, is the *HTTP auth contract v2* in the lex-app repository
 (`lex/contracts/auth/v2/`). Its TypeScript client is what the bundled frontends use.
+
+## API keys
+
+An API key lets a script or an integration call the API without a Keycloak sign-in. A key is an `APIKey` row of the
+`rest_framework_api_key` app in the instance's database, with a name. A request sends it in one of three ways:
+
+| How | Looks like |
+|---|---|
+| The `Api-Key` header | `Api-Key: <key>` |
+| The `Authorization` header | `Authorization: Api-Key <key>` |
+| The `api_key` query parameter, for a caller that can only be given a URL | `?api_key=<key>` |
+
+They are tried in that order, and the first one present is the one checked: a wrong key in the `Api-Key` header is
+refused even when the URL carries a valid one. Prefer a header. A key in a URL ends up in access logs.
+
+A request with a valid key and no sign-in runs as a technical user named after the key: all six
+[[access-and-dashboards/permissions#Access Scopes|scopes]], the client role `api_key` and nothing else — no groups,
+never a superuser, no email. The audit log and `created_by` record it as `Technical User`. A request that is also
+signed in, with a session cookie or a bearer token, runs as that user and not as the key. What a key may then do is up
+to the model's permission methods; [[access-and-dashboards/permissions#Callers with an API key|Permissions]] has how
+they see it. Where a key differs from a signed-in user — lists that come back empty, a refusal that answers `401`, the
+routes that take no key — is under [[reference/REST API#API keys|REST API]].
 
 ## Dashboards and live updates
 
@@ -118,7 +140,7 @@ Run these with the app's environment, as any other `lex` command:
 | `lex oidc_check` | After changing anything about Keycloak, the realm or `KEYCLOAK_INTERNAL_URL`: checks discovery, that the issuer is the public one, the signing keys and the token endpoint. Exits non-zero on a problem. |
 | `lex oidc_cleanup` | Daily, with `lex clearsessions`: ends sign-ins whose refresh token expired or whose session is gone, and deletes ended ones after 7 days. |
 | `lex oidc_rotate_keys` | After putting a new key first in `OIDC_TOKEN_ENCRYPTION_KEYS`, before removing the old one: re-encrypts every stored token. |
-| `lex prune_dashboard_sessions` | Daily, with the two above: deletes dashboard sign-ins that can no longer be used (see below). |
+| `lex prune_dashboard_sessions` | Daily, with the two above: deletes expired hand-off codes and the dashboard sign-ins that can no longer be used — those of Streamlit dashboards signed in through the app, and of pages embedded by an MCP client (see [Dashboards and live updates](#dashboards-and-live-updates)). |
 
 On the platform, a daily maintenance job runs `lex oidc_cleanup`, `lex clearsessions` and `lex prune_dashboard_sessions`
 for every instance.
