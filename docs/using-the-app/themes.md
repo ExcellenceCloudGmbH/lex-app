@@ -28,12 +28,12 @@ Designed for low-light environments, late-night work, and users who simply prefe
 
 Dark mode isn't just a color inversion — every component is individually styled. The data grid, sidebar, cards, buttons, and even the Streamlit dashboard frames are all tuned for visual consistency.
 
-![Dark mode across the whole application — grid, sidebar, cards and buttons each restyled rather than inverted; the theme toggle sits in the header bar beside the search field](images/app/dark-mode.svg)
+![Dark mode across the whole application — grid, sidebar, cards and buttons each restyled rather than inverted; the theme toggle sits in the header bar, between the refresh button and your name](images/app/dark-mode.svg)
 
 
 ## How to Switch
 
-Click the **theme toggle** icon in the application header bar, next to the search field. The switch is instant — no reload required. Your preference is remembered across sessions.
+Click the **theme toggle** icon in the application header bar, between the refresh button and your name; its tooltip reads *Toggle light/dark mode*. The switch is instant — no reload required. Your preference is remembered across sessions.
 
 
 > [!tip]

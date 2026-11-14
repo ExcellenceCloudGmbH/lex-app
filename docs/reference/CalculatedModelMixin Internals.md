@@ -19,7 +19,8 @@ For the conceptual guide with examples and patterns, see [[calculations/batch ca
 |---|---|---|---|
 | `defining_fields` | `List[str]` | **required** | Field names that form the combination axes. A `UniqueConstraint` is created automatically. Must appear in every subclass's class body — the metaclass reads it directly, so omitting it fails at import with `KeyError: 'defining_fields'`. Write `defining_fields = []` if you have no axes. |
 | `parallelizable_fields` | `List[str]` | `[]` | Subset of `defining_fields` used to group models for Celery dispatch. |
-| `input` | `bool` | `False` | Whether this model accepts external input data. |
+
+The class also declares an `input` attribute (`False`). Nothing in the framework reads it, so setting it has no effect.
 
 ## Required Methods
 

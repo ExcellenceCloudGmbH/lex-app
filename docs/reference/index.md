@@ -24,9 +24,10 @@ flowchart TB
     V --> V1["<b>V1 to V2 Import Map</b>"]
 ```
 
-`CLI Commands`, `Report File Fields` and `Grid Filter API` sit outside that split —
-the first is every `lex` command, the second is what a report model writes to disk,
-the third is the HTTP side of the grid's value lists.
+`CLI Commands`, `Report File Fields`, `REST API` and `Grid Filter API` sit outside that
+split — the first is every `lex` command, the second is what a report model writes to
+disk, the third is the HTTP contract the interface, a custom frontend or an integration
+uses, and the fourth is the HTTP side of the grid's value lists.
 
 ## Core Classes
 
@@ -39,7 +40,8 @@ the third is the HTTP side of the grid's value lists.
 - [[reference/LexLogger API|LexLogger API]] — every `LexLogger` method with examples
 - [[reference/CLI Commands|CLI Commands]] — every `lex` command at a glance
 - [[reference/Report File Fields|Report File Fields]] — generated Excel and PDF files on report models
-- [[reference/Grid Filter API|Grid Filter API]] — the endpoints behind the grid's value lists, and the list's `__in`, `__exact` and `__blank` lookups
+- [[reference/REST API|REST API]] — every route the interface calls: lists and filters, records, calculations, bulk deletes, history, exports, API keys and WebSockets
+- [[reference/Grid Filter API|Grid Filter API]] — the endpoints behind the grid's value lists, the list's `__in`, `__exact` and `__blank` lookups, the fields endpoint, and which fields may be filtered
 
 ## Configuration
 

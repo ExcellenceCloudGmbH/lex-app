@@ -25,7 +25,7 @@ flowchart LR
     or call a @lex_job function"]
 ```
 
-A schedule is a `ScheduledJob` record. `ScheduledJob` is itself a [[calculations/calculation models|calculation model]], so a run is an ordinary calculation. When a job fires, the framework starts its calculation the same way the ▶ Calculate button does. That gives every schedule a "run now" button, a last-run status, a live log, an audit entry and cancel. When `CELERY_ACTIVE` is on, the run goes to a Celery worker, as any calculation does.
+A schedule is a `ScheduledJob` record. `ScheduledJob` is itself a [[calculations/calculation models|calculation model]], so a run is an ordinary calculation. When a job fires, the framework starts its calculation the same way the ▶ Calculate button does. That gives every schedule a "run now" button, a last-run status, a live log and an audit entry. When `CELERY_ACTIVE` is on, the run goes to a Celery worker, as any calculation does, and can be cancelled like one: the interface has no cancel control, so use `CalculationModel.cancel()` or the REST cancel request (see [[reference/CalculationModel Internals#Cancelling a Running Calculation|Cancelling a Running Calculation]]).
 
 A schedule never runs code typed into the app. It runs one of two things:
 
@@ -86,6 +86,8 @@ def send_daily_digest(recipients=()):
 ```
 
 Once registered, a user can create a schedule in the app that runs `send_daily_digest`. The name is what schedules refer to; it defaults to the function's name. Each name belongs to one function: registering a second function under the same name raises `ImproperlyConfigured` when its module is imported.
+
+Always write the parentheses: `@lex_job()` registers under the function's name. A bare `@lex_job` registers nothing, raises no error, and leaves the function's name bound to the decorator instead of your function.
 
 Registration happens when the module is imported. The framework imports every module of the project at startup, so a decorated function anywhere in the project is found.
 
@@ -167,7 +169,7 @@ Rights are not checked again at run time. If a user's rights are reduced, schedu
 | Where | What you see |
 |---|---|
 | The schedule's row | The last run's status (the ▶ column), its error message, the last run's start time, the next run, and the status message: why the last slot did not run. |
-| The log drawer | The run's live log, as for any calculation. See [[calculations/logging\|Logging]]. |
+| The calculation log | The run's log, opened from the log icon next to the row's status, as for any calculation. See [[calculations/logging\|Logging]]. |
 | The [[history-and-audit/audit logs\|audit log]] | One entry per run, by the run-as user or `Scheduler`. Its payload has `trigger: {by: "schedule", job, schedule}`, so you can tell it from a click. It ends as success or failure. |
 | The backend log | a `Scheduler started` line at start, and one line per tick that fired, skipped or missed something. Skipped and missed slots are logged at WARNING. |
 
@@ -217,7 +219,7 @@ Runs share the calculation pool, sized by `LEX_CALCULATION_THREADS`. See [[refer
 
 The `ScheduledJob` table comes with migration `scheduling.0001_initial`, which `lex init` applies on the next start. Run `lex init` (or your usual migration step) so the new model is also registered with Keycloak, then grant access to `ScheduledJob` to the users who should manage schedules.
 
-`CalculationModel` gains a class attribute in the same release: `reset_calculation_on_edit` (default `True`). Set it to `False` on a model whose status is not a result of its fields; an edit in the app then keeps the status instead of resetting it. `ScheduledJob` uses it. Existing models are unaffected.
+`CalculationModel` gains a class attribute in the same release: `reset_calculation_on_edit` (default `True`). Set it to `False` on a model whose status is not a result of its fields; an edit in the app then keeps the status instead of resetting it. `ScheduledJob` uses it. Existing models are unaffected. See [[reference/CalculationModel Internals#Keeping the Status Through Edits|Keeping the Status Through Edits]].
 
 ## Related
 

@@ -31,4 +31,7 @@ Custom [Django REST Framework](https://www.django-rest-framework.org/) serialize
 React to model events — creation, update, deletion — with explicit [django-lifecycle](https://rsinger86.github.io/django-lifecycle/) decorators. Process uploaded files, trigger side effects, and enforce validation rules.
 
 ### [[model-your-data/model structure|Model Structure]]
-Control how models appear in the frontend sidebar. Group models into categories, customize display names, and hide internal models from end users.
+Control how models appear in the frontend sidebar. Group models into categories of your own instead of by folder, rename groups and models, and leave models out of the sidebar — once you define the tree, only the models it lists get an entry.
+
+### [[model-your-data/HTML reports|HTML Reports]]
+Add a sidebar entry that shows HTML your code builds, instead of a table of records — a summary page, or a frame around something hosted elsewhere.

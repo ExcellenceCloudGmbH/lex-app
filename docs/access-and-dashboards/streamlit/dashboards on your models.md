@@ -4,14 +4,14 @@ title: Dashboards on Your Models
 
 The quickest dashboard to write is one that belongs to a model. You add a method, and the application decides when to show it — no routing, no separate app, no extra process to configure beyond the Streamlit server itself.
 
-**[Northwind Analytics](https://github.com/ExcellenceCloudGmbH/DemoNorthwindAnalytics) has one:** `Fund.streamlit_main` in `Input/Fund.py`, which is what the Analytics tab renders when you open a fund. Its dashboard's *Record and table dashboards* page walks through it.
+**[Northwind Analytics](https://github.com/ExcellenceCloudGmbH/DemoNorthwindAnalytics) has one:** `Fund.streamlit_main` in `Input/Fund.py`, which is what the Analytics tab renders when you open a fund. Run the project and open any fund's Analytics tab to see it.
 
 There are two of them, and the difference is what the method receives:
 
 | Level | Method | Receives | Where it appears |
 |---|---|---|---|
 | **Table-level** | `streamlit_class_main(cls)` | the model class | the chart icon on the grid toolbar |
-| **Record-level** | `streamlit_main(self)` | one record | the [[using-the-app/record-detail/analytics tab\|Analytics tab]] on the record page |
+| **Record-level** | `streamlit_main(self, user)` | one record, and the viewer | the [[using-the-app/record-detail/analytics tab\|Analytics tab]] on the record page |
 
 Reach for the table-level one for aggregates — summaries, charts across all records, a filtered table. Reach for the record-level one for detail: this record's history, its related data, a drill-down.
 
@@ -63,7 +63,7 @@ class Expense(LexModel):
         st.dataframe(spend)
 ```
 
-`streamlit_main` takes an optional `user` — the signed-in user, if you need to vary what the dashboard shows by who is looking at it. `streamlit_class_main` is a `@classmethod` and takes nothing but the class.
+`streamlit_main` is called with one argument, `user`: the viewer's claims from Keycloak, a dict with `sub`, `email` and `preferred_username` — not a Django user. Keep the parameter even when you do not use it: a `streamlit_main(self)` without it fails with a `TypeError`, shown in the tab. `streamlit_class_main` is a `@classmethod` and is called with nothing but the class. Either can read the viewer, their Keycloak permissions and their access token from `st.session_state` — see [[access-and-dashboards/streamlit/sessions and authentication#Who is signed in|Who is signed in]]. Their ORM queries are not narrowed to what the viewer may see: the ORM reads as the dashboard.
 
 > [!warning] Import what you use
 > A dashboard that builds a `DataFrame` without importing `pandas` fails at the
@@ -83,6 +83,24 @@ class Expense(LexModel):
 Neither appears unless the Streamlit server is running and `IS_STREAMLIT_ENABLED` is set; see [[reference/Environment Variables]]. If the server is unavailable, the UI shows a fallback with a "Retry Connection" button and the rest of the application keeps working.
 
 See [[using-the-app/record-detail/analytics tab|Analytics Tab]] for what the reader of a dashboard sees.
+
+## What the reader sees
+
+| URL | Shows |
+|---|---|
+| `?model=fund&pk=42` | fund 42's `streamlit_main(user)` |
+| `?model=fund` | `Fund.streamlit_class_main()` |
+| `?model=fund&pk=42`, and `Fund` defines no `streamlit_main` | *No instance-level visualization available for this model.* |
+| `?model=fund`, and `Fund` defines no `streamlit_class_main` | *No class-level visualization available for this model.* |
+| `?model=nope` | *❌ Model 'nope' not found* |
+| `?model=fund&pk=999`, with no such fund | *❌ Object with ID 999 not found* |
+| `?model=…&pk=…` for a plain Django model, not a `LexModel` | *❌ This model doesn't support visualization* |
+| `?model=…` for a plain Django model | *❌ This model doesn't support class-level visualization* |
+| `streamlit_main` or `streamlit_class_main` raises | *❌ Error:* and the exception's message, on one line — no traceback |
+
+`model` is matched case-insensitively against the names of the project's own models. The Reflex dashboards show similar messages for a missing model, record or dashboard method, without the ❌ and without an error row of this kind — see [[access-and-dashboards/reflex/dashboards on your models#What the reader sees|What the reader sees]].
+
+The project's own dashboard — `main()` in `_streamlit_structure.py` — is not wrapped like this. An exception from it is raised to Streamlit, which shows it on the page, unless `DEPLOYMENT_ENVIRONMENT` is exactly `PROD`: then the page shows *An error occurred while trying to load the app.*, which opens to the traceback. A `_streamlit_structure.py` that fails to import shows nothing at all: your part of the page stays blank, and nothing is logged.
 
 ## Tips
 

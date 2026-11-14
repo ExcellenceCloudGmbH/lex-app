@@ -14,7 +14,7 @@ Your frontend is served on the instance's own host, so it talks to the lex-app b
 | [Setting it up in the Instance Controller](#setting-it-up-in-the-instance-controller) | Turning on the frontend build, and choosing it on an instance |
 | [Build secrets](#build-secrets) | Private registries and other tokens the build needs |
 | [What your app is given at runtime](#what-your-app-is-given-at-runtime) | `window.__LEX_ENV__`, and the keys in it |
-| [Talking to lex-app](#talking-to-lex-app) | Signing in, the REST API, websockets, large files |
+| [Talking to lex-app](#talking-to-lex-app) | Signing in, the REST API, websockets, large files, framing dashboards |
 | [Releases](#releases) | How a release carries the frontend along |
 
 ## What the repository needs
@@ -97,27 +97,38 @@ export function lexEnv(key: string, fallback = ''): string {
 
 Your app is on the backend's own origin, so it uses lex-app exactly as the standard interface does:
 
-- **REST** is under `/api/api/<route>` — the first `/api/` is the instance's backend, the second lex-app's own API prefix. `GET /api/api/user/` returns the signed-in user.
-- **Signing in** is lex-app's: when a call answers 401 or 403, send the browser to `/api/oidc/authenticate?next=<where to come back to>`. Signing out is `/api/oidc/total_logout?next=<url>&fail=<url>`.
+- **REST** is under `/api/api/<route>` — the first `/api/` is the instance's backend, the second lex-app's own API prefix. `GET /api/api/user/` returns the signed-in user. [[reference/REST API|REST API]] lists the routes, what they take and what they answer.
+- **Signing in** is lex-app's. Only a `401` means the sign-in is gone: send the browser to `/api/oidc/authenticate?next=<where to come back to>`. A `403` never does — with `"code": "permission_denied"` the user stays signed in and you show the refusal; with `"code": "csrf_failed"` read the `csrftoken` cookie again and retry once. A `503` with `{"error": "auth_unavailable"}` means Keycloak cannot answer right now: wait `Retry-After` seconds and retry, and sign nobody out. Signing out is `/api/oidc/total_logout?next=<url>&fail=<url>`, and only when the user asks for it. The full table is in [[access-and-dashboards/sign-in and sessions#For frontends and API clients|Sign-in & Sessions]].
 - **Requests** go with `credentials: 'include'`, and anything that changes data sends the `csrftoken` cookie's value as the `X-CSRFToken` header.
-- **Websockets** connect to `wss://${location.host}/api/ws/<route>` (for example `calculations`), with the session cookie.
+- **Websockets** connect to `wss://${location.host}/api/ws/<route>` (for example `calculations`), with the session cookie — the only thing that signs a socket in.
 
 ```ts
 const api = (route: string) => new URL(`api/${route}`, new URL(lexEnv('API_BASE_PATH', '/api/'), location.origin))
 
-export async function lexFetch(route: string, init: RequestInit = {}) {
-  const csrf = document.cookie.match(/(?:^|; )csrftoken=([^;]*)/)?.[1]
-  const response = await fetch(api(route), {
-    ...init,
-    credentials: 'include',
-    headers: { ...(init.headers ?? {}), ...(csrf ? { 'X-CSRFToken': decodeURIComponent(csrf) } : {}) },
-  })
-  if (response.status === 401 || response.status === 403) {
+export async function lexFetch(route: string, init: RequestInit = {}, retries = 3): Promise<Response> {
+  const headers = new Headers(init.headers)
+  const csrf = document.cookie.match(/(?:^|; )csrftoken=([^;]*)/)?.[1] // read again on every attempt
+  if (csrf) headers.set('X-CSRFToken', decodeURIComponent(csrf))
+  const response = await fetch(api(route), { ...init, credentials: 'include', headers })
+
+  if (response.status === 401) {
+    // The sign-in is gone: sign in, and come back here.
     location.href = `${lexEnv('API_BASE_PATH', '/api/')}oidc/authenticate?next=${encodeURIComponent(location.href)}`
+  } else if (retries > 0 && (response.status === 403 || response.status === 503)) {
+    const body = await response.clone().json().catch(() => ({}))
+    if (body.code === 'csrf_failed') return lexFetch(route, init, 0) // once, with the cookie read again
+    if (body.error === 'auth_unavailable') {
+      // Keycloak is briefly unreachable: wait as told, then retry.
+      const seconds = Number(response.headers.get('Retry-After')) || 5
+      await new Promise((resolve) => setTimeout(resolve, seconds * 1000))
+      return lexFetch(route, init, retries - 1)
+    }
   }
-  return response
+  return response // a 403 permission_denied ends here: the user stays signed in; show the refusal
 }
 ```
+
+A retried request is sent again with the same `init`, so its body must be one that can be sent twice: a string, `FormData`, a `Blob` or `URLSearchParams`, not a stream.
 
 Files under `/assets/` — Vite's content-hashed output — are cached for a year; everything else, `index.html` included, is not cached, so a release is picked up on the next page load.
 
@@ -127,14 +138,32 @@ A request body above about 100 MB never reaches the backend. Cloudflare, the Ing
 
 | Route | Does |
 |---|---|
-| `POST chunked-uploads/` with JSON `{filename, size}` | Starts an upload. Answers `upload_id`, `token`, `chunk_size` and `chunk_count`. |
+| `POST chunked-uploads/` with JSON `{filename, size}`, and optionally `content_type` | Starts an upload. Answers `201` with `upload_id`, `token`, `chunk_size` and `chunk_count`, or `413` for a file above the limit. `content_type` is the media type the joined file gets; without it, `application/octet-stream`. |
 | `POST chunked-uploads/<upload_id>/chunks/<index>`, multipart field `chunk` | Stores one piece. Pieces may arrive in any order; sending one again replaces it. |
 | `GET chunked-uploads/<upload_id>` | Lists the pieces received (`received`, `complete`), so an upload can resume. |
 | `DELETE chunked-uploads/<upload_id>` | Discards the upload. |
 
-Cut the file into pieces of exactly `chunk_size` bytes; only the last may be shorter. Then send the create or update request as usual, with `token` (`lex-chunked-upload:<upload_id>`) as the file field's value in place of the file. The backend joins the pieces, and the record saves as with a direct upload. Delete the upload when the request has finished, whether it succeeded or not.
+Cut the file into pieces of exactly `chunk_size` bytes; only the last may be shorter, and a piece of any other size is refused with `400`. Then send the create or update request as usual, with `token` (`lex-chunked-upload:<upload_id>`) as the file field's value in place of the file. The backend joins the pieces, and the record saves as with a direct upload. Delete the upload when the request has finished, whether it succeeded or not.
 
-An upload belongs to the user who started it; anyone else gets `404`. A file may be at most 5 GiB. An upload nobody deletes is removed after 24 hours.
+An upload belongs to the user who started it; anyone else gets `404`. A file may be at most 5 GiB. An upload nobody deletes is removed once it is more than 24 hours old, by the next upload anyone starts; until then it keeps working. These numbers — 32 MiB pieces, 5 GiB, 24 hours — are fixed in 2.5.0: no environment variable or `lex_config.py` setting changes them.
+
+### Framing a dashboard
+
+To show one of the instance's dashboards inside your app, frame its address — `STREAMLIT_URL` or `REFLEX_URL` above — with the query parameters the standard interface adds:
+
+| Parameter | Value | What the dashboard does with it |
+|---|---|---|
+| `model`, `pk` | A model's name, and a record's primary key | Picks the dashboard: with both, the record's; with `model` alone, the model's; with neither, the project's own |
+| `lex_embed` | `true` | Leaves out its own header: the account bar with its sign-out, and on Streamlit the logo. A Streamlit dashboard also opens with its sidebar collapsed |
+| `is_logout_enabled` | `false` | Hides the sign-out control, on a dashboard that still draws its account bar |
+| `lex_app_origin` | `location.origin` | Streamlit only: the origin its `lex_view` tables are framed from, and where it sends its sign-in messages. Ignored unless it is one of the instance's application hosts (as your app's is), its configured frontend (`REACT_APP_URL` / `LEX_FRONTEND_URL`), or — on an instance that is not deployed — a loopback origin |
+| `embed_options` | `light_theme` or `dark_theme` | Streamlit only: opens in that theme |
+
+```
+https://<dashboard host>/?model=fund&pk=42&lex_embed=true&is_logout_enabled=false&lex_app_origin=https%3A%2F%2Fapp.customer.com
+```
+
+The frame carries no credential when dashboards sign in with `LEX_STREAMLIT_AUTH=handoff` or `dual` — `GET api/auth/session` then lists `"streamlit"` in `capabilities.dashboard_handoff` — and a Streamlit dashboard signs itself in through the application; a Reflex dashboard keeps its own Keycloak sign-in. On an instance with a custom domain, frame the dashboard hostname on your page's own domain: see [[ship-and-operate/custom domains#Why the dashboards get their own hostnames|Custom domains]].
 
 ## Releases
 

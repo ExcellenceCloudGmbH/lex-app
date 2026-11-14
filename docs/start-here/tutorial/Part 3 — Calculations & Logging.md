@@ -121,7 +121,7 @@ Let's break down what's happening:
 | `class BudgetSummary(CalculationModel)` | Inherits the calculate button and state machine |
 | `def calculate(self)` | Your business logic — just compute and assign |
 | `LexLogger().add_heading(...)` | Builds a rich Markdown report |
-| `.log()` | Saves the report — visible in the calculation logs panel |
+| `.log()` | Saves the report — visible in the record's calculation log |
 
 > [!important]
 > Notice what you **don't** need to write: no state management (`is_calculated` is automatic), no error handling (framework catches exceptions), no `self.save()` (framework saves after `calculate()` returns).
@@ -179,13 +179,15 @@ Select **"Init"** from the run configuration dropdown in PyCharm → click ▶�
 
 1. Select **"Start"** in PyCharm → click ▶️
 2. Navigate to **Reports → BudgetSummary** in the frontend
-3. Create a new record: select a team and enter a quarter (e.g., "Q1 2026")
-4. Click the **Calculate** button ▶️
+3. Create a new record: click **+** (*Create new record*), select a team and enter a quarter (e.g., "Q1 2026")
+4. Click ▶ in the record's row, in the **Actions** column (its tooltip reads *Start your custom calculation*)
 
 You should see:
-- The `is_calculated` field transitions: `NOT_CALCULATED` → `IN_PROGRESS` → `SUCCESS`
+- The pill in the **Calculation** column — the `is_calculated` field — goes `NOT_CALCULATED` → `IN_PROGRESS` → `SUCCESS`, and a message says the calculation is completed
 - The calculated fields fill in automatically
-- The **Calculation Log** panel shows your formatted report
+- The log doesn't open by itself: click the log icon beside the `SUCCESS` pill (*See the calculation log*) to open the calculation log with your formatted report
+
+See [[using-the-app/the-grid/calculations|Running Calculations]] for everything the status pill and the log show.
 
 
 ## How the State Machine Works
@@ -193,7 +195,7 @@ You should see:
 ```mermaid
 stateDiagram-v2
     [*] --> NOT_CALCULATED : Record created
-    NOT_CALCULATED --> IN_PROGRESS : "Calculate" clicked
+    NOT_CALCULATED --> IN_PROGRESS : ▶ clicked
     IN_PROGRESS --> SUCCESS : calculate completed
     IN_PROGRESS --> ERROR : Exception raised
     ERROR --> IN_PROGRESS : Retry

@@ -66,6 +66,11 @@ Without them an instance only knows its canonical hostname, which is exactly the
 
 Nothing here is set by hand on a hosted instance. They are documented because they are what a symptom points at: a domain that resolves and returns `400` is a hostname missing from `LEX_APP_HOSTS`; a dashboard that signs in forever is a sign-in callback built for a different hostname.
 
+Two more settings read hostnames, and each needs the custom ones as well:
+
+- **`LEX_INSTANCE_HOSTS`, when dashboards sign in with `LEX_STREAMLIT_AUTH=handoff` or `dual`.** That sign-in does not read `LEX_STREAMLIT_HOSTS`, which serves only the `legacy` one. It hands the dashboard's frame to the application and back, and accepts only the hosts this JSON lists — the `canonical`, `platform` and `extra` hosts of its `app` and `streamlit` entries — or, without it, `DOMAIN_HOSTED` and `STREAMLIT_URL`. The custom hostnames of both the application and the dashboard belong in the `extra` lists: the hand-off goes to the application host on the dashboard's own domain. The platform sets this variable as well. A dashboard that says *this host is not one of the instance's dashboard hosts* is a hostname missing from it. See [[reference/Environment Variables#Sign-in sessions|Environment Variables]].
+- **`LEX_EMBED_ALLOWED_ORIGINS`, once it is set.** It then decides which sites may show the application's pages in a frame, and nothing is added to it for you, the dashboard hostnames included. A dashboard on `https://streamlit.app.customer.com` that shows tables with `lex_view`, or the app controls, has to be listed there beside its platform address; a frame the browser refuses to show is an origin missing from it. See [[access-and-dashboards/streamlit/embedding app pages#Allowed sites|Allowed sites]].
+
 ## Related
 
 - [[reference/Environment Variables|Environment variables]] — the three host lists, and the dashboards' own settings

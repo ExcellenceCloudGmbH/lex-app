@@ -27,13 +27,16 @@ flowchart LR
 Your primary workspace. An [AG Grid](https://www.ag-grid.com/) Enterprise–powered datagrid that feels like Excel but works like a database. Filter, sort, group, pivot, and export — then save your setup as a reusable view.
 
 ### [[using-the-app/record-detail/index|Record Detail]]
-Click any row to see its full story across five tabs: a field summary, embedded analytics, a visual timeline, full version history with time-travel, and a per-record audit log.
+Open any record — the eye icon in its row, then **Open full view** — to see its full story across five tabs: a field summary, embedded analytics, a visual timeline with time-travel, the full version history, and a per-record audit log.
+
+### [[using-the-app/the-grid/calculations|Running Calculations]]
+Start a record's calculation from its row, follow its status, and read its log.
 
 ### [[using-the-app/themes|Themes]]
 Work in **Light** or **Dark** mode — switch instantly based on your preference or environment.
 
 ### [[using-the-app/navigation|Navigation]]
-A stable, professional sidebar organizes your models into groups. Global search and breadcrumbs keep you oriented no matter how deep you go.
+A stable, professional sidebar organizes your models into groups. Sidebar search, record search (⌘K) and breadcrumbs keep you oriented no matter how deep you go.
 
 ## Staying Signed In
 
@@ -52,8 +55,27 @@ You sign in once and stay signed in, across all Lex apps that share your sign-in
   sign-in a note says *Your unsaved changes were restored*. Review them, then save. A
   file you picked but did not save yet is not kept; choose it again.
 
-You are signed out only when you sign out yourself from the user menu, or when your
-sign-in really ends.
+You are signed out only when you choose **Logout** in the user menu — which ends your
+sign-in for every Lex app that shares it, not just this one — or when your sign-in
+really ends.
+
+## When Something Stands in the Way
+
+- **The server stops answering.** After five seconds without a reply, a banner at the
+  top says *Reconnecting to server…*. The page stays as it is underneath, and the banner
+  goes away when the server answers again.
+- **The server stays away.** After two minutes, a full page says *Your LEX instance's
+  servers are starting up!* Instances pause by default when nobody has used them for 30
+  minutes, and start again on the first visit. The page goes away as soon as the server
+  answers; if it is still there after a couple of minutes, contact an administrator.
+- **You have no access.** *Access Denied* means you signed in, but your account has no
+  roles in this application. Ask your administrator for access; **Return to Login**
+  signs you out.
+- **Sign-in keeps failing.** *Authentication failed repeatedly. Please clear your
+  browser cookies and try again.* Clear the cookies for the site, then click **Retry**.
+- **Your session can't be loaded.** *Could not load your session. Please check your
+  connection or try again.* The app retries by itself, saying *Retrying automatically…*;
+  **Retry** tries again at once.
 
 ## How It Connects
 

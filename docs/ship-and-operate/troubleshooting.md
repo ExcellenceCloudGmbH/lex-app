@@ -11,17 +11,19 @@ symptom alone tells you which:
 flowchart TB
     A{"Who is affected,<br/>and when?"}
     A -->|"one tab, after about an hour"| B["Credential renewal stopped<br/><i>check the interface version</i>"]
-    A -->|"everyone, right after a redeploy"| C["DJANGO_SECRET_KEY unset<br/>or still the example value<br/><i>a random per-process key is used</i>"]
+    A -->|"everyone, right after a redeploy"| C["DJANGO_SECRET_KEY changed<br/><i>the sign-ins rest on it</i>"]
     A -->|"some requests, at random"| D["No shared token store<br/>across replicas<br/><i>startup is refused, not served</i>"]
 ```
 
 ## The deployment fails, and the logs look like a crash loop
 
-**Check the startup probe budget before anything else.** The web process runs migrations and registers every model before it answers a request. If the startup probe expires mid-migration the pod is killed, the replacement starts the same migration from the beginning, and it repeats.
+**Check the startup probe budget before anything else.** The web process runs no migrations itself, but a deployment that runs `lex lex_migrate` in the same pod before `lex start` cannot answer a request until the migration is done. If the startup probe expires mid-migration the pod is killed, the replacement starts the same migration from the beginning, and it repeats.
 
 Nothing in the log says "timeout" — you see a partial migration and a restart, which reads like a crash. Measured on one instance: a 340-second migration against a 600-second budget, comfortable until the data grew.
 
 Fix the probe, not the migration.
+
+If the log instead ends in `ImproperlyConfigured`, it is not a timeout: a deployed instance refuses to start without `DOMAIN_HOSTED`, a private `DJANGO_SECRET_KEY` and the Redis settings, or with `*` in `LEX_EXTRA_ALLOWED_HOSTS`. The message says which, and [[ship-and-operate/configuration#What still refuses to start|Configuration]] lists every case.
 
 ## An embedded dashboard stops working after it has been open a while
 
@@ -52,13 +54,15 @@ The backend joins the pieces into one temporary file before it saves the record,
 
 ## Everyone is signed out after a redeploy
 
-Session cookies are signed with a key derived from `DJANGO_SECRET_KEY`. If that key is not set — or is still the published example value, which is excluded on purpose — the framework falls back to a random per-process key and warns. It works, and it is discarded on every restart.
+The sign-ins rest on `DJANGO_SECRET_KEY`: Django keys each session's authentication hash to it, the dashboard proxy derives its cookie key from it, and — unless `OIDC_TOKEN_ENCRYPTION_KEYS` is set — the stored sign-in tokens are encrypted with a key derived from it. A key that changed between two deploys invalidates all of them, and everyone has to sign in again.
 
 Set `DJANGO_SECRET_KEY` to a stable, per-installation value. See [[ship-and-operate/configuration|Configuration]].
 
+A key that is missing, or still the published example value, no longer gets this far on a deployed instance. Before 2.5 the dashboard proxy fell back to a random key per process, which every restart discarded; from 2.5 a process with `DEPLOYMENT_ENVIRONMENT` set refuses to start instead. The random key is left only to `lex streamlit` on a developer's machine.
+
 ## Sessions work intermittently across replicas
 
-Two replicas with no shared token store will each accept only the sessions they created. The framework refuses to start in this configuration rather than serving it, because "works about half the time" is harder to diagnose than a startup failure.
+Two dashboard proxy replicas with no shared token store will each accept only the sessions they created. `lex streamlit` refuses to start in this configuration rather than serving it — when `LEX_PROXY_REPLICAS` says there is more than one and neither `TOKEN_REDIS_URL` nor `REDIS_URL` is set — because "works about half the time" is harder to diagnose than a startup failure. With `LEX_STREAMLIT_AUTH=handoff` the proxy keeps no tokens, and any replica serves any dashboard.
 
 ## A report is saved under a name nobody chose
 
@@ -68,7 +72,7 @@ On 2.1.11 or later, ensure the widening migration was actually generated and app
 
 ## `lex --help` does not list the command I was told to run
 
-It only lists the ten commands the CLI implements itself. Django management commands — `init`, `migrate`, `create_db`, `sync_keycloak`, `lex_migrate` and the rest — work but do not appear, because listing them would mean starting Django just to print help.
+It only lists the eleven commands the CLI implements itself, and the `ai-*` commands of `lex-mcp-local` when that package is installed. Django management commands — `init`, `migrate`, `create_db`, `sync_keycloak`, `lex_migrate` and the rest — work but do not appear, because listing them would mean starting Django just to print help.
 
 [[reference/CLI Commands|CLI Commands]] is the complete list.
 
@@ -76,6 +80,6 @@ It only lists the ten commands the CLI implements itself. Django management comm
 
 Collect these before asking, because they are what the first three questions will be:
 
-- The exact `lex-app` version, and the interface version if they differ.
-- Whether the deployment ran `lex_migrate` with or without `--no-makemigrations`.
+- The exact `lex-app` version (`lex --version`), and the interface version if they differ.
+- Whether the deployment ran `lex lex_migrate` with or without `--no-makemigrations`, and what it printed — it exits `0` even when a migration failed.
 - The pod log around the failure — including the absence of lines, which is evidence.

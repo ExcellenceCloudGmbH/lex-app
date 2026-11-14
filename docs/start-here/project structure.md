@@ -8,7 +8,7 @@ Lex App uses a flat project structure — no `manage.py`, no nested [Django](htt
 
 ```
 YourProject/
-├── .env                        ← environment config (single source of truth)
+├── .env                        ← environment config, loaded by every lex command
 ├── .run/                       ← PyCharm run configurations (eleven, from lex setup)
 ├── migrations/                 ← Django migrations
 ├── tests/
@@ -73,14 +73,9 @@ from Reports.CalculateNAV import CalculateNAV
 
 ## The `.env` File
 
-The `.env` file is the single source of truth for all runtime configuration. It's loaded automatically by the PyCharm run configurations, or you can source it manually:
+The `.env` file holds your runtime configuration for local development. Every `lex` command loads it from the project root by itself, whether an IDE run configuration or a terminal starts it — there is nothing to source. A variable that is already set in the environment wins over the file.
 
-> [!note]- Terminal: loading .env manually
-> ```bash
-> set -a; source .env; set +a
-> ```
-
-See [[start-here/installation]] for how to configure it.
+See [[start-here/installation#Configure Your Environment|Installation]] for how to configure it.
 
 ## Model Files
 
@@ -102,11 +97,29 @@ class Fund(LexModel):
 
 ## Key Dependencies
 
-Lex App brings along a specific set of dependencies. Make sure your `requirements.txt` includes:
+Lex App brings along a specific set of dependencies, pinned to exact versions. Your models, calculations and dashboards run on these — in 2.5.0:
 
-- `lex-app` — the framework itself
-- `pandas`, `numpy` — you manage these versions yourself (not bundled)
+| Dependency | Version |
+|---|---|
+| Python | 3.12 only |
+| Django | 6.0.9 |
+| pandas | 3.0.6 (it brings numpy with it) |
+| openpyxl | 3.1.5 |
+| Streamlit | 1.66.1 |
+| Reflex | 0.9.13, with reflex-enterprise 0.9.7 |
+| Celery | 5.6.3 |
+| The web interface, `lex-app-frontend` | 2.3.x |
+
+So your `requirements.txt` needs:
+
+- `lex-app`, pinned exactly (`lex-app==2.5.0`) — see [[ship-and-operate/upgrading#Pin the version|Upgrading]]
 - Any additional libraries your project needs
 
-> [!warning]
-> If you're upgrading from an older version, `pandas` and `numpy` are no longer bundled with `lex-app`. Add them explicitly to your `requirements.txt`.
+> [!warning] Do not pin these yourself
+> pip has to satisfy every requirement at once, so with lex-app pinned, a
+> version of your own that differs from its — `pandas==2.2.*`, `django<6` —
+> makes the install fail. Leave them out of your `requirements.txt` and take
+> the versions lex-app brings. Code written against older releases of them, Django 5 or
+> pandas 2, may need changes when you upgrade. The interface is the one
+> exception: [[ship-and-operate/upgrading#The interface upgrades separately|its pin]]
+> leaves room for a later 2.3.x of your own.

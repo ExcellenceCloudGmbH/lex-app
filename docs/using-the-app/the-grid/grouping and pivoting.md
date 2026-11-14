@@ -8,7 +8,7 @@ Sometimes you don't want a flat list — you want a structure. Grouping lets you
 
 ## Row Grouping
 
-Drag any column header to the grouping area above the grid (or right-click a column → **Group by this column**). The grid instantly reorganizes into expandable groups.
+Drag any column header to the grouping area above the grid (or right-click a column header and choose **Group by** followed by the column's name). The area is hidden while nothing is grouped and appears as soon as you start dragging a header. The grid instantly reorganizes into expandable groups.
 
 ![Funds grouped by currency, with one group open](images/the-grid/row-grouping.svg)
 
@@ -27,12 +27,6 @@ For example, group your expenses by **Team**:
 ```
 
 Each group header shows aggregate values — the count of records and totals for numeric columns. Click to expand or collapse.
-
-> [!example]- 🎬 Video — Drag-to-group row grouping
-> <video controls width="100%">
->   <source src="../../videos/grid-drag-to-group.mp4" type="video/mp4">
-> </video>
-> Drag the "team" column to the group bar, see the grid reorganize into collapsible groups.
 
 ### Multi-Level Grouping
 
@@ -71,7 +65,7 @@ Pivot mode transforms your grid into a cross-tabulation — think pivot tables i
 
 To enable pivot mode:
 
-1. Click the **Pivot Mode** toggle in the column panel (or right-click a column → **Pivot by this column**)
+1. Open the **Columns** tab on the grid's right edge and turn on its **Pivot Mode** toggle
 2. Drag a column (like **Quarter**) to the pivot area
 3. The grid flips: each unique value in the pivot column becomes its own column header
 
@@ -82,12 +76,6 @@ For example, with expenses grouped by **Team** and pivoted by **Quarter**:
 | Engineering | €8,200 | €6,100 | €5,400 | €4,800 | **€24,500** |
 | Marketing | €4,500 | €3,800 | €3,200 | €3,700 | **€15,200** |
 | Finance | €1,800 | €1,500 | €1,200 | €1,800 | **€6,300** |
-
-> [!example]- 🎬 Video — Pivot mode cross-tabulation
-> <video controls width="100%">
->   <source src="../../videos/grid-pivot-mode.mp4" type="video/mp4">
-> </video>
-> Enable pivot mode, drag Quarter to the pivot area, see the grid transform into a cross-tabulation.
 
 > [!tip]
 > When you [[using-the-app/the-grid/exporting data|export]] in pivot mode, the exported file reflects the pivoted layout — rows, columns, and aggregations exactly as you see them on screen.

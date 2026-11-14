@@ -46,22 +46,24 @@ The `lex setup` command generates ready-to-use run configurations in the `.run/`
 Select **"Start"** and click the green ▶️ button. Your app is now running at `http://localhost:8000`.
 
 > [!tip]
-> PyCharm run configurations automatically load your `.env` file. No manual sourcing needed.
+> Nothing needs sourcing, here or in a terminal: every `lex` command loads the project's `.env` itself.
 
 
 ## Using the Terminal
 
-If you're not using PyCharm, you'll need to load environment variables manually before running any `lex` command:
+Run the same commands from the project folder. Each `lex` command loads the `.env` at the project root before it does anything else:
 
 ```bash
-# Load environment variables
-set -a; source .env; set +a
-
 # Start the development server
 lex start --reload --loop asyncio lex_app.asgi:application
 ```
 
 The `--reload` flag enables hot-reloading so the server restarts automatically when you change code.
+
+> [!warning] A variable already set in your shell wins
+> `.env` never overrides the environment. If you exported it into this shell
+> earlier (`set -a; source .env; set +a`), later edits to the file are ignored
+> until you `unset` the variable or open a new terminal.
 
 ## Running Streamlit Dashboards
 
@@ -74,21 +76,18 @@ Select **"Streamlit"** from the Run Configuration dropdown.
 ### Via Terminal
 
 ```bash
-set -a; source .env; set +a
 lex streamlit
 ```
 
-> [!tip]
-> PyCharm's Streamlit run configuration handles all environment variables automatically. We recommend using it for local development.
+`lex streamlit` starts the Streamlit app and the authentication proxy together. Locally, the defaults are enough. Without a `DJANGO_SECRET_KEY` of your own it warns that dashboard sessions will not survive a restart — true, and harmless on your own machine.
 
-`lex streamlit` starts the Streamlit app and the authentication proxy together. Locally, the defaults are enough. In HTTPS deployments, set a fixed `SESSION_SECRET`; if you run multiple proxy replicas, set a shared `TOKEN_REDIS_URL` / `REDIS_URL` too so dashboard sessions survive restarts and load balancing.
+Deployed, there is nothing to set for that either. The proxy signs its session cookie with a key derived from `DJANGO_SECRET_KEY`, which every deployed instance has; `SESSION_SECRET` only overrides it. If you run several proxy replicas and dashboards sign in the `legacy` or `dual` way, give them a shared `TOKEN_REDIS_URL` / `REDIS_URL`; with `LEX_PROXY_REPLICAS` above 1, `lex streamlit` refuses to start without one. See [[access-and-dashboards/streamlit/sessions and authentication|Streamlit: Sessions & Authentication]].
 
 ## Running Reflex Dashboards
 
 If the project has [[access-and-dashboards/reflex/index|Reflex dashboards]], start the Reflex server beside the app — select **"Reflex"** from the Run Configuration dropdown, or from a terminal:
 
 ```bash
-set -a; source .env; set +a
 lex reflex
 ```
 

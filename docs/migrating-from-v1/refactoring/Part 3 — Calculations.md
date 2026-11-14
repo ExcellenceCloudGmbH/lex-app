@@ -13,7 +13,7 @@ If your V1 project uses `ConditionalUpdateMixin` for on-demand calculations, thi
 | Base class | `ConditionalUpdateMixin` | `CalculationModel` |
 | Method name | `update()` | `calculate()` |
 | Decorator | `@conditional_calculation` | Not needed |
-| State field | Boolean `is_calculated` (true/false) | Enum with 5 states |
+| State field | Boolean `is_calculated` (true/false) | Enum with 6 states |
 | Recursion guard | Manual `dont_update` flag | Automatic |
 | Error handling | Manual `try/catch` | Automatic |
 | Save | Manual `self.save()` | Automatic |
@@ -54,6 +54,8 @@ def calculate(self):
     # ... business logic ...
     # No self.save() needed — the framework does it
 ```
+
+The one exception is a `calculate()` decorated with `@lex_shared_task`: the framework then stores only the calculation's status, so that `calculate()` saves the record itself. See [[reference/CalculationModel Internals]].
 
 ### 3. Remove the Decorator
 
@@ -188,10 +190,11 @@ stateDiagram-v2
     ABORTED --> IN_PROGRESS : Retry
 ```
 
-`CANCELLED` and `ABORTED` are both non-success and both audit as a failure, but
-they answer different questions afterwards: someone stopped this run, versus
-the framework found it stuck in `IN_PROGRESS` at startup and gave up on its
-behalf.
+`CANCELLED` and `ABORTED` are both non-success, and the audit log tells them
+apart: a cancelled run is recorded as `cancelled`, a run the framework found
+stuck in `IN_PROGRESS` at startup, and gave up on, as `aborted`. An `ERROR` is
+recorded as a `failure`, with its traceback. See
+[[history-and-audit/audit logs]].
 
 This gives you proper progress tracking, retry capability, and clear error states. See [[calculations/calculation models]] for the full details.
 

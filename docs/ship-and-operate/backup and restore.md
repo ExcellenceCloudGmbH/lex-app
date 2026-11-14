@@ -8,7 +8,7 @@ command for backing it up. Knowing which is which is most of this page.
 | What | Where it lives | Who backs it up |
 |---|---|---|
 | Your application data | PostgreSQL | **You**, with your platform's database tooling |
-| Uploaded files | Local disk, GCS, or SharePoint — see `STORAGE_TYPE` | **You**, with that storage's tooling |
+| Uploaded files and generated reports | Local disk, GCS, or SharePoint — see [Uploaded files](#uploaded-files) | **You**, with that storage's tooling |
 | Permission configuration | Keycloak | `lex keycloak_backup` |
 
 > [!important]
@@ -101,15 +101,32 @@ Two things about Lex App specifically are worth knowing when you plan it:
   and the [[history-and-audit/audit logs|audit log]] are ordinary tables. A
   restore to an earlier point loses the audit trail of everything after it — the
   record of the incident is inside the thing being rolled back.
-- **Uploaded files are usually not.** Unless `STORAGE_TYPE` is unset or
-  `LEGACY`, files live in GCS or SharePoint and a database restore will leave
-  rows pointing at objects whose state does not match. Restore both to the same
+- **Uploaded files are not.** They live on local disk, in GCS or in SharePoint
+  (see [Uploaded files](#uploaded-files)), and a database restore will leave
+  rows pointing at files whose state does not match. Restore both to the same
   point, or expect broken links.
 
 Which of `pg_dump`, managed snapshots or streaming replication is right for you
 depends on how much data loss and how much downtime your installation can take.
 That decision belongs to whoever operates your databases — this page will not
 guess it for you.
+
+## Uploaded files
+
+Files people upload and the report files your calculations write (`XLSXField`,
+`PDFField`) go to the same storage, chosen by `STORAGE_TYPE`:
+
+| `STORAGE_TYPE` | Where the files are |
+|---|---|
+| unset or `LEGACY` | Local disk. With `KUBERNETES_ENGINE` unset or `NONE` — a developer's machine, say — the project root itself. With anything else there, `/app/storage/uploads`: the volume to persist and back up, because without a persistent volume the files go when the container does |
+| `GCS` | The bucket named by `GS_BUCKET_NAME` |
+| `SHAREPOINT` | The SharePoint site at `SHAREPOINT_URL` |
+
+With `GCS`, the service-account key is part of what you restore: it is read from
+`django-storages/gcpCredentials.json` in the folder **above** the project root,
+as the settings load. No variable points anywhere else, and without the file no
+process that loads the settings starts — not the web process, not a worker, not
+`lex init`.
 
 ## What a full restore looks like
 

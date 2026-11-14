@@ -4,16 +4,17 @@ aliases:
   - "interface/record-detail/history tab"
 ---
 
-The [[using-the-app/record-detail/timeline tab|Timeline tab]] tells the story visually. The History tab gives you the raw data — a full AG Grid of every historical version of this record, sortable, filterable, and equipped with the **As Of** time-travel control. Because it's a standard table, this is the best place to explore historical values, compare versions, and verify changes.
+The [[using-the-app/record-detail/timeline tab|Timeline tab]] tells the story visually. The History tab gives you the raw data — a full AG Grid of every historical version of this record, sortable, filterable, and exportable. Because it's a standard table, this is the best place to explore historical values, compare versions, and verify changes.
 
 ## The History Grid
 
-Every historical version of the current record is displayed as a row. Each row represents a snapshot of the record at a specific point in time, with all field values captured at that moment.
+Every historical version of the current record is displayed as a row, newest first. Each row represents a snapshot of the record at a specific point in time, with all field values captured at that moment.
 
 The columns include both history-tracking fields and all of the model's own fields:
 
 | Column | What It Shows |
 |---|---|
+| **Valid From** / **Valid To** | When this version was in force. The current version has no Valid To |
 | **Created By** | The user who originally created the record |
 | **Edited By** | The user who made this particular change |
 | **Calculation** | For `CalculationModel` records, the state at this version (`NOT_CALCULATED`, `IN_PROGRESS`, `SUCCESS`, `ERROR`, `CANCELLED`, `ABORTED`) |
@@ -21,35 +22,42 @@ The columns include both history-tracking fields and all of the model's own fiel
 
 You can [[using-the-app/the-grid/filtering and sorting|filter and sort]] this grid like any other — for example, filter by `Edited By` to see all changes made by a specific person, or sort by date to trace the evolution of the record.
 
-![One row per version, with Created By, Edited By and Calculation alongside the model's own fields as they stood at that moment](images/record-detail/history-tab.svg)
+The rows are past versions, so their **Edit** and **Delete** are greyed out. By default
+only a superuser can change one, by double-clicking its cells — **Valid From** and
+**Valid To** included. The eye icon opens a version — see [[#Jumping to Live Data]].
 
-## The As Of Control
+![One row per version, with the record's fields as they stood in that version; Edit and Delete are greyed out](images/record-detail/history-tab.svg)
 
-At the top of the History tab, the **As Of** button lets you time-travel. Click it, pick a date and time, and the grid filters to show only the versions that were **active at that moment**.
+## The Toolbar
 
-This answers questions like:
-- "What did this record look like on March 1st?"
-- "What values were in place at the end of last quarter?"
-- "Was this field already updated before the audit?"
+Above the grid:
 
-> [!example]- 🎬 Video — As Of time-travel in the History grid
-> <video controls width="100%">
->   <source src="../../videos/record-history-as-of.mp4" type="video/mp4">
-> </video>
-> Click the As Of button, pick a date from last month, and the grid updates to show the historical state at that point in time.
+| Control | What It Does |
+|---|---|
+| **Refresh** | Reloads the versions |
+| **Discard unsaved changes** (the curved arrow) | Goes back to the saved view. Greyed out when there is nothing to discard |
+| **Save changes to current view** (the disk) | Saves the grid's filters, sorting and columns into the open view |
+| **View selector** | Switches between saved views of the history grid, or creates one when you type a name and press Enter — see [[using-the-app/the-grid/saved views\|Saved Views]] |
+| **Export** | Downloads an Excel file — but not of these versions; see the warning below |
+| **Auto-fit columns** | Sizes every column to its content |
+| **Settings** (the gear) | Row density: **Compact**, **Standard** or **Comfortable** |
 
-The As Of control uses the [[history-and-audit/bitemporal history|system time dimension]] — it shows you what the system believed to be true at the timestamp you selected. To see when a change was *actually effective* in the business sense, use the [[using-the-app/record-detail/timeline tab|Timeline tab's]] effective-time view.
+> [!warning] Export doesn't export the versions
+> In Lex App 2.5.0 the **Export** button on this tab asks for the model's live table, not
+> its history. With nothing ticked you get the model's current records; ticking versions
+> doesn't narrow it to those versions.
 
-> [!note]
-> The same As Of control is also available at the [[using-the-app/the-grid/index|table level]], where it filters the entire model's grid — not just one record's history.
-
-### Clearing the Time Travel
-
-Click the **Reset to Latest** button to exit time-travel mode and return to the current live data. The button is always visible when an As Of date is active, so you never get stuck in the past.
+There is no time-travel control on this tab. To see the record as the system knew it at
+a moment in the past, use **As Of** on the
+[[using-the-app/record-detail/timeline tab#Time-Travel with As Of|Timeline tab]].
 
 ## Jumping to Live Data
 
-When viewing a historical record, a **Go to Live Data** button appears. Click it to navigate directly to the current live version of this record — useful when you've found something interesting in the history and want to check today's state.
+The eye icon in a row opens that version in a side panel; **Open full view** there (or
+⌘/Ctrl-click on the eye icon) takes you to the version's own page. That page has a
+**Live Data** tab instead of History. Its **Go to Live Data** button takes you to the
+current live version of this record — useful when you've found something interesting in
+the history and want to check today's state.
 
 ## How History Is Created
 
@@ -57,7 +65,7 @@ You don't need to do anything to create history — it's automatic. Every `LexMo
 
 This means:
 - Every save adds a version rather than overwriting the last one
-- You can correct *when* a version applied — its Valid From and Valid To, as [[start-here/tutorial/Part 6 — History in Action|Part 6 of the tutorial]] shows — and that correction is itself recorded in the system-time history, which can't be edited
+- Only a superuser may change a history row: in this grid or in **Full history**, a superuser can edit a version's cells in place, Valid From and Valid To included. Without that right, a correction that applies from an earlier date is made in code, as a backdated save — [[start-here/tutorial/Part 6 — History in Action|Part 6 of the tutorial]] shows how. Any correction is itself recorded in the system-time history, whose rows no one can edit (a superuser can only delete them, through the REST API)
 - No data is ever lost — even deleted records are preserved in history
 - You can always answer "what did this look like on date X?"
 

@@ -20,31 +20,42 @@ The Audit Log tab displays a grid of all API operations that affected the curren
 | **Resource** | The model name (e.g., `budgetsummary`) |
 | **Action** | `create`, `update`, or `delete` |
 | **Payload** | The full data that was sent or modified (expandable JSON) |
-| **Calculation Id** | Link to the calculation log entry (for `CalculationModel` records) |
+| **Calculation Log** | A button that opens the log of that calculation run — an icon with that tooltip in compact rows. Greyed out when the run left no log. See [[using-the-app/the-grid/calculations#The Log Page\|The Log Page]] |
 | **Calculation Record** | The related record (e.g., "Marketing — 1") |
+| **Status** | Where the operation got to: `pending`, `success`, `failure`, `cancelled` or `aborted` — see [[#The Status Lifecycle]] |
+| **Error Traceback** | Why the operation failed — filled only when the status is `failure` |
+| **Status Created At** / **Status Updated At** / **Duration** | When the status was first written and last changed, and how long the operation took |
 | **Actions** | Quick view link to inspect the full entry |
 
 ![Every attempted operation, not just the ones that succeeded — the entry is written before the operation runs, so a delete that failed is still on record](images/record-detail/audit-log-tab.svg)
 
 ## The Status Lifecycle
 
-Every audit log entry goes through a status lifecycle:
+Every audit log entry goes through a status lifecycle. The **Status** column shows it as
+the lower-case value the server stores:
 
 ```mermaid
 flowchart LR
-    A["🟡 Pending"] -->|operation succeeds| B["🟢 Success"]
-    A -->|operation fails| C["🔴 Failure"]
+    A["pending"] -->|operation succeeds| B["success"]
+    A -->|operation fails| C["failure"]
+    A -->|someone stops the calculation| D["cancelled"]
+    A -->|server restarts mid-calculation| E["aborted"]
 ```
 
-- **Pending** — the operation has been requested but not yet completed (for HTTP `202` calculations, this can remain until background work finishes)
-- **Success** — the operation completed successfully; payload updated to reflect final state
-- **Failure** — the operation failed; the error traceback is stored for investigation
+- **`pending`** — the operation has been requested but not yet completed (for HTTP `202` calculations, this can remain until background work finishes)
+- **`success`** — the operation completed successfully; payload updated to reflect final state
+- **`failure`** — the operation failed; the error traceback is stored for investigation
+- **`cancelled`** — a calculation was stopped by a person before it finished
+- **`aborted`** — a calculation was still running when the server restarted, so it never
+  finished
+
+Only `failure` keeps a traceback: a cancelled or aborted run raised no error.
 
 The key insight: the audit log is created **before** the operation executes. This means even operations that fail due to validation errors, database issues, or permission denials are recorded with full context.
 
 ## Reading the Payload
 
-Click any row to expand its payload — the full JSON body of the operation. For updates, this shows the values that were sent:
+The **Payload** cell holds the full JSON body of the operation, folded; click its arrow to expand it. For updates, this shows the values that were sent:
 
 ```json
 {
@@ -64,8 +75,12 @@ The Audit Log tab uses the same [[using-the-app/the-grid/index|AG Grid]] as ever
 
 - **Filter by author** — see all changes made by a specific user
 - **Filter by action** — show only deletions, or only creations
-- **Filter by status** — find failed operations
+- **Spot failed operations** — their **Status** reads `failure`
 - **Sort by date** — latest first, or trace from the beginning
+
+> [!warning]
+> In Lex App 2.5.0 the **Export** button above this grid downloads rows from the record's
+> own table, not these log entries.
 
 ## Relationship to Other Tabs
 

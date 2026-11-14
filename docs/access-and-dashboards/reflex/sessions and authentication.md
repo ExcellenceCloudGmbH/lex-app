@@ -31,7 +31,7 @@ Something that must be public says so with `auth=False` — `@rxe.page(route="/s
 Framed by Lex App — the **Reflex** entry in the sidebar — the dashboard behaves the same with two differences:
 
 - **Signing in happens without showing Keycloak.** Keycloak's login page refuses to render inside a frame, so the framed dashboard asks Keycloak whether the user is signed in without a page of its own (`prompt=none`). Signed in to Lex App, they are, and the dashboard opens signed in with nothing to click. When Keycloak cannot tell from inside the frame, `/login` shows **Login with Keycloak**: one click opens a small popup, which finishes by itself and closes for someone signed in already, and shows Keycloak's form to anyone else.
-- **The dashboard's own header is left out.** Lex App opens it with `lex_embed=1`, and the page then draws neither the signed-in user nor a **Sign out** button: Lex App's header shows both.
+- **The dashboard's own header is left out.** Lex App opens it with `lex_embed=1`, and the page then draws neither the signed-in user nor a **Sign out** button: Lex App's header shows both. Your components can do the same — see [[access-and-dashboards/reflex/standalone dashboards#Framed by Lex App|Framed by Lex App]].
 
 Keycloak cannot tell from inside the frame when there is no Keycloak session, and when the browser keeps Keycloak's cookies from frames on another site — Safari and Firefox do by default, and so does any browser set to block third-party cookies. Serving Keycloak and the dashboards on the same site as Lex App — `auth.example.com` and `dashboards.example.com` beside `app.example.com` — makes the frame's sign-in silent in all of them.
 
@@ -53,7 +53,7 @@ The dashboard signs in with the settings the project already has for Keycloak �
 
 The issuer is the realm's URL, `<KEYCLOAK_URL>/realms/<KEYCLOAK_REALM>`. The overrides are Reflex Enterprise's own variables, and a set one always wins. `KEYCLOAK_CLIENT_ID` is never used: in Lex App it names the client handed to the browser, which is not the one a dashboard signs in through.
 
-Two of the proxy's settings apply here too, with the same meaning: `OIDC_ISSUER`, when the tokens carry a different issuer from the URL the server reaches Keycloak on, and `OIDC_VERIFY_SSL=false`, for a local Keycloak with a self-signed certificate. The proxy's session settings — `SESSION_SECRET`, `TOKEN_REDIS_URL`, `LEX_PROXY_REPLICAS` — do not: the sign-in keeps nothing on the server to configure.
+Two of the proxy's settings apply here too, with the same meaning: `OIDC_ISSUER`, when the tokens carry a different issuer from the URL the server reaches Keycloak on, and `OIDC_VERIFY_SSL=false`, for a local Keycloak with a self-signed certificate. The proxy's session settings — `SESSION_SECRET`, `TOKEN_REDIS_URL`, `LEX_PROXY_REPLICAS` — do not. What the sign-in keeps on the server it keeps in the instance's own Redis, the one Celery uses, which needs nothing new either — see [Staying signed in](#staying-signed-in).
 
 ### Keycloak: two lists of URLs
 
@@ -65,6 +65,12 @@ Keycloak only sends a user back to a URL it knows. In the confidential client's 
 | **Valid post logout redirect URIs** | `http://localhost:8502/*`<br>`https://dashboards.example.com/*` |
 
 The callback is built from the address in the browser, so every origin people actually use needs an entry — and behind a reverse proxy, the app must see the public scheme and host, or it builds an `http://` callback that matches nothing. A missing entry shows up as Keycloak's *Invalid parameter: redirect_uri* instead of the login form.
+
+### Options of the sign-in
+
+The sign-in is Reflex Enterprise's `AuthPlugin`, built by `lex_auth_plugin()` from `lex.lex_app.reflex.config`; `lex_config()` puts it in the app's plugin list. `lex_auth_plugin(**options)` passes on any option `AuthPlugin` takes — `auth=` for an app-wide authorization check, `extra_scopes` for more claims, builders for the plugin's own pages, an audit hook; Reflex Enterprise's [authentication documentation](https://reflex.dev/docs/enterprise/auth/overview/) lists them. Two are set for you: `auth_providers`, Lex App's Keycloak provider, and `login_page`, the `/login` described above. Pass either only to replace it.
+
+The options go where `rxconfig.py` builds the plugin list, and a list you pass replaces lex-app's whole one. Keep `lex_auth_plugin()` in it — without it the dashboards stop requiring sign-in — and `rx.plugins.RadixThemesPlugin()` beside it; the example is under [[access-and-dashboards/reflex/running and deploying#What the first run does|Running & Deploying]].
 
 ## Staying signed in
 
@@ -78,6 +84,8 @@ Nothing else signs it out:
 - **Keycloak rejecting the dashboard's client** (a wrong client secret, say). The user is not signed out, and the log says why at ERROR, once per attempt (every 5 minutes), so the misconfiguration is found rather than felt. Once the access token has expired, nothing is served until it is fixed, as above.
 - **Keycloak's clock a few seconds off, or its signing keys rotated.** Neither signs anyone out: the dashboard allows 30 seconds of clock difference, and fetches Keycloak's keys again when a token is signed with a new one. Tokens it still cannot verify are not taken; the previous ones are kept, and the log says why at ERROR, naming the clock.
 - **Several tabs.** One tab renews the tokens and the others take its result — across Reflex replicas too, when they share the instance's Redis. A second renewal within 30 seconds is skipped, not treated as a failure.
+
+What tabs and replicas have to agree on is kept in the instance's Redis — the Celery broker's: `REDIS_HOST`, with `REDIS_USERNAME` and `REDIS_PASSWORD`, on a deployed instance, `127.0.0.1:6379` locally. It holds a lock for each renewal, the token set a renewal obtained — encrypted, for two minutes — for the other tabs to take instead of asking Keycloak, and a mark for each Keycloak session back-channel logout ended, which is how signing out of Lex App reaches the dashboard at its next token check. No token is stored there in clear. Without Redis, or while it does not answer, each Reflex process keeps the same in its own memory and logs a warning: tabs served by one process still share one renewal, and a sign-out reaches the dashboard at its next renewal.
 
 ### Across restarts and new tabs
 
@@ -205,12 +213,15 @@ class Funds(rx.State):
         async with httpx.AsyncClient(base_url="http://localhost:8000") as client:
             response = await client.get(
                 "/api/model_entries/fund/list",
+                params={"perPage": -1},
                 headers={"Authorization": f"Bearer {token}"},
             )
         self.rows = response.json()["results"]
 ```
 
 `http://localhost:8000` is `lex start` locally; in production it is wherever the dashboard reaches the Lex App backend. The token never reaches the browser, and it is always a current one: the dashboard renews it before it expires. While it has expired and Keycloak cannot renew it, `current_access_token` returns `""` — treat that as not signed in.
+
+The list is paged only when the request sends `perPage`: then it answers `{"count", "next", "previous", "results"}`, and `-1` puts every row in that one page. Without `perPage` it answers a plain array of every row — read `response.json()` itself then. See [[reference/REST API#The list endpoint|The list endpoint]].
 
 ## Related
 

@@ -125,7 +125,18 @@ class Invoice(LexModel):
 ```
 
 > [!tip] `pre_validation()` vs. serializer validation
-> These look similar — both block bad data before save — but they run at different layers. `pre_validation()` runs on **every `save()`**, no matter how it's triggered (API, hook, management command, calculation). [[model-your-data/serializers|Serializer validation]] only runs when data arrives through the **REST API**. Use `pre_validation()` for universal business rules; use serializer validation for API-specific concerns like formatting or permission-aware checks.
+> These look similar — both block bad data before save — but they run at different layers. `pre_validation()` runs on **every `save()` that runs hooks**, whatever triggers it (API, hook, management command, your own code). [[model-your-data/serializers|Serializer validation]] only runs when data arrives through the **REST API**. Use `pre_validation()` for universal business rules; use serializer validation for API-specific concerns like formatting or permission-aware checks.
+
+> [!warning] Saves that skip `pre_validation()`
+> It is a hook, so a write without hooks skips it: `save(skip_hooks=True)`, `QuerySet.update()`, and `bulk_create(..., skip_history=True)`.
+>
+> What happens to a calculation's results depends on how it runs:
+>
+> - **In-process**, the framework stores the record after `calculate()` with `save(skip_hooks=True)`, so `pre_validation()` never sees what `calculate()` produced.
+> - **On Celery**, a `calculate()` without `@lex_shared_task` is stored with a plain `save()`, so `pre_validation()` does run.
+> - **A `@lex_shared_task` `calculate()`** gets no save of its results from the framework, which writes only the status fields, without hooks. `pre_validation()` runs only if `calculate()` saves the record itself.
+>
+> To check a calculation's results whichever way it runs, check them inside `calculate()`. See [[reference/CalculationModel Internals]].
 
 ### `post_validation()` — Verify After Save + Auto-Rollback
 
@@ -154,7 +165,20 @@ class ExpenseReport(LexModel):
 > 1. Field values are restored from the snapshot
 > 2. A `save(skip_hooks=True)` is executed to persist the rollback
 > 3. The operation is wrapped in `transaction.atomic()` with savepoints
-> 4. A `ValidationError` is raised to the caller
+> 4. A `lex.core.exceptions.ValidationError` is raised to the caller
+
+### What `save()` raises
+
+Whatever either hook raises, `save()` raises `lex.core.exceptions.ValidationError` — not Django's or Django REST Framework's — with your exception kept as `.original_exception` (and as `__cause__`) and the model's class name as `.model_class`. Its message starts with `Save cancelled - pre-validation failed:` or `Post-validation failed and model was rolled back:`, followed by yours.
+
+```python
+from lex.core.exceptions import ValidationError
+
+try:
+    invoice.save()
+except ValidationError as exc:
+    reason = exc.original_exception  # the ValueError pre_validation() raised
+```
 
 ## Which Pattern Should I Use?
 

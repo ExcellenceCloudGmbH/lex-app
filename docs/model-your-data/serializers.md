@@ -139,7 +139,7 @@ When validation fails, the error message appears directly in the frontend UI —
 > model responses rather than relying on the frontend to hide them.
 
 > [!tip] Serializer validation vs. `pre_validation()`
-> Serializer validation and [[model-your-data/lifecycle hooks#`pre_validation()` — Guard Before Save|pre_validation()]] both block invalid data before it's saved — but they run at different layers. Serializer validation runs in the **API layer** (when data arrives via REST), while `pre_validation()` runs in the **model layer** (on every `save()`, regardless of source). If a rule should apply no matter how the model is saved — API, management command, hook, calculation — put it in `pre_validation()`. If it's specific to the REST API (e.g., formatting, permission-aware checks), use a serializer.
+> Serializer validation and [[model-your-data/lifecycle hooks#`pre_validation()` — Guard Before Save|pre_validation()]] both block invalid data before it's saved — but they run at different layers. Serializer validation runs in the **API layer** (when data arrives via REST), while `pre_validation()` runs in the **model layer**, on every `save()` that runs hooks, whatever its source. If a rule should apply no matter how the model is saved — API, management command, hook, your own code — put it in `pre_validation()`, and see that page for the saves that skip hooks, a calculation's in-process result among them. If it's specific to the REST API (e.g., formatting, permission-aware checks), use a serializer.
 
 ## Foreign keys read as names, not IDs
 
@@ -276,22 +276,28 @@ what `FundSummarySerializer` declares. See
 
 ### Renaming the framework serializer
 
-When you override `api_serializers["default"]` with a custom serializer, the framework's auto-generated serializer is replaced in the map — your serializer becomes `"default"`. For most models this is exactly what you want.
+When you override `api_serializers["default"]` with a custom serializer, the framework's auto-generated serializer is replaced in the map — your serializer becomes `"default"`. Every request that names no serializer gets yours: the list, a single record, the snapshots of the record history endpoint, and the fields endpoint alike. For most models this is exactly what you want.
 
-If you also need the framework-generated serializer to remain accessible (for example, so users can switch back to it in the View Preset dropdown, or if internal features like history snapshots rely on it), set `DEFAULT_SERIALIZER_NAME` in `lex_config.py`:
+If you also need the framework-generated serializer to remain reachable, set `DEFAULT_SERIALIZER_NAME` in `lex_config.py`:
 
 ```python title="lex_config.py"
 DEFAULT_SERIALIZER_NAME = "framework_default"
 ```
 
-With this setting, the framework-generated serializer is additionally registered under `"framework_default"`. Both keys appear in the **View Preset** dropdown. Without this setting, the framework serializer is only available while no `"default"` override exists — once you add one, the framework serializer is no longer in the map.
+With this setting, the framework-generated serializer is additionally registered under `"framework_default"` — for every model that overrides `"default"`, and for that model's history tables. It does not change which serializer a request without `?serializer=` gets: that is still `"default"`, yours. What it adds:
+
+- `?serializer=framework_default` selects the generated serializer;
+- both keys are listed in the model's `available_serializers`, so both are offered in the view selector;
+- the model structure reports `default_serializer_name: "framework_default"` for the model, and the interface asks for that serializer wherever it needs the full field set rather than your shape — loading foreign-key references, building the create and edit forms, and the record's History tab.
+
+Without this setting, the framework serializer is only available while no `"default"` override exists — once you add one, it is no longer in the map, and `default_serializer_name` is `"default"`. A name that is already a key of your `api_serializers` registers nothing.
 
 ### Computed fields and row grouping
 
 `SerializerMethodField` fields — and any other computed property with no underlying database column — are automatically marked as non-groupable. The grid will disable **row group** and **pivot** for those columns. Only real database-backed columns support server-side grouping.
 
-> [!tip] History tables pick up your default override automatically
-> When you override `api_serializers["default"]`, the framework also registers the auto-generated serializer under the same alias on the model's history and meta-history tables. You don't need to configure anything on `HistoricalInvestorCashflow` or `MetaHistoricalInvestorCashflow`—history-endpoint and snapshot lookups stay consistent for free.
+> [!tip] History tables follow their model
+> You don't configure anything on `HistoricalInvestorCashflow` or `MetaHistoricalInvestorCashflow`. When `InvestorCashflow` overrides `"default"` and `DEFAULT_SERIALIZER_NAME` is set, its history tables get the alias too, so the History tab can ask for the generated serializer there as well.
 
 ## Value lists
 
@@ -352,6 +358,9 @@ How wide a grid column is, whether it is pinned, and whether it appears at all a
 Reach for `lex_column_options` when the answer is the same for everybody and nobody should have to set it up by hand:
 
 ```python title="serializers.py"
+from lex.api.serializers import LexSerializer
+
+
 class FundSerializer(LexSerializer):
     class Meta:
         model = Fund
@@ -361,6 +370,9 @@ class FundSerializer(LexSerializer):
             "internal_ref": {"hidden": True},  # never show this column
             "name": {"width": 320, "pinned": "left"},
         }
+
+
+Fund.api_serializers = {"default": FundSerializer}
 ```
 
 ### Options
@@ -392,6 +404,31 @@ The symptom is simply that the column does not change, so check the spelling and
 
 > [!tip] Custom serializers keep their column options
 > A hand-written `ModelSerializer` registered as `api_serializers["default"]` is wrapped by the framework before use. Your `lex_column_options` comes through the wrapping unchanged.
+
+### Other `Meta` options
+
+Two more options sit beside `lex_column_options` in a serializer's `Meta`. Like it, they apply while that serializer is the one in use, and the [[reference/Grid Filter API|fields endpoint]] reports them to the interface:
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `hide_actions_column` | `False` | `True` leaves the row-actions column out of the grid. The fields endpoint reports it as `list_ui.hide_actions_column`. |
+| `lex_field_type_overrides` | `{}` | `{field name: type}` for fields the serializer declares without a model field behind them, such as a `SerializerMethodField`. The fields endpoint reports that type instead of the one it derives from the DRF field — `string` for anything it does not recognise — and the interface treats the column as that type. A model field always keeps its model field's type. |
+
+```python
+class InvestorCashflowDetailSerializer(serializers.ModelSerializer):
+    amount_k_eur = serializers.SerializerMethodField()
+
+    class Meta:
+        model = InvestorCashflow
+        fields = ["id", "investor", "amount_eur", "amount_k_eur"]
+        hide_actions_column = True
+        lex_field_type_overrides = {"amount_k_eur": "float"}
+
+    def get_amount_k_eur(self, obj):
+        return float(obj.amount_eur) / 1000 if obj.amount_eur is not None else None
+```
+
+Use the type names the fields endpoint reports. For a field with no model field behind it, the framework itself derives one of `string`, `int`, `float`, `boolean`, `date`, `date_time`, `foreign_key` and `json`; model fields can also report `file`, `pdf_file`, `xlsx_file` and `image_file`.
 
 ## Where to Put Serializers
 

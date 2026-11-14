@@ -8,7 +8,7 @@ Data that lives only inside an application isn't fully useful. Stakeholders need
 
 ## How Export Works
 
-Click the **Export** button above the table. (It used to live only in the right-click
+Click **Export** (the download arrow) above the table. (It used to live only in the right-click
 menu, which meant it was reachable only by people who already knew it was there.) The system generates a file that mirrors your current grid view:
 
 - **Filters applied?** Only filtered rows are exported.
@@ -24,20 +24,12 @@ carried in; with rows selected you get precisely those rows. The button's toolti
 which of the two is about to happen, which matters at the moment of the click — a file
 that turns out to hold the wrong rows is discovered far too late.
 
-The export runs server-side, so even large datasets (tens of thousands of rows) export reliably without browser memory issues.
+The export runs server-side, so even large datasets (tens of thousands of rows) export reliably without browser memory issues. A message says *Preparing export…* while the file is built, and *Export ready* once your browser has it.
 
-> [!example]- 🎬 Video — Exporting a grouped, filtered view
-> <video controls width="100%">
->   <source src="../../videos/grid-export.mp4" type="video/mp4">
-> </video>
-> Set up a grouped and filtered view, click Export, open the resulting Excel file.
+## Export Format
 
-## Export Formats
-
-| Format | Best For |
-|---|---|
-| **Excel (.xlsx)** | Full-featured export preserving formatting, grouping, and structure |
-| **CSV** | Lightweight, universal format for importing into other systems |
+Every export is an Excel workbook (`.xlsx`). **Export to Excel** in the grid's
+right-click menu makes the same file as the toolbar button.
 
 ## What Gets Exported
 
@@ -51,7 +43,7 @@ The export captures the grid exactly as you're viewing it:
 | Row grouping hierarchy | ✅ Group labels and nested rows |
 | Pivot mode cross-tabulation | ✅ Pivoted columns as-is |
 | Aggregation totals (group rows) | ✅ |
-| Selected rows only | ✅ Optional |
+| Ticked rows | ✅ Only those, whenever any are ticked |
 | Column widths | ❌ Auto-fit in export |
 | Cell formatting (colors, fonts) | ❌ Plain data |
 
@@ -84,7 +76,11 @@ This is the same cross-tabulation you see on screen — ready to paste into a pr
 
 ## Exporting Selected Rows
 
-If you need a subset, select specific rows in the grid (click to select, `Shift+Click` for a range, `Ctrl+Click` for individual picks). When exporting, choose **Selected rows only** to generate a file with just those records.
+If you need a subset, click **Select rows** in the toolbar and tick the rows you want.
+**Export** then exports just those; its tooltip reads *Export 3 selected rows*. The
+checkbox in the header ticks a whole page — or, when you ask for it, every row in the
+table (see [[using-the-app/the-grid/index#Selecting and Deleting Rows|Selecting and Deleting Rows]]).
+**Clear** in the selection bar unticks them, and **Export** goes back to the whole table.
 
 > [!tip]
 > Combine selection with [[using-the-app/the-grid/filtering and sorting|filters]] for precision: filter down to the relevant records, select a handful, and export just those.
@@ -92,5 +88,3 @@ If you need a subset, select specific rows in the grid (click to select, `Shift+
 ## Datetimes in Excel exports
 
 Excel has no timezone type. When your data contains datetime values, the exported workbook shows them in your **browser's local timezone** — the same time you see in the grid — rather than UTC. If the exported file is opened by someone in a different timezone, the digits they see represent the original exporter's local time.
-
-CSV exports are unaffected: they always include UTC offsets (e.g. `2026-07-14T11:00:00+02:00`).

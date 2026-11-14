@@ -52,7 +52,7 @@ That distinction matters. A long calculation is not a stuck one, and any recover
 
 ## Logs
 
-Application logs go through the `lex.*` logger hierarchy and out of the process's stdout, for whatever your platform collects.
+Application logs go through the `lex.*` logger hierarchy and out of the process's **stderr**, as does everything else logged through Python's root logger, for whatever your platform collects. The one exception is the sign-in library, `oauth2_authcodeflow`: its events — sign-ins started, refreshed and ended — go to stdout, at INFO even when `LOG_LEVEL` asks for less. Collect both streams.
 
 Two things about the proxy's access log are worth knowing, because they were chosen rather than defaulted:
 

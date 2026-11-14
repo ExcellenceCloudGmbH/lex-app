@@ -94,7 +94,7 @@ Lex App replaces django-simple-history's default `history_date` field with **`St
 | `valid_to` | `DateTimeField` (nullable) | When it was superseded. `NULL` = still current |
 | `history_type` | `CharField(1)` | `+` Created · `~` Changed · `-` Deleted |
 | `history_user` | `ForeignKey(User)` | Who made the change |
-| `history_change_reason` | `TextField` | Optional reason for the change |
+| `history_change_reason` | `CharField(max_length=100)` | Optional reason for the change |
 
 Every create, update, or delete on your model creates a new row in the history table with a full snapshot of all field values at that moment.
 
@@ -148,6 +148,46 @@ pending rows.
 > connection problem all read as *not alive* — and that falls back to the
 > behaviour lex-app has always had. The query runs in its own savepoint, so a
 > missing table cannot poison the transaction that asked.
+
+#### Running the applier on your own PostgreSQL
+
+On a hosted installation the platform registers the pg_cron job. On a
+PostgreSQL of your own, register it yourself, after the `lex.core` migration has
+run — the migration installs the functions. pg_cron lives in one database,
+usually `postgres`; from there, schedule the call in the instance's database:
+
+```sql
+SELECT cron.schedule_in_database(
+    'lex-apply-due-activations',            -- job name
+    '* * * * *',                            -- every minute
+    'SELECT lex_apply_due_activations()',
+    'your_instance_db'                      -- the instance's database
+);
+```
+
+If pg_cron is installed in the instance's own database, `cron.schedule()` with
+the first three arguments does the same. The functions are `SECURITY DEFINER`:
+they run with the rights of the role that ran the migration, whichever role the
+job uses.
+
+To see whether it works:
+
+```sql
+SELECT * FROM lex_activation_applier_state;  -- the heartbeat
+SELECT * FROM lex_pending_activations();     -- every SCHEDULED row, due or not
+```
+
+The heartbeat is one row: `last_run_at`, `last_run_applied`, `last_run_failed`
+and `last_run_duration_ms`. `lex_apply_due_activations()` returns the number of
+records it converged; a record that fails is counted in `last_run_failed` and
+named in a `WARNING`, which pg_cron keeps in `cron.job_run_details`, and the
+others still apply.
+
+`lex_pending_activations()` only reads. It returns one row per `SCHEDULED` meta
+row, with `main_table`, `pk`, `history_id`, `meta_history_id`, `valid_from`,
+`due`, `due_for` (how long it has been due) and `meta_task_status`. A meta row
+whose history row is gone is listed with an empty `pk` and `valid_from`: the
+applier never touches it.
 
 ### Why Two Levels?
 
@@ -217,6 +257,73 @@ Now you can answer two different questions:
 
 This distinction is critical for audit trails, regulatory compliance, and financial reporting.
 
+## Writing a Dated Version From Code
+
+A plain `save()` records the new version as valid from now. To date it, set
+`_history_date` on the instance before you save — an aware datetime, which
+becomes the new version's `valid_from`. `_history_change_reason` sets its
+reason, at most 100 characters:
+
+```python
+from datetime import datetime
+
+from django.utils import timezone
+
+alice = Employee.objects.get(pk=42)
+alice.salary = 60000
+alice._history_date = timezone.make_aware(datetime(2026, 1, 1))
+alice._history_change_reason = "Salary correction, effective Jan 1"
+alice.save()
+```
+
+What that save does:
+
+- **The version is inserted at its date.** The version before it ends there,
+  and it stays valid until the next later version begins — or for good, if
+  there is none. It does not replace the versions after it. To correct a version
+  from its start, give the correction that version's `valid_from`: the old one
+  then ends where it began.
+- **The live row follows the version valid now.** A date in the past with no
+  later version leaves your values live. A future date — or a past one with a
+  later version after it — puts the version valid now back into the live table,
+  and yours waits for its time (see [[#Activating a future-dated record]]).
+- **The rest is an ordinary save.** `pre_validation()`, the hooks and the audit
+  stamps run as usual.
+
+Neither attribute is cleared by the save. Delete them, or load a fresh
+instance, before saving the same object again, or the next version gets the
+same date and reason.
+
+> [!warning] `valid_from` is not the way in
+> The live model has no `valid_from` field, so assigning one there is ignored and
+> the version is dated now. Changing `valid_from` on an existing history row
+> stores the new date, but the rows are then re-chained by date: a correction
+> moved before the version it corrects ends where that version begins, and the
+> old value is current again.
+
+To bring back a deleted record for a period, `resurrect_object` creates it
+again under its old primary key and dates the version:
+
+```python
+from datetime import datetime
+
+from django.utils import timezone
+
+from lex.core.services.Bitemporal import resurrect_object
+
+resurrect_object(
+    Employee,
+    42,
+    valid_from=timezone.make_aware(datetime(2026, 1, 1)),
+    attributes={"name": "Alice", "salary": 60000, "role": "Engineer"},
+    valid_to=timezone.make_aware(datetime(2026, 3, 31)),
+)
+```
+
+It saves `Employee(pk=42, **attributes)` with `_history_date = valid_from` and
+returns the instance. With `valid_to`, it also writes a deletion version (`-`)
+dated `valid_to`, which closes the period; without it, the record stays.
+
 ## Querying History
 
 ### All versions of a record (Level 1)
@@ -252,25 +359,35 @@ system_at_feb = get_queryset_as_of(HistoricalEmployee, feb_1)
 ```
 
 > [!note]
-> Django 5.x enforces timezone-aware datetimes. Always use `timezone.make_aware()` or `timezone.now()` when working with temporal queries.
+> lex-app 2.5 runs on Django 6 (it pins `django==6.0.9`), which with `USE_TZ` on expects timezone-aware datetimes and warns about naive ones. Always use `timezone.make_aware()` or `timezone.now()` when working with temporal queries.
 
 > [!tip]
 > The `get_queryset_as_of` helper auto-detects which layer to query based on what you pass: a **main model** triggers a valid-time query (Level 1), a **history model** triggers a system-time query (Level 2).
 
 ## The REST API
 
-Both the main list endpoint and the history endpoint support time-travel via the `as_of` query parameter:
+The list of a model and the history of one record both take an `as_of` query parameter:
 
 ```
-GET /api/employee/?as_of=2026-02-01T00:00:00Z             → employee list as it existed then
-GET /api/employee/42/history/                             → all Level 1 versions
-GET /api/employee/42/history/?as_of=2026-02-01T00:00:00Z → Level 2 snapshot at that system time
+GET api/model_entries/employee/list?as_of=2026-02-01T00:00:00Z                → the rows as they were valid then
+GET api/model_entries/employee/default/history/42                             → every Level 1 version of record 42
+GET api/model_entries/employee/default/history/42?as_of=2026-02-01T00:00:00Z  → the Level 2 rows the system held then
 ```
+
+On the list, `as_of` asks valid time; on the history route, system time. In
+the history route — `api/model_entries/<model>/<calculationId>/history/<pk>`,
+with an integer `pk` — the segment before `history` is a calculation id the
+client chooses; the interface sends `default`. See
+[[reference/REST API#History|REST API]] for the details and how a script
+authenticates.
 
 Use a normal ISO timestamp. `Z` or an explicit offset are the clearest
-options, but a naive timestamp is also accepted and treated as UTC.
+options, but a naive timestamp is also accepted and treated as UTC, and a date
+alone — `2026-02-01` — means midnight UTC that day. A value that is not an ISO
+date or date-time, such as `01.02.2026`, is ignored without an error: the list
+returns the live rows, and the history endpoint every version.
 
-Each response entry includes:
+Each history entry includes:
 
 ```json
 {
@@ -278,15 +395,31 @@ Each response entry includes:
   "valid_from": "2026-01-01T00:00:00Z",
   "valid_to": null,
   "history_type": "+",
+  "change_reason": "Salary correction, effective Jan 1",
   "user": { "id": 1, "email": "hr@company.com", "name": "Jane Doe" },
   "snapshot": { "name": "Alice", "salary": "60000.00", "role": "Engineer" },
   "system_history": [
-    { "sys_from": "2026-03-15T09:30:00Z", "sys_to": null, "task_status": "NONE" }
+    {
+      "sys_from": "2026-03-15T09:30:00Z",
+      "sys_to": null,
+      "task_status": "NONE",
+      "task_name": null,
+      "change_reason": null
+    }
   ]
 }
 ```
 
-The `snapshot` contains all field values at that version, serialized through your model's default serializer. The `system_history` array contains the Level 2 meta records for that history row.
+The `snapshot` contains all field values at that version, serialized through the model's `"default"` serializer — your override, if you set one. `change_reason` is the version's `history_change_reason`. The `system_history` array holds the Level 2 meta records for that history row, newest first; `task_status` and `task_name` say whether, and by what, a future-dated version is to be activated (see [[#Activating a future-dated record]]).
+
+| Answer | When |
+|---|---|
+| 400 `{"error": "Model … does not track history."}` | The history route, on a model without history tables — one that is [[model-your-data/model structure#Untracked Models\|untracked]] |
+| 500 | `as_of` on the list of such a model |
+| 404 | The caller may not read the record — the `READ_SURFACES` security switch, on by default. A deleted record is judged by its last version |
+
+With `READ_SURFACES` on, a version the caller may not read comes back with an
+empty `snapshot`, and with no `user` or `change_reason`.
 
 > [!important] Always send `as_of` in UTC
 > The `as_of` value is interpreted as **UTC**. Send an explicit designator — a trailing
@@ -301,8 +434,7 @@ The `snapshot` contains all field values at that version, serialized through you
 
 The bitemporal model powers several parts of the user interface:
 
-- **[[using-the-app/record-detail/timeline tab|Timeline Tab]]** — a visual timeline showing changes along both time dimensions, with a version details drawer for inspecting specific snapshots
-- **[[using-the-app/record-detail/history tab|History Tab]]** — a full grid of all historical versions with the **As Of** control for time-travel queries
-- **As Of Control** — a date picker in the grid toolbar that lets users view data as it existed at any point in the past
+- **[[using-the-app/record-detail/timeline tab|Timeline Tab]]** — the record's versions on a valid-time chart, with an **As Of** control that reloads them as the system knew them at a chosen moment (the history endpoint's `as_of`), and a drawer for inspecting one version
+- **[[using-the-app/record-detail/history tab|History Tab]]** — a full grid of all historical versions
 
 See [[using-the-app/record-detail/index|Record Detail]] for the full user-facing documentation.

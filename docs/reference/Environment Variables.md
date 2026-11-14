@@ -21,7 +21,7 @@ Lex App reads its runtime configuration from environment variables — usually l
 | `FLOWER_ADDRESS`       | Interface [Flower](https://flower.readthedocs.io/) binds to when you run `lex flower`. Default `127.0.0.1` — change it to `0.0.0.0` to reach the dashboard from outside the container.                                                                                                                              |
 | `FLOWER_PORT`          | Port Flower listens on. Default `5555`.                                                                                                                                                                                                                                                                             |
 | `FLOWER_URL_PREFIX`    | Sub-path Flower is served under, when it sits behind a reverse proxy rather than at the root. Empty by default.                                                                                                                                                                                                     |
-| `IS_RUNNING_IN_CELERY` | Set to `true` inside Celery worker processes so the framework knows it's executing a queued task rather than a web request. Set automatically when you launch via `lex celery` / `lex celery-workers`; if you run a standalone recovery worker such as `lex-recovery-beat`, export it there too.                    |
+| `IS_RUNNING_IN_CELERY` | Set to `true` inside Celery worker processes so the framework knows it's executing a queued task rather than a web request. `lex celery-workers` sets it for the workers it starts, and so does the generated **Celery Workers** run configuration. `lex celery` does not: export it yourself for a worker you start with `lex celery … worker`, and for a standalone recovery worker such as `lex-recovery-beat`. |
 
 ## Calculation threading
 
@@ -61,9 +61,9 @@ These govern how the framework recovers tasks from dead workers and how idle wor
 
 ## Streamlit
 
-| Variable                                                     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `IS_STREAMLIT_ENABLED`                                       | `true` to enable the Streamlit toolbar icon in the frontend. See [[access-and-dashboards/streamlit/index                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Streamlit Dashboards]]. |
+| Variable | Purpose |
+| --- | --- |
+| `IS_STREAMLIT_ENABLED` | `true` to enable the Streamlit toolbar icon in the frontend. See [[access-and-dashboards/streamlit/index\|Streamlit Dashboards]]. |
 | `LEX_STREAMLIT_AUTH`                                         | How embedded dashboards sign in. `legacy` (default): the frontend hands the proxy the user's token, as before 2.5. `handoff`: the dashboard signs in through the app and holds no token; it stays signed in as long as the app does. `dual`: both, for a rollout. Set the **same value on the backend and on the Streamlit pod**; setting it back is the rollback. Any other value stops `lex streamlit` and the proxy. See [[access-and-dashboards/streamlit/sessions and authentication\|Sessions & Authentication]]. |
 | `STREAMLIT_URL` / `BASE_URL`                                 | The dashboard's canonical public URL, used by the embedded dashboard proxy. When this is HTTPS, Lex App defaults to secure cross-site cookies for the iframe. On a hosted instance with a customer-owned domain attached, `LEX_STREAMLIT_HOSTS` below lists every hostname the dashboard also answers on.                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `LEX_APP_HOSTS` / `LEX_STREAMLIT_HOSTS` / `LEX_REFLEX_HOSTS` | Every hostname the instance answers on for that role, comma separated, canonical first. Written by the hosting platform when a customer-owned domain is attached; absent otherwise, when `DOMAIN_HOSTED`, `STREAMLIT_URL` and `REFLEX_URL` are the whole truth. They reach `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS`, the dashboard proxy's sign-in callback and renewal allow-list, and Reflex's websocket CORS — and decide which dashboard hostname a page frames, so that the iframe stays on the viewer's own registrable domain. See [[ship-and-operate/custom domains\|Custom domains]].                                                                                                                                                                 |
@@ -79,13 +79,14 @@ These govern how the framework recovers tasks from dead workers and how idle wor
 | `LEX_PROXY_REPLICAS`                                         | Number of Streamlit proxy replicas. When greater than `1`, Lex App requires a shared Redis token store instead of process-local memory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `LEX_STREAMLIT_DISCONNECTED_SESSION_TTL`                     | How long Streamlit keeps a disconnected session around for reconnects. Default `600` seconds.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `LEX_INTERNAL_AUTH_SECRET`                                   | Shared secret for the proxy-to-Streamlit token refresh channel. `lex streamlit` sets this automatically; set it yourself only when running the two processes separately.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `REACT_APP_URL` / `LEX_FRONTEND_URL`                         | Two roles. For the dashboard proxy: the origin allowed to hand it a renewed dashboard token, normally derived from `DOMAIN_HOSTED`, so set one only when the frontend is served from a different host. For `lex_view()`: where its frames point, and the only origin whose events it accepts. Unset, the frames point at the application hostname on the same registrable domain as the dashboard itself — the platform hostname normally, the customer's once a domain is attached, since a frame across registrable domains is third-party and loses its cookies. Only a shell on neither host needs this set; give a full origin with its scheme. See [[access-and-dashboards/streamlit/embedding app pages#Where the frame points\|Where the frame points]]. |
+| `REACT_APP_URL` / `LEX_FRONTEND_URL` | Two roles. For the dashboard proxy: the origin allowed to hand it a renewed dashboard token, normally derived from `DOMAIN_HOSTED`, so set one only when the frontend is served from a different host. For `lex_view()` and `lex_widgets()`: a fallback for where their frames point, and so for the only origin whose events `lex_view()` accepts. The frame's base is, in order: the origin that the Lex App interface framing the dashboard names (`lex_app_origin`), once the instance confirms it is one of its own app origins; `REACT_APP_URL`; `LEX_FRONTEND_URL`; the application hostname on the same registrable domain as the dashboard — the platform hostname normally, the customer's once a domain is attached, since a frame across registrable domains is third-party and loses its cookies; and last `http://localhost:8000`. Only a shell on none of these hosts needs the variable; give a full origin with its scheme. See [[access-and-dashboards/streamlit/embedding app pages#Where the frame points\|Where the frame points]]. |
 | `STRIP_AUTH_TOKEN_FROM_URL`                                  | `true` to redirect the dashboard's first request to the same URL without its `auth_token`. Default `true`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `STATIC_ASSET_MAX_AGE`                                       | `max-age` for Streamlit package assets served by the proxy. Default one year.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `STATIC_GZIP_MIN_SIZE` / `STATIC_GZIP_LEVEL`                 | Compression floor and zlib level for Streamlit assets served by the proxy. Defaults `500` and `6`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `JWKS_CACHE_TTL` / `JWKS_RETRY_BACKOFF_SECONDS`              | How long Keycloak signing keys are cached (default `3600`), and how long to wait before retrying a failed refresh while continuing to serve cached keys (default `30`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `WEBSOCKETS_MAX_LINE_LENGTH`                                 | Longest HTTP header line the `websockets` library will parse on a WebSocket handshake. Lex App sets `65536` before the library loads; its own default is `8192`, which a long Keycloak access token or session cookie can exceed — and an over-long line leaves the handshake unanswered rather than refused, so the dashboard waits on an open socket and nothing is logged. Set it yourself only to raise it further. Read by `websockets` 13 and later; `lex streamlit` warns at startup when the installed release is older and parses at its own fixed limit. |
 | `LEX_THEME_FOLLOW`                                           | Keep embedded Streamlit pages in the same light/dark mode as Lex App. Enabled by default; set to `0`, `false`, `no`, or `off` to let Streamlit control its own theme.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `LEX_THEME_DEBUG` | `1`, `true`, `yes` or `on` to draw a diagnostics box on each Streamlit page that follows Lex App's theme, listing every link of the light/dark sync in order, so you can see which one breaks. Only with `LEX_THEME_FOLLOW` on. Off by default; whoever opens the dashboard sees the box too. |
 
 ## Reflex
 
@@ -231,44 +232,72 @@ keeps its SQLite file at the project root, named after the project folder:
 
 ## Redis
 
-| Variable                            | Purpose                                                                                                  |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `REDIS_HOST`                        | Host of the Redis instance. Used for the cache, the Celery result backend, and the cluster cancel index. |
-| `REDIS_USERNAME` / `REDIS_PASSWORD` | Credentials for it.                                                                                      |
+| Variable | Purpose |
+| --- | --- |
+| `REDIS_HOST` | Host of the instance's Redis. It is the Celery broker (database `1`) and the channel layer that carries live updates between processes (database `2`), and it holds the calculation-log cache and the cluster cancel index. It is not the Celery result backend: results are stored in PostgreSQL — on a deployed instance in the database the `DATABASE_*` and `POSTGRES_*` variables name, locally in the `default` profile's database. |
+| `REDIS_USERNAME` / `REDIS_PASSWORD` | Credentials for it. |
 
-All three are combined into a `redis://` URL — there is no separate URL
-variable for the app itself. (The dashboard proxy has its own
-`TOKEN_REDIS_URL` / `REDIS_URL`, listed under Streamlit above, because it can
-run as a separate process against a different instance.)
+All three are read only on a deployed instance (`DEPLOYMENT_ENVIRONMENT` set).
+There they are combined into `redis://` URLs — there is no separate URL
+variable for the app itself — and the instance refuses to start if one of
+them is missing. Locally they are ignored: the framework uses
+`redis://127.0.0.1:6379`, and needs it once `CELERY_ACTIVE` is on. (The
+dashboard proxy has its own `TOKEN_REDIS_URL` / `REDIS_URL`, listed under
+Streamlit above, because it can run as a separate process against a
+different instance.)
 
 ## Deployment identity
 
 | Variable                       | Purpose                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DEPLOYMENT_ENVIRONMENT`       | Presence flag: set to anything on a deployed instance, leave unset on a developer machine. When set, `lex start` runs `collectstatic` first, the audit-log cache switches to its shared backend, and the framework is allowed to call the platform API. Unset, all three are skipped.                                                                                                                      |
+| `DEPLOYMENT_ENVIRONMENT` | Presence flag: set it, to any non-empty value, on a deployed instance; leave it unset on a developer machine. Don't set it empty: the settings then count it as set, but `lex start`, `lex init`, the calculation-log cache and the platform-API calls count it as unset. Set, the instance refuses to start without `DOMAIN_HOSTED`, a private `DJANGO_SECRET_KEY` and the three `REDIS_*` variables (see below); Redis and the Celery result backend are reached through their variables instead of `localhost`; `lex start` runs `collectstatic` first; the calculation-log cache moves to Redis; and the framework is allowed to call the platform API. The value `PROD` also changes what a standalone Streamlit dashboard shows when its `main()` raises: the traceback, in an expander on the page. Any other value, or none, lets the error reach Streamlit. |
+| `DOMAIN_HOSTED` | The instance's canonical hostname, bare: `acme.lex.example`, no scheme. It goes into `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS` and the CORS origins, and it is the app host wherever `LEX_APP_HOSTS` and `LEX_INSTANCE_HOSTS` name none. **Required when `DEPLOYMENT_ENVIRONMENT` is set**: without it the instance refuses to start, because `ALLOWED_HOSTS` would match only `localhost` and every WebSocket and CSRF check would reject the real hostname. Locally it defaults to `localhost`. |
+| `DJANGO_SECRET_KEY` | Django's `SECRET_KEY`. It signs sessions and tokens, and two further keys are derived from it: the dashboard proxy's cookie key, unless `SESSION_SECRET` is set, and the key that encrypts stored sign-ins, unless `OIDC_TOKEN_ENCRYPTION_KEYS` is set. Unset, a development key published with the package is used — and a deployed instance refuses to start on that key, or on none. |
 | `LEX_ENVIRONMENT_TAG`          | Set to `dev` to turn Django's `DEBUG` on. Any other value — including unset — leaves it off. This is the only switch for `DEBUG`; there is no `DJANGO_DEBUG`.                                                                                                                                                                                                                                              |
-| `KUBERNETES_ENGINE`            | Anything other than `NONE` tells the framework it is running under Kubernetes, which changes how static files are served. Default `NONE`.                                                                                                                                                                                                                                                                  |
+| `KUBERNETES_ENGINE` | Anything other than `NONE` tells the framework it runs in a container cluster: with local file storage, uploaded files then go to `/app/storage/uploads` instead of the project root. See [File storage](#file-storage). Default `NONE`. |
 | `K8S_NAMESPACE`                | Namespace, used to build storage paths for uploaded files.                                                                                                                                                                                                                                                                                                                                                 |
 | `INSTANCE_RESOURCE_IDENTIFIER` | The name that distinguishes this instance from every other one sharing infrastructure. It becomes the Celery queue name, the cache-key prefix, the Redis key prefix for recovery and cancellation, and part of the upload path. Two instances that share a Redis or a broker **must** have different values here. Defaults vary by call site (`celery`, `local`) — set it explicitly on anything deployed. |
-| `PROJECT_ROOT`                 | Absolute path to your project. Everything that resolves a project-relative path — `lex_config.py`, `initial_data`, migrations — starts here. Defaults to the current working directory, which is why `lex` commands behave differently depending on where you run them.                                                                                                                                    |
+| `PROJECT_ROOT` | Absolute path to your project. Everything that resolves a project-relative path — `lex_config.py`, `initial_data`, migrations, local uploads — starts here. You rarely set it: the `lex` CLI works it out from the directory you run it in and sets it for every process it starts. It takes the nearest folder at or above that directory that holds `lex_config.py`; else the git top level; else the nearest folder holding `.git`, `pyproject.toml`, `setup.cfg`, `manage.py`, `requirements.txt`, `.idea` or `.vscode`; else the directory itself. The searches upward stop at your home directory. A value already in the environment wins. See [[reference/CLI Commands#Where the CLI looks for the project\|Where the CLI looks for the project]]. |
 | `PROJECT_DISPLAY_NAME`         | Name shown in the frontend's title bar. Defaults to the repository name.                                                                                                                                                                                                                                                                                                                                   |
 | `DOMAIN_BASE`                  | Hostname of the platform API the framework calls for transactional mail and client-role lookups.                                                                                                                                                                                                                                                                                                           |
 | `PUBLIC_URL`                   | Fallback public URL for the dashboard when `STREAMLIT_PUBLIC_URL` is unset.                                                                                                                                                                                                                                                                                                                                |
-| `LEX_API_KEY`                  | API key for those platform API calls, and the key the framework's own health endpoint expects. See [[ship-and-operate/monitoring and health]].                                                                                                                                                                                                                                                             |
+| `LEX_API_KEY` | The instance's own API key, set by the platform. The framework sends it as `Authorization: Api-Key …` on its calls to the platform API. It is not needed to read the health check: `/health` and `/api/health` are public. With the key set, their answer also carries `runtime`: the lex-app version and the instance's commit, encrypted with a key derived from this one, so that only the platform can read them. A request carrying this key may also read `api/active-calculations`, as a signed-in user or a Django-admin API key may. See [[ship-and-operate/monitoring and health]]. |
 | `LEX_EXTRA_ALLOWED_HOSTS`      | Further hostnames the instance answers on, comma separated, e.g. `sign.example.com,.example.org`. Each is added to `ALLOWED_HOSTS` and, as an `https://` origin, to `CSRF_TRUSTED_ORIGINS`. Bare hostnames, no scheme; a leading dot means every subdomain (`.example.org` becomes `https://*.example.org` as an origin). `*` is refused at startup on a deployed instance. Unset by default. Django judges the hostname the browser asked for, so a hostname missing here gets `400 Bad Request` whatever the ingress rewrites. |
+
+> [!warning] What a deployed instance refuses to start without
+> With `DEPLOYMENT_ENVIRONMENT` set, loading the settings stops every process
+> — the web server, the workers, every management command — with
+> `ImproperlyConfigured` when:
+>
+> - `DOMAIN_HOSTED` is unset or empty;
+> - `LEX_EXTRA_ALLOWED_HOSTS` contains `*`;
+> - `DJANGO_SECRET_KEY` is unset, blank, or the development key published with
+>   the package;
+> - `REDIS_HOST`, `REDIS_USERNAME` or `REDIS_PASSWORD` is unset or empty — a
+>   deployed instance always uses Redis for its channel layer.
+>
+> The message names the variable. See
+> [[ship-and-operate/configuration#What still refuses to start|Configuration]].
 
 ## File storage
 
 | Variable                                | Purpose                                                                          |
 | --------------------------------------- | -------------------------------------------------------------------------------- |
-| `STORAGE_TYPE`                          | Where uploaded files go: `SHAREPOINT`, `GCS`, or `LEGACY`/unset for local disk.  |
-| `GS_BUCKET_NAME`                        | Bucket name when `STORAGE_TYPE=GCS`.                                             |
+| `STORAGE_TYPE` | Where uploaded files go: `SHAREPOINT`, `GCS`, or `LEGACY`/unset for local disk. On local disk they go to the project root itself on a developer machine, and to `/app/storage/uploads` when `KUBERNETES_ENGINE` is not `NONE` — the volume to persist and back up. |
+| `GS_BUCKET_NAME` | Bucket name when `STORAGE_TYPE=GCS`. The service-account key is a file, not a variable; see below. |
 | `SHAREPOINT_URL`                        | Site URL when `STORAGE_TYPE=SHAREPOINT`. Default `local`.                        |
 | `SHAREPOINT_APP_CLIENT_ID`              | Azure app registration client ID for SharePoint access.                          |
 | `SHAREPOINT_API_TENANT_NAME`            | Azure tenant name.                                                               |
 | `SHAREPOINT_API_CERTIFICATE_PATH`       | Path to the certificate used to authenticate as that app.                        |
 | `SHAREPOINT_API_CERTIFICATE_THUMBPRINT` | Thumbprint of that certificate. Azure requires both the file and its thumbprint. |
 | `FILE_PREVIEW_LINK_BASE`                | Base URL used to build the in-browser preview link for a stored document.        |
+
+> [!warning] `STORAGE_TYPE=GCS` reads its key from a fixed path
+> The service-account key is loaded from
+> `<parent of the project root>/django-storages/gcpCredentials.json` while the
+> settings load: the folder `django-storages` sits *beside* the project folder,
+> not inside it. No variable names another path. Without the file, every
+> process that loads the settings fails at startup.
 
 ## Celery tuning
 
@@ -280,7 +309,7 @@ rather than what happens when a worker dies.
 | `CELERY_TASK_TIMEOUT`    | `3600`  | Hard time limit, in seconds, for a single task.                                                                                                                  |
 | `CELERY_MAX_RETRIES`     | `3`     | Retries for a task that raises.                                                                                                                                  |
 | `CELERY_RETRY_DELAY`     | `60`    | Seconds between those retries.                                                                                                                                   |
-| `CELERY_VALIDATE_CONFIG` | `True`  | Whether the worker checks its broker and backend configuration at startup. Leave it on: the check turns a class of silent misconfiguration into a startup error. |
+| `CELERY_VALIDATE_CONFIG` | `True` | Whether the Celery app checks, as it is imported, that the broker and the result backend are Redis URLs. It only logs and never stops anything: the result backend is PostgreSQL, so the check reports that at DEBUG level and returns. Any value but `true` skips it. |
 
 ## Dashboard proxy: tokens and sessions
 
@@ -335,9 +364,9 @@ migrate step by step; they are not meant to stay off.
 | Variable                   | Default | Purpose                                                                                                                                                                                                                                            |
 | -------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `LEX_LEGACY_SECURITY`      | `false` | `true` switches every hardening off and restores the earlier behaviour. A migration aid; it logs a warning once.                                                                                                                                   |
-| `LEX_SEC_<FLAG>`           | unset   | `true` or `false` for one hardening, and wins over `LEX_LEGACY_SECURITY`. Flags: `FAIL_CLOSED`, `NOT_FOUND`, `READ_SURFACES`, `EDIT`, `FILTERS`, `TRACEBACKS`, `OIDC_REDIRECT`, `INTERNAL`, `HISTORY_WRITE`.                                       |
+| `LEX_SEC_<FLAG>` | unset | `true` or `false` (or `1`/`0`, `yes`/`no`, `on`/`off`) for one hardening, and wins over `LEX_LEGACY_SECURITY`. Flags: `FAIL_CLOSED`, `NOT_FOUND`, `READ_SURFACES`, `EDIT`, `FILTERS`, `TRACEBACKS`, `OIDC_REDIRECT`, `INTERNAL`, `HISTORY_WRITE`, `CREATE`, `CORS`. |
 | `LEX_API_TRACEBACKS`       | unset   | `true` puts the server traceback into API error responses, `false` never does, not even with `DEBUG`. Unset: only with `DEBUG`.                                                                                                                    |
-| `LEX_CORS_ALLOWED_ORIGINS` | unset   | Comma-separated origins, e.g. `https://app.example.com,https://admin.example.com`. When set, only these origins may make credentialed cross-origin requests, replacing the permissive default. They are also accepted as sign-in redirect targets. |
+| `LEX_CORS_ALLOWED_ORIGINS` | unset | Comma-separated origins, e.g. `https://app.example.com,https://admin.example.com`, added to the instance's own origins (see `CORS` below): they too may make credentialed cross-origin requests, and they are accepted as sign-in redirect targets. An entry containing `*` or without a scheme is dropped. |
 
 What each flag does:
 
@@ -349,11 +378,15 @@ What each flag does:
   app's index page.
 - `READ_SURFACES` — history, global search, export and file download apply read
   permission.
-- `EDIT` — `permission_edit`, `permission_delete` and `permission_create` run on
-  PATCH, PUT, bulk and `run_step`. A refusal is a 400 with
-  `{code, detail, error}` (`EDIT_NOT_ALLOWED`, `DELETE_NOT_ALLOWED`,
-  `CREATE_NOT_ALLOWED`), never a 403: bundled frontends released before the
-  sign-out fix signed the user out on any 403.
+- `EDIT` — `permission_edit` runs on PATCH and PUT of a record and on every row
+  of a bulk PATCH, and `permission_delete` on every row of a bulk DELETE. A
+  refusal is a 400 with `{code, detail, error}`: `EDIT_NOT_ALLOWED` (with
+  `fields` when only some fields are refused) or `DELETE_NOT_ALLOWED` (with the
+  refused `ids`). A record whose `permission_edit` refuses everything refuses a
+  calculate or cancel request too. Creating a record and deleting a single one
+  are checked whatever this switch says; a refusal there is a 401 (not signed
+  in) or a 403, with `{message, detail, code}` and `code` set to
+  `not_authenticated` or `permission_denied`.
 - `FILTERS` — list filters and ordering only on fields the caller can see; the
   primary key is always allowed. Otherwise 400 `FILTER_NOT_ALLOWED`. A column the
   caller may not filter by has no value list either.
@@ -364,18 +397,25 @@ What each flag does:
   `CSRF_TRUSTED_ORIGINS` or `LEX_CORS_ALLOWED_ORIGINS`; anything else answers
   400 `REDIRECT_NOT_ALLOWED`. A frontend served from a different origin in
   development needs its origin in one of the two lists.
-- `INTERNAL` — deleting unused files only for superusers and users with the
-  Keycloak client role `admin`; writing to the server log and changing Django
-  users and groups only for superusers; the calculation-log tree and its PDF
-  show only logs of records the caller may read.
+- `INTERNAL` — deleting unused files only for superusers and members of the
+  Django group named `admin` (the user's groups in Django, not a Keycloak role;
+  an API key is never one); writing to the server log and changing Django users
+  and groups only for superusers; the calculation-log tree and its PDF show
+  only logs of records the caller may read.
 - `HISTORY_WRITE` — history rows can be changed or deleted only by superusers
   (400 `EDIT_NOT_ALLOWED` otherwise); their `lex_reserved_scopes` say so to the
   client.
+- `CREATE` — `permission_create` is asked a second time, on the record as the
+  request fills it: its validated values set, foreign keys included,
+  many-to-many not. That happens before `pre_validation` and before anything is
+  saved. The first check, on a blank record, runs whatever this switch says. A
+  refusal at either answers 401 or 403 with `{message, detail, code}`.
 - `CORS` — credentialed cross-origin requests are accepted only from the
-  instance's own origins: `https://<DOMAIN_HOSTED>`, the hosts in
-  `LEX_INSTANCE_HOSTS`, and `LEX_CORS_ALLOWED_ORIGINS`; locally also the dev
-  servers on `localhost`. Never `*`: with credentials it would let any site act
-  as the signed-in user. Off, any origin is accepted again, as before 2.5.
+  instance's own origins: `https://<DOMAIN_HOSTED>`, every host in
+  `LEX_INSTANCE_HOSTS` and `LEX_APP_HOSTS`, and `LEX_CORS_ALLOWED_ORIGINS`;
+  locally also the dev servers on `localhost` and `127.0.0.1`, ports 3000 and
+  8000. Never `*`: with credentials it would let any site act as the signed-in
+  user. Off, any origin is accepted again, as before 2.5.
 
 ## Behaviour switches
 
@@ -383,7 +423,7 @@ Knobs that change how the framework behaves rather than what it connects to.
 
 | Variable                                  | Default | Purpose                                                                                                                                                                                                                                                                                         |
 | ----------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LEX_METADATA_CACHE_SECONDS`              | `30`    | How long a browser may reuse the model-structure response. This is the staleness budget for a permission change: a revoked permission can stay visible in the model tree for at most this long. Set `0` where that is unacceptable — the tree is then re-fetched on every navigation.           |
+| `LEX_METADATA_CACHE_SECONDS` | `30` | **No effect in 2.5.0.** It was meant to set how long a browser may reuse the model-structure response, but only a model-structure view that no route serves reads it; the endpoint the interface calls ignores it. |
 | `LEX_SYNC_STREAMING_EXPANSION`            | `true`  | Whether synchronous batch expansion streams combinations one at a time (the memory-safe path) or materialises them all first. Set `false` for a one-line rollback to the old behaviour without a redeploy. See [[calculations/batch calculations]].                                             |
 | `LEX_ACTIVATION_APPLIER_LIVENESS_SECONDS` | `300`   | How recent the in-database activation applier's heartbeat must be before lex-app treats it as alive and stops arming its own timers for future-dated history rows. pg_cron fires every minute, so five minutes absorbs a slow tick or a failover. See [[history-and-audit/bitemporal history]]. |
 
@@ -412,8 +452,20 @@ flowchart LR
 
 | Place                  | When it's used                                                                                               |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `.env` at project root | Local development. Loaded by PyCharm run configs and `set -a; source .env; set +a` in the terminal.          |
+| `.env` at project root | Local development. Every `lex` command loads it before it does anything else, and so do a plain `pytest` run in a Lex project and the Reflex backend; the PyCharm and VS Code run configurations `lex setup` generates load it too. A variable already set in the environment wins over the file. |
 | Container / cloud env  | Production. Whatever your platform's secret manager exposes (Docker `--env-file`, Kubernetes Secrets, etc.). |
+
+> [!warning] Do not `source .env`
+> Every `lex` command reads the file itself, so exporting it into your shell
+> first gains nothing, and it goes stale: a variable exported once wins over
+> the file from then on, and later edits to `.env` seem to be ignored until you
+> `unset` it or open a new shell.
+
+Write the file as plain `NAME=value` lines. Blank lines and lines that start
+with `#` are skipped, spaces around the name and the value are dropped, and one
+pair of matching quotes around a value is removed. Nothing else is
+interpreted: an `export` prefix and `${…}` are not understood, and a `#` after
+a value is part of the value.
 
 > [!tip]
 > If you change anything in `.env`, restart your `lex start` / `lex streamlit` / `lex reflex` processes (and your Celery workers if you have them) — the variables are read once at startup.

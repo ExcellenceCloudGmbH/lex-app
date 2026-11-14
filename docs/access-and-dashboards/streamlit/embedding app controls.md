@@ -6,7 +6,7 @@ aliases:
 
 A Streamlit dashboard can host the application's *own* controls. Not a screenshot of the Calculate button, and not a re-implementation of it — the real control, wired to the real record, with the same status pill, the same live log and the same permissions as the grid.
 
-**Four pages of [Northwind Analytics](https://github.com/ExcellenceCloudGmbH/DemoNorthwindAnalytics) run everything below against real data:** *The three widgets*, *Shaping a control* — every argument rendered live — *Reacting to a run*, and *Layout and cost*.
+**Two pages of [Northwind Analytics](https://github.com/ExcellenceCloudGmbH/DemoNorthwindAnalytics) run these controls against real data:** *Calculations*, with the three widgets in one `lex_widgets()` block, and *Overview*, where a single **Revalue** control sits beside Streamlit's own metrics and chart.
 
 Use this when a dashboard is where the work happens: a report page where the reader should be able to re-run the calculation they are looking at, without leaving for the grid and coming back.
 
@@ -184,6 +184,12 @@ The control also reports the record's current status as soon as it loads, so a
 record that already succeeded returns `SUCCESS` before anyone has clicked. To
 react only to a run that finishes on this page, compare with the status you saw
 last, for instance in `st.session_state`.
+
+Opening the log takes the status's place. A click on the log button travels back
+through the same channel, so from the rerun it causes, the call returns `None`
+until the status next changes — the last status is not sent again. Code that
+needs the status on every rerun should keep the last one it received, in
+`st.session_state`, rather than read it from the call each time.
 
 ## Blocks in a loop
 

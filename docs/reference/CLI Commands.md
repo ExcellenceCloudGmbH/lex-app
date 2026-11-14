@@ -16,17 +16,60 @@ Lex App ships with a `lex` CLI tool for managing your application. Here's every 
 | Command            | What It Does                                                                                                                                          |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `lex setup`        | Generate `.run/`, `.vscode/launch.json`, `.env`, and `migrations/` for a new project                                                                  |
-| `lex init`         | Apply migrations + sync models/permissions to Keycloak                                                                                                |
+| `lex init`         | Apply migrations + sync models/permissions to Keycloak — see [below](#lex-init) |
 | `lex start`        | Start the development server                                                                                                                          |
-| `lex streamlit`    | Start the [Streamlit](https://docs.streamlit.io/) dashboard server                                                                                    |
+| `lex streamlit`    | Start the [Streamlit](https://docs.streamlit.io/) dashboards behind their sign-in proxy — see [below](#lex-streamlit) |
 | `lex reflex`       | Start the [Reflex](https://reflex.dev/docs/) dashboard server — arguments go to Reflex's own CLI; see [below](#lex-reflex)                            |
 | `lex create_db`    | Create the PostgreSQL database if it doesn't exist yet; does nothing on SQLite — see [[start-here/installation#Choose a Database\|Choose a Database]] |
-| `pip show lex-app` | Print the installed version. There is no `lex --version` — the group does not define one                                                              |
+| `lex --version`    | Print the installed lex-app version (`lex, version 2.5.0`) without starting Django |
+| `pip show lex-app` | Where the package is installed from, and the version pip recorded for it |
 
-`lex init` has two setup-focused flags worth knowing:
+`lex --version` prints the version stamped into the package when it was built,
+the one the instance reports to the platform with its health check. On an image
+built from a git ref the build stamps it after `pip install`, so there it can
+differ from the version `pip show lex-app` prints.
 
-- `--bootstrap` — open the browser bootstrap flow if Keycloak credentials are missing
-- `--skip-client-preflight` — bypass the local Keycloak client safety check when you're intentionally managing that setup yourself
+### `lex init`
+
+`lex init` brings the database and the Keycloak realm in line with your models.
+In order, it:
+
+1. with `--bootstrap`, runs the browser bootstrap flow when Keycloak credentials
+   are missing from the environment — the flow `lex bootstrap_keycloak` runs;
+2. checks the Keycloak client: it must be confidential, and when
+   `DEPLOYMENT_ENVIRONMENT` is not set it must also be a development client,
+   one with a `localhost` redirect URI;
+3. detects added, deleted and renamed models;
+4. runs `lex create_db` (PostgreSQL only) and `createcachetable`, then
+   `makemigrations`, then `migrate`;
+5. adds the models Keycloak has no resource for, and syncs resources, scopes and
+   permissions.
+
+`makemigrations` runs for **your project's app only** — the project folder, which the
+settings install as an app unless its name starts with `lex`; when they don't, it runs for
+every app. lex-app and the other
+installed packages ship their own migrations, and one generated for them inside
+site-packages would clash with the next one the package ships. An app label in
+`--makemigrations-args` replaces your project's app; name both if you need both.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--bootstrap` / `--no-bootstrap` | off | Step 1. It waits up to 15 minutes for the browser flow. |
+| `--skip-client-preflight` | off | Skip step 2 — only when you mean to run against a public client, or against a non-development one from a developer machine. |
+| `--no-makemigrations` | off | Skip `makemigrations`; apply the migration files that exist. |
+| `--skip-migrations` | off | Skip step 4 entirely, `create_db` and `createcachetable` included. |
+| `--migration-verbosity N` | `1` | Verbosity of `makemigrations` and `migrate`, `0` to `3`. |
+| `--makemigrations-args "…"` | — | Further arguments for `makemigrations`, as one quoted string. |
+| `--migrate-args "…"` | — | Further arguments for `migrate`, as one quoted string. A `--database ALIAS` here also points `create_db`, `createcachetable` and the check for pending migrations at that database. |
+| `--dry-run` | off | Report the model changes and whether migrations are pending, then stop: nothing is migrated and nothing changes in Keycloak. `create_db` and `createcachetable` still run. |
+| `--check-missing` / `--no-check-missing` | on | Look for models Keycloak has no resource for, and add them. |
+| `--preserve-renamed-permissions` / `--no-preserve-renamed-permissions` | on | Carry a renamed model's permissions over to its new name. |
+| `--ensure-default-authz` | off | Make sure the client has a default resource, a regex default policy and a resource-based default permission. |
+| `--sync-retries N` | `3` | Attempts at each Keycloak step, waiting 2, 4, 8… seconds in between. The flag's own help text says the default is 1; it is 3. |
+
+Inside the two `…-args` strings a flag followed by a word takes that word as
+its value, so put app labels and migration names first:
+`--migrate-args "myapp 0001 --fake"`, not `"--fake myapp 0001"`.
 
 ### `lex start` flags
 
@@ -43,6 +86,57 @@ lex start --reload --loop asyncio lex_app.asgi:application
 | `lex_app.asgi:application` | The ASGI mount point. This is the framework's entry point — leave it as-is unless you have a custom ASGI app.                           |
 
 For production runs, drop `--reload`.
+
+### `lex streamlit`
+
+`lex streamlit` is [Streamlit](https://docs.streamlit.io/)'s own command line,
+run in a process that has Django set up and with the sign-in proxy in front of
+it: every argument after `streamlit` goes to Streamlit unchanged. With none, it
+is `streamlit run` on lex-app's own `streamlit_app.py`, which serves the
+project's dashboards — see [[access-and-dashboards/streamlit/index|Streamlit Dashboards]].
+The first argument that contains `streamlit_app.py`, when it is a relative path, is
+resolved against the lex-app package's folder — `apps/streamlit_app.py` becomes
+`<package>/apps/streamlit_app.py`. That is how the generated **Streamlit** run
+configuration, `lex streamlit run streamlit_app.py`, runs the package's own app in any
+project.
+
+| Listener | Default | Moved by |
+| --- | --- | --- |
+| The proxy, on `0.0.0.0` — the address you open | `8501` | `--browser.serverPort`, or `LEX_PROXY_PORT`, which wins |
+| Streamlit itself, behind the proxy | `8080` | `--server.port`; the proxy follows it unless `UPSTREAM` is set |
+
+What it adds to running `streamlit` yourself:
+
+- the **LEX theme**, as `--theme.*` flags. Command-line flags override the
+  `[theme]` of a project's `.streamlit/config.toml`; pass a `--theme.<option>`
+  yourself and lex-app leaves that one out, so yours wins;
+- Streamlit's usage statistics off, and headless mode on, unless you set them;
+- `--server.disconnectedSessionTTL` from `LEX_STREAMLIT_DISCONNECTED_SESSION_TTL`
+  (600 seconds by default), so a dashboard that reconnects after a sign-in round
+  trip keeps its session;
+- a fresh `LEX_INTERNAL_AUTH_SECRET` shared by the proxy and Streamlit, unless
+  you set one.
+
+It refuses to start, with a message naming the setting, when:
+
+- `LEX_STREAMLIT_AUTH` is not `legacy`, `handoff` or `dual`;
+- `LEX_STREAMLIT_AUTH` is `handoff` or `dual` on a deployed instance that names
+  no app host (`LEX_INSTANCE_HOSTS` or `DOMAIN_HOSTED`) or no dashboard host
+  (`LEX_INSTANCE_HOSTS` or `STREAMLIT_URL`);
+- `SESSION_SAMESITE` is not `lax`, `strict` or `none`;
+- the cookies would be `SameSite=None` — the default over https — without
+  `Secure` (`SESSION_HTTPS_ONLY` false), which browsers discard;
+- `LEX_PROXY_REPLICAS` is above 1 with no `TOKEN_REDIS_URL` or `REDIS_URL`,
+  except under `handoff`.
+
+It warns and starts anyway when Streamlit is older than 1.58 (light/dark sync
+with Lex App cannot work), when `websockets` is older than 13, when dashboard
+sessions will not survive a restart (no `SESSION_SECRET` and no private
+`DJANGO_SECRET_KEY`, or no Redis token store outside `handoff`), and when a
+deployed hand-off has neither an https `STREAMLIT_URL` nor `SESSION_HTTPS_ONLY`.
+When Streamlit stops, the proxy
+shuts down cleanly, within `LEX_PROXY_SHUTDOWN_TIMEOUT` seconds. The variables
+are listed under [[reference/Environment Variables#Streamlit|Streamlit]].
 
 ### `lex reflex`
 
@@ -74,12 +168,27 @@ It does not set Django up in its own process: Reflex's workers import the app, a
 
 `lex pytest` behaves like plain `pytest` — any flags you pass are forwarded directly. Before running, it prepares Django's test environment and sets up the test database for your `default` alias. If that test DB already exists, `lex pytest` reuses it and runs migrations (`keepdb` behavior); if it's missing (common in CI), it creates it first. If that setup step fails, `lex pytest` stops early and shows the setup error instead of continuing with a partial run.
 
-Two extra flags are intercepted:
+> [!warning] On a deployed database profile, the test database is the real one
+> With `DATABASE_DEPLOYMENT_TARGET` set to `GCP`, `K8S` or `DOCKER-COMPOSE`, the
+> test database's name is `DATABASE_NAME` itself. `lex pytest` reuses it as it
+> reuses any existing test database, so the tests run against that database and
+> its data: nothing is created or dropped, and whatever a test commits stays.
+> Run tests with the `default` or `local` profile, or against a database you can
+> lose.
 
-| Flag                 | What It Does                                                 |
-| -------------------- | ------------------------------------------------------------ |
-| `--report`           | Generate a branded PDF test report after the run             |
-| `--report-and-email` | Generate the PDF report and send it to configured recipients |
+Three extra flags are intercepted:
+
+| Flag | What It Does |
+| --- | --- |
+| `--report` | Generate a branded PDF test report after the run |
+| `--report-and-email` | Generate the PDF report and send it to the configured recipients. It shows who gets what and asks before sending; with no terminal to ask in, as in CI, it fails unless `--send-emails` is given |
+| `--send-emails` | With `--report-and-email`: send without asking. The form for CI |
+
+The emails go through Django's mail backend, which is SendGrid and needs
+`SENDGRID_API_KEY`, unless `LEX_TEST_EMAIL_BACKEND` names another one as a
+dotted path. With `django.core.mail.backends.filebased.EmailBackend` they are
+written to files in `LEX_TEST_EMAIL_FILE_PATH`, by default `email-outbox` in the
+report directory.
 
 Use `-m` marker expressions to run only a subset of tests:
 
@@ -89,18 +198,49 @@ lex pytest -m "creation or validation"   # union of two groups
 lex pytest -m "not slow"                 # exclude a group
 ```
 
-Test groups, recipients, and the tests entry point are configured in `lex_test_config.yaml` at your project root. Use `lex pytest-groups` to inspect what groups are registered and which tests belong to each.
+Test groups, report recipients and the tests entry point are configured in `lex_test_config.yaml` at your project root. Use `lex pytest-groups` to inspect what groups are registered and which tests belong to each.
+
+Without that file `lex pytest` refuses to run. Its message suggests copying
+`lex_test_config.yaml.example`, which lex-app does not ship; start from the
+example [below](#lex_test_configyaml-at-a-glance) instead. In a pipeline,
+`LEX_TEST_CONFIG_PAYLOAD` can carry the whole configuration as one JSON object
+with the same keys; when it is set, the file is not read.
+
+### Running tests in PyCharm or VS Code
+
+In any project with a `lex_test_config.yaml` (or a `LEX_TEST_CONFIG_PAYLOAD`), a plain `pytest` run gets the same setup as `lex pytest`, so your IDE's own test runner works: PyCharm's test tree, the run button next to each test, **Run pytest in …** and rerunning failed tests, with nothing to add to your project. The setup comes from a pytest plugin that lex-app installs; pass `-p no:lex` to switch it off for a run. The plugin refuses to run alongside pytest-django, since both set up Django's test environment: add `-p no:django` to your pytest options, or uninstall pytest-django.
+
+`lex setup` (or `lex-generate-configs`) writes a **Tests** run configuration for the whole suite and one for each group, named after it (**Tests: invoices**, for example), for PyCharm and for VS Code. They set `CELERY_ACTIVE=False`, so calculations run in the test process instead of waiting for a Celery worker.
+
+Keep using `lex pytest` for `--report` and `--report-and-email`, and in CI.
+
+> [!tip]
+> If your project copied this setup into its own `conftest.py` to get PyCharm's test tree, it keeps working after you upgrade — the built-in setup runs first and your copy stands down — and you can delete it.
 
 ### `lex_test_config.yaml` at a glance
 
-The file is a small YAML document at your project root. The most useful keys:
+The file is a small YAML document at your project root:
 
-| Key                 | Purpose                                                                                                                                  |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests_root`        | Directory pytest discovers tests in (relative to project root)                                                                           |
-| `groups`            | Mapping of group name → list of test files / nodeids. The group name is what you pass to `pytest -m` and what `lex pytest-groups` lists. |
-| `report.recipients` | List of email addresses that receive the PDF when `--report-and-email` is passed                                                         |
-| `report.sender`     | "From" address on the report email (falls back to your SendGrid sender)                                                                  |
+| Key                 | Purpose                                                                                                                                                                                                                                                               |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests_entrypoint`  | Required. The directory `lex pytest` collects tests from when you name no target, relative to the project root. It must exist.                                                                                                                                        |
+| `groups`            | Required, at least one. A list of `name` / `description` entries. Each name must be a Python identifier — letters, digits and underscores, not starting with a digit — and unique. Every name is a pytest marker: `@pytest.mark.<name>` puts a test in the group and `lex pytest -m <name>` runs it. A marker that is not a group stops the run. A group can list its own `receivers`. |
+| `receivers`         | Who receives the PDF report from `--report-and-email`: a list of `name` / `email` entries.                                                                                                                                                                            |
+| `email`             | The report email's `from_email` (required for `--report-and-email`), `from_name`, `reply_to` and `subject_prefix`.                                                                                                                                                    |
+| `report.output_dir` | Where the PDF report and the coverage HTML are written, relative to the project root. Default `reports`.                                                                                                                                                              |
+| `group_assignments` | Optional. Maps a test's node id (`tests/test_invoices.py::test_post`) to a group name. In the report, that test counts for that group alone whatever its markers say, and a marker on it that is not a group is no error. What `-m` selects still follows the markers. |
+
+```yaml title="lex_test_config.yaml"
+tests_entrypoint: tests
+groups:
+  - name: invoices
+    description: Invoice creation and posting
+  - name: year_end
+    description: The year-end rollover
+receivers: []
+report:
+  output_dir: reports
+```
 
 > [!note]
 > `--report` (and `--report-and-email`) require coverage data. If coverage cannot be collected, the command stops with an error instead of producing a report with missing coverage.
@@ -121,6 +261,30 @@ The file is a small YAML document at your project root. The most useful keys:
 Most projects only ever need `lex init`. The rest are the pieces it is built
 from, useful when you want one step without the others — a permission sync with
 no migration, or a re-register after editing the realm by hand.
+
+### Running `lex init`'s steps one at a time
+
+`lex detect_model_changes` writes what it found to `.model_changes.json` in the
+**current directory**, and `lex sync_keycloak` reads it from there: run the two
+from the same place, or pass the path.
+
+| Command | Flag | Default | Meaning |
+| --- | --- | --- | --- |
+| `lex detect_model_changes` | `--output PATH` | `.model_changes.json` | Where to write the JSON. |
+| | `--no-check-missing` | off | Do not ask Keycloak which models it lacks; write the model changes only. |
+| `lex sync_keycloak` | `--input PATH` | `.model_changes.json` | The JSON to apply. |
+| | `--dry-run` | off | Print the changes and stop. |
+| | `--ensure-default-authz` | off | As for `lex init`. |
+| | `--preserve-renamed-permissions` | on | As for `lex init`, except that here it cannot be switched off. |
+| `lex bootstrap_keycloak` | `--timeout SECONDS` | `900` | How long to wait for the browser flow. |
+| | `--poll-interval SECONDS` | `3` | How often to check whether it finished. |
+| | `--no-browser` | off | Do not open a browser; the URL is printed either way. |
+
+`lex sync_keycloak` reports a missing or unreadable file, and a sync that
+failed, but exits 0 all the same — read what it printed.
+`lex bootstrap_keycloak` does nothing when the Keycloak credentials are already
+set; otherwise it writes them to `.env` in the current directory, so run it from
+the project root.
 
 > [!note]
 > The standalone `lex-generate-configs` console script (note the hyphen, not `lex generate-configs`) regenerates the PyCharm run configurations under `.run/` and VS Code launch configurations under `.vscode/launch.json`. You usually don't need to call it directly — `lex setup` and `lex setup-with-ai` run it for you. There is no `lex generate-configs` subcommand.
@@ -144,25 +308,25 @@ runs them like any other management command. See
 
 | Command                         | What It Does                                                                                                                                                                                                                                  |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lex create_db`                 | Create the PostgreSQL database if it doesn't exist yet; does nothing on SQLite                                                                                                                                                                |
+| `lex create_db`                 | Create the PostgreSQL database if it doesn't exist yet; does nothing on SQLite. When it cannot connect, it prints the error and still exits 0 |
 | `lex flush`                     | Delete every row in the database, after asking you to confirm (`--noinput` skips the question). The next `lex start` loads your initial data again                                                                                            |
 | `lex migrate`                   | Apply pending Django migrations, then create the cache tables if they are missing (no separate `createcachetable` needed on a fresh database)                                                                                                 |
 | `lex makemigrations`            | Create new migration files from model changes                                                                                                                                                                                                 |
 | `lex sqlflush`                  | Print SQL statements to flush the database                                                                                                                                                                                                    |
-| `lex lex_migrate`               | `makemigrations` then `migrate` in one step. `--no-makemigrations` applies existing migration files only — which is what you want on a deployed instance, where migration files should come from the release, not from the running container. |
+| `lex lex_migrate`               | `makemigrations` for every installed app — not only your project's, as `lex init` does — then, when something is pending, `migrate` and `createcachetable`. `--no-makemigrations` applies the existing migration files only: not safe on an upgrade that changes a framework field your models use, because the migration your app needs is then never generated — see [[ship-and-operate/upgrading#Migrations your application has to generate\|Upgrading]]. `--migration-verbosity N` (default `1`). It exits 0 even when a step fails, printing `✗ Migration failed: …` — read its output. |
 | `lex rebase_incident_datetimes` | Re-anchor user-entered datetimes that were mis-stored during the TIME_ZONE incident (see below).                                                                                                                                              |
 
 ### Migration snapshots and rollback
 
 Take a snapshot before a migration you are not sure about, and you have a way back.
 
-| Command                               | What It Does                                                                                                                        |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+| Command | What It Does |
+| --- | --- |
 | `lex capture_migration_state`         | Write the current migration target of every app to a JSON file (default `.lex_migration_state_before.json`).                        |
 | `lex rollback_migration_state`        | Migrate every app back to the targets in that file. `--dry-run` prints the plan without applying it.                                |
 | `lex capture_db_tables`               | Snapshot the physical table names in the database (default `.lex_tables_before.json`), for diffing after a migration.               |
 | `lex generate_legacy_freeze_manifest` | Diff a `capture_db_tables` snapshot against the current V2 model tables to produce the list of legacy tables nothing owns any more. |
-| `lex full_migration_workflow`         | Run the whole V1→V2 migration sequence with one stable interface, from any working directory. See [[migrating-from-v1/index         | Migrating from V1]]. |
+| `lex full_migration_workflow`         | Run the whole V1→V2 database migration sequence with one stable interface, from any working directory: it takes the table snapshot, prepares the V1 migration files, runs `makemigrations` and `migrate`, writes the legacy-freeze manifest and runs the three backfills below. See [[migrating-from-v1/migrating the database\|Migrating the database]]. |
 
 > [!warning]
 > `rollback_migration_state` reverses **schema** migrations. It does not restore
@@ -216,15 +380,35 @@ lex rebase_incident_datetimes --cutoff 2026-07-10T00:00:00+00:00 --apply
 
 ## Async / Celery Commands
 
-| Command                       | What It Does                                                                                                                                                                                                                                                                    |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `lex celery`                  | Run a raw Celery command (forwards everything after it to `celery`). Used to start workers — see [[calculations/celery and async calculations                                                                                                                                   | Celery & async calculations]] for the full worker invocation. |
-| `lex celery-workers`          | Start the standard worker pool with the framework's default settings                                                                                                                                                                                                            |
+| Command | What It Does |
+| --- | --- |
+| `lex celery`                  | Run a raw Celery command (forwards everything after it to `celery`) in a process that has Django set up. Unlike `lex celery-workers`, it sets no environment variables — see [[calculations/celery and async calculations\|Celery & async calculations]] for the full worker invocation. |
+| `lex celery-workers N`        | Start N standard workers — see [below](#lex-celery-workers) |
 | `lex flower`                  | Launch [Flower](https://flower.readthedocs.io/), the Celery monitoring dashboard, against the configured broker                                                                                                                                                                 |
 | `lex run_recovery_supervisor` | Run the worker-recovery loop in the foreground: detect workers that stopped sending heartbeats and requeue the tasks they were holding. `--once` does a single sweep and exits, which is the form to use from cron. `--interval` overrides `LEX_TASK_SUPERVISOR_SCAN_INTERVAL`. |
 
 > [!note]
 > If you use worker recovery, two standalone console scripts live outside the `lex` command tree: `lex-recovery-supervisor` (the always-on sweep loop) and `lex-recovery-beat` (the admin-scheduled recovery worker). See [[calculations/celery and async calculations|Celery & async calculations]].
+
+### `lex celery-workers`
+
+```bash
+lex celery-workers 4
+```
+
+The count is a plain argument, at least 1. Each worker is its own process,
+started from the project root as
+
+```bash
+python -m lex celery -A lex_app worker --loglevel=info --concurrency=1 --prefetch-multiplier=1 -n worker<N>@%h
+```
+
+with `-P threads` added on macOS and Windows, and with
+`IS_RUNNING_IN_CELERY=true` and `CELERY_ACTIVE=true` in its environment.
+Anything after the count is appended to every worker's command line. The
+workers live and die together: when one exits, the others are stopped and the
+command exits with that worker's exit code. Ctrl-C stops them all. The
+generated **Celery Workers** run configurations ask for the count.
 
 ## Scheduling Commands
 
@@ -238,7 +422,7 @@ The backend runs this clock by itself, so most instances never need the command.
 
 | Command               | What It Does                                                                                                                                |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lex setup-with-ai`   | Configure LEX AI integration (GitHub Copilot MCP, remote MCP server)                                                                        |
+| `lex setup-with-ai`   | Set up the LEX AI integration for one or more agentic environments — GitHub Copilot in PyCharm or VS Code, Copilot CLI, Cursor, Claude Code, Codex, Windsurf — with the remote MCP server |
 | `lex ai-update`       | Upgrade lex-mcp-local and apply all pending updates to an existing LEX AI setup                                                             |
 | `lex ai-dashboard`    | Open a local web dashboard to switch MCP mode, update credentials (GitHub token, remote API key, remote MCP URL), and inspect server status |
 | `lex ai-verify`       | Verify that required AI asset files are present and restore any that are missing or have drifted                                            |
@@ -246,7 +430,18 @@ The backend runs this clock by itself, so most instances never need the command.
 | `lex ai-issue-report` | Generate a zip bundle of the current AI setup for support triage                                                                            |
 | `lex ai-worktree`     | Manage a parallel git worktree for AI-assisted development                                                                                  |
 
-`lex setup-with-ai` prompts for a GitHub token and a remote MCP API key, then writes the necessary entries to your `.env` and `mcp.json` (including `LEX_MCP_ANALYTICS_BACKEND=remote`). It also verifies that all required AI asset directories (`.github`, etc.) are present and restores any that are missing. If no project markers are found, it uses the directory you ran the command from (it won't jump up to your home folder).
+`lex setup-with-ai` does what `lex setup` does, then asks for a GitHub token and a remote MCP API key on a local setup page in your browser, installs `lex-mcp-local`, writes the AI entries to your `.env` (including `LEX_MCP_ANALYTICS_BACKEND=remote`), registers the MCP server in the configuration of each environment you chose, and delivers the agent files for them. Last, it verifies that all required AI asset directories (`.github`, etc.) are present and restores any that are missing.
+
+| Flag | Meaning |
+| --- | --- |
+| `-p`, `--project-root PATH` | The project folder. Default: the directory you run the command from. |
+| `--github-token TOKEN` | The GitHub token. Give `--remote-mcp-api-key` as well and no page or prompt appears. |
+| `--remote-mcp-api-key KEY` | The API key for the remote MCP server; it also authorises the download of `lex-mcp-local`. |
+| `--remote-mcp-url URL` | The remote MCP endpoint. Default `https://mcp.excellence-cloud.de/mcp`. |
+| `-e`, `--environment NAME` | An environment to set up; repeat the flag for several: `pycharm-copilot`, `vscode-copilot`, `copilot-cli`, `cursor`, `claude-code`, `codex`, `windsurf`, or `all`. Without it the setup page offers them all, with the tools it finds on this machine ticked; with `--no-browser` it is `pycharm-copilot`. An unknown name stops the command. |
+| `--list-environments` | Print the supported environments, with the other names each accepts, and exit. |
+| `--no-browser` | Ask in the terminal instead of opening the setup page. |
+| `--mcp-mode MODE` | Accepted, but in 2.5.0 it does not decide the mode. The setup page's choice does — `brief` unless you unlock the others — and without the page (both credentials given as flags, or `--no-browser`) the mode is `forward`. Switch it afterwards with `lex ai-dashboard`. |
 
 `lex setup-with-ai` and `lex ai-verify` use the directory you pass via `--project-root` (or your current directory) directly — they don't walk up to a parent folder automatically.
 
@@ -281,7 +476,8 @@ than a gap:
 | `lex _keycloak_env`                                   | Not a command at all. `_keycloak_env.py` is the shared helper that `lex register_keycloak_resources` and `lex delete_keycloak_resources` both import for their Keycloak connection; it sits in `management/commands/`, so Django's discovery lists it as one. Running it does nothing. |
 
 > [!note]
-> `lex --help` prints only the eleven commands the CLI implements itself; the
+> `lex --help` prints only the eleven commands the CLI implements itself, plus
+> the `ai-*` commands of `lex-mcp-local` once that is installed; the
 > Django passthrough commands do not appear there, because listing them would
 > mean starting Django just to render help. This page is the complete list, and
 > CI checks that it stays complete — a new management command with no entry here
@@ -291,32 +487,22 @@ than a gap:
 
 The CLI takes the nearest folder at or above the current directory that holds `lex_config.py` as the project root, before falling back to the git top level. A Lex project in a subfolder of a larger repository (a monorepo) therefore runs with plain `lex <command>` from that subfolder — no `PROJECT_ROOT` or `GIT_CEILING_DIRECTORIES` needed.
 
+The full order:
+
+1. the nearest folder at or above the current directory that holds `lex_config.py`;
+2. the git top level;
+3. the nearest folder at or above the current directory that holds `.git`, `pyproject.toml`, `setup.cfg`, `manage.py`, `requirements.txt`, `.idea` or `.vscode`;
+4. the current directory itself.
+
+The searches upward stop at your home directory, and a git top level that is your home directory, or above it, does not count. Whatever is found, `lex` loads that folder's `.env` and sets `PROJECT_ROOT` to it for every process it starts, unless `PROJECT_ROOT` is already set. `lex setup-with-ai` and `lex ai-verify` are the exceptions: they use `--project-root` or the current directory as given.
+
 ## Usage Pattern
 
-We recommend using the IDE run configurations generated by `lex setup` — both PyCharm (`.run/`) and VS Code (`.vscode/launch.json`) — which auto-load `.env` for you. If you prefer the terminal:
-
-**Linux / macOS:**
+We recommend using the IDE run configurations generated by `lex setup` — both PyCharm (`.run/`) and VS Code (`.vscode/launch.json`). In a terminal, run commands from the project folder or any folder below it, on Linux, macOS and Windows alike:
 
 ```bash
-# Load environment variables first
-set -a; source .env; set +a
-
-# Then run any lex command
 lex init
 lex start
 ```
 
-**Windows PowerShell:**
-
-```powershell
-# Load environment variables first
-Get-Content .env | ForEach-Object {
-    if ($_ -match '^([^=]+)=(.*)$') {
-        [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2])
-    }
-}
-
-# Then run any lex command
-lex init
-lex start
-```
+There is nothing to load first. Every `lex` command loads `<project root>/.env` itself, before anything else runs, and a variable already set in your environment wins over the file. So do not `source .env` into your shell: a value exported that way stays in the shell and silently overrides later edits to the file. To change a value for one run, set it on the command line, as in `LOG_LEVEL=DEBUG lex start`. How the file is read is in [[reference/Environment Variables#Where these get set|Environment Variables]].
