@@ -2425,3 +2425,29 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 | 1.704 | The chrome hides inside lex-app and follows its theme | the shell, `LexThemeFollower`, the `restored` notice, the embedded class, the title, the logout condition; the CSS hides header/sidebar under the class and sets the navy chrome |
 | 1.705 | The browser bridge obeys only lex-app and reports sign-in state | URL mode first, then only the parent's v1 messages at an allowed origin with a known mode; `restored` only after `required`, once, to the parent's exact origin, lex-auth v2 shape |
 | 1.706 | The compiled app is RFDS on lex-app's runtime | `rfds.install` ran; identity resolver is `rxe_identity`, permission resolver lex-app's, nav checker set; head carries lex-app's styles; transformers: RfdsApi first, headers with no frame options, the framing policy; the Keycloak provider has RFDS's mixin |
+
+### Batch 1bu — Model data in the Reflex dashboards — through lex-app's own API, as the signed-in user ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.707 – 1.716 |
+| Type | U (1.711: I) |
+| Files covered | `lex/lex_app/reflex/data.py` (`LexApi`, `lex_api`, `api_base_url`, `wire_value`, `lex_rows`, `column_kind`, `visible_fields`, `lex_columns`, `lex_grid_columns`, `filter_params`, `scope_params`, `LexTableState`, `table_state`, `lex_table`, `LexGridState`, `lex_grid`, `LexRecordState`), `lex/lex_app/reflex/__init__.py` |
+| Test file | `lex/test_project/tests/init/test_1bu_reflex_model_data.py` |
+| Test classes | `TestCluster01bu_TheApi` (1.707–1.709), `TestCluster01bu_WireAndColumns` (1.710, 1.712, 1.713), `TestCluster01bu_RowsFromAQueryset` (1.711), `TestCluster01bu_TablesGridsAndRecords` (1.714–1.716) |
+| Fixtures | a recording HTTP client standing in for lex-app's API; two `Group` rows for 1.711 |
+| Tests landed | **10 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.707 | Calls lex-app's own endpoints with the user's token | Bearer token on every call; list/read/create/update(PATCH)/delete on the model-entry routes, which resolve to lex-app's views; page/perPage/ordering and repeated filters in order; operation ids name model and action; both list shapes become `{count, results}` |
+| 1.708 | Refusals and outages are errors, never empty data | 403/404/500/unreachable raise `LexApiError` with the status (0 unreachable); 401/403/404 are `denied`; no token, no API |
+| 1.709 | `lex_api` uses the session's token and the configured base | the session's access token; base `LEX_API_URL`, else `https://DOMAIN_HOSTED`, else `http://localhost:8000` |
+| 1.710 | Values travel as RFDS wire values | Decimals as exact strings, dates ISO, UUIDs strings, related instances their key, NaN `None`, nested values converted; mapping rows keep chosen fields |
+| 1.711 | `lex_rows` reads a queryset with `values()` | real rows of chosen fields in queryset order; instances read field by field |
+| 1.712 | Columns follow each field's type and skip credentials | id/boolean/instant/text kinds, verbose-name headers, `password` left out, per-field overrides, an unknown field refused; grid columns likewise |
+| 1.713 | Table filters become lex list filters | each RFDS operator mapped to lex-app's lookups (`!`, repeated fields, `__gte`/`__lte`, `__icontains`, `__blank`); malformed names dropped; fixed filters skip empties and repeat lists |
+| 1.714 | `lex_table` pages, sorts, filters and searches through the API | one state class per distinct table; mount passes the fixed filters as the state var; page 3 of 25, `-name,id`, fixed + table filters + `name__icontains`; wire rows and the total |
+| 1.715 | `lex_grid` loads rows once, says when cut, hides on refusal | first page of `GRID_ROW_LIMIT` with fixed filters; wire rows, `truncated`, dataset version bumped; a 403 leaves no rows and `denied` |
+| 1.716 | A record dashboard gets only records the API would show | API shows: instance, title, data, `ok`; 403: `None`, `denied`; 404 or no pk: `None`, `missing`; the instance is read only after the API showed the record |
