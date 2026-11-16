@@ -284,3 +284,23 @@ a project reaching for column options is most likely to have.
   [session note](../../progress/sessions/2026-10-20-native-column-filters.md).
 
 ---
+
+### Batch 10af — api/project-info tells the frontend which framework draws each model's dashboards ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.190 – 10.193 |
+| Type | U (10.190: E) |
+| Files covered | `lex/lex_app/dashboard_surfaces.py` (`surface_for`, `dashboard_surfaces`, `reflex_home_available`, `overrides`), `lex/api/views/project_info/ProjectInfo.py` |
+| Test file | `lex/test_project/tests/api_layer/test_10af_project_info_dashboards.py` |
+| Test classes | `TestCluster10af_TheRules` (10.191–10.193), `TestCluster10af_TheEndpoint` (10.190) |
+| Fixtures | stand-in models with chosen hooks; `lex.lex_app.tests.auth.sign_in` for 10.190 |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.190 | project-info carries the dashboard fields | old fields kept; `reflex_enabled`, `reflex_home` true; `dashboards` keyed by route id with record/table surfaces, models without dashboards left out; with Reflex off, Reflex-only levels drop out |
+| 10.191 | Reflex wins when on and the model has a Reflex hook | Reflex hook > Streamlit hook > none with Reflex on; only Streamlit hooks when off or forced; record and table separate; bad level refused; unknown setting means auto |
+| 10.192 | The Reflex home needs Reflex and a structure module | off: false; on with `_reflex_structure` found: true; on without: false; found with `find_spec` |
+| 10.193 | Deciding never imports Reflex into Django | neither module imports reflex, reflex_enterprise, rfds or lex.lex_app.reflex |

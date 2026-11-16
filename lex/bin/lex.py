@@ -945,6 +945,32 @@ def _reflex_hot_reload_paths(project_root: Path) -> str:
     return ":".join(names) or "rxconfig.py"
 
 
+def _reflex_add(argv):
+    """``lex reflex add <block> --model <Model>``: write a dashboard page bound to a model."""
+    import argparse
+
+    from lex.lex_app.reflex.scaffold import BLOCKS, add_block
+
+    parser = argparse.ArgumentParser(prog="lex reflex add", description="Write a Reflex dashboard page for a model.")
+    parser.add_argument("block", choices=BLOCKS)
+    parser.add_argument("--model", required=True, help="the model's class name, e.g. Fund")
+    parser.add_argument("--route", help="the page's path, e.g. /funds")
+    parser.add_argument("--title", help="the page's title")
+    parser.add_argument("--nav", default="Dashboards", help="the navigation heading it is listed under")
+    parser.add_argument("--force", action="store_true", help="replace an existing page")
+    parser.add_argument("--no-register", action="store_true", help="do not import it from _reflex_structure.py")
+    args = parser.parse_args(argv)
+    try:
+        touched = add_block(PROJECT_ROOT_DIR, args.block, args.model, route=args.route, title=args.title,
+                            nav=args.nav, force=args.force, register=not args.no_register)
+    except (ValueError, FileExistsError) as exc:
+        click.echo(f"lex reflex add: {exc}", err=True)
+        return 2
+    for path in touched:
+        click.echo(f"wrote {path}")
+    return 0
+
+
 @lex.command(
     name="reflex",
     short_help="Run the project's Reflex dashboards.",
@@ -959,6 +985,10 @@ def reflex_cmd(ctx):
     lex reflex                    # reflex run: dev server with hot reload
     lex reflex run --env prod     # production, as a deployment runs it
     lex reflex login              # sign in to Reflex, for reflex-enterprise
+    lex reflex add list_report --model Fund   # a page bound to a model (also
+                                  #   object_page, overview; --route, --title,
+                                  #   --nav, --force, --no-register)
+    lex reflex check              # RFDS lint --strict + doctor, as CI runs them
     lex reflex --help             # Reflex's own help
     """
     # The Reflex counterpart of `lex streamlit`, with one difference that shapes
@@ -968,6 +998,14 @@ def reflex_cmd(ctx):
     # (`lex.reflex_app`) sets Django up itself -- and this command, which is in
     # `_SKIP_BOOTSTRAP_COMMANDS`, does not do it a second time.
     reflex_args = list(ctx.args) or ["run"]
+
+    # Two commands of lex-app's own, which Reflex's CLI does not have.
+    if reflex_args[0] == "add":
+        sys.exit(_reflex_add(reflex_args[1:]))
+    if reflex_args[0] == "check":
+        from lex.lex_app.reflex.scaffold import run_check
+
+        sys.exit(run_check(PROJECT_ROOT_DIR))
 
     if reflex_args[0] not in _REFLEX_PROJECTLESS_ARGS:
         # Reflex reads rxconfig.py from, and writes .web/ into, the directory it

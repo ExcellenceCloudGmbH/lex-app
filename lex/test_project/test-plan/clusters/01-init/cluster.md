@@ -981,3 +981,20 @@ does not remove user launch configurations.
 | 1.723 | The frame speaks lex-app's contract and trusts only lex-app | JS filters token equals Python's; the page opens on the framing lex-app origin, never a stranger's; each load posts theme then the missing filters; duplicates, foreign origins, other windows and newer versions ignored; widget host gets manifest and theme on ready; status reaches `on_status` |
 
 **Scenario range:** 1.717 – 1.723. **Test file:** `lex/test_project/tests/init/test_1bv_reflex_lex_view_and_widgets.py`. **Type:** U. **Status:** ✅ Complete (2026-11-17). Batch: [1bv](batches.md).
+
+---
+
+### 1bw. A consultant's tooling for Reflex dashboards — lex reflex add, lex reflex check, the reference example ✅
+
+**What it tests:** that a consultant gets a working page for a model with one command, checks dashboards the way CI does with another, and copies a reference structure module that uses every feature and compiles.
+
+**Why a regression matters:** a template that imports a name lex-app no longer exports breaks the first compile a consultant runs; a page that is not registered silently never appears; a check that differs from CI passes locally and fails in the pipeline; an example nobody compiles teaches an API that is gone.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.724 | `add` writes a page and registers it once | `_dashboards/` package and page; `_reflex_structure.py` created with `main()` and the import once; refused without `--force`; `--no-register` and `object_page` leave the structure alone; bad model, block or route exit non-zero |
+| 1.725 | Every template is valid and uses only lex-app's surface | each block parses and imports only names `lex.lex_app.reflex` exports; list and overview are `@lex_page` routes gated on read; object page is a `LexRecordState` dashboard; the overview's ORM read is behind `has_permission` |
+| 1.726 | `check` lints the dashboards and runs the doctor | `lint --strict` over the structure module and the package, then `doctor --app-root`; non-zero when either fails; only the doctor when there is nothing to lint |
+| 1.727 | The reference example uses every feature and compiles | imports every lex-app dashboard feature; uses ExportMixin, charts, KPIs and `can`; its routes are in the compiled app; the compile ran conformance in strict CI mode |
+
+**Scenario range:** 1.724 – 1.727. **Test file:** `lex/test_project/tests/init/test_1bw_reflex_developer_tooling.py`. **Type:** U. **Status:** ✅ Complete (2026-11-17). Batch: [1bw](batches.md).

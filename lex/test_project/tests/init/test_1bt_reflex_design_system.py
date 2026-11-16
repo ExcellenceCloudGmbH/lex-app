@@ -269,8 +269,15 @@ class TestCluster01bt_Access(SimpleTestCase):
 class TestCluster01bt_Chrome(SimpleTestCase):
     """``@lex_page`` and the chrome it draws."""
 
+    def setUp(self) -> None:
+        # The navigation is process-wide; a compile earlier in the run (the
+        # reference example's pages) filled it. Each test starts empty.
+        self._nav = shell.nav_entries()
+        shell.clear_nav()
+
     def tearDown(self) -> None:
         shell.clear_nav()
+        shell._NAV.extend(self._nav)
 
     # -- 1.702 ---------------------------------------------------------
     def test_1_702_lex_page_registers_a_signed_in_page_that_loads_grants_first(self) -> None:
