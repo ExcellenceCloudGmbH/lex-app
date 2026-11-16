@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 716
+max_scenario: 723
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1859,3 +1859,29 @@ letters:
       lex_columns maps Django field types to RFDS column kinds and leaves out credential-shaped
       fields the serialisers never publish. lex_rows turns a queryset into wire rows (Decimals
       as exact strings) for charts inside run_orm.
+  bv:
+    title: 'lex-app''s pages and controls inside Reflex dashboards — one embed contract for both frameworks'
+    scenarios: 1.717-1.723
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      The embed contract with lex-app's React app moves out of the Streamlit package into
+      framework-free lex.lex_app.embed: core.py (Flow, ref, STAY, filters, the filters token,
+      and build_lex_view_url, extracted from Streamlit's lex_view body) and widgets.py (the
+      widget-host manifest, moved from streamlit/widgets/spec.py, which re-exports it).
+      Streamlit's lex_view now renders over build_lex_view_url; every name stays importable from
+      its old module as the same object. Reflex gets lex_view, lex_widgets,
+      lex_calculation(_log/_tree), calculation and calculation_log over a React component
+      (_js/lex_frame.jsx) speaking the same postMessage contract: events go to event handlers (a
+      handler is what asks the page for its kind; on_event alone asks for all), a record may be
+      a state var joined into the URL in the browser, filters may be a state var posted on
+      change, the widget host gets its manifest on widget_host_ready, a log request opens a
+      dialog by default, and when lex-app frames the dashboard the page opens on the origin lex-
+      app was reached on. Found while testing: Django's model discovery imported the new package
+      a second time as lex_app.embed (two Flow classes); 'embed' joins
+      _LEX_PACKAGE_EXCLUDED_DIRS. And a component module must not use from __future__ import
+      annotations: an event handler annotated with a function-local spec silently resolves to
+      nothing. 1.704 also asserts the theme follower's allowed origins reach the page.

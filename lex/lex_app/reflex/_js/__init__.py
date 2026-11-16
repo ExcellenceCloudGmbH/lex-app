@@ -22,6 +22,7 @@ HERE = Path(__file__).parent
 #: Every asset and what it carries.
 FILES: dict[str, str] = {
     "lex_host.jsx": "the bridge to lex-app's shell: theme following, sign-in notices",
+    "lex_frame.jsx": "lex-app's pages (lex_view) and controls (lex_widgets) framed in a dashboard",
 }
 
 

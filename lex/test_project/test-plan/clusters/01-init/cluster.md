@@ -961,3 +961,23 @@ does not remove user launch configurations.
 | 1.716 | A record dashboard gets only records the API would show | API shows: instance, title, data, `ok`; 403: `None`, `denied`; 404 or no pk: `None`, `missing`; the instance is read only after the API showed the record |
 
 **Scenario range:** 1.707 – 1.716. **Test file:** `lex/test_project/tests/init/test_1bu_reflex_model_data.py`. **Type:** U (1.711: I). **Status:** ✅ Complete (2026-11-17). Batch: [1bu](batches.md).
+
+---
+
+### 1bv. lex-app's pages and controls inside Reflex dashboards — one embed contract for both frameworks ✅
+
+**What it tests:** that a Reflex dashboard frames lex-app's pages and controls exactly as a Streamlit one does -- the same URL for the same arguments, the same events, the same manifest -- from one framework-free contract, with the Reflex additions a compiled page needs: records and filters as state vars, events to handlers, and the frame opening lex-app where the user reached it.
+
+**Why a regression matters:** a second copy of the contract drifts, and lex-app's React app would see two dialects; a frame that believes any origin hands a stranger the dashboard's event handlers; a record frozen at compile time opens the wrong record; and moving Streamlit's code could silently break every Streamlit dashboard that imports it.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.717 | Streamlit and Reflex open the same URL | both render `build_lex_view_url`'s URL (Reflex adding the filters token Streamlit's shim adds in the browser); old Streamlit imports are the same objects; discovery never imports `lex_app.embed` |
+| 1.718 | Handlers ask for their events and receive them | an `on_create` handler sets only `emit_create` and is wired; `on_event` alone sets every flag; none sets nothing; only lex-app's origin is believed |
+| 1.719 | A record named by a state var is joined in the browser | a Var path and an f-string embedding a var become a Var URL with the base, the path and the embed query; filters stay the state var, not frozen into the URL |
+| 1.720 | lex-app is framed from the app address beside the dashboards | `REACT_APP_URL`; else the app host on the dashboards' registrable domain; else `http://localhost:8000` |
+| 1.721 | Widgets post one validated manifest with runtime records | one `/embed.html?embed=true` frame, version-1 manifest, a Var pk, ids unique per widget, `on_status` wired, the default log dialog unless the page handles logs; empty, duplicate-id and unknown-option specs refused at build |
+| 1.722 | A calculation's log opens over the page | `open_log` builds a one-widget log manifest for the run and opens the dialog; an incomplete request changes nothing |
+| 1.723 | The frame speaks lex-app's contract and trusts only lex-app | JS filters token equals Python's; the page opens on the framing lex-app origin, never a stranger's; each load posts theme then the missing filters; duplicates, foreign origins, other windows and newer versions ignored; widget host gets manifest and theme on ready; status reaches `on_status` |
+
+**Scenario range:** 1.717 – 1.723. **Test file:** `lex/test_project/tests/init/test_1bv_reflex_lex_view_and_widgets.py`. **Type:** U. **Status:** ✅ Complete (2026-11-17). Batch: [1bv](batches.md).
