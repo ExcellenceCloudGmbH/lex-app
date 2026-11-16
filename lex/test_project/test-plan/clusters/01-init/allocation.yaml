@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 694
+max_scenario: 706
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1815,3 +1815,26 @@ letters:
       lex-app-v2's 1.409 and this branch's own 1br (1.681-1.689); 1.410 stays unused.
       Renumbered on merging lex-app-v2 (2026-11-12): 1az and its scenarios were taken there, so it is 1bs,
       the first letter free on lex-app-v2 and every remote branch, with a range above the highest max_scenario.
+  bt:
+    title: 'RFDS in the Reflex dashboards — configuration, Keycloak permissions, chrome, host bridge'
+    scenarios: 1.695-1.706
+    status: complete
+    tests:
+      pass: 12
+      skip: 0
+      xfail: 0
+    note: >-
+      RFDS (rfds on PyPI) becomes the component and design layer of lex-app's Reflex dashboards
+      while lex-app keeps the runtime. lex_config() lists AuthPlugin, Radix with RFDS's root
+      theme, and RFDSPlugin with the LEX teal brand and LEX_FORMAT_LOCALE / LEX_UI_LANGUAGE /
+      LEX_BASE_CURRENCY / LEX_TIME_ZONE; create_app() builds rfds.enterprise.app(), installs
+      RFDS's platform with lex-app's security headers (no X-Frame-Options; an enforcing frame-
+      ancestors naming lex-app's origins) and runs rfds.install with Keycloak as the only
+      identity; Keycloak's UMA grants become RFDS permission strings through a resolver fed by
+      LexAccessState.load; @lex_page adds signed-in pages in lex-app's chrome, which hides
+      itself under ?lex_embed=1; _js/lex_host.jsx follows lex-app's colour mode and posts lex-
+      auth v2 required/restored notices. The compiled-app assertions now share one compile per
+      process with 1aq (_reflex_compiled.py): Reflex Enterprise allows one AuthPlugin per
+      process. 1.366 gained LexAccessState.load between the sign-in guard and resolve. Writing
+      the tests found one bug: a page registered again (a hot reload) moved to the end of its
+      navigation section; it now keeps its place.

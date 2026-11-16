@@ -73,6 +73,7 @@ from joserfc import jwt as jose_jwt
 from joserfc.errors import InvalidKeyIdError, JoseError
 from reflex.middleware import Middleware
 from reflex_enterprise.auth import AuthUserState, OIDCAuthState
+from rfds.enterprise.auth.providers import RfdsProviderMixin
 from reflex_enterprise.auth.audit import AuditAction, AuditOutcome
 from reflex_enterprise.auth.consts import ACCESS_TOKEN_CACHE_INTERVAL
 from reflex_enterprise.auth.enforcement import get_login_endpoint, login_url_for
@@ -260,8 +261,15 @@ class UserinfoStatusError(UserinfoFetchError):
 _PLUGIN_COOKIES = guard.plugin_cookies_lasting(_oidc_state)
 
 
-class LexKeycloakAuthState(OIDCAuthState, rx.State):
-    """lex-app's Keycloak realm, as a Reflex Enterprise OIDC provider."""
+class LexKeycloakAuthState(RfdsProviderMixin, OIDCAuthState, rx.State):
+    """lex-app's Keycloak realm, as a Reflex Enterprise OIDC provider.
+
+    RFDS's provider mixin adds what every RFDS provider has: the ID token's
+    claims merged into userinfo, a step-up sign-in (``start_step_up``, which
+    asks Keycloak to re-authenticate before a sensitive action), and RFDS's own
+    progress and error screens for the sign-in routes. Everything lex-app
+    overrides below runs first; the mixin is reached through ``super()``.
+    """
 
     __provider__ = PROVIDER
 
@@ -1231,6 +1239,8 @@ def lex_login_page(*, providers: Sequence[type], **context: Any) -> rx.Component
     """
     from reflex_enterprise.auth.pages import default_login_page
 
+    from lex.lex_app.reflex.host import auth_notice
+
     if len(providers) != 1 or not issubclass(providers[0], LexKeycloakAuthState):
         return default_login_page(providers=providers, **context)
     provider = providers[0]
@@ -1248,6 +1258,9 @@ def lex_login_page(*, providers: Sequence[type], **context: Any) -> rx.Component
                 rx.vstack(
                     rx.heading("Sign in", size="6"),
                     provider.get_login_button(),
+                    # Inside lex-app's frame: lex-app's shell learns that this
+                    # dashboard waits for a click, and can say so around it.
+                    auth_notice("required"),
                     spacing="5",
                     align="center",
                 ),

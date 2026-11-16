@@ -35,6 +35,10 @@ streamlit-keycloak-lex==1.0.5
 # reflex-enterprise's OIDC provider hooks, which a 0.10 is free to change.
 reflex==0.9.13
 reflex-enterprise==0.9.7
+# The Reflex dashboards' design system: tokens, components, page templates
+# (lex.lex_app.reflex.design). The enterprise extra is its Reflex Enterprise
+# half -- AG Grid, the OIDC provider mixin -- which lex-app runs on already.
+rfds[enterprise]==1.0.0
 sqlalchemy==2.1.5
 django_redis==7.0.0
 django-storages[google]==1.14.6

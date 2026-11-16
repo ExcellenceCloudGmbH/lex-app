@@ -59,6 +59,10 @@ include = ["lex*", "migrations_logic*"]
 # shipped the migration without its SQL -- and `lex init` aborted on the first
 # start of any instance that installed one.
 "lex.core" = ["sql/*.sql"]
+# The Reflex dashboards' own browser code (a JSX bridge to lex-app's shell and
+# lex-app's stylesheet over RFDS): read by `rx.asset` when the app compiles, so
+# a wheel without them compiles a dashboard that imports a file that is not there.
+"lex.lex_app.reflex._js" = ["*.jsx", "*.js", "*.css"]
 
 [tool.setuptools.exclude-package-data]
 # Belt and braces with MANIFEST.in. include-package-data is on by default for
