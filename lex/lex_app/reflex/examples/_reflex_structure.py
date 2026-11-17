@@ -380,6 +380,7 @@ def record_dashboard() -> rx.Component:
             )),
             ("denied", rfds.inline_message("You may not see this record.", tone="warning")),
             ("missing", rfds.inline_message("This record does not exist.", tone="neutral")),
+            ("unavailable", rfds.inline_message("lex-app cannot be reached; try again shortly.", tone="danger")),
             rfds.spinner(label="Loading"),
         ),
         on_mount=RecordState.load,

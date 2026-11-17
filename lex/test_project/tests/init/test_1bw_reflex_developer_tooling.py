@@ -129,6 +129,8 @@ class TestCluster01bw_Add(_Project):
         self.assertIn("from crm._dashboards.cash_position_object_page import", record,
                       "the hook imports the project's package by name, never relatively")
         self.assertNotIn("Imported by _reflex_structure.py", record, "an object page is never registered")
+        for state in ('"ok"', '"denied"', '"missing"', '"unavailable"'):
+            self.assertIn(state, record, f"the record page handles record_state {state}")
         self.assertIn("auth=has_permission(", scaffold.render("overview", "CashPosition")[1])
 
 
