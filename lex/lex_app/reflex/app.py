@@ -28,6 +28,8 @@ def create_app():
       maps Keycloak's grants to RFDS's permissions (decision D3).
     * :class:`DjangoConnectionMiddleware`, so each event gets the connection
       handling a Django request gets.
+    * :class:`~lex.lex_app.reflex.access.GrantsRefreshMiddleware`, so RFDS's
+      permission checks answer from grants at most a minute old.
     * :class:`~lex.lex_app.reflex.auth.SignInExpiryMiddleware`, so no event is
       served on a profile whose access token has expired. Added here, before the
       auth plugin adds its gate after compiling, so it runs first.
@@ -43,7 +45,11 @@ def create_app():
     from rfds.components.navigation.side_nav import set_permission_checker
     from rfds.platform import install_platform
 
-    from lex.lex_app.reflex.access import LexAccessState, install_permission_resolver
+    from lex.lex_app.reflex.access import (
+        GrantsRefreshMiddleware,
+        LexAccessState,
+        install_permission_resolver,
+    )
     from lex.lex_app.reflex.auth import SignInExpiryMiddleware
     from lex.lex_app.reflex.dashboards import (
         LexDashboardState,
@@ -68,6 +74,7 @@ def create_app():
 
     app.add_middleware(DjangoConnectionMiddleware())
     app.add_middleware(SignInExpiryMiddleware())
+    app.add_middleware(GrantsRefreshMiddleware())
     app.add_page(
         dashboard_page(load_structure()),
         route="/",
