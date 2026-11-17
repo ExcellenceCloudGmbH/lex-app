@@ -127,6 +127,16 @@ def _frame(**props: Any) -> rx.Component:
     return _frame_class().create(**{k: v for k, v in props.items() if v is not None})
 
 
+def _holds_var(value: Any) -> bool:
+    if isinstance(value, rx.Var):
+        return True
+    if isinstance(value, Mapping):
+        return any(_holds_var(v) for v in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_holds_var(v) for v in value)
+    return False
+
+
 def _view_url(base: str, path: Any, **options: Any):
     """The embed request for ``path`` -- which may be a state var, joined in the browser."""
     if isinstance(path, str) and "reflex.Var" in path:
@@ -177,8 +187,9 @@ def lex_view(
             form goes after saving (``{id}`` is the saved record's id).
         flow: Chained forms, a :class:`~lex.lex_app.embed.Flow`; it wins over the redirects.
         serializer: The serializer the embedded list reads with.
-        filters: The list's filters, ``{field: value or [values]}``, a dict or a
-            state var; posted to the page whenever they change, without a reload.
+        filters: The list's filters, ``{field: value or [values]}``: a dict, a
+            dict naming state vars, or a state var holding the dict; posted to
+            the page whenever they change, without a reload.
         extra_params: More query parameters, applied last.
         base_url: lex-app's address, when :func:`lex_app_base_url` would pick the wrong one.
         title: The frame's accessible title.
@@ -195,6 +206,10 @@ def lex_view(
     }
     # A handler is what asks the page for its kind of event; `on_event` alone asks for all.
     flags = {flag: handlers[flag] is not None or on_event is not None for flag in EVENT_FLAGS}
+    if isinstance(filters, Mapping) and _holds_var(filters):
+        # A dict naming a state var (``{"fund": State.pk}``) is read in the browser,
+        # like a filters var: posted after each load and on change.
+        filters = rx.Var.create(dict(filters))
     literal_filters = filters if isinstance(filters, Mapping) else None
     request, src = _view_url(
         base_url or lex_app_base_url(),
@@ -284,10 +299,22 @@ class LexWidgetLogState(rx.State):
     log_open: bool = False
     log_manifest: dict = {}
     log_title: str = ""
+    #: The lex-app the asking widget was framed from; its log opens there too.
+    log_base: str = ""
+
+    @rx.var
+    def log_src(self) -> str:
+        """The widget host the log dialog frames."""
+        return f"{(self.log_base or lex_app_base_url()).rstrip('/')}{WIDGET_HOST_PATH}?embed=true"
+
+    @rx.var
+    def log_origin(self) -> str:
+        """The only origin the log dialog's frame believes."""
+        return origin_of(self.log_base or lex_app_base_url()) or ""
 
     @rx.event
     def open_log(self, payload: dict):
-        """Show the log of the calculation ``payload`` names (``{model, pk, calculationId}``)."""
+        """Show the log of the calculation ``payload`` names (``{model, pk, calculationId, base}``)."""
         model = str(payload.get("model") or "")
         pk = payload.get("pk")
         if not model or pk in (None, ""):
@@ -296,6 +323,7 @@ class LexWidgetLogState(rx.State):
                                     calculation_id=payload.get("calculationId") or None)
         self.log_manifest = build_manifest([spec])
         self.log_title = f"Calculation log — {model} {pk}"
+        self.log_base = str(payload.get("base") or "")
         self.log_open = True
 
     @rx.event
@@ -304,12 +332,16 @@ class LexWidgetLogState(rx.State):
         self.log_open = bool(value)
 
 
-def _log_dialog() -> rx.Component:
+def log_dialog() -> rx.Component:
+    """The one log dialog of a page, which every ``lex_widgets`` frame on it opens.
+
+    ``lex_chrome`` draws it on every lex page, once. A page outside lex-app's
+    chrome draws it itself -- or passes ``on_open_log=`` to ``lex_widgets``.
+    """
     import rfds
 
-    base = lex_app_base_url()
     return rfds.dialog(
-        _frame(src=f"{base}{WIDGET_HOST_PATH}?embed=true", expected_origin=origin_of(base) or "",
+        _frame(src=LexWidgetLogState.log_src, expected_origin=LexWidgetLogState.log_origin,
                mode="widgets", manifest=LexWidgetLogState.log_manifest, min_height=LOG_DIALOG_HEIGHT - 60,
                title="Calculation log"),
         open=LexWidgetLogState.log_open,
@@ -337,7 +369,8 @@ def lex_widgets(
         on_status: Gets ``{widget_id, model, pk, status}`` from every widget made
             with ``on_status=True``, each time its status changes.
         on_open_log: Gets a widget's request to see its log. By default the log
-            opens in a dialog over the page, as in Streamlit.
+            opens in the page's one log dialog (:func:`log_dialog`, which
+            ``lex_chrome`` draws), as in Streamlit.
         min_height: The least the frame shrinks to.
     """
     if not widgets:
@@ -354,9 +387,7 @@ def lex_widgets(
         on_status=on_status,
         on_open_log=on_open_log if on_open_log is not None else LexWidgetLogState.open_log,
     )
-    if on_open_log is not None:
-        return frame
-    return rx.fragment(frame, _log_dialog())
+    return frame
 
 
 def lex_calculation(model: str, pk: Any, *, on_status: Any = None, min_height: int = 48, **options: Any) -> rx.Component:

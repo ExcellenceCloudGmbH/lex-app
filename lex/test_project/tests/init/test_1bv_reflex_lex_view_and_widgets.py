@@ -157,7 +157,8 @@ class TestCluster01bv_ReflexLexView(SimpleTestCase):
     def test_1_719_a_record_named_by_a_state_var_is_joined_in_the_browser(self) -> None:
         """
         Scenario 1.719: a compiled page frames the record the URL names at run time.
-        Given: a path that is a state var, an f-string embedding one, and filters held in state.
+        Given: a path that is a state var, an f-string embedding one, filters
+               held in state, and a filters dict naming a state var.
         When:  lex_view is built.
         Then:  the frame's URL is a var joining lex-app's address, the record's
                path and the embed query in the browser; the filters are the
@@ -174,6 +175,10 @@ class TestCluster01bv_ReflexLexView(SimpleTestCase):
         frame = _frame_of(embed.lex_view("investor", base_url=_BASE, filters=_Scope.team))
         self.assertIn("team", str(frame.filters))
         self.assertEqual(_props(frame)["url_filters_token"], "")
+        naming = _frame_of(embed.lex_view("investor", base_url=_BASE, filters={"fund": _Scope.pk}))
+        self.assertIsInstance(naming.filters, rx.Var, "a dict naming a state var is read in the browser")
+        self.assertIn("pk", str(naming.filters))
+        self.assertNotIn("filters=", _props(naming)["src"])
 
     # -- 1.720 ---------------------------------------------------------
     def test_1_720_lex_app_is_framed_from_the_app_address_beside_the_dashboards(self) -> None:
@@ -210,8 +215,9 @@ class TestCluster01bv_ReflexWidgets(SimpleTestCase):
         When:  they are framed.
         Then:  one widget-host frame (``/embed.html?embed=true``) carries a version-1
                manifest whose record is the state var, with ids unique per
-               widget; ``on_status`` is wired; a log request opens the default
-               log dialog unless the page handles it; an empty frame, an unknown
+               widget; ``on_status`` is wired; a log request opens the page's
+               one log dialog (drawn once by the chrome, whatever the number of
+               frames) unless the page handles it; an empty frame, an unknown
                option and a duplicate id are refused when the page is built.
         """
         component = embed.lex_widgets(
@@ -234,9 +240,14 @@ class TestCluster01bv_ReflexWidgets(SimpleTestCase):
         self.assertIn("on_status", frame.event_triggers)
         self.assertIn("on_open_log", frame.event_triggers)
         self.assertIn("open_log", str(frame.event_triggers["on_open_log"]))
-        self.assertIn("RadixThemesDialog", str(component), "the default log dialog is on the page")
+        self.assertNotIn("RadixThemesDialog", str(component), "a widget frame draws no dialog of its own")
+        from lex.lex_app.reflex.shell import lex_chrome
+
+        chrome = str(lex_chrome(rx.fragment(component, embed.lex_widgets(embed.calculation("fund", 2)))))
+        self.assertEqual(chrome.count("RadixThemesDialog.Root"), 1,
+                         "one log dialog per page, however many widget frames it has")
         handled = embed.lex_widgets(embed.calculation("fund", 1), on_open_log=_Scope.noted, base_url=_BASE)
-        self.assertNotIn("RadixThemesDialog", str(handled))
+        self.assertIn("noted", str(_frame_of(handled).event_triggers["on_open_log"]))
         single = _frame_of(embed.lex_calculation("fund", 1, on_status=_Scope.noted))
         self.assertIn("on_status", single.event_triggers)
         a, b = embed.calculation("fund", _Scope.pk), embed.calculation("fund", _Scope.pk)
@@ -254,13 +265,17 @@ class TestCluster01bv_ReflexWidgets(SimpleTestCase):
         Scenario 1.722: the default answer to a widget's log request.
         Given: the log state.
         When:  a widget asks for the log of fund 7's run abc, then sends a request without a record.
-        Then:  the dialog opens on a one-widget manifest for that run's log;
-               the incomplete request changes nothing.
+        Then:  the dialog opens on a one-widget manifest for that run's log,
+               on the lex-app the widget came from; the incomplete request
+               changes nothing.
         """
         state = type("Log", (), {})()
-        state.__dict__.update(log_open=False, log_manifest={}, log_title="")
-        embed.LexWidgetLogState.open_log.fn(state, {"model": "fund", "pk": 7, "calculationId": "abc"})
+        state.__dict__.update(log_open=False, log_manifest={}, log_title="", log_base="")
+        embed.LexWidgetLogState.open_log.fn(state, {"model": "fund", "pk": 7, "calculationId": "abc",
+                                                    "base": "https://app.customer.example"})
         self.assertTrue(state.log_open)
+        self.assertEqual(state.log_base, "https://app.customer.example",
+                         "the log opens on the lex-app the asking widget was framed from")
         widget = state.log_manifest["widgets"][0]
         self.assertEqual((widget["type"], widget["model"], str(widget["pk"]), widget["options"]["calculation_id"]),
                          ("calculation_log", "fund", "7", "abc"))
@@ -282,6 +297,7 @@ global.window = {
   self: {}, top: {}, location: { ancestorOrigins: ["https://app.customer.example"] },
   addEventListener: (t, f) => { listeners[t] = f; }, removeEventListener: () => {},
 };
+global.document = { referrer: "" };
 const effects = [];
 const React = {
   useRef: (v) => ({ current: v }),
@@ -290,18 +306,26 @@ const React = {
   useContext: () => ({ resolvedColorMode: "dark" }),
   createElement: (type, props) => ({ type, props }),
 };
-const api = new Function("window", "React", "TextEncoder", "btoa",
+const api = new Function("window", "document", "React", "TextEncoder", "btoa",
   "const {useRef,useState,useMemo,useCallback,useEffect,useContext,createElement}=React;" +
   "const ColorModeContext=null;" + hostSrc + frameSrc +
-  "\nreturn {filtersToken, effectiveOrigin, rebase, LexFrame};")(global.window, React, TextEncoder, btoa);
+  "\nreturn {filtersToken, effectiveOrigin, rebase, LexFrame};")(global.window, global.document, React,
+  TextEncoder, btoa);
 const got = [];
-const handlers = { onCreate: (p) => got.push(["create", p]), onStatus: (p) => got.push(["status", p]),
-                   onEvent: (e) => got.push(["event", e.type]) };
+const handlers = { onCreate: (p) => got.push(["create", p]), onStatus: (p) => got.push(["status", p.status]),
+                   onOpenLog: (p) => got.push(["log", p.base]), onEvent: (e) => got.push(["event", e.type]) };
 const out = { token: api.filtersToken({ b: [2, 1], a: "x", c: null }),
               origin: api.effectiveOrigin("https://app.platform.example", ["https://app.customer.example"]),
               stranger: api.effectiveOrigin("https://app.platform.example", ["https://other.example"]),
               rebased: api.rebase("https://app.platform.example/fund?embed=true", "https://app.platform.example",
                                   "https://app.customer.example") };
+// Firefox: no ancestorOrigins, the referrer names the framing page
+const saved = window.location.ancestorOrigins;
+window.location.ancestorOrigins = undefined;
+document.referrer = "https://app.customer.example/fund/42/show";
+out.firefox = api.effectiveOrigin("https://app.platform.example", ["https://app.customer.example"]);
+window.location.ancestorOrigins = saved;
+document.referrer = "";
 // a view frame with filters the URL does not carry
 let el = api.LexFrame({ src: "https://app.platform.example/fund?embed=true#embed",
   expectedOrigin: "https://app.platform.example", appOrigins: ["https://app.customer.example"], mode: "view",
@@ -329,8 +353,12 @@ effects.forEach((f) => f());
 el.props.onLoad();
 listeners.message({ data: { source: "lex-app", version: 1, type: "widget_host_ready" },
                     origin: "https://app.platform.example", source: child });
-listeners.message({ data: { source: "lex-app", version: 1, type: "calculation_status", id: "s1",
-                            payload: { widget_id: "w", status: "SUCCESS" } },
+const status = (s, id) => listeners.message({ data: { source: "lex-app", version: 1, type: "calculation_status",
+                            id: id || `w:${s}`, payload: { widget_id: "w", status: s } },
+                    origin: "https://app.platform.example", source: child });
+status("SUCCESS"); status("SUCCESS"); status("IN_PROGRESS"); status("SUCCESS");
+listeners.message({ data: { source: "lex-app", version: 1, type: "open_log", id: "l1",
+                            payload: { widget_id: "w", model: "fund", pk: 1 } },
                     origin: "https://app.platform.example", source: child });
 out.widgets = posted.map((p) => [p.m.type, p.o]);
 out.widgetsGot = got.slice();
@@ -355,8 +383,10 @@ class TestCluster01bv_TheFrame(SimpleTestCase):
                customer's domain lex-app was reached on (a stranger's never); each
                load posts the theme, then the filters the URL lacked; only the
                first, genuine event reaches its handler and the catch-all; the
-               widget host gets its manifest and the theme when ready, and the
-               status reaches ``on_status``.
+               widget host gets its manifest and the theme when ready; statuses
+               reach ``on_status`` -- a repeat dropped, a re-run's result not;
+               a log request carries its origin; and in Firefox, without
+               ``ancestorOrigins``, the referrer names the framing lex-app.
         """
         result = subprocess.run(
             ["node", "-e", _FRAME_HARNESS, str(JS_DIR / "lex_host.jsx"), str(JS_DIR / "lex_frame.jsx")],
@@ -374,5 +404,10 @@ class TestCluster01bv_TheFrame(SimpleTestCase):
         self.assertEqual(out["widgets"], [["theme", "https://app.platform.example"],
                                           ["manifest", "https://app.platform.example"],
                                           ["theme", "https://app.platform.example"]])
-        self.assertEqual(out["widgetsGot"], [["event", "calculation_status"],
-                                             ["status", {"widget_id": "w", "status": "SUCCESS"}]])
+        self.assertEqual(out["firefox"], "https://app.customer.example",
+                         "without ancestorOrigins (Firefox) the referrer names the framing lex-app")
+        statuses = [g[1] for g in out["widgetsGot"] if g[0] == "status"]
+        self.assertEqual(statuses, ["SUCCESS", "IN_PROGRESS", "SUCCESS"],
+                         "a repeat is dropped, but a re-run's result comes through")
+        self.assertIn(["log", "https://app.platform.example"], out["widgetsGot"],
+                      "a log request carries the origin it came from")

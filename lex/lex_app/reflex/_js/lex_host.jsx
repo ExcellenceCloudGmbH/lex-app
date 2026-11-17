@@ -66,6 +66,12 @@ function parentOrigin() {
   } catch (e) {
     /* not supported */
   }
+  try {
+    // Firefox has no `ancestorOrigins`: the referrer names the framing page.
+    if (document.referrer) return new URL(document.referrer).origin;
+  } catch (e) {
+    /* no usable referrer */
+  }
   return "*";
 }
 

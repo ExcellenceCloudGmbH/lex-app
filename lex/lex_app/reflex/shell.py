@@ -130,6 +130,7 @@ def lex_chrome(body, *, embedded=None):
 
     from lex.lex_app.reflex.auth import LexUser
     from lex.lex_app.reflex.dashboards import LexDashboardState
+    from lex.lex_app.reflex.embed import log_dialog
     from lex.lex_app.reflex.host import auth_notice, theme_follower
 
     if embedded is None:
@@ -149,6 +150,8 @@ def lex_chrome(body, *, embedded=None):
     return rx.fragment(
         theme_follower(),
         auth_notice("restored"),
+        # One calculation-log dialog per page, for every lex_widgets frame on it.
+        log_dialog(),
         rfds.app_shell(
             header=header,
             side_nav=side,

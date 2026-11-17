@@ -46,17 +46,32 @@ export function filtersToken(filters) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+// The origin of the page framing this dashboard: `ancestorOrigins` where the browser has it,
+// else the referrer's (Firefox has no `ancestorOrigins`); null when not framed or unknown.
+export function framingOrigin() {
+  try {
+    if (window.self === window.top) return null;
+  } catch (e) {
+    /* a cross-origin top: framed */
+  }
+  try {
+    const ancestors = window.location.ancestorOrigins;
+    if (ancestors && ancestors.length > 0 && ancestors[0] !== "null") return ancestors[0];
+  } catch (e) {
+    /* not supported */
+  }
+  try {
+    if (document.referrer) return new URL(document.referrer).origin;
+  } catch (e) {
+    /* no usable referrer */
+  }
+  return null;
+}
+
 // The origin lex-app's page is opened on: lex-app's own, when it frames this dashboard.
 export function effectiveOrigin(expectedOrigin, appOrigins) {
-  try {
-    if (window.self !== window.top) {
-      const ancestors = window.location.ancestorOrigins;
-      const parent = ancestors && ancestors.length > 0 ? ancestors[0] : null;
-      if (parent && parent !== "null" && originAllowed(parent, appOrigins)) return parent;
-    }
-  } catch (e) {
-    /* cross-origin top: keep the configured origin */
-  }
+  const parent = framingOrigin();
+  if (parent && originAllowed(parent, appOrigins)) return parent;
   return expectedOrigin;
 }
 
@@ -74,7 +89,7 @@ export function LexFrame(props) {
   const loaded = useRef(false);
   const ready = useRef(false);
   const current = useRef(null);
-  const seen = useRef(new Set());
+  const lastId = useRef(null);
   const [frameHeight, setFrameHeight] = useState(mode === "widgets" ? minHeight : height);
   const { resolvedColorMode } = useContext(ColorModeContext);
   const origin = useMemo(() => effectiveOrigin(expectedOrigin, appOrigins), [expectedOrigin, appOrigins]);
@@ -123,9 +138,12 @@ export function LexFrame(props) {
       const data = event.data;
       if (!data || data.source !== "lex-app" || typeof data.type !== "string") return;
       if (typeof data.version === "number" && data.version > 1) return;
+      // The same message delivered twice in a row is one message. Only the previous id is
+      // remembered: a calculation's status id is `<widget>:<status>`, so a re-run's SUCCESS
+      // after IN_PROGRESS must come through although an earlier run reported it too.
       if (data.id) {
-        if (seen.current.has(data.id)) return;
-        seen.current.add(data.id);
+        if (data.id === lastId.current) return;
+        lastId.current = data.id;
       }
       const current = latest.current;
       if (data.type === "widget_host_ready") {
@@ -141,7 +159,9 @@ export function LexFrame(props) {
       }
       if (typeof current.onEvent === "function") current.onEvent(data);
       const handler = current[HANDLERS[data.type]];
-      if (typeof handler === "function") handler(data.payload || {});
+      // A log request carries where it came from, so the log opens on the same lex-app.
+      const payload = data.type === "open_log" ? { ...(data.payload || {}), base: origin } : data.payload || {};
+      if (typeof handler === "function") handler(payload);
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
