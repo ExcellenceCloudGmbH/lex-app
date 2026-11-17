@@ -243,7 +243,10 @@ class TestCluster01bt_Access(SimpleTestCase):
         When:  ``LexAccessState.load`` runs.
         Then:  the signed-in user's grants are remembered for the resolver and
                the handler continues with ``AccessState.load``; for nobody
-               signed in nothing is remembered.
+               signed in nothing is remembered; and on a page left open,
+               ``GrantsRefreshMiddleware`` refreshes grants older than a minute
+               before an event (once per freshness window), and a failed
+               refresh never stops the event.
         """
         from rfds.auth import AccessState
 
@@ -264,6 +267,34 @@ class TestCluster01bt_Access(SimpleTestCase):
                 patch("lex.lex_app.reflex.auth.current_permissions", grants):
             asyncio.run(handler(SimpleNamespace()))
         self.assertEqual(access._GRANTS, {})
+
+        # While a page stays open, events refresh grants older than a minute --
+        # so RFDS's requires() keeps answering -- and leave fresh ones alone.
+        calls = []
+
+        async def counted(_state):
+            calls.append(1)
+            return [{"rsname": "lex_app.Fund", "scopes": ["read"]}]
+
+        middleware = access.GrantsRefreshMiddleware()
+        with patch("rfds.auth.current_identity", return_value=user), \
+                patch("lex.lex_app.reflex.auth.current_permissions", counted):
+            asyncio.run(middleware.preprocess(None, SimpleNamespace(), None))
+            asyncio.run(middleware.preprocess(None, SimpleNamespace(), None))
+            self.assertEqual(len(calls), 1, "fresh grants are not fetched again")
+            access.remember_grants(user, [], now=0.0)
+            asyncio.run(middleware.preprocess(None, SimpleNamespace(), None))
+        self.assertEqual(len(calls), 2, "grants older than GRANTS_REFRESH_SECONDS are refreshed")
+        self.assertEqual(access.lex_permission_resolver(user), frozenset({"lex_app.Fund:read"}))
+
+        async def broken(_state):
+            raise RuntimeError("Keycloak down")
+
+        access.remember_grants(user, [], now=0.0)
+        with patch("rfds.auth.current_identity", return_value=user), \
+                patch("lex.lex_app.reflex.auth.current_permissions", broken):
+            self.assertIsNone(asyncio.run(middleware.preprocess(None, SimpleNamespace(), None)),
+                              "a failed refresh never stops the event")
 
 
 class TestCluster01bt_Chrome(SimpleTestCase):
@@ -481,3 +512,5 @@ class TestCluster01bt_TheCompiledApp(TestCase):
         self.assertIsNone(headers[0].frame_options)
         self.assertTrue(any(getattr(t, "lex_framing_policy", False) for t in transformers))
         self.assertTrue(issubclass(LexKeycloakAuthState, RfdsProviderMixin))
+        middlewares = [type(m).__name__ for m in self.app._middlewares]
+        self.assertIn("GrantsRefreshMiddleware", middlewares)

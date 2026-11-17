@@ -440,27 +440,46 @@ _STATE_CACHE: dict[tuple, type] = {}
 _COUNTER = itertools.count(1)
 
 
-def _state_for(base: type, model: Any, extra: Mapping[str, Any]) -> type:
-    key = (base.__name__, model_id(model), tuple(sorted((k, repr(v)) for k, v in extra.items())))
+def _state_for(base: type, model: Any, classvars: Mapping[str, Any], *, defaults: Mapping[str, Any] | None = None,
+               identity: tuple = ()) -> type:
+    """One state class per distinct table or grid: same model, configuration and fixed filters.
+
+    ``identity`` is what else tells two of them apart -- their fixed filters, a
+    state var's name included -- so two tables of one model filtered
+    differently never share rows. ``defaults`` override the base's state vars.
+    """
+    defaults = dict(defaults or {})
+    key = (base.__name__, model_id(model), tuple(sorted((k, repr(v)) for k, v in classvars.items())),
+           tuple(sorted((k, repr(v)) for k, v in defaults.items())), identity)
     cls = _STATE_CACHE.get(key)
     if cls is None:
         name = f"{base.__name__.removeprefix('Lex').removesuffix('State')}_{model_id(model)}_{next(_COUNTER)}"
-        namespace = {"__module__": __name__, "resource": model_id(model), **extra,
-                     "__annotations__": {"resource": ClassVar[str], **{k: ClassVar[Any] for k in extra}}}
+        annotations = {"resource": ClassVar[str], **{k: ClassVar[Any] for k in classvars}}
+        annotations.update({k: type(v) for k, v in defaults.items()})
+        namespace = {"__module__": __name__, "resource": model_id(model), **classvars, **defaults,
+                     "__annotations__": annotations}
         cls = type(name, (base, rx.State), namespace)
         _STATE_CACHE[key] = cls
     return cls
 
 
+def _filters_identity(filters: Mapping[str, Any] | None) -> tuple:
+    return tuple(sorted((str(k), repr(v)) for k, v in (filters or {}).items()))
+
+
 def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_field: str = "",
-                page_size: int = 25) -> type:
-    """The :class:`LexTableState` for one table of ``model`` (one class per distinct table)."""
+                page_size: int = 25, filters: Mapping[str, Any] | None = None) -> type:
+    """The :class:`LexTableState` for one table of ``model`` (one class per distinct table).
+
+    The table opens at ``page_size`` rows, which is also among the sizes the
+    user can pick.
+    """
     sizes = tuple(sorted({25, 50, 100, int(page_size)}))
     return _state_for(LexTableState, model, {
         "table_columns": tuple(columns),
         "search_field": search_field,
         "page_size_options": sizes,
-    })
+    }, defaults={"page_size": int(page_size)}, identity=_filters_identity(filters))
 
 
 def _default_search_field(model: Any) -> str:
@@ -501,7 +520,7 @@ def lex_table(
 
     cols = list(columns) if columns is not None else lex_columns(model, fields)
     search = _default_search_field(model) if search_field is None else search_field
-    state = table_state(model, columns=cols, search_field=search, page_size=page_size)
+    state = table_state(model, columns=cols, search_field=search, page_size=page_size, filters=filters)
     table = rfds.data_table(
         state=state,
         columns=cols,
@@ -511,9 +530,10 @@ def lex_table(
     return rx.box(table, on_mount=state.open(dict(filters or {})), width="100%")
 
 
-def grid_state(model: Any) -> type:
-    """The :class:`LexGridState` for ``model``'s grids."""
-    return _state_for(LexGridState, model, {})
+def grid_state(model: Any, *, fields: Sequence[str] | None = None, filters: Mapping[str, Any] | None = None) -> type:
+    """The :class:`LexGridState` for one grid of ``model`` (one class per fields and fixed filters)."""
+    return _state_for(LexGridState, model, {},
+                      identity=(tuple(fields or ()),) + _filters_identity(filters))
 
 
 def lex_grid(
@@ -536,7 +556,7 @@ def lex_grid(
     """
     import rfds
 
-    state = grid_state(model)
+    state = grid_state(model, fields=fields if columns is None else [repr(c) for c in columns], filters=filters)
     cols = list(columns) if columns is not None else lex_grid_columns(model, fields)
     grid = rfds.data_grid(
         id=grid_id or f"lex-grid-{model_id(model)}",
@@ -600,8 +620,9 @@ class LexRecordState(rx.State, mixin=True):
         """The model instance, or ``None`` when there is none or the user may not see it.
 
         Sets ``record_data`` (the record as the API serialises it, wire-safe),
-        ``record_title`` and ``record_state`` -- ``"ok"``, ``"missing"`` or
-        ``"denied"`` -- for the page to show.
+        ``record_title`` and ``record_state`` -- ``"ok"``, ``"missing"``,
+        ``"denied"``, or ``"unavailable"`` when lex-app cannot answer -- for the
+        page to show.
         """
         from lex.lex_app.reflex.dashboards import current_record
         from lex.lex_app.reflex.django_orm import run_orm
@@ -614,7 +635,13 @@ class LexRecordState(rx.State, mixin=True):
         try:
             data = await (await lex_api(self)).get(model, pk)
         except LexApiError as exc:
-            self.record_state = "denied" if exc.status in (401, 403) else "missing"
+            if exc.status in (401, 403):
+                self.record_state = "denied"
+            elif exc.status == 404:
+                self.record_state = "missing"
+            else:
+                # lex-app unreachable, or failing: not a record that does not exist.
+                self.record_state = "unavailable"
             self.record_data, self.record_title = {}, ""
             return None
         instance = await current_record(self, model)
