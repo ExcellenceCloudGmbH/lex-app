@@ -270,7 +270,8 @@ class TestCluster01bu_TablesGridsAndRecords(SimpleTestCase):
         Given: ``lex_table(Group, filters={"name": <a state var>})``.
         When:  it is built, and its state fetches page 3 of 25 rows sorted by
                name descending then id, filtered and quick-searched.
-        Then:  one state class per distinct table (built once, reused);
+        Then:  one state class per distinct table (built once, reused; a
+               differently filtered table gets its own), opening at its page size;
                mounting passes the fixed filters (the var, read at mount);
                the API is asked for page 3 of 25 with that ordering, the fixed
                filters, the table filters and the search on the default text
@@ -282,10 +283,17 @@ class TestCluster01bu_TablesGridsAndRecords(SimpleTestCase):
             team: str = "Alpha"
 
         component = data.lex_table(Group, filters={"name": Scope.team}, page_size=25)
-        state = data.table_state(Group, columns=data.lex_columns(Group), search_field="name", page_size=25)
+        state = data.table_state(Group, columns=data.lex_columns(Group), search_field="name", page_size=25,
+                                 filters={"name": Scope.team})
         self.assertIs(state, data.table_state(Group, columns=data.lex_columns(Group), search_field="name",
-                                              page_size=25), "one state class per distinct table")
+                                              page_size=25, filters={"name": Scope.team}),
+                      "one state class per distinct table")
+        self.assertIsNot(state, data.table_state(Group, columns=data.lex_columns(Group), search_field="name",
+                                                 page_size=25, filters={"name": "Beta"}),
+                         "differently filtered tables never share rows")
         self.assertEqual(state.resource, "group")
+        self.assertEqual(state.get_fields()["page_size"].default, 25, "the table opens at its page size")
+        self.assertIn(10, data.table_state(Group, columns=data.lex_columns(Group), page_size=10).page_size_options)
         mount = str(component.event_triggers["on_mount"])
         self.assertIn(".open", mount)
         self.assertIn("team", mount, "the fixed filter is the state var, resolved when the table mounts")
@@ -321,7 +329,10 @@ class TestCluster01bu_TablesGridsAndRecords(SimpleTestCase):
         component = data.lex_grid(Group, filters={"name": "Alpha"})
         self.assertIn("lex-grid-group", str(component))
         self.assertIn("Alpha", str(component.event_triggers["on_mount"]))
-        state = data.grid_state(Group)
+        state = data.grid_state(Group, filters={"name": "Alpha"})
+        self.assertIsNot(state, data.grid_state(Group, filters={"name": "Beta"}),
+                         "differently filtered grids never share rows")
+        self.assertIsNot(data.grid_state(Group, fields=["id"]), data.grid_state(Group, fields=["name"]))
         client = _Client(_Response(200, {"count": data.GRID_ROW_LIMIT + 5, "results": [{"id": 1}]}),
                          _Response(403, {"code": "permission_denied"}))
 
@@ -349,8 +360,8 @@ class TestCluster01bu_TablesGridsAndRecords(SimpleTestCase):
                and the URL names no record.
         Then:  shown: the instance, its title and wire data, state "ok";
                refused: ``None`` and "denied"; hidden or absent: ``None`` and
-               "missing" -- the instance is never read for a record the API
-               would not show.
+               "missing"; lex-app failing: "unavailable", never "missing" --
+               the instance is never read for a record the API would not show.
         """
         group = SimpleNamespace(pk=5)
         reads = []
@@ -370,7 +381,8 @@ class TestCluster01bu_TablesGridsAndRecords(SimpleTestCase):
         for answer, expected_state, expect_instance in (
                 (_Response(200, {"id": 5, "name": "Alpha", "rate": "1.50"}), "ok", True),
                 (_Response(403, {"code": "permission_denied"}), "denied", False),
-                (_Response(404, {"detail": "not found"}), "missing", False)):
+                (_Response(404, {"detail": "not found"}), "missing", False),
+                (_Response(502, None, text="bad gateway"), "unavailable", False)):
             client = _Client(answer)
 
             async def api(_state, client=client):
