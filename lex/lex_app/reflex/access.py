@@ -1,6 +1,6 @@
 """The signed-in user's Keycloak permissions, as RFDS's permission checks read them.
 
-RFDS gates UI and handlers on permission *strings* -- ``rfds.can("x")``, the
+RFDS gates UI and handlers on permission *strings* -- ``rfds.auth.can("x")``, the
 side navigation's ``NavItem(permission=...)``, ``rfds.auth.requires("x")`` --
 and asks a resolver for the strings an identity holds. lex-app's permissions
 are Keycloak UMA grants, the same ones the grid and the REST API enforce, so the
@@ -10,14 +10,19 @@ resolver hands RFDS those (decision D3), one string per model-wide grant::
 
 :func:`permission` spells one for a model, so a page never types it::
 
-    rfds.can(permission(Fund, "edit"), rfds.button("Revalue", ...))
+    from rfds.auth import can
+
+    can(permission(Fund, "edit"), rfds.button("Revalue", ...))
 
 Keycloak is asked over HTTP with the user's access token, which a resolver --
 synchronous, given only the identity -- cannot do. So :class:`LexAccessState`
 fetches the grants in an event (every lex page loads it), remembers them for
 that identity, and then lets RFDS's ``AccessState`` load as usual; the resolver
-answers from what was remembered. A grant scoped to single records does not
-open the whole model, exactly as in :func:`~lex.lex_app.reflex.auth.has_permission`.
+answers from what was remembered. :class:`GrantsRefreshMiddleware` keeps that
+fresh while a page stays open, so a handler guarded by RFDS's ``requires()``
+does not start refusing on a page left open longer than the grants' lifetime.
+A grant scoped to single records does not open the whole model, exactly as in
+:func:`~lex.lex_app.reflex.auth.has_permission`.
 """
 
 from __future__ import annotations
@@ -27,11 +32,15 @@ import time
 from typing import Any, Iterable, Mapping
 
 import reflex as rx
+from reflex.middleware import Middleware
 
-#: How long remembered grants answer for an identity without a reload. Every
-#: page load refreshes them; this only bounds how long a long-open page keeps
-#: showing a control after its grant was withdrawn.
+#: How long remembered grants answer for an identity. Every page load, and
+#: every event once they are older than :data:`GRANTS_REFRESH_SECONDS`,
+#: refreshes them; this bounds how long a withdrawn grant keeps answering.
 GRANTS_TTL_SECONDS = 300.0
+
+#: How old remembered grants may get before an event refreshes them first.
+GRANTS_REFRESH_SECONDS = 60.0
 
 _GRANTS: dict[str, tuple[float, frozenset[str]]] = {}
 _LOCK = threading.Lock()
@@ -83,6 +92,16 @@ def remember_grants(identity: Any, permissions: Iterable[Mapping[str, Any]], *, 
     return strings
 
 
+def grants_age(identity: Any, *, now: float | None = None) -> float | None:
+    """Seconds since ``identity``'s grants were remembered; ``None`` when never."""
+    key = identity_key(identity)
+    with _LOCK:
+        entry = _GRANTS.get(key) if key else None
+    if entry is None:
+        return None
+    return (time.monotonic() if now is None else now) - entry[0]
+
+
 def forget_grants(identity: Any = None) -> None:
     """Forget one identity's remembered grants, or everyone's."""
     with _LOCK:
@@ -119,10 +138,39 @@ def install_permission_resolver() -> None:
     set_permission_resolver(lex_permission_resolver)
 
 
+class GrantsRefreshMiddleware(Middleware):
+    """Before an event: refresh the signed-in user's remembered grants once they are a minute old.
+
+    RFDS's ``requires()`` checks a handler against the resolver, which answers
+    from grants remembered at page load. Without this, a page left open past
+    :data:`GRANTS_TTL_SECONDS` would have every such handler refused. The fetch
+    is the provider's, cached per access token, so a refresh costs a Keycloak
+    call at most once per token. It never stops an event: if anything fails,
+    the grants simply stay as they were.
+    """
+
+    async def preprocess(self, app: Any, state: Any, event: Any) -> Any:
+        try:
+            from rfds.auth import current_identity
+
+            from lex.lex_app.reflex.auth import current_permissions
+
+            identity = current_identity(state)
+            age = grants_age(identity)
+            if identity is not None and (age is None or age > GRANTS_REFRESH_SECONDS):
+                remember_grants(identity, await current_permissions(state))
+        except Exception:
+            pass
+        return None
+
+    async def postprocess(self, app: Any, state: Any, event: Any, update: Any) -> Any:
+        return update
+
+
 class LexAccessState(rx.State):
     """Loads the user's Keycloak grants, then RFDS's ``AccessState`` from them.
 
-    Every :func:`~lex.lex_app.reflex.shell.lex_page` loads it, so ``rfds.can``
+    Every :func:`~lex.lex_app.reflex.shell.lex_page` loads it, so ``rfds.auth.can``
     and the navigation's permissions are right on the first paint after the
     page's load events.
     """
