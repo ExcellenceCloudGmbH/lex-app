@@ -366,7 +366,9 @@ def record_dashboard() -> rx.Component:
         class Fund(LexModel):
             @classmethod
             def reflex_main(cls):
-                from ._reflex_structure import record_dashboard
+                # Your project's package by name: a relative import from a model
+                # in a subfolder (Input/Fund.py) would look inside that subfolder.
+                from crm._reflex_structure import record_dashboard
                 return record_dashboard()
     """
     return rx.box(

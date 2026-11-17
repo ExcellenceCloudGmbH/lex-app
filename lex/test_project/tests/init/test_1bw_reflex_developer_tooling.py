@@ -107,8 +107,9 @@ class TestCluster01bw_Add(_Project):
         Then:  it parses; every name it imports from ``lex.lex_app.reflex`` is
                one the package exports; list and overview pages are ``@lex_page``
                routes gated on the model's read grant; the object page is a
-               ``LexRecordState`` dashboard for ``reflex_main``; the overview's
-               database read is behind ``has_permission``.
+               ``LexRecordState`` dashboard for ``reflex_main``, whose suggested
+               import names the project's package; the overview's database read
+               is behind ``has_permission``.
         """
         exported = set(lex_reflex.__all__)
         for block in scaffold.BLOCKS:
@@ -122,9 +123,12 @@ class TestCluster01bw_Add(_Project):
                 self.assertTrue(imported, "a template uses lex-app's surface")
                 self.assertLessEqual(imported, exported, f"imports a name lex.lex_app.reflex does not export")
         self.assertIn("@lex_page(", scaffold.render("list_report", "CashPosition")[1])
-        record = scaffold.render("object_page", "CashPosition")[1]
+        record = scaffold.render("object_page", "CashPosition", package="crm")[1]
         self.assertIn("class CashPositionRecordState(LexRecordState)", record)
         self.assertNotIn("@lex_page", record)
+        self.assertIn("from crm._dashboards.cash_position_object_page import", record,
+                      "the hook imports the project's package by name, never relatively")
+        self.assertNotIn("Imported by _reflex_structure.py", record, "an object page is never registered")
         self.assertIn("auth=has_permission(", scaffold.render("overview", "CashPosition")[1])
 
 

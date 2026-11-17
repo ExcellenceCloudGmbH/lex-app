@@ -36,7 +36,7 @@ BLOCKS = ("list_report", "object_page", "overview")
 
 _HEADER = '''"""${title} -- written by `lex reflex add ${block} --model ${model}`; yours to change.
 
-Imported by _reflex_structure.py, which registers its page when the app compiles.
+${loaded_by}
 """
 
 '''
@@ -88,7 +88,7 @@ def ${func}() -> rx.Component:
 
         @classmethod
         def reflex_main(cls):
-            from ._dashboards.${module} import ${func}
+            from ${package}._dashboards.${module} import ${func}
             return ${func}()
     """
     return rfds.page(
@@ -160,8 +160,13 @@ def snake(name: str) -> str:
 
 
 def render(block: str, model: str, *, route: str | None = None, title: str | None = None,
-           nav: str = "Dashboards") -> tuple[str, str]:
-    """``(module name, source)`` of ``block`` for ``model``."""
+           nav: str = "Dashboards", package: str = "your_repo") -> tuple[str, str]:
+    """``(module name, source)`` of ``block`` for ``model``.
+
+    ``package`` is the project's own package -- its repository folder -- which an
+    import from a model module must name: a relative import from a model in a
+    subfolder (``Input/Fund.py``) would resolve inside that subfolder.
+    """
     if block not in _TEMPLATES:
         raise ValueError(f"unknown block {block!r}; blocks: {', '.join(BLOCKS)}")
     if not re.fullmatch(r"[A-Z][A-Za-z0-9_]*", model or ""):
@@ -176,7 +181,10 @@ def render(block: str, model: str, *, route: str | None = None, title: str | Non
     values = {
         "block": block, "model": model, "model_lower": model.lower(), "title": title.replace('"', "'"),
         "route": route, "nav": nav.replace('"', "'"), "func": f"{base}_{words}_page",
-        "state": f"{model}{words.capitalize()}State", "module": module,
+        "state": f"{model}{words.capitalize()}State", "module": module, "package": package,
+        "loaded_by": ("A record dashboard: the model's reflex_main imports and returns it (see below)."
+                      if block == "object_page" else
+                      "Imported by _reflex_structure.py, which registers its page when the app compiles."),
     }
     return module, string.Template(_TEMPLATES[block]).substitute(values)
 
@@ -184,7 +192,8 @@ def render(block: str, model: str, *, route: str | None = None, title: str | Non
 def add_block(project_root: Path, block: str, model: str, *, route: str | None = None, title: str | None = None,
               nav: str = "Dashboards", force: bool = False, register: bool = True) -> list[Path]:
     """Write ``block`` for ``model`` into the project; returns the files written or changed."""
-    module, source = render(block, model, route=route, title=title, nav=nav)
+    package = project_root.name if project_root.name.isidentifier() else "your_repo"
+    module, source = render(block, model, route=route, title=title, nav=nav, package=package)
     package = project_root / DASHBOARDS_DIR
     package.mkdir(exist_ok=True)
     touched = []
