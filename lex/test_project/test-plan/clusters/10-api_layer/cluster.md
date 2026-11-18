@@ -208,3 +208,20 @@ say exactly one thing (`hide_actions_column`) and nothing about a column.
 **Scenario range:** 10.188-10.189. **Test file:** `lex/test_project/tests/api_layer/test_10ae_fields_value_list_flag.py`. **Type:** U. **Status:** ✅ Complete (2026-10-16; the filter bar withdrawn 2026-10-20). Covers `lex/api/views/model_info/Fields.py` (`Fields.get`'s `value_list` and `list_ui`, `create_list_ui_info`), `lex/api/serializers/base_serializers.py` (`get_list_ui_options`), `lex/api/utils/filterable_fields.py` (`value_list_field`). Batch: [10ae](batches.md).
 
 ---
+
+---
+
+### 10af. api/project-info tells the frontend which framework draws each model's dashboards ✅
+
+**What it tests:** that `api/project-info` tells the frontend, per model, whether Streamlit or Reflex draws its record and table dashboards, whether Reflex is on, and whether there is a Reflex home -- without importing Reflex into Django.
+
+**Why a regression matters:** a wrong answer frames a blank Reflex dashboard where a Streamlit one worked, or hides the Reflex home a project wrote; importing Reflex to answer would change process-wide state in every Django worker.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.190 | project-info carries the dashboard fields | old fields kept; `reflex_enabled`, `reflex_home` true; `dashboards` keyed by route id with record/table surfaces, models without dashboards left out; with Reflex off, Reflex-only levels drop out |
+| 10.191 | Reflex wins when on and the model has a Reflex hook | Reflex hook > Streamlit hook > none with Reflex on; only Streamlit hooks when off or forced; record and table separate; bad level refused; unknown setting means auto |
+| 10.192 | The Reflex home needs Reflex and a structure module | off: false; on with `_reflex_structure` found: true; on without: false; found with `find_spec` |
+| 10.193 | Deciding never imports Reflex into Django | neither module imports reflex, reflex_enterprise, rfds or lex.lex_app.reflex |
+
+**Scenario range:** 10.190 – 10.193. **Test file:** `lex/test_project/tests/api_layer/test_10af_project_info_dashboards.py`. **Type:** U (10.190: E). **Status:** ✅ Complete (2026-11-17). Batch: [10af](batches.md).

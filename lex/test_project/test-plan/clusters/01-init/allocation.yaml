@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 723
+max_scenario: 727
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1885,3 +1885,27 @@ letters:
       _LEX_PACKAGE_EXCLUDED_DIRS. And a component module must not use from __future__ import
       annotations: an event handler annotated with a function-local spec silently resolves to
       nothing. 1.704 also asserts the theme follower's allowed origins reach the page.
+  bw:
+    title: 'A consultant''s tooling for Reflex dashboards — lex reflex add, lex reflex check, the reference example'
+    scenarios: 1.724-1.727
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      `lex reflex add <block> --model X` (list_report, object_page, overview; --route, --title,
+      --nav, --force, --no-register) writes a page bound to a model into `_dashboards/` -- a
+      package model discovery skips -- and imports it once from `_reflex_structure.py`, creating
+      that with a main() when missing; object_page is a record dashboard for reflex_main and is
+      not registered. Every template imports only names lex.lex_app.reflex exports. `lex reflex
+      check` runs RFDS's lint --strict over the structure module and the dashboards package,
+      then doctor over the project, failing when either fails. The reference
+      examples/_reflex_structure.py now uses every feature (lex_page, lex_table, lex_grid,
+      LexRecordState, lex_api, lex_view with a Flow and handlers, lex_widgets with calculation
+      and its log, run_orm behind has_permission, permission with can, RFDS charts and KPIs,
+      ExportMixin) on any project's first model, and compiles in the shared compile under RFDS's
+      strict CI conformance. The shared compile now defines its own example model
+      (ReflexExampleFund, app lex_app, never migrated) so it does not depend on 1aq's module
+      having been imported first; 1aq's 1.366 now expects the example's routes; 1bt's chrome
+      tests save and restore the process-wide navigation.

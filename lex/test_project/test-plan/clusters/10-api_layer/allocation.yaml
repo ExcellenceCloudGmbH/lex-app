@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 189
+max_scenario: 193
 letters:
   a:
     title: ''
@@ -329,3 +329,22 @@ letters:
       branch was open, so the batch moved to the next free letter on merge.
       Renumbered on merging lex-app-v2 (2026-11-12): 10r and its scenarios were taken there, so it is 10ae,
       the first letter free on lex-app-v2 and every remote branch, with a range above the highest max_scenario.
+  af:
+    title: 'api/project-info tells the frontend which framework draws each model''s dashboards'
+    scenarios: 10.190-10.193
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      api/project-info gains reflex_enabled, reflex_home and dashboards ({model id: {record,
+      table}}), which PAC's DashboardFrame reads to frame Streamlit or Reflex per model
+      (process-admin-general-client #650). lex/lex_app/dashboard_surfaces.py decides (decision
+      D11): a model's own Reflex hook wins when IS_REFLEX_ENABLED is on, else its own Streamlit
+      hook, else it is left out; LEX_DASHBOARD_SURFACE=streamlit keeps everyone on Streamlit;
+      reflex_home needs Reflex on and a _reflex_structure module, found with find_spec, never
+      imported. Neither the decision nor the view imports Reflex or RFDS. Test note: Django's
+      discovery imports lex/lex_app/*.py as lex_app.*, and the view's lazy import of
+      lex.lex_app.dashboard_surfaces can be a different object from the test module's top-level
+      reference, so 10.190 patches by import path.

@@ -29,8 +29,32 @@ _CLEARED = (
 
 
 @cache
+def example_model() -> type:
+    """A model for the reference example's pages to be about.
+
+    The example shows its pages for one of the project's models, and the
+    ``lex_app`` app this suite compiles against has none of its own -- 1aq's
+    probe models exist only once its module is imported. Defined here, the
+    compile does not depend on which test module ran first. Never migrated:
+    compiling reads no rows.
+    """
+    from django.db import models
+
+    from lex.core.models.LexModel import LexModel
+
+    class ReflexExampleFund(LexModel):
+        name = models.CharField(max_length=100)
+
+        class Meta:
+            app_label = "lex_app"
+
+    return ReflexExampleFund
+
+
+@cache
 def compiled_app() -> SimpleNamespace:
     """The compiled app and what its compile left behind, read once."""
+    example_model()
     from reflex.config import get_config
     from reflex_base.registry import RegistrationContext
 

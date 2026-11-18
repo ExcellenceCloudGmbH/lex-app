@@ -683,13 +683,14 @@ class TestCluster01aq_TheCompiledApp(TestCase):
                ``/`` runs the sign-in guard before resolving the URL; the
                Django connection middleware is installed; the provider asks
                Keycloak for the standard scopes and not ``offline_access``; the
-               structure's own page
-               (``/about``) and ``main()``, and the model's dashboards, are
-               compiled in.
+               structure's own pages (the reference example's ``/records``,
+               ``/grid``, ``/in-lex-app``, ``/calculations``, ``/edit`` since 1bw)
+               and ``main()``, and the model's dashboards, are compiled in.
         """
         from reflex_enterprise.plugins.auth import AuthPlugin
 
-        for route in ("index", "login", "callback", "logout", "forbidden", "about",
+        for route in ("index", "login", "callback", "logout", "forbidden",
+                      "records", "grid", "in-lex-app", "calculations", "edit",
                       "_reflex_oidc_lex_keycloak/popup-login", "_reflex_oidc_lex_keycloak/popup-logout"):
             self.assertIn(route, self.pages, f"missing page {route}: {sorted(self.pages)}")
 

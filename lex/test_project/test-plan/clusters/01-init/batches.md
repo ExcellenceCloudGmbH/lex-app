@@ -2474,3 +2474,23 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 | 1.721 | Widgets post one validated manifest with runtime records | one `/embed.html?embed=true` frame, version-1 manifest, a Var pk, ids unique per widget, `on_status` wired, the default log dialog unless the page handles logs; empty, duplicate-id and unknown-option specs refused at build |
 | 1.722 | A calculation's log opens over the page | `open_log` builds a one-widget log manifest for the run and opens the dialog; an incomplete request changes nothing |
 | 1.723 | The frame speaks lex-app's contract and trusts only lex-app | JS filters token equals Python's; the page opens on the framing lex-app origin, never a stranger's; each load posts theme then the missing filters; duplicates, foreign origins, other windows and newer versions ignored; widget host gets manifest and theme on ready; status reaches `on_status` |
+
+### Batch 1bw — A consultant's tooling for Reflex dashboards — lex reflex add, lex reflex check, the reference example ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.724 – 1.727 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/scaffold.py` (`render`, `add_block`, `check_paths`, `run_check`), `lex/bin/lex.py` (`lex reflex add`, `lex reflex check`, `_reflex_add`), `lex/lex_app/reflex/examples/_reflex_structure.py` |
+| Test file | `lex/test_project/tests/init/test_1bw_reflex_developer_tooling.py` |
+| Test classes | `TestCluster01bw_Add` (1.724–1.725), `TestCluster01bw_Check` (1.726), `TestCluster01bw_TheExample` (1.727) |
+| Fixtures | a temporary project root with `lex.bin.lex.PROJECT_ROOT_DIR` patched; RFDS's CLI recorded for 1.726; the shared compile for 1.727 |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.724 | `add` writes a page and registers it once | `_dashboards/` package and page; `_reflex_structure.py` created with `main()` and the import once; refused without `--force`; `--no-register` and `object_page` leave the structure alone; bad model, block or route exit non-zero |
+| 1.725 | Every template is valid and uses only lex-app's surface | each block parses and imports only names `lex.lex_app.reflex` exports; list and overview are `@lex_page` routes gated on read; object page is a `LexRecordState` dashboard; the overview's ORM read is behind `has_permission` |
+| 1.726 | `check` lints the dashboards and runs the doctor | `lint --strict` over the structure module and the package, then `doctor --app-root`; non-zero when either fails; only the doctor when there is nothing to lint |
+| 1.727 | The reference example uses every feature and compiles | imports every lex-app dashboard feature; uses ExportMixin, charts, KPIs and `can`; its routes are in the compiled app; the compile ran conformance in strict CI mode |
