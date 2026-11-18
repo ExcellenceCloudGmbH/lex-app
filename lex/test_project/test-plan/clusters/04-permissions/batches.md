@@ -52,6 +52,8 @@
 
 ### Batch 4n — Keycloak UMA permissions in Reflex dashboards ✅
 
+> **Updated 2026-11-19** (Reflex without Reflex Enterprise): the access token comes from the session's binding to the user's lex-app sign-in (batch 1bx) instead of Reflex Enterprise's provider state; the same five scenarios, with the binding set the way the socket guard sets it and `KeycloakManager` still the only patched boundary. 4.77 now reads: without a sign-in there are no permissions, and none live in session state.
+
 | Property | Value |
 | --- | --- |
 | Scenario range | 4.75 – 4.79 |

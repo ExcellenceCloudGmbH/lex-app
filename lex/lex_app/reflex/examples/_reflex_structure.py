@@ -48,7 +48,6 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 import reflex as rx
-import reflex_enterprise as rxe
 import rfds
 from rfds.auth import can
 from rfds.patterns.exports import ExportMixin, export_menu
@@ -63,6 +62,7 @@ from lex.lex_app.reflex import (
     current_permissions,
     has_permission,
     lex_api,
+    lex_event,
     lex_grid,
     lex_page,
     lex_table,
@@ -134,9 +134,9 @@ class OverviewState(ExportMixin, rx.State):
     resources: list[str] = []
 
     # Counting rows reads the database directly, so the handler checks a grant
-    # first: here, read access to the featured model. Without it, Reflex
-    # Enterprise refuses the event before it runs.
-    @rxe.event(auth=_may_read_featured)
+    # first: here, read access to the featured model. Without it, RFDS's
+    # PolicyMiddleware refuses the event before it runs.
+    @lex_event(auth=_may_read_featured)
     async def load(self):
         """Read the counts and the viewer's Keycloak resources -- on mount, per viewer."""
         self.counts = await run_orm(_row_counts)

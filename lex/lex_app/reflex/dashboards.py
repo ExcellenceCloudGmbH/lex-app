@@ -27,8 +27,6 @@ from types import ModuleType
 from typing import Any, Callable
 
 import reflex as rx
-import reflex_enterprise as rxe
-from reflex_enterprise.auth import User
 
 from lex.lex_app.reflex.auth import LexUser
 from lex.lex_app.reflex.django_orm import run_orm
@@ -205,26 +203,26 @@ def _query_flag(params: Any, name: str) -> str | None:
 class LexDashboardState(rx.State):
     """What the dashboard route is showing, resolved once the viewer is known.
 
-    ``view``, ``model`` and ``pk`` are protected like any other state, and are
-    delivered after sign-in -- :meth:`resolve` runs behind the page guard. The
-    two chrome flags are public: they only restate the URL.
+    ``view``, ``model`` and ``pk`` are delivered after sign-in -- :meth:`resolve`
+    is an event, and an anonymous session's events go through the sign-in first.
+    The two chrome flags only restate the URL.
     """
 
     view: str = ""
     model: str = ""
     pk: str = ""
 
-    @rxe.var(auth=False)
+    @rx.var
     def embedded(self) -> bool:
         """True when lex-app frames the page in its own chrome (``?lex_embed=1``)."""
         return _query_flag(self.router.url.query_parameters, EMBED_PARAM) in _TRUTHY
 
-    @rxe.var(auth=False)
+    @rx.var
     def logout_enabled(self) -> bool:
         """False only when the URL turns the sign-out control off."""
         return _query_flag(self.router.url.query_parameters, LOGOUT_PARAM) not in _FALSY
 
-    @rxe.event
+    @rx.event
     async def resolve(self):
         """Resolve the query string into the view the page shows."""
         params = self.router.url.query_parameters
@@ -256,15 +254,15 @@ def topbar() -> rx.Component:
         rx.vstack(
             rx.text(LexUser.display_name, weight="medium", size="2"),
             rx.cond(
-                User.email != LexUser.display_name,
-                rx.text(User.email, size="1", color_scheme="gray"),
+                LexUser.email != LexUser.display_name,
+                rx.text(LexUser.email, size="1", color_scheme="gray"),
             ),
             spacing="0",
             align="end",
         ),
         rx.cond(
             LexDashboardState.logout_enabled,
-            rx.button("Sign out", on_click=User.logout, variant="soft", size="2"),
+            rx.button("Sign out", on_click=LexUser.sign_out, variant="soft", size="2"),
         ),
         align="center",
         spacing="3",

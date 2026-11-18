@@ -823,8 +823,8 @@ REFLEX_CONFIG_TEMPLATE = '''"""Reflex configuration for this Lex App project.
 
 `lex reflex` created this file, because Reflex reads its configuration from
 rxconfig.py in the project root. lex_config() is wired for Lex App: the Reflex
-app lex-app serves, and Keycloak sign-in. Pass it any rx.Config / rxe.Config
-option to override a default, e.g.
+app lex-app serves, signed in through lex-app's own sign-in. Pass it any
+rx.Config option to override a default, e.g.
 
     config = lex_config(show_built_with_reflex=False)
 
@@ -848,8 +848,8 @@ _REFLEX_PROJECTLESS_ARGS = frozenset({"login", "logout", "--help", "-h", "--vers
 
 # Defaults for the two Reflex ports. Reflex's own, 3000 and 8000, are where the
 # React frontend and the Django server run in development; these sit beside
-# Streamlit's 8501 instead. Fixed rather than auto-incremented, because Keycloak
-# has to know the callback URL in advance: http://localhost:8502/callback.
+# Streamlit's 8501 instead. Fixed rather than auto-incremented, so the sign-in
+# hand-off comes back to the address the browser left from.
 _DEFAULT_REFLEX_FRONTEND_PORT = "8502"
 _DEFAULT_REFLEX_BACKEND_PORT = "8503"
 
@@ -984,7 +984,6 @@ def reflex_cmd(ctx):
     \b
     lex reflex                    # reflex run: dev server with hot reload
     lex reflex run --env prod     # production, as a deployment runs it
-    lex reflex login              # sign in to Reflex, for reflex-enterprise
     lex reflex add list_report --model Fund   # a page bound to a model (also
                                   #   object_page, overview; --route, --title,
                                   #   --nav, --force, --no-register)

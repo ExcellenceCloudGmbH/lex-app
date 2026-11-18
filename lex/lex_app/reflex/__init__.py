@@ -9,9 +9,10 @@ Everything a dashboard author needs is importable from here::
 ``run_orm`` / ``orm``     synchronous Django code, from an async event handler
 ``current_permissions``   the user's Keycloak UMA permissions
 ``has_permission``        an ``auth=`` check built from one of them
+``lex_event``             ``rx.event`` with an ``auth=`` check run before the handler
 ``current_access_token``  the user's Keycloak access token, for the lex-app API
 ``LexUser``               the signed-in user's names, as frontend vars
-``lex_config``            the ``rxe.Config`` a project's ``rxconfig.py`` returns
+``lex_config``            the ``rx.Config`` a project's ``rxconfig.py`` returns
 ``lex_page``              a signed-in page in lex-app's chrome (``@rx.page``'s twin)
 ``lex_chrome``            any component in lex-app's chrome
 ``permission``            the RFDS permission string for a Keycloak scope on a model
@@ -33,8 +34,8 @@ and page templates. Anything that knows about lex-app comes from here.
 
 Nothing is imported until it is used. ``rxconfig.py`` imports
 :mod:`lex.lex_app.reflex.config` through this package before Django or any
-Reflex state exists, and an eager import here would create the states -- the
-auth provider among them -- inside the config that configures them.
+Reflex state exists, and an eager import here would create the states inside
+the config that configures them.
 """
 
 from __future__ import annotations
@@ -45,13 +46,13 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from lex.lex_app.reflex.access import LexAccessState, permission
     from lex.lex_app.reflex.auth import (
-        LexKeycloakAuthState,
         LexUser,
         current_access_token,
         current_permissions,
         has_permission,
+        lex_event,
     )
-    from lex.lex_app.reflex.config import lex_auth_plugin, lex_config
+    from lex.lex_app.reflex.config import lex_config
     from lex.lex_app.reflex.dashboards import LexDashboardState, current_record
     from lex.lex_app.reflex.data import (
         LexApiError,
@@ -82,12 +83,11 @@ _EXPORTS = {
     "permission": "lex.lex_app.reflex.access",
     "lex_chrome": "lex.lex_app.reflex.shell",
     "lex_page": "lex.lex_app.reflex.shell",
-    "LexKeycloakAuthState": "lex.lex_app.reflex.auth",
     "LexUser": "lex.lex_app.reflex.auth",
     "current_access_token": "lex.lex_app.reflex.auth",
     "current_permissions": "lex.lex_app.reflex.auth",
     "has_permission": "lex.lex_app.reflex.auth",
-    "lex_auth_plugin": "lex.lex_app.reflex.config",
+    "lex_event": "lex.lex_app.reflex.auth",
     "lex_config": "lex.lex_app.reflex.config",
     "LexDashboardState": "lex.lex_app.reflex.dashboards",
     "current_record": "lex.lex_app.reflex.dashboards",
@@ -122,7 +122,6 @@ __all__ = [
     "LexAccessState",
     "LexApiError",
     "LexDashboardState",
-    "LexKeycloakAuthState",
     "LexRecordState",
     "LexTableState",
     "LexUser",
@@ -134,13 +133,13 @@ __all__ = [
     "current_record",
     "has_permission",
     "lex_api",
-    "lex_auth_plugin",
     "lex_calculation",
     "lex_calculation_log",
     "lex_calculation_log_tree",
     "lex_chrome",
     "lex_columns",
     "lex_config",
+    "lex_event",
     "lex_grid",
     "lex_grid_columns",
     "lex_page",

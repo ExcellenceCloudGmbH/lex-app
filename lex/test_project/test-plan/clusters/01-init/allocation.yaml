@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 727
+max_scenario: 739
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1114,10 +1114,15 @@ letters:
     scenarios: 1.357-1.369
     status: complete
     tests:
-      pass: 22
+      pass: 14
       skip: 0
       xfail: 0
     note: >-
+      UPDATED 2026-11-19, Reflex without Reflex Enterprise: 1.357 asserts a plain rx.Config whose
+      plugins are Radix and RFDS (sign-in is lex-app's own hand-off, batch 1bx); 1.358 and 1.359
+      (Reflex Enterprise's Keycloak provider settings) retired with the provider; 1.366 asserts the
+      compiled app's /logout page, no Enterprise sign-in pages, and the session middleware before
+      RFDS's policy gate; 1.369 names the user from the binding's profile. Earlier note follows.
       Reflex Enterprise's AuthPlugin replaces the Streamlit proxy. LexKeycloakAuthState reads the
       Keycloak settings a project already has (KEYCLOAK_URL/KEYCLOAK_REALM, OIDC_RP_CLIENT_ID/SECRET)
       behind the plugin's own LEX_KEYCLOAK_* and OIDC_* variables, honours OIDC_ISSUER and
@@ -1141,12 +1146,13 @@ letters:
   ar:
     title: Reflex dashboards sign in by themselves — no click, and the Keycloak session carries over
     scenarios: 1.370-1.375
-    status: complete
+    status: rolled-back
     tests:
-      pass: 6
+      pass: 0
       skip: 0
       xfail: 0
     note: >-
+      RETIRED 2026-11-19 with Reflex Enterprise (lex-app runs Reflex without it): Reflex Enterprise's /login page and its silent prompt=none sign-in are gone with Reflex Enterprise; a Reflex dashboard signs in through lex-app's hand-off (batch 1bx). Test file removed; letter and scenarios kept.
       Reflex Enterprise's /login is a palette that waits for a click, deliberately, even with one
       provider; lex-app has exactly one, and a user signed in to lex-app already has a Keycloak session
       that can answer at once. lex_login_page (the plugin's login_page, by import path) starts the
@@ -1176,12 +1182,13 @@ letters:
   as:
     title: Reflex dashboards — a Keycloak access token too large for its cookie is stored compressed
     scenarios: 1.376-1.380
-    status: complete
+    status: rolled-back
     tests:
-      pass: 5
+      pass: 0
       skip: 0
       xfail: 0
     note: >-
+      RETIRED 2026-11-19 with Reflex Enterprise (lex-app runs Reflex without it): the access-token cookie it compressed is gone: no token reaches the browser since Reflex signs in through lex-app's hand-off (batch 1bx). Test file removed; letter and scenarios kept.
       Reflex Enterprise keeps the session, and a user's tabs in step, through cookies, and browsers
       refuse a cookie over 4096 bytes (name and value). A Keycloak access token carries every role the
       user holds in every client of the realm, and in a shared realm it is easily larger: then only the
@@ -1211,12 +1218,13 @@ letters:
   at:
     title: A Reflex development run behind one port — Reflex Enterprise's single-port proxy gets the Starlette app
     scenarios: 1.381-1.383
-    status: complete
+    status: rolled-back
     tests:
-      pass: 3
+      pass: 0
       skip: 0
       xfail: 0
     note: >-
+      RETIRED 2026-11-19 with Reflex Enterprise (lex-app runs Reflex without it): the repair of Reflex Enterprise's single-port proxy is gone with it; lex-app's own single-port proxy is tested in batch 1by. Test file removed; letter and scenarios kept.
       A pod exposes one port and a Reflex development run has two servers, so the platform starts the
       dashboards in Reflex Enterprise's single-port mode (REFLEX_USE_SINGLE_PORT): the backend answers its
       own routes and proxies every other path to Vite. On reflex-enterprise 0.9.6 with Reflex 0.9.12 the
@@ -1440,12 +1448,13 @@ letters:
   bg:
     title: Reflex dashboards stay signed in as long as Keycloak keeps the session - at_hash, refresh error taxonomy, single-flight across tabs and replicas, cooldown, 30-day cookies, back-channel coherence
     scenarios: 1.561-1.591
-    status: complete
+    status: rolled-back
     tests:
-      pass: 28
+      pass: 0
       skip: 3
       xfail: 0
     note: >-
+      RETIRED 2026-11-19 with Reflex Enterprise (lex-app runs Reflex without it): the refresh guard, cross-tab single flight, cookie lifetimes and back-channel receiver all served Reflex Enterprise's token cookies; Django's sign-in (django-oauth2-codeflow) now refreshes once per sign-in and ends it, and batch 1bx tests what a dashboard sees of that. Test file removed; letter and scenarios kept.
       Plan "long-lived sessions" section 6.4 (workstream lex-surfaces-reflex-ws). LexKeycloakAuthState checks an ID token
       against the access token held now (1.561-1.562), signs out only on invalid_grant and keeps the tokens with
       back-off on configuration and transient errors, userinfo 401 -> one refresh, outage -> cached profile
@@ -1909,3 +1918,49 @@ letters:
       (ReflexExampleFund, app lex_app, never migrated) so it does not depend on 1aq's module
       having been imported first; 1aq's 1.366 now expects the example's routes; 1bt's chrome
       tests save and restore the process-wide navigation.
+  bx:
+    title: 'Reflex dashboards sign in through lex-app''s hand-off - no Reflex Enterprise, no Reflex account'
+    scenarios: 1.728-1.735
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      Reflex without Reflex Enterprise, PR B (with 1by). lex/lex_app/reflex/session.py replaces
+      Reflex Enterprise's AuthPlugin with the Django-anchored dashboard hand-off, audience
+      reflex (10ag): /auth/start (nonce, then <app>/oidc/handoff), /auth/handoff (redeem in-
+      process into a DashboardBinding, handle cookie lex_rdash -- __Host- over https, HttpOnly,
+      30 days), /auth/logout (revoke, then the app's total logout), /auth/blocked (no loop when
+      cookies are blocked). An ASGI guard strips every cookie from /_event and adds X-Lex-
+      Binding = sha256(handle), because Reflex copies the socket's request headers into state
+      and sends them to the browser. LexSessionMiddleware reads the binding's standing off the
+      loop (cached 60 s per process) before every event and sends an anonymous session through
+      the hand-off by a page load (rx.redirect would route a same-host URL inside the frontend);
+      RFDS reads the user through set_identity_resolver; auth.py's lex_event(auth=) tags
+      handlers for RFDS's PolicyMiddleware (signed-in users pass untagged handlers, Enterprise
+      parity); current_access_token comes from broker.access_token; export tickets are bound to
+      the binding's subject. The hand-off counter lex_hs is cleaned by LexAccessState.load
+      (Reflex 0.9.13 never calls a middleware's postprocess). Proven in a browser on a real
+      project too (sandboxed headless Chrome): signed-out page -> Keycloak; test sign-in -> page
+      with the user, no cookie or handle in page state; sign-out revokes. Mutation: the guard
+      keeping cookies on the socket fails 1.729.
+  by:
+    title: 'Reflex dashboards without Reflex Enterprise - nothing imports it, and lex-app''s own one-port proxy'
+    scenarios: 1.736-1.739
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      Reflex without Reflex Enterprise, PR B (with 1bx). requirements.txt drops reflex-
+      enterprise and rfds[enterprise] for plain reflex and core rfds; config.py returns a plain
+      rx.Config (Radix, RFDS); app.py builds rx.App(**rfds.app_kwargs()) and installs RFDS's
+      open path. lex/lex_app/reflex/devproxy.py replaces Reflex Enterprise's single-port proxy
+      for development runs behind one port (REFLEX_USE_SINGLE_PORT): HTTP and the dev server's
+      WebSocket pass to the frontend, mounted on the backend after its routes. Writing 1.738
+      found two proxy bugs, fixed here: a retry re-sent a request whose body was spent
+      (StreamConsumed instead of a retry while the frontend starts), and a gzipped body went on
+      still compressed after its Content-Encoding header was dropped. 1.736 runs in a child
+      interpreter that refuses to import reflex_enterprise and rfds.enterprise.

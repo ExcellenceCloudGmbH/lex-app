@@ -10,8 +10,11 @@ it on first use -- and all it holds is::
 
 This module must stay importable before Django is set up and before any
 Reflex state exists: ``rxconfig.py`` is loaded by every Reflex process first,
-and a provider class imported here would re-enter the config it is part of.
-That is why the auth provider is named by import path, never imported.
+and a state class imported here would re-enter the config it is part of.
+
+It is a plain ``rx.Config``: lex-app's dashboards need no Reflex Enterprise and
+no Reflex account (decision E1). Sign-in is lex-app's own, added by the app
+itself (:mod:`lex.lex_app.reflex.session`), so no plugin carries it.
 """
 
 from __future__ import annotations
@@ -26,27 +29,11 @@ from typing import Any
 #: and serves the project's dashboards. The counterpart of ``streamlit_app.py``.
 APP_MODULE = "lex.reflex_app"
 
-#: The provider that signs users in against lex-app's Keycloak.
-AUTH_PROVIDER = "lex.lex_app.reflex.auth.LexKeycloakAuthState"
-
-#: The ``/login`` page: it starts the sign-in by itself instead of offering a
-#: button, since lex-app has exactly one provider to sign in with.
-LOGIN_PAGE = "lex.lex_app.reflex.auth.lex_login_page"
-
 # No ports here, deliberately. Reflex treats a port in the config exactly like
 # one passed on the command line, so a configured frontend port makes
 # `--backend-only` refuse to start, and two configured ports make every
 # `--env prod` run refuse (prod serves both on one port). `lex reflex` supplies
 # lex-app's defaults instead, per run mode -- see `_resolve_reflex_port_flags`.
-
-# No `offline_access` either, although Reflex's documentation suggests it for
-# refresh tokens. Keycloak issues a refresh token for the authorization-code flow
-# without it -- the Streamlit proxy has always renewed with exactly that -- and
-# asking for it turns the refresh token into an OFFLINE token: one that outlives
-# the Keycloak session, so signing out of lex-app would no longer end the
-# dashboard's session, and a realm without the `offline_access` role refuses the
-# sign-in outright. Without it, a dashboard session is bound to the Keycloak
-# session like every other lex-app session.
 
 
 def app_name_for(project_root: str | os.PathLike[str]) -> str:
@@ -80,71 +67,6 @@ def _make_app_module_findable() -> None:
         sys.path.append(parent)
 
 
-def _repair_single_port_proxy() -> None:
-    """Mount Reflex Enterprise's single-port proxy on the Reflex backend itself.
-
-    ``use_single_port`` (``REFLEX_USE_SINGLE_PORT``) has the backend answer its
-    own routes and pass every other request to the frontend server, so that a
-    development run -- two servers -- works behind the one port a pod exposes.
-    reflex-enterprise 0.9.6 never manages it on Reflex 0.9.12:
-
-    * its lifespan task names its parameter ``app``, and Reflex passes the
-      *Reflex* app under that name (the Starlette app only as
-      ``starlette_app``), so it logs "Unable to find the base Starlette app";
-    * given the Starlette app, it mounts on the outermost one, and Reflex
-      reaches its backend through a catch-all ``Mount("")`` there. Behind an
-      ``api_transformer`` that wraps the backend in ASGI middleware (RFDS's
-      security headers do), the proxy lands after that mount and is never
-      reached. Every page 404s either way.
-
-    So the replacement takes the Reflex app and hands the proxy its backend,
-    ``app._api`` -- where Reflex itself mounts a compiled frontend -- inside
-    every wrapper, after every backend route. Reflex Enterprise imports the
-    proxy when it builds the app, after ``rxconfig.py`` has run, so replacing
-    the module's function is enough. The stand-in Reflex Enterprise defines
-    when asgiproxy is missing, which names no parameter, is left alone, and so
-    is this replacement itself.
-    """
-    import contextlib
-    import inspect
-
-    from reflex_enterprise import proxy
-
-    upstream = proxy.proxy_middleware
-    if getattr(upstream, "lex_mounts_on_backend", False):
-        return
-    if not {"app", "starlette_app"} & set(inspect.signature(upstream).parameters):
-        return
-
-    @contextlib.asynccontextmanager
-    async def proxy_middleware(app):
-        async with upstream(app._api):
-            yield
-
-    proxy_middleware.lex_mounts_on_backend = True
-    proxy.proxy_middleware = proxy_middleware
-
-
-def lex_auth_plugin(**options: Any):
-    """``rxe.AuthPlugin``, signing users in against lex-app's Keycloak.
-
-    Takes any ``AuthPlugin`` option -- ``auth=`` for an app-wide authorization
-    check, ``extra_scopes`` for more claims, custom page builders, an audit hook.
-    Both defaults are named by import path, which the plugin resolves at compile
-    time: importing them here would create Reflex states while ``rxconfig.py``
-    is still loading.
-    """
-    import reflex_enterprise as rxe
-
-    # Here because every project's rxconfig.py calls this -- `lex_config()`
-    # does, and so does a hand-written one that keeps lex-app's sign-in -- and
-    # Reflex reads rxconfig.py before it builds the app.
-    _repair_single_port_proxy()
-    options.setdefault("auth_providers", [AUTH_PROVIDER])
-    options.setdefault("login_page", LOGIN_PAGE)
-    return rxe.AuthPlugin(**options)
-
-
 def public_origins() -> list[str]:
     """Every origin a Reflex page of this instance may be served from.
 
@@ -168,21 +90,18 @@ def public_origins() -> list[str]:
 
 
 def lex_config(**overrides: Any):
-    """An ``rxe.Config`` for the project, with lex-app's defaults.
+    """An ``rx.Config`` for the project, with lex-app's defaults.
 
-    Any ``rx.Config`` or ``rxe.Config`` option overrides the default of the same
-    name, and ``REFLEX_<OPTION>`` environment variables override both, as in any
-    Reflex app. ``plugins`` replaces the whole list: keep
-    :func:`lex_auth_plugin` in it, or the dashboards stop requiring sign-in, and
-    keep RFDS's two plugins in this order, or ``rfds.install()`` refuses to start.
+    Any ``rx.Config`` option overrides the default of the same name, and
+    ``REFLEX_<OPTION>`` environment variables override both, as in any Reflex
+    app. ``plugins`` replaces the whole list: keep RFDS's two plugins in this
+    order, or ``rfds.install()`` refuses to start.
 
-    The plugins are lex-app's sign-in, Radix with RFDS's root theme, and RFDS
-    itself with lex-app's brand and locale (:mod:`lex.lex_app.reflex.design`).
-    The *Built with Reflex* badge is off: Reflex Enterprise shows it anyway on
-    a tier that may not hide it, and RFDS accepts that case.
+    The plugins are Radix with RFDS's root theme, and RFDS itself with lex-app's
+    brand and locale (:mod:`lex.lex_app.reflex.design`). The *Built with Reflex*
+    badge is off, which plain Reflex honours in every run mode.
     """
     import reflex as rx
-    import reflex_enterprise as rxe
 
     from lex.lex_app.reflex.design import rfds_plugin, theme_plugin
 
@@ -193,7 +112,7 @@ def lex_config(**overrides: Any):
         "app_module_import": APP_MODULE,
         "telemetry_enabled": False,
         "show_built_with_reflex": False,
-        "plugins": [lex_auth_plugin(), theme_plugin(), rfds_plugin()],
+        "plugins": [theme_plugin(), rfds_plugin()],
         # A sitemap advertises pages to crawlers; every page here is behind a
         # sign-in, so it would advertise nothing a crawler could open.
         "disable_plugins": [rx.plugins.SitemapPlugin],
@@ -214,4 +133,4 @@ def lex_config(**overrides: Any):
         settings["cors_allowed_origins"] = origins
 
     settings.update(overrides)
-    return rxe.Config(**settings)
+    return rx.Config(**settings)
