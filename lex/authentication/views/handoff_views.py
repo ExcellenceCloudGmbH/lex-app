@@ -1,8 +1,9 @@
-"""``GET oidc/handoff`` -- the app's half of the Streamlit dashboard hand-off.
+"""``GET oidc/handoff`` -- the app's half of the dashboard hand-off, for Streamlit and Reflex.
 
-The dashboard proxy sends the browser here, inside the dashboard's frame::
+The dashboard -- Streamlit's proxy, or the Reflex backend (``lex.lex_app.reflex.session``) --
+sends the browser here, inside the dashboard's frame::
 
-    /oidc/handoff?aud=streamlit&return=<dashboard URL>&state=<nonce>
+    /oidc/handoff?aud=streamlit|reflex&return=<dashboard URL>&state=<nonce>
 
 * **Signed in** (an active ``OIDCSession``) -- a single-use code is minted, valid 60 s and bound
   to the sign-in, the audience, the dashboard origin and ``state``, and the browser goes back to
@@ -13,14 +14,17 @@ The dashboard proxy sends the browser here, inside the dashboard's frame::
 * **Not signed in, top level** -- the normal sign-in (``oidc/authenticate?next=`` this URL), then
   the hand-off continues.
 
-``return`` must be an origin the instance lists for its dashboards (``LEX_INSTANCE_HOSTS``,
-loopback in development); anything else is a 400, so the view never redirects to a host it does
-not know. The view is exempt from the login requirement and from the session middleware: it
-loads and checks the sign-in itself (with the library's own functions), so an ended sign-in in a
-frame still goes back to the dashboard as ``login_required`` instead of a sign-in page in the
-frame. Keycloak being unreachable answers the contract's 503.
+``return`` must be an origin the instance lists for that audience's dashboards
+(``LEX_INSTANCE_HOSTS``: its ``streamlit`` or ``reflex`` hosts, loopback in development); anything
+else is a 400, so the view never redirects to a host it does not know, and a code minted for one
+surface never lands on the other. The view is exempt from the login requirement and from the
+session middleware: it loads and checks the sign-in itself (with the library's own functions), so
+an ended sign-in in a frame still goes back to the dashboard as ``login_required`` instead of a
+sign-in page in the frame. Keycloak being unreachable answers the contract's 503.
 
-Only served while ``LEX_STREAMLIT_AUTH`` is ``dual`` or ``handoff``; 404 otherwise.
+``aud=streamlit`` is only served while ``LEX_STREAMLIT_AUTH`` is ``dual`` or ``handoff`` (404
+otherwise): Streamlit keeps a legacy sign-in that the flag rolls out of. ``aud=reflex`` is always
+served -- the hand-off is the only way a Reflex dashboard signs in.
 """
 from __future__ import annotations
 
@@ -37,7 +41,7 @@ from oauth2_authcodeflow import sessions as oidc_sessions
 from oauth2_authcodeflow.exceptions import OIDCAuthUnavailable, OIDCSessionEnded
 
 from lex.authentication.dashboards import modes, sites
-from lex.authentication.dashboards.handoff import AUD_STREAMLIT, issue_code
+from lex.authentication.dashboards.handoff import AUD_REFLEX, AUD_STREAMLIT, issue_code
 
 logger = logging.getLogger(__name__)
 
@@ -71,18 +75,21 @@ class HandoffView(View):
     http_method_names = ["get"]
 
     def get(self, request):
-        if not modes.handoff_enabled(modes.streamlit_auth_mode()):
+        aud = request.GET.get("aud")
+        if aud not in (AUD_STREAMLIT, AUD_REFLEX):
+            return _bad_request("aud must be 'streamlit' or 'reflex'.")
+        if aud == AUD_STREAMLIT and not modes.handoff_enabled(modes.streamlit_auth_mode()):
             return _no_store(JsonResponse({"error": "not_found", "detail": "The dashboard hand-off is off."}, status=404))
-        if request.GET.get("aud") != AUD_STREAMLIT:
-            return _bad_request("aud must be 'streamlit'.")
         state = request.GET.get("state", "")
         if not STATE_PATTERN.match(state):
             return _bad_request("state is missing or malformed.")
         target = request.GET.get("return", "")
         origin = sites.origin_of(target)
-        if origin is None or not sites.is_dashboard_origin(origin):
-            logger.warning("Dashboard hand-off refused: return origin %r is not a dashboard of this instance", origin)
-            return _bad_request("return is not a dashboard of this instance.")
+        listed = sites.is_reflex_origin if aud == AUD_REFLEX else sites.is_dashboard_origin
+        if origin is None or not listed(origin):
+            logger.warning("Dashboard hand-off refused: return origin %r is not a %s dashboard of this instance",
+                           origin, aud)
+            return _bad_request(f"return is not a {aud} dashboard of this instance.")
         next_path = _relative_target(target)
 
         row = None
@@ -106,7 +113,7 @@ class HandoffView(View):
                 return _no_store(HttpResponseRedirect(oidc_responses.login_url(request.get_full_path())))
             return _no_store(oidc_responses.unauthenticated(request, "not_authenticated"))
 
-        code = issue_code(row, aud=AUD_STREAMLIT, return_origin=origin, state=state)
+        code = issue_code(row, aud=aud, return_origin=origin, state=state)
         query = urlencode({"code": code, "state": state, "next": next_path})
         return _no_store(HttpResponseRedirect(f"{origin}/auth/handoff?{query}"))
 

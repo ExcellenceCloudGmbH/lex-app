@@ -158,6 +158,11 @@ def dashboard_origins(environ: Optional[Mapping[str, str]] = None) -> Tuple[str,
     return _origins("streamlit", environ)
 
 
+def reflex_origins(environ: Optional[Mapping[str, str]] = None) -> Tuple[str, ...]:
+    """The configured origins of the Reflex dashboards."""
+    return _origins("reflex", environ)
+
+
 def app_origins(environ: Optional[Mapping[str, str]] = None) -> Tuple[str, ...]:
     """The configured origins of the app (Django and the frontend it serves)."""
     return _origins("app", environ)
@@ -174,6 +179,11 @@ def _allowed(origin: Optional[str], listed: Iterable[str], environ: Optional[Map
 def is_dashboard_origin(origin: object, environ: Optional[Mapping[str, str]] = None) -> bool:
     """Whether ``origin`` is one of this instance's dashboard origins (loopback in development)."""
     return _allowed(normalize_origin(origin), dashboard_origins(environ), environ)
+
+
+def is_reflex_origin(origin: object, environ: Optional[Mapping[str, str]] = None) -> bool:
+    """Whether ``origin`` is one of this instance's Reflex origins (loopback in development)."""
+    return _allowed(normalize_origin(origin), reflex_origins(environ), environ)
 
 
 def is_app_origin(origin: object, environ: Optional[Mapping[str, str]] = None, extra: Iterable[str] = ()) -> bool:
@@ -218,12 +228,14 @@ __all__ = [
     "dashboard_origins",
     "is_app_origin",
     "is_dashboard_origin",
+    "is_reflex_origin",
     "is_deployed",
     "is_loopback_origin",
     "local_path",
     "normalize_origin",
     "origin_of",
     "pick_app_origin",
+    "reflex_origins",
     "same_site",
     "site_of",
     "split_host",

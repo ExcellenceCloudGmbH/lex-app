@@ -20,10 +20,18 @@ AUTH_CONTRACT_VERSION = 2
 
 
 def dashboard_handoff_surfaces() -> List[str]:
-    """Dashboard surfaces served by the hand-off: ``["streamlit"]`` when ``LEX_STREAMLIT_AUTH`` is ``dual`` or ``handoff``."""
-    from lex.authentication.dashboards.modes import handoff_enabled, streamlit_auth_mode
+    """Dashboard surfaces served by the hand-off.
 
-    return ["streamlit"] if handoff_enabled(streamlit_auth_mode()) else []
+    ``"streamlit"`` while ``LEX_STREAMLIT_AUTH`` is ``dual`` or ``handoff``; ``"reflex"`` while the
+    instance serves Reflex dashboards (``IS_REFLEX_ENABLED``), which sign in no other way.
+    """
+    from lex.authentication.dashboards.modes import handoff_enabled, streamlit_auth_mode
+    from lex.lex_app.dashboard_surfaces import reflex_enabled
+
+    surfaces = ["streamlit"] if handoff_enabled(streamlit_auth_mode()) else []
+    if reflex_enabled():
+        surfaces.append("reflex")
+    return surfaces
 
 
 def ws_close_codes() -> bool:

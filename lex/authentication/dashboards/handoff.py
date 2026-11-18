@@ -30,9 +30,11 @@ from lex.authentication.dashboards.cookies import HANDLE_RESET_INTERVAL
 
 #: Audience of a Streamlit dashboard hand-off.
 AUD_STREAMLIT = "streamlit"
+#: Audience of a Reflex dashboard hand-off (``lex.lex_app.reflex.session``).
+AUD_REFLEX = "reflex"
 #: Audience of an MCP embed ticket.
 AUD_EMBED = "embed"
-AUDIENCES = (AUD_STREAMLIT, AUD_EMBED)
+AUDIENCES = (AUD_STREAMLIT, AUD_REFLEX, AUD_EMBED)
 
 #: How long a code may wait to be redeemed.
 CODE_TTL_SECONDS = 60
@@ -244,6 +246,7 @@ def identity(binding: Any) -> Dict[str, str]:
 __all__ = [
     "AUDIENCES",
     "AUD_EMBED",
+    "AUD_REFLEX",
     "AUD_STREAMLIT",
     "CODE_TTL_SECONDS",
     "HandoffError",

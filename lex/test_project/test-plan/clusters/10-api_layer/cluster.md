@@ -225,3 +225,20 @@ say exactly one thing (`hide_actions_column`) and nothing about a column.
 | 10.193 | Deciding never imports Reflex into Django | neither module imports reflex, reflex_enterprise, rfds or lex.lex_app.reflex |
 
 **Scenario range:** 10.190 – 10.193. **Test file:** `lex/test_project/tests/api_layer/test_10af_project_info_dashboards.py`. **Type:** U (10.190: E). **Status:** ✅ Complete (2026-11-17). Batch: [10af](batches.md).
+
+---
+
+### 10ag. Reflex dashboards sign in through the app's hand-off - oidc/handoff for the reflex audience ✅
+
+**What it tests:** that `oidc/handoff` hands a Reflex dashboard a single-use code for the browser's sign-in -- audience `reflex`, bound to the Reflex origin that asked -- whatever Streamlit's rollout flag says, sends it only to the instance's Reflex hosts, answers a frame without a sign-in with `login_required`, and that `api/auth/session` lists the Reflex hand-off while Reflex is served.
+
+**Why a regression matters:** without it a Reflex dashboard has no way to sign in once Reflex Enterprise is gone; a wrong origin check is an open redirect on the sign-in path, and a code accepted across audiences lets one surface's sign-in pass for the other's.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.194 | A Reflex dashboard gets a code bound to reflex | 302 to `<Reflex origin>/auth/handoff?code&state&next`, no-store, with Streamlit's hand-off off; the code is for `reflex` and that origin, 60 s; redeems into a `reflex` binding with no expiry; refused as `streamlit` or for the Streamlit host; a Reflex handle never resolves as Streamlit |
+| 10.195 | Each audience goes only to its own hosts | reflex code to the Streamlit host, streamlit code to the Reflex host, unlisted host, unknown audience: 400, nothing minted; `streamlit` still 404 while its flag is off; `reflex_origins`; loopback only when not deployed |
+| 10.196 | Without a sign-in, frames go back and pages sign in | frame: back to `/auth/handoff?error=login_required` with state and path; top level: lex-app's sign-in returning to the hand-off; no code |
+| 10.197 | The capability lists reflex while Reflex is served | `dashboard_handoff`: [] / [reflex] / [streamlit, reflex] by IS_REFLEX_ENABLED and LEX_STREAMLIT_AUTH |
+
+**Scenario range:** 10.194 – 10.197. **Test file:** `lex/test_project/tests/api_layer/test_10ag_reflex_handoff_audience.py`. **Type:** E (10.197: I). **Status:** ✅ Complete (2026-11-18). Batch: [10ag](batches.md).
