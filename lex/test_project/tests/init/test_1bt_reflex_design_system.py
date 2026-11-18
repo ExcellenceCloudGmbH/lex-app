@@ -378,7 +378,8 @@ class TestCluster01bt_Chrome(SimpleTestCase):
         with patch.dict(os.environ, {**_NO_LEX_ENV, "LEX_DASHBOARD_TITLE": "Treasury"}):
             rendered = str(shell.lex_chrome(rx.text("body")))
         for expected in ("LexThemeFollower", "LexAuthNotice", '"restored"', shell.EMBEDDED_CLASS,
-                         "Treasury", "data-rfds-shell", "embedded", "logout_enabled"):
+                         "Treasury", "data-rfds-shell", "embedded", "logout_enabled",
+                         "allowedOrigins", "http://localhost:*"):
             self.assertIn(expected, rendered, f"the chrome must carry {expected!r}")
         css = (JS_DIR / "lex_rfds.css").read_text()
         self.assertIn(f'.{shell.EMBEDDED_CLASS} [data-rfds-shell="header"]', css)

@@ -2451,3 +2451,26 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 | 1.714 | `lex_table` pages, sorts, filters and searches through the API | one state class per distinct table; mount passes the fixed filters as the state var; page 3 of 25, `-name,id`, fixed + table filters + `name__icontains`; wire rows and the total |
 | 1.715 | `lex_grid` loads rows once, says when cut, hides on refusal | first page of `GRID_ROW_LIMIT` with fixed filters; wire rows, `truncated`, dataset version bumped; a 403 leaves no rows and `denied` |
 | 1.716 | A record dashboard gets only records the API would show | API shows: instance, title, data, `ok`; 403: `None`, `denied`; 404 or no pk: `None`, `missing`; the instance is read only after the API showed the record |
+
+### Batch 1bv — lex-app's pages and controls inside Reflex dashboards — one embed contract for both frameworks ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.717 – 1.723 |
+| Type | U |
+| Files covered | `lex/lex_app/embed/core.py`, `lex/lex_app/embed/widgets.py`, `lex/lex_app/embed/__init__.py`, `lex/lex_app/streamlit/embed.py` (`lex_view` over the shared core), `lex/lex_app/streamlit/widgets/spec.py` (re-export), `lex/lex_app/reflex/embed.py`, `lex/lex_app/reflex/_js/lex_frame.jsx`, `lex/utilities/config/generic_app_config.py` (`_LEX_PACKAGE_EXCLUDED_DIRS`) |
+| Test file | `lex/test_project/tests/init/test_1bv_reflex_lex_view_and_widgets.py` |
+| Test classes | `TestCluster01bv_OneContract` (1.717), `TestCluster01bv_ReflexLexView` (1.718–1.720), `TestCluster01bv_ReflexWidgets` (1.721–1.722), `TestCluster01bv_TheFrame` (1.723) |
+| Fixtures | node for 1.723 (skipped without it), React's hooks stubbed |
+| Tests landed | **7 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.717 | Streamlit and Reflex open the same URL | both render `build_lex_view_url`'s URL (Reflex adding the filters token Streamlit's shim adds in the browser); old Streamlit imports are the same objects; discovery never imports `lex_app.embed` |
+| 1.718 | Handlers ask for their events and receive them | an `on_create` handler sets only `emit_create` and is wired; `on_event` alone sets every flag; none sets nothing; only lex-app's origin is believed |
+| 1.719 | A record named by a state var is joined in the browser | a Var path and an f-string embedding a var become a Var URL with the base, the path and the embed query; filters stay the state var, not frozen into the URL |
+| 1.720 | lex-app is framed from the app address beside the dashboards | `REACT_APP_URL`; else the app host on the dashboards' registrable domain; else `http://localhost:8000` |
+| 1.721 | Widgets post one validated manifest with runtime records | one `/embed.html?embed=true` frame, version-1 manifest, a Var pk, ids unique per widget, `on_status` wired, the default log dialog unless the page handles logs; empty, duplicate-id and unknown-option specs refused at build |
+| 1.722 | A calculation's log opens over the page | `open_log` builds a one-widget log manifest for the run and opens the dialog; an incomplete request changes nothing |
+| 1.723 | The frame speaks lex-app's contract and trusts only lex-app | JS filters token equals Python's; the page opens on the framing lex-app origin, never a stranger's; each load posts theme then the missing filters; duplicates, foreign origins, other windows and newer versions ignored; widget host gets manifest and theme on ready; status reaches `on_status` |

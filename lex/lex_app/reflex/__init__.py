@@ -22,6 +22,10 @@ Everything a dashboard author needs is importable from here::
 ``lex_columns``           RFDS column specs for a model's fields
 ``LexRecordState``        the record ``?model=&pk=`` names, checked against the API
 ``lex_rows``              a queryset as wire rows for charts (inside ``run_orm``)
+``lex_view``              one lex-app page (table, form, record) in the dashboard
+``lex_widgets``           lex-app's controls in one frame: ``calculation``, ``calculation_log``
+``lex_calculation``       one calculation's status and button (and its log)
+``Flow`` / ``ref``        chained forms, exactly as in Streamlit
 ========================  ====================================================
 
 UI comes from ``rfds`` (and plain ``reflex``): the components, charts, tables
@@ -61,6 +65,16 @@ if TYPE_CHECKING:
         lex_table,
     )
     from lex.lex_app.reflex.django_orm import orm, run_orm
+    from lex.lex_app.embed.core import STAY, Flow, ref
+    from lex.lex_app.reflex.embed import (
+        calculation,
+        calculation_log,
+        lex_calculation,
+        lex_calculation_log,
+        lex_calculation_log_tree,
+        lex_view,
+        lex_widgets,
+    )
     from lex.lex_app.reflex.shell import lex_chrome, lex_page
 
 _EXPORTS = {
@@ -86,6 +100,16 @@ _EXPORTS = {
     "lex_grid_columns": "lex.lex_app.reflex.data",
     "lex_rows": "lex.lex_app.reflex.data",
     "lex_table": "lex.lex_app.reflex.data",
+    "calculation": "lex.lex_app.reflex.embed",
+    "calculation_log": "lex.lex_app.reflex.embed",
+    "lex_calculation": "lex.lex_app.reflex.embed",
+    "lex_calculation_log": "lex.lex_app.reflex.embed",
+    "lex_calculation_log_tree": "lex.lex_app.reflex.embed",
+    "lex_view": "lex.lex_app.reflex.embed",
+    "lex_widgets": "lex.lex_app.reflex.embed",
+    "STAY": "lex.lex_app.embed.core",
+    "Flow": "lex.lex_app.embed.core",
+    "ref": "lex.lex_app.embed.core",
     "orm": "lex.lex_app.reflex.django_orm",
     "run_orm": "lex.lex_app.reflex.django_orm",
 }
@@ -94,6 +118,7 @@ _EXPORTS = {
 #: -- the docs gate among them -- see a module ``__getattr__`` plus ``__all__`` as
 #: its exports (PEP 562). 1.357c keeps the two lists equal.
 __all__ = [
+    "Flow",
     "LexAccessState",
     "LexApiError",
     "LexDashboardState",
@@ -101,12 +126,18 @@ __all__ = [
     "LexRecordState",
     "LexTableState",
     "LexUser",
+    "STAY",
+    "calculation",
+    "calculation_log",
     "current_access_token",
     "current_permissions",
     "current_record",
     "has_permission",
     "lex_api",
     "lex_auth_plugin",
+    "lex_calculation",
+    "lex_calculation_log",
+    "lex_calculation_log_tree",
     "lex_chrome",
     "lex_columns",
     "lex_config",
@@ -115,8 +146,11 @@ __all__ = [
     "lex_page",
     "lex_rows",
     "lex_table",
+    "lex_view",
+    "lex_widgets",
     "orm",
     "permission",
+    "ref",
     "run_orm",
 ]
 

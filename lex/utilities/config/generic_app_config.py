@@ -36,7 +36,10 @@ class GenericAppConfig(AppConfig):
     #: -- which is a second module object beside the `lex.lex_app.reflex.auth` the
     #: rest of the code imports. For `reflex` that would define every Reflex state
     #: twice. It holds no models, and its report is registered explicitly.
-    _LEX_PACKAGE_EXCLUDED_DIRS = ('reflex',)
+    #: `embed` -- the embed contract both dashboard frameworks share -- likewise:
+    #: a second `Flow` class would fail every `isinstance(flow, Flow)` check of a
+    #: flow built from the other import.
+    _LEX_PACKAGE_EXCLUDED_DIRS = ('reflex', 'embed')
 
     def __init__(self, app_name, app_module):
         super().__init__(app_name, app_module)
