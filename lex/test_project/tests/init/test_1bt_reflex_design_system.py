@@ -454,8 +454,14 @@ class TestCluster01bt_HostBridge(SimpleTestCase):
         Then:  the URL's mode applies first, then only the parent's messages at
                an allowed origin and version 1 with a known mode; a ``restored``
                notice is posted only after a ``required`` one, once, to the
-               parent's exact origin, in the lex-auth v2 shape.
+               parent's exact origin, in the lex-auth v2 shape. The components'
+               names hold nothing a JavaScript name cannot (Reflex names the
+               code it generates for a component after its qualified name).
         """
+        from lex.lex_app.reflex import host
+
+        for component in host._components().values():
+            self.assertTrue(component.__qualname__.isidentifier(), component.__qualname__)
         result = subprocess.run(
             ["node", "-e", _HARNESS, str(JS_DIR / "lex_host.jsx"), "?lex_theme=light"],
             capture_output=True, text=True, timeout=60, check=True,

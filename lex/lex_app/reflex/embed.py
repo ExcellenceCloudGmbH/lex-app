@@ -117,6 +117,10 @@ def _frame_class() -> type:
         on_status: rx.EventHandler[passthrough] = field(doc="A calculation's status: {widget_id, model, pk, status}.")
         on_open_log: rx.EventHandler[passthrough] = field(doc="A calculation's log was asked for.")
 
+    # Defined in here to stay lazy, but named as if at module level: Reflex builds the names of
+    # the JavaScript it generates from a component's qualified name, and "<locals>" is not
+    # valid in one -- a page with a frame would not build.
+    LexFrame.__qualname__ = LexFrame.__name__
     return LexFrame
 
 
