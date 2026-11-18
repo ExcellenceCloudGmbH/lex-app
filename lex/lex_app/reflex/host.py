@@ -39,6 +39,11 @@ def _components() -> dict[str, type]:
         tag = "LexAuthNotice"
         event: Var[str] = field(doc='"required" or "restored".')
 
+    # Defined in here to stay lazy, but named as if at module level: Reflex builds the names of
+    # the JavaScript it generates from a component's qualified name, and "<locals>" is not
+    # valid in one.
+    for component in (LexThemeFollower, LexAuthNotice):
+        component.__qualname__ = component.__name__
     return {"theme": LexThemeFollower, "auth": LexAuthNotice}
 
 
