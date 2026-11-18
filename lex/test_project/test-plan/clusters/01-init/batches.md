@@ -2397,3 +2397,31 @@ string before this point — the fix is correct defensive practice regardless of
 Test fix: 1.693's `;`-carrying host case also carried a `*`, so the existing wildcard pre-check was
 rejecting it before the grammar check ever ran; changed to a host with only the semicolon. One new
 test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenario IDs.
+
+### Batch 1bt — RFDS in the Reflex dashboards — configuration, Keycloak permissions, chrome, host bridge ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.695 – 1.706 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/design.py`, `access.py`, `shell.py`, `host.py`, `app.py` (`create_app`), `config.py` (`lex_config`), `auth.py` (`LexKeycloakAuthState`'s RFDS mixin, `lex_login_page`'s notice), `_js/lex_host.jsx`, `_js/lex_rfds.css` |
+| Test file | `lex/test_project/tests/init/test_1bt_reflex_design_system.py` |
+| Test classes | `TestCluster01bt_DesignSystemConfig` (1.695–1.698), `TestCluster01bt_Access` (1.699–1.701), `TestCluster01bt_Chrome` (1.702–1.704), `TestCluster01bt_HostBridge` (1.705), `TestCluster01bt_TheCompiledApp` (1.706) |
+| Fixtures | `_reflex_compiled.compiled_app()` (one compile per process, shared with 1aq); node for 1.705 (skipped without it) |
+| Tests landed | **12 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.695 | `lex_config` lists RFDS after Radix, with the LEX brand | plugins are AuthPlugin, RadixThemesPlugin, RFDSPlugin in that order; brand is the LEX teal; badge and telemetry off; `rfds.bootstrap.validate_config` finds nothing |
+| 1.696 | Locale, currency and time zone come from lex settings | defaults en-US / en / EUR / Django's time-zone default; each `LEX_*` variable overrides its field; a keyword overrides the environment |
+| 1.697 | Conformance warns locally, fails in CI | warn by default; error under `CI`; `LEX_RFDS_CONFORMANCE` wins when valid; a typo falls back to the default |
+| 1.698 | Only lex-app may frame a dashboard | app origins from `LEX_APP_HOSTS` as https, localhost wildcards locally; a response has no X-Frame-Options, an enforcing `frame-ancestors 'self' <origins>`, RFDS's report-only CSP without it, and nosniff |
+| 1.699 | Grants become permission strings, model-wide only | `<app_label>.<Model>:<scope>` per model-wide scope; record-scoped and malformed grants ignored; `permission()` spells the same string and refuses a scope with a colon |
+| 1.700 | The resolver answers from fresh grants and fails closed | remembered identity gets its strings; another subject with the same e-mail, an anonymous one, and the same identity after the TTL get nothing |
+| 1.701 | `LexAccessState.load` loads grants, then RFDS's `AccessState` | signed-in user's grants remembered and the handler returns `AccessState.load`; nothing remembered for an anonymous visitor |
+| 1.702 | `@lex_page` registers a signed-in page that loads grants first | `rxe.page` gets the route, title and loads `[LexAccessState.load, own]`; the nav entry carries heading, icon and permission; the function is returned unchanged; a route without `/` is refused |
+| 1.703 | Navigation lists the overview, then each heading | overview first, headings in registration order, a re-registered page listed once in its old place, no navigation without pages |
+| 1.704 | The chrome hides inside lex-app and follows its theme | the shell, `LexThemeFollower`, the `restored` notice, the embedded class, the title, the logout condition; the CSS hides header/sidebar under the class and sets the navy chrome |
+| 1.705 | The browser bridge obeys only lex-app and reports sign-in state | URL mode first, then only the parent's v1 messages at an allowed origin with a known mode; `restored` only after `required`, once, to the parent's exact origin, lex-auth v2 shape |
+| 1.706 | The compiled app is RFDS on lex-app's runtime | `rfds.install` ran; identity resolver is `rxe_identity`, permission resolver lex-app's, nav checker set; head carries lex-app's styles; transformers: RfdsApi first, headers with no frame options, the framing policy; the Keycloak provider has RFDS's mixin |

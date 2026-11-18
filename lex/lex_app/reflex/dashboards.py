@@ -246,7 +246,11 @@ def _resolving() -> rx.Component:
 
 
 def topbar() -> rx.Component:
-    """The signed-in user and the way out, for a dashboard lex-app is not framing."""
+    """The signed-in user and the way out, without RFDS's shell.
+
+    The dashboards draw RFDS's shell instead (:func:`~lex.lex_app.reflex.shell.lex_chrome`);
+    this stays for projects that build a page of their own outside it.
+    """
     return rx.hstack(
         rx.spacer(),
         rx.vstack(
@@ -341,8 +345,9 @@ def dashboard_page(
             for name, model in sorted(project_models.items())
             if defines_hook(model, TABLE_HOOK)
         ]
-        return rx.vstack(
-            rx.cond(LexDashboardState.embedded, rx.fragment(), topbar()),
+        from lex.lex_app.reflex.shell import lex_chrome
+
+        return lex_chrome(rx.vstack(
             rx.match(
                 LexDashboardState.view,
                 (VIEW_RECORD, _dispatch(record_cases, _notice(NO_RECORD_DASHBOARD))),
@@ -360,7 +365,7 @@ def dashboard_page(
             width="100%",
             spacing="4",
             padding="1em",
-        )
+        ))
 
     return index
 

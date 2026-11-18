@@ -663,29 +663,14 @@ class TestCluster01aq_TheCompiledApp(TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         super().setUpClass()
-        from reflex.config import get_config
-        from reflex_base.registry import RegistrationContext
+        # One compile per process, shared with 1bt: see _reflex_compiled.py.
+        from lex.test_project.tests.init._reflex_compiled import compiled_app
 
-        from lex.bin.lex import _ensure_reflex_config
-        from lex.lex_app.reflex.examples import _reflex_structure as example
-
-        with tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp), \
-                patch.dict(os.environ, {"CI": "true"}), _PROJECT_APP, \
-                patch("lex.lex_app.reflex.dashboards.load_structure", return_value=example), \
-                RegistrationContext.ensure_context().fork():
-            # The project's rxconfig.py, exactly as `lex reflex` writes it.
-            _ensure_reflex_config(Path(tmp))
-            sys.modules.pop("lex.reflex_app", None)
-            try:
-                module = importlib.import_module("lex.reflex_app")
-                app = module.app
-                app._compile(dry_run=True)
-                cls.pages = dict(app._pages)
-                cls.index_on_load = list(app._unevaluated_pages["index"].on_load)
-                cls.middlewares = list(app._middlewares)
-                cls.plugins = list(get_config().plugins)
-            finally:
-                sys.modules.pop("lex.reflex_app", None)
+        compiled = compiled_app()
+        cls.pages = compiled.pages
+        cls.index_on_load = compiled.index_on_load
+        cls.middlewares = compiled.middlewares
+        cls.plugins = compiled.plugins
 
     # -- 1.366 ---------------------------------------------------------
     def test_1_366_the_app_signs_in_through_keycloak_and_serves_every_dashboard(self) -> None:
@@ -710,8 +695,10 @@ class TestCluster01aq_TheCompiledApp(TestCase):
 
         handlers = [handler.fn.__qualname__ for handler in self.index_on_load]
         self.assertEqual(
-            handlers, ["PageGuardState.enforce_login", "LexDashboardState.resolve"],
-            "the guard must run first: resolve reads the database only for a signed-in user",
+            handlers,
+            ["PageGuardState.enforce_login", "LexAccessState.load", "LexDashboardState.resolve"],
+            "the guard must run first: the grants and resolve read Keycloak and the database "
+            "only for a signed-in user (1bt loads the grants for RFDS's permission checks)",
         )
         self.assertIn("DjangoConnectionMiddleware", [type(m).__name__ for m in self.middlewares])
 

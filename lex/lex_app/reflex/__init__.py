@@ -12,7 +12,14 @@ Everything a dashboard author needs is importable from here::
 ``current_access_token``  the user's Keycloak access token, for the lex-app API
 ``LexUser``               the signed-in user's names, as frontend vars
 ``lex_config``            the ``rxe.Config`` a project's ``rxconfig.py`` returns
+``lex_page``              a signed-in page in lex-app's chrome (``@rx.page``'s twin)
+``lex_chrome``            any component in lex-app's chrome
+``permission``            the RFDS permission string for a Keycloak scope on a model
+``LexAccessState``        loads the user's grants for RFDS's ``can()`` and navigation
 ========================  ====================================================
+
+UI comes from ``rfds`` (and plain ``reflex``): the components, charts, tables
+and page templates. Anything that knows about lex-app comes from here.
 
 Nothing is imported until it is used. ``rxconfig.py`` imports
 :mod:`lex.lex_app.reflex.config` through this package before Django or any
@@ -26,6 +33,7 @@ import importlib
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from lex.lex_app.reflex.access import LexAccessState, permission
     from lex.lex_app.reflex.auth import (
         LexKeycloakAuthState,
         LexUser,
@@ -36,8 +44,13 @@ if TYPE_CHECKING:
     from lex.lex_app.reflex.config import lex_auth_plugin, lex_config
     from lex.lex_app.reflex.dashboards import LexDashboardState, current_record
     from lex.lex_app.reflex.django_orm import orm, run_orm
+    from lex.lex_app.reflex.shell import lex_chrome, lex_page
 
 _EXPORTS = {
+    "LexAccessState": "lex.lex_app.reflex.access",
+    "permission": "lex.lex_app.reflex.access",
+    "lex_chrome": "lex.lex_app.reflex.shell",
+    "lex_page": "lex.lex_app.reflex.shell",
     "LexKeycloakAuthState": "lex.lex_app.reflex.auth",
     "LexUser": "lex.lex_app.reflex.auth",
     "current_access_token": "lex.lex_app.reflex.auth",
@@ -55,6 +68,7 @@ _EXPORTS = {
 #: -- the docs gate among them -- see a module ``__getattr__`` plus ``__all__`` as
 #: its exports (PEP 562). 1.357c keeps the two lists equal.
 __all__ = [
+    "LexAccessState",
     "LexDashboardState",
     "LexKeycloakAuthState",
     "LexUser",
@@ -63,8 +77,11 @@ __all__ = [
     "current_record",
     "has_permission",
     "lex_auth_plugin",
+    "lex_chrome",
     "lex_config",
+    "lex_page",
     "orm",
+    "permission",
     "run_orm",
 ]
 

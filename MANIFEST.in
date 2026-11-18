@@ -10,6 +10,8 @@ recursive-exclude lex/react/build *
 recursive-include lex/assets *
 # Read at runtime by the core migration 0001; see pyproject.toml package-data.
 recursive-include lex/core/sql *.sql
+# Compiled into every Reflex dashboard; see pyproject.toml package-data.
+recursive-include lex/lex_app/reflex/_js *.jsx *.js *.css
 include pyproject.toml
 include requirements*.txt
 include generate_pycharm_configs.py

@@ -173,10 +173,18 @@ def lex_config(**overrides: Any):
     Any ``rx.Config`` or ``rxe.Config`` option overrides the default of the same
     name, and ``REFLEX_<OPTION>`` environment variables override both, as in any
     Reflex app. ``plugins`` replaces the whole list: keep
-    :func:`lex_auth_plugin` in it, or the dashboards stop requiring sign-in.
+    :func:`lex_auth_plugin` in it, or the dashboards stop requiring sign-in, and
+    keep RFDS's two plugins in this order, or ``rfds.install()`` refuses to start.
+
+    The plugins are lex-app's sign-in, Radix with RFDS's root theme, and RFDS
+    itself with lex-app's brand and locale (:mod:`lex.lex_app.reflex.design`).
+    The *Built with Reflex* badge is off: Reflex Enterprise shows it anyway on
+    a tier that may not hide it, and RFDS accepts that case.
     """
     import reflex as rx
     import reflex_enterprise as rxe
+
+    from lex.lex_app.reflex.design import rfds_plugin, theme_plugin
 
     _make_app_module_findable()
     project_root = os.getenv("PROJECT_ROOT") or os.getcwd()
@@ -184,7 +192,8 @@ def lex_config(**overrides: Any):
         "app_name": app_name_for(project_root),
         "app_module_import": APP_MODULE,
         "telemetry_enabled": False,
-        "plugins": [lex_auth_plugin(), rx.plugins.RadixThemesPlugin()],
+        "show_built_with_reflex": False,
+        "plugins": [lex_auth_plugin(), theme_plugin(), rfds_plugin()],
         # A sitemap advertises pages to crawlers; every page here is behind a
         # sign-in, so it would advertise nothing a crawler could open.
         "disable_plugins": [rx.plugins.SitemapPlugin],

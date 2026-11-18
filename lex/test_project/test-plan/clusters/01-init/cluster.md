@@ -913,3 +913,28 @@ does not remove user launch configurations.
 | 1.694 | The SPA document itself carries `frame-ancestors` | `serve_react`'s SPA fallback (`index.html`) and a literal non-fallback `.html`/`.htm` file (`embed.html`, case-insensitively) both carry `frame-ancestors 'self' <origins>`; merging keeps an existing CSP header's other directives; a hashed asset and `config.js` get none; unset leaves the SPA fallback unchanged; configured but nothing valid still gets exactly `frame-ancestors 'self'` |
 
 **Scenario range:** 1.690 – 1.694. **Test file:** `lex/test_project/tests/init/test_1bs_embed_allowed_origins.py`. **Type:** U. **Status:** ✅ Complete (2026-10-17). Batch: [1bs](batches.md).
+
+---
+
+### 1bt. RFDS in the Reflex dashboards — configuration, Keycloak permissions, chrome, host bridge ✅
+
+**What it tests:** that a project's Reflex dashboards get RFDS with nothing configured by hand: RFDS's plugins in the order `rfds.install()` demands with lex-app's brand and locale, RFDS installed on lex-app's runtime (Keycloak as the only identity, Keycloak's grants as RFDS's permissions, headers that let only lex-app frame a dashboard), `@lex_page` pages in lex-app's chrome, and a browser bridge that follows lex-app's colour mode and reports the frame's sign-in state.
+
+**Why a regression matters:** a wrong plugin order or a missing plugin stops every dashboard from compiling; RFDS's default `X-Frame-Options: DENY` blanks every dashboard inside lex-app's Analytics tab while a missing `frame-ancestors` lets any site frame it; a resolver that answers without fresh grants shows controls a user has no grant for; a bridge that obeys any origin lets a stranger restyle a dashboard.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.695 | `lex_config` lists RFDS after Radix, with the LEX brand | plugins are AuthPlugin, RadixThemesPlugin, RFDSPlugin in that order; brand is the LEX teal; badge and telemetry off; `rfds.bootstrap.validate_config` finds nothing |
+| 1.696 | Locale, currency and time zone come from lex settings | defaults en-US / en / EUR / Django's time-zone default; each `LEX_*` variable overrides its field; a keyword overrides the environment |
+| 1.697 | Conformance warns locally, fails in CI | warn by default; error under `CI`; `LEX_RFDS_CONFORMANCE` wins when valid; a typo falls back to the default |
+| 1.698 | Only lex-app may frame a dashboard | app origins from `LEX_APP_HOSTS` as https, localhost wildcards locally; a response has no X-Frame-Options, an enforcing `frame-ancestors 'self' <origins>`, RFDS's report-only CSP without it, and nosniff |
+| 1.699 | Grants become permission strings, model-wide only | `<app_label>.<Model>:<scope>` per model-wide scope; record-scoped and malformed grants ignored; `permission()` spells the same string and refuses a scope with a colon |
+| 1.700 | The resolver answers from fresh grants and fails closed | remembered identity gets its strings; another subject with the same e-mail, an anonymous one, and the same identity after the TTL get nothing |
+| 1.701 | `LexAccessState.load` loads grants, then RFDS's `AccessState` | signed-in user's grants remembered and the handler returns `AccessState.load`; nothing remembered for an anonymous visitor |
+| 1.702 | `@lex_page` registers a signed-in page that loads grants first | `rxe.page` gets the route, title and loads `[LexAccessState.load, own]`; the nav entry carries heading, icon and permission; the function is returned unchanged; a route without `/` is refused |
+| 1.703 | Navigation lists the overview, then each heading | overview first, headings in registration order, a re-registered page listed once in its old place, no navigation without pages |
+| 1.704 | The chrome hides inside lex-app and follows its theme | the shell, `LexThemeFollower`, the `restored` notice, the embedded class, the title, the logout condition; the CSS hides header/sidebar under the class and sets the navy chrome |
+| 1.705 | The browser bridge obeys only lex-app and reports sign-in state | URL mode first, then only the parent's v1 messages at an allowed origin with a known mode; `restored` only after `required`, once, to the parent's exact origin, lex-auth v2 shape |
+| 1.706 | The compiled app is RFDS on lex-app's runtime | `rfds.install` ran; identity resolver is `rxe_identity`, permission resolver lex-app's, nav checker set; head carries lex-app's styles; transformers: RfdsApi first, headers with no frame options, the framing policy; the Keycloak provider has RFDS's mixin |
+
+**Scenario range:** 1.695 – 1.706. **Test file:** `lex/test_project/tests/init/test_1bt_reflex_design_system.py`. **Type:** U. **Status:** ✅ Complete (2026-11-17). Batch: [1bt](batches.md).
