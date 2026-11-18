@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 706
+max_scenario: 716
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1838,3 +1838,24 @@ letters:
       process. 1.366 gained LexAccessState.load between the sign-in guard and resolve. Writing
       the tests found one bug: a page registered again (a hot reload) moved to the end of its
       navigation section; it now keeps its place.
+  bu:
+    title: 'Model data in the Reflex dashboards — through lex-app''s own API, as the signed-in user'
+    scenarios: 1.707-1.716
+    status: complete
+    tests:
+      pass: 10
+      skip: 0
+      xfail: 0
+    note: >-
+      A dashboard reads and writes a model's records through lex-app's own REST API with the
+      user's Keycloak access token (lex_api / LexApi), so it shows and changes exactly what the
+      grid would for the same user: model and row permissions, field filtering, validation,
+      hooks, audit log and calculations all run, because it is the same code. lex_table is
+      RFDS's server-paged data_table over the list endpoint (page/perPage/ordering, RFDS filters
+      translated to lex-app's lookups, the quick search on one text field, fixed filters that
+      may be state vars, read at mount); lex_grid is RFDS's AG Grid Community over at most 2,000
+      rows; LexRecordState.record() asks the API for the record before reading the instance, so
+      a record dashboard never shows a record the API would hide (403 denied, 404 missing).
+      lex_columns maps Django field types to RFDS column kinds and leaves out credential-shaped
+      fields the serialisers never publish. lex_rows turns a queryset into wire rows (Decimals
+      as exact strings) for charts inside run_orm.

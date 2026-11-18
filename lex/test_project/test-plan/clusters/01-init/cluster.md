@@ -938,3 +938,26 @@ does not remove user launch configurations.
 | 1.706 | The compiled app is RFDS on lex-app's runtime | `rfds.install` ran; identity resolver is `rxe_identity`, permission resolver lex-app's, nav checker set; head carries lex-app's styles; transformers: RfdsApi first, headers with no frame options, the framing policy; the Keycloak provider has RFDS's mixin |
 
 **Scenario range:** 1.695 – 1.706. **Test file:** `lex/test_project/tests/init/test_1bt_reflex_design_system.py`. **Type:** U. **Status:** ✅ Complete (2026-11-17). Batch: [1bt](batches.md).
+
+---
+
+### 1bu. Model data in the Reflex dashboards — through lex-app's own API, as the signed-in user ✅
+
+**What it tests:** that a dashboard's model data comes through lex-app's own REST API as the signed-in user: the requests lex-app's frontend would make, errors that never look like empty data, RFDS's table filters, sort, paging and search translated to lex-app's list parameters, a grid within RFDS's state budget, and a record state that only hands out records the API would show.
+
+**Why a regression matters:** a dashboard reading the database around lex-app's API would show records and fields the grid hides; a write around it would skip validation, hooks, the audit log and calculations; a mistranslated filter or ordering silently shows the wrong rows; an error mistaken for an empty page tells a user there is nothing when there is.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.707 | Calls lex-app's own endpoints with the user's token | Bearer token on every call; list/read/create/update(PATCH)/delete on the model-entry routes, which resolve to lex-app's views; page/perPage/ordering and repeated filters in order; operation ids name model and action; both list shapes become `{count, results}` |
+| 1.708 | Refusals and outages are errors, never empty data | 403/404/500/unreachable raise `LexApiError` with the status (0 unreachable); 401/403/404 are `denied`; no token, no API |
+| 1.709 | `lex_api` uses the session's token and the configured base | the session's access token; base `LEX_API_URL`, else `https://DOMAIN_HOSTED`, else `http://localhost:8000` |
+| 1.710 | Values travel as RFDS wire values | Decimals as exact strings, dates ISO, UUIDs strings, related instances their key, NaN `None`, nested values converted; mapping rows keep chosen fields |
+| 1.711 | `lex_rows` reads a queryset with `values()` | real rows of chosen fields in queryset order; instances read field by field |
+| 1.712 | Columns follow each field's type and skip credentials | id/boolean/instant/text kinds, verbose-name headers, `password` left out, per-field overrides, an unknown field refused; grid columns likewise |
+| 1.713 | Table filters become lex list filters | each RFDS operator mapped to lex-app's lookups (`!`, repeated fields, `__gte`/`__lte`, `__icontains`, `__blank`); malformed names dropped; fixed filters skip empties and repeat lists |
+| 1.714 | `lex_table` pages, sorts, filters and searches through the API | one state class per distinct table; mount passes the fixed filters as the state var; page 3 of 25, `-name,id`, fixed + table filters + `name__icontains`; wire rows and the total |
+| 1.715 | `lex_grid` loads rows once, says when cut, hides on refusal | first page of `GRID_ROW_LIMIT` with fixed filters; wire rows, `truncated`, dataset version bumped; a 403 leaves no rows and `denied` |
+| 1.716 | A record dashboard gets only records the API would show | API shows: instance, title, data, `ok`; 403: `None`, `denied`; 404 or no pk: `None`, `missing`; the instance is read only after the API showed the record |
+
+**Scenario range:** 1.707 – 1.716. **Test file:** `lex/test_project/tests/init/test_1bu_reflex_model_data.py`. **Type:** U (1.711: I). **Status:** ✅ Complete (2026-11-17). Batch: [1bu](batches.md).
