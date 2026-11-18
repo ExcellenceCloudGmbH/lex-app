@@ -582,8 +582,13 @@ def lex_grid(
 # -- the record a dashboard is about ------------------------------------------
 
 
-class LexRecordState(rx.State, mixin=True):
+class LexRecordState(rx.State):
     """The record ``?model=&pk=`` names -- or ``model``'s, for a shared dashboard -- checked against the API.
+
+    A state, not a mixin: a class whose only state base is a mixin is itself a
+    mixin in Reflex, so ``class FundDashboard(LexRecordState)`` -- the way a
+    dashboard is written -- would never become a state and its handlers would
+    not bind. Each dashboard is a substate of this one.
 
     :meth:`record` asks lex-app's API for the record as the user first: only if
     the API would show it does the dashboard get the model instance, so a
