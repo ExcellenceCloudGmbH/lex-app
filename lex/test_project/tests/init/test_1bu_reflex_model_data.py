@@ -275,8 +275,14 @@ class TestCluster01bu_TablesGridsAndRecords(SimpleTestCase):
                mounting passes the fixed filters (the var, read at mount);
                the API is asked for page 3 of 25 with that ordering, the fixed
                filters, the table filters and the search on the default text
-               field; rows come back as wire rows with the total.
+               field; rows come back as wire rows with the total. Each table's
+               state class pickles as itself -- Reflex's state managers pickle
+               state, to disk in development and to Redis across workers.
         """
+        import pickle
+
+        pickled = data.table_state(Group, columns=data.lex_columns(Group), page_size=10)
+        self.assertIs(pickle.loads(pickle.dumps(pickled)), pickled, "a table's state must pickle by name")
         import reflex as rx
 
         class Scope(rx.State):
