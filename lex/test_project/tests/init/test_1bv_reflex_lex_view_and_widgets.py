@@ -386,8 +386,11 @@ class TestCluster01bv_TheFrame(SimpleTestCase):
                widget host gets its manifest and the theme when ready; statuses
                reach ``on_status`` -- a repeat dropped, a re-run's result not;
                a log request carries its origin; and in Firefox, without
-               ``ancestorOrigins``, the referrer names the framing lex-app.
+               ``ancestorOrigins``, the referrer names the framing lex-app. The
+               frame component's name holds nothing a JavaScript name cannot
+               (Reflex names the code it generates after it).
         """
+        self.assertTrue(embed._frame_class().__qualname__.isidentifier(), embed._frame_class().__qualname__)
         result = subprocess.run(
             ["node", "-e", _FRAME_HARNESS, str(JS_DIR / "lex_host.jsx"), str(JS_DIR / "lex_frame.jsx")],
             capture_output=True, text=True, timeout=60, check=True,
