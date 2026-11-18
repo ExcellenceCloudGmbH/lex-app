@@ -13,7 +13,9 @@ A Streamlit dashboard signs in through the app, never through Keycloak directly:
 4. Every request and WebSocket asks the broker (:mod:`.broker`) for a fresh access token of the
    sign-in behind the binding; only the access token and identity headers reach Streamlit.
 
-The MCP embed ticket (:mod:`.embed`) reuses the same codes and bindings (``aud="embed"``).
+A Reflex dashboard signs in the same way, as audience ``reflex``: its backend
+(:mod:`lex.lex_app.reflex.session`) plays the proxy's part. The MCP embed ticket (:mod:`.embed`)
+reuses the same codes and bindings (``aud="embed"``).
 
 Modules: :mod:`.modes` (``LEX_STREAMLIT_AUTH``), :mod:`.cookies`, :mod:`.sites` (allowed origins,
 same-site app host) -- standard library only, importable before Django is set up -- and
@@ -26,6 +28,7 @@ from typing import Any
 
 _HANDOFF_NAMES = (
     "AUD_EMBED",
+    "AUD_REFLEX",
     "AUD_STREAMLIT",
     "CODE_TTL_SECONDS",
     "HandoffError",

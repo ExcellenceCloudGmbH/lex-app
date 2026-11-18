@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 193
+max_scenario: 197
 letters:
   a:
     title: ''
@@ -348,3 +348,22 @@ letters:
       discovery imports lex/lex_app/*.py as lex_app.*, and the view's lazy import of
       lex.lex_app.dashboard_surfaces can be a different object from the test module's top-level
       reference, so 10.190 patches by import path.
+  ag:
+    title: 'Reflex dashboards sign in through the app''s hand-off - oidc/handoff for the reflex audience'
+    scenarios: 10.194-10.197
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      Reflex without Reflex Enterprise, PR A: the Django half.
+      lex/authentication/dashboards/handoff.py gains AUD_REFLEX ('reflex'); sites.py gains
+      reflex_origins / is_reflex_origin (the reflex hosts of LEX_INSTANCE_HOSTS, loopback in
+      development); HandoffView serves aud=reflex always (Reflex has no legacy sign-in to roll
+      out of) while aud=streamlit stays behind LEX_STREAMLIT_AUTH, and checks the return origin
+      against that audience's own hosts, so a code never lands on the other surface;
+      capabilities.dashboard_handoff lists 'reflex' while IS_REFLEX_ENABLED. A reflex binding,
+      like a streamlit one, lives as long as its sign-in. Test note: sites.is_deployed treats
+      DEPLOYMENT_ENVIRONMENT set to anything, even empty, as deployed, so 10.195 removes it to
+      test the loopback exception.

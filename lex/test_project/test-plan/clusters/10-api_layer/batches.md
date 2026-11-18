@@ -304,3 +304,23 @@ a project reaching for column options is most likely to have.
 | 10.191 | Reflex wins when on and the model has a Reflex hook | Reflex hook > Streamlit hook > none with Reflex on; only Streamlit hooks when off or forced; record and table separate; bad level refused; unknown setting means auto |
 | 10.192 | The Reflex home needs Reflex and a structure module | off: false; on with `_reflex_structure` found: true; on without: false; found with `find_spec` |
 | 10.193 | Deciding never imports Reflex into Django | neither module imports reflex, reflex_enterprise, rfds or lex.lex_app.reflex |
+
+### Batch 10ag — Reflex dashboards sign in through the app's hand-off - oidc/handoff for the reflex audience ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.194 – 10.197 |
+| Type | E (10.197: I) |
+| Files covered | `lex/authentication/views/handoff_views.py`, `lex/authentication/dashboards/handoff.py` (`AUD_REFLEX`, `issue_code`, `redeem`, `resolve`), `lex/authentication/dashboards/sites.py` (`reflex_origins`, `is_reflex_origin`), `lex/authentication/capabilities.py` (`dashboard_handoff_surfaces`) |
+| Test file | `lex/test_project/tests/api_layer/test_10ag_reflex_handoff_audience.py` |
+| Test classes | `TestCluster10ag_SignedIn` (10.194), `TestCluster10ag_Origins` (10.195), `TestCluster10ag_NotSignedIn` (10.196), `TestCluster10ag_Advertised` (10.197) |
+| Fixtures | `lex.lex_app.tests.auth.sign_in`; `LEX_INSTANCE_HOSTS` naming an app, a Streamlit and a Reflex host |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.194 | A Reflex dashboard gets a code bound to reflex | 302 to `<Reflex origin>/auth/handoff?code&state&next`, no-store, with Streamlit's hand-off off; the code is for `reflex` and that origin, 60 s; redeems into a `reflex` binding with no expiry; refused as `streamlit` or for the Streamlit host; a Reflex handle never resolves as Streamlit |
+| 10.195 | Each audience goes only to its own hosts | reflex code to the Streamlit host, streamlit code to the Reflex host, unlisted host, unknown audience: 400, nothing minted; `streamlit` still 404 while its flag is off; `reflex_origins`; loopback only when not deployed |
+| 10.196 | Without a sign-in, frames go back and pages sign in | frame: back to `/auth/handoff?error=login_required` with state and path; top level: lex-app's sign-in returning to the hand-off; no code |
+| 10.197 | The capability lists reflex while Reflex is served | `dashboard_handoff`: [] / [reflex] / [streamlit, reflex] by IS_REFLEX_ENABLED and LEX_STREAMLIT_AUTH |
