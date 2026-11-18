@@ -459,6 +459,11 @@ def _state_for(base: type, model: Any, classvars: Mapping[str, Any], *, defaults
         namespace = {"__module__": __name__, "resource": model_id(model), **classvars, **defaults,
                      "__annotations__": annotations}
         cls = type(name, (base, rx.State), namespace)
+        # Reachable by name, as a class written in this module would be: Reflex's state managers
+        # pickle state -- to disk in development, to Redis across workers -- and pickle finds a
+        # class by its module and name. Every worker compiles the same pages in the same order,
+        # so the name means the same class in each.
+        globals()[name] = cls
         _STATE_CACHE[key] = cls
     return cls
 
