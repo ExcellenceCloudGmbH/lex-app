@@ -362,7 +362,22 @@ class TestCluster01bu_TablesGridsAndRecords(SimpleTestCase):
                refused: ``None`` and "denied"; hidden or absent: ``None`` and
                "missing"; lex-app failing: "unavailable", never "missing" --
                the instance is never read for a record the API would not show.
+               And a dashboard written as the docs write it --
+               ``class Dash(LexRecordState)`` with an ``@rx.event`` -- is a real
+               state whose handler binds, not a mixin a page cannot mount.
         """
+        import reflex as rx
+        from reflex_base.event import EventHandler
+
+        class Dash116(data.LexRecordState):
+            @rx.event
+            async def load(self):
+                await self.record()
+
+        self.assertFalse(Dash116._mixin, "a LexRecordState subclass must be a state, not another mixin")
+        self.assertIsInstance(Dash116.load, EventHandler, "the subclass's handler must bind for on_mount")
+        self.assertIn("record_state", Dash116.vars, "the record vars reach the subclass")
+
         group = SimpleNamespace(pk=5)
         reads = []
 
@@ -393,7 +408,7 @@ class TestCluster01bu_TablesGridsAndRecords(SimpleTestCase):
             with self.subTest(state=expected_state), patch.object(data, "lex_api", api), \
                     patch("lex.lex_app.reflex.dashboards.current_record", current), \
                     patch("lex.lex_app.reflex.django_orm.run_orm", run_orm):
-                result = _run(data.LexRecordState.record(state))
+                result = _run(data.LexRecordState.record.fn(state))
                 self.assertEqual(state.record_state, expected_state)
                 self.assertIs(result, group if expect_instance else None)
                 self.assertEqual(reads, [Group] if expect_instance else [],
@@ -402,5 +417,5 @@ class TestCluster01bu_TablesGridsAndRecords(SimpleTestCase):
         self.assertEqual(state.record_title, "")
         with patch.object(data, "lex_api", api):
             no_pk = fake(pk="")
-            self.assertIsNone(_run(data.LexRecordState.record(no_pk)))
+            self.assertIsNone(_run(data.LexRecordState.record.fn(no_pk)))
             self.assertEqual(no_pk.record_state, "missing")
