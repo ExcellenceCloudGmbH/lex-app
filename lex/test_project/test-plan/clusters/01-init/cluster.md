@@ -1036,3 +1036,21 @@ does not remove user launch configurations.
 | 1.739 | The hot-reload socket passes through with its subprotocol | accepted with vite-hmr; text and bytes both ways unchanged; no frontend -> the socket is refused |
 
 **Scenario range:** 1.736 – 1.739. **Test file:** `lex/test_project/tests/init/test_1by_reflex_without_enterprise.py`. **Type:** U. **Status:** ✅ Complete (2026-11-19). Batch: [1by](batches.md).
+
+---
+
+### 1bz. The LEX look for Reflex dashboards ✅
+
+**What it tests:** that a Reflex dashboard looks like lex-app: every RFDS colour, type, radius and chrome value comes from lex-app's design tokens in light and dark, wins over RFDS's own stylesheets wherever RFDS sets it, the accent is the LEX teal itself, the header, navigation, cards and buttons are lex-app's, and pages open in light mode as lex-app does.
+
+**Why a regression matters:** a dashboard framed inside lex-app that reads as another product (RFDS's slate canvas, cyan-indigo accent, square bordered cards, another font) -- which is what the first cut shipped, because RFDS's brand sheet outranked lex-app's overrides.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.740 | Every colour, type and radius is a lex token | per mode: canvas, surfaces, text, link, lines, teal accent and focus, tag statuses, navy chrome, table header, Inter, radii = the tokens; no hex literal in the module's code; a changed token changes the stylesheet |
+| 1.741 | lex values outrank RFDS and reach every Radix element | both mode blocks start at html:root:root (above the brand sheet's :root:root) and cover forced-mode regions, dark last; every re-declared variable the theme sets is forwarded from a per-mode copy; every other one RFDS re-declares reads an accent step the theme sets |
+| 1.742 | The accent scale is the LEX teal, not RFDS's adjusted brand | indigo-9 = TEAL 500 both modes; hover, accent text, selection washes, on-solid text and page/panel backgrounds from the tokens; the brand passed to RFDS is the same teal |
+| 1.743 | Header, navigation, cards and buttons are lex-app's | navy gradient header with teal glow, no stripe; navy side nav, teal wash + 3 px bar on the current page; 16 px cards with soft elevation; buttons 8 px / 600 / no uppercase / hover lift, none with reduced motion; primary navy gradient + white (light), teal gradient + dark text (dark); soft focus ring, no dashed title outline |
+| 1.744 | Pages load Inter and the theme and open in light mode | lex_config default_color_mode light; head links Inter and inlines the theme then the embedded layout; the embedded layout file carries no colours |
+
+**Scenario range:** 1.740 – 1.744. **Test file:** `lex/test_project/tests/init/test_1bz_reflex_lex_look.py`. **Type:** U. **Status:** ✅ Complete (2026-11-19). Batch: [1bz](batches.md).

@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 739
+max_scenario: 744
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1964,3 +1964,25 @@ letters:
       (StreamConsumed instead of a retry while the frontend starts), and a gzipped body went on
       still compressed after its Content-Encoding header was dropped. 1.736 runs in a child
       interpreter that refuses to import reflex_enterprise and rfds.enterprise.
+  bz:
+    title: 'The LEX look for Reflex dashboards - RFDS dressed in lex-app''s design tokens'
+    scenarios: 1.740-1.744
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      Decision E13. lex/lex_app/reflex/theme.py generates the dashboards' stylesheet from
+      lex_tokens for light and dark: every RFDS colour, type, radius and chrome variable, the
+      Radix indigo steps RFDS's accent reads pinned to the LEX teal (RFDS's brand sheet had
+      nudged #14B4B4 to a cyan), and the variables RFDS re-declares on each Radix element
+      forwarded there per mode; plus lex-app's components (navy gradient header and side
+      navigation with a teal current-page bar, 16 px cards with soft elevation, navy/teal
+      primary button, soft focus ring, no dashed page-title outline). Pages load Inter and open
+      in light mode (Config.default_color_mode), never the OS mode. The first cut's overrides
+      used html:root, which RFDS's brand sheet (:root:root) outranked -- 1.741 pins the
+      specificity and fails if an RFDS release re-declares a variable this theme sets without
+      forwarding it. Charts keep RFDS's colour-blind-checked categorical palette (a JS table,
+      never branded). Mutations caught: weak selectors, a dropped forward, an off-teal accent.
+      1.704 (1bt) now reads the chrome navy from the theme.

@@ -2546,3 +2546,24 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 | 1.737 | The proxy runs only for a one-port development run | REFLEX_USE_SINGLE_PORT set, development, not backend-only -> on; unset, production or backend-only -> off; install registers the lifespan task only when on |
 | 1.738 | Pages pass through to the frontend server | method, path, query, body on; Host the upstream's; hop-by-hop dropped; status, headers, body back; gzip decoded without Content-Encoding; a starting frontend retried with the body every time; never answering -> 502 |
 | 1.739 | The hot-reload socket passes through with its subprotocol | accepted with vite-hmr; text and bytes both ways unchanged; no frontend -> the socket is refused |
+
+### Batch 1bz — The LEX look for Reflex dashboards - RFDS dressed in lex-app's design tokens ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.740 – 1.744 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/theme.py`, `lex/lex_app/reflex/design.py` (`lex_head_components`, `brand_spec`), `lex/lex_app/reflex/config.py` (`default_color_mode`), `lex/lex_app/reflex/_js/lex_rfds.css` |
+| Test file | `lex/test_project/tests/init/test_1bz_reflex_lex_look.py` |
+| Test classes | `TestCluster01bz_Tokens` (1.740), `_Precedence` (1.741), `_Accent` (1.742), `_Components` (1.743), `_Pages` (1.744) |
+| Fixtures | none; 1.741 reads RFDS's generated `rfds.css` from the installed package |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.740 | Every colour, type and radius is a lex token | per mode: canvas, surfaces, text, link, lines, teal accent and focus, tag statuses, navy chrome, table header, Inter, radii = the tokens; no hex literal in the module's code; a changed token changes the stylesheet |
+| 1.741 | lex values outrank RFDS and reach every Radix element | both mode blocks start at html:root:root (above the brand sheet's :root:root) and cover forced-mode regions, dark last; every re-declared variable the theme sets is forwarded from a per-mode copy; every other one RFDS re-declares reads an accent step the theme sets |
+| 1.742 | The accent scale is the LEX teal, not RFDS's adjusted brand | indigo-9 = TEAL 500 both modes; hover, accent text, selection washes, on-solid text and page/panel backgrounds from the tokens; the brand passed to RFDS is the same teal |
+| 1.743 | Header, navigation, cards and buttons are lex-app's | navy gradient header with teal glow, no stripe; navy side nav, teal wash + 3 px bar on the current page; 16 px cards with soft elevation; buttons 8 px / 600 / no uppercase / hover lift, none with reduced motion; primary navy gradient + white (light), teal gradient + dark text (dark); soft focus ring, no dashed title outline |
+| 1.744 | Pages load Inter and the theme and open in light mode | lex_config default_color_mode light; head links Inter and inlines the theme then the embedded layout; the embedded layout file carries no colours |
