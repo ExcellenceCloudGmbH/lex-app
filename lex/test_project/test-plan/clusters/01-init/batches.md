@@ -2546,3 +2546,20 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 | 1.737 | The proxy runs only for a one-port development run | REFLEX_USE_SINGLE_PORT set, development, not backend-only -> on; unset, production or backend-only -> off; install registers the lifespan task only when on |
 | 1.738 | Pages pass through to the frontend server | method, path, query, body on; Host the upstream's; hop-by-hop dropped; status, headers, body back; gzip decoded without Content-Encoding; a starting frontend retried with the body every time; never answering -> 502 |
 | 1.739 | The hot-reload socket passes through with its subprotocol | accepted with vite-hmr; text and bytes both ways unchanged; no frontend -> the socket is refused |
+
+### Batch 1ca — A local run lets the dashboards' sign-in and sign-out send the browser back to them ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.745 – 1.745 |
+| Type | I |
+| Files covered | `lex/lex_app/settings.py` (`_LOCAL_DEV_PORTS`, `_local_dev_origins`, `_cors_allowed_origins`, `_redirect_hosts`), `lex/authentication/middleware.py` (`OidcRedirectGuardMiddleware`, through the views) |
+| Test file | `lex/test_project/tests/init/test_1ca_local_dashboard_redirects.py` |
+| Test classes | `TestCluster01ca_LocalDashboardRedirects` (1.745) |
+| Fixtures | `oauth2_authcodeflow.testing.FakeOP`; the allowlists overridden as settings derives them |
+| Tests landed | **1 pass / 0 fail** (6 subtests) |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.745 | A local run trusts the dashboards' dev servers and no more | local: 8501, 8502, 8503 and a moved Reflex port trusted on localhost and 127.0.0.1, total_logout and authenticate redirect back to the dashboard; another loopback port and a foreign site still 400 REDIRECT_NOT_ALLOWED; deployed: no localhost; this local run's real settings carry the dashboards' origins |

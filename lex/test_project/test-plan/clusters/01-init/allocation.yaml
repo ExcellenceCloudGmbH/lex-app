@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 739
+max_scenario: 745
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1964,3 +1964,21 @@ letters:
       (StreamConsumed instead of a retry while the frontend starts), and a gzipped body went on
       still compressed after its Content-Encoding header was dropped. 1.736 runs in a child
       interpreter that refuses to import reflex_enterprise and rfds.enterprise.
+  ca:
+    title: 'A local run lets the dashboards'' sign-in and sign-out send the browser back to them'
+    scenarios: 1.745-1.745
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      Found by hand: Sign out on a local Reflex dashboard (localhost:8502) ended on lex-app's
+      JSON "Redirect target not allowed." /auth/logout sends the browser to
+      <app>/oidc/total_logout?next=<dashboard>, and both lex-app's OidcRedirectGuardMiddleware
+      and the OIDC library's OIDC_ALLOWED_REDIRECT_HOSTS only trusted the local React dev server
+      and Django. settings.py now adds the dashboards' default dev ports (Streamlit 8501, Reflex
+      8502 and 8503) and a REFLEX_FRONTEND_PORT/REFLEX_BACKEND_PORT override to a local run's
+      origins; deployed instances are unchanged (their dashboards come from LEX_INSTANCE_HOSTS).
+      Letter ca and 1.745: 1bz (1.740-1.744) is allocated on the stacked feat/reflex-lex-look.
+      Without the settings change 1.745 fails.
