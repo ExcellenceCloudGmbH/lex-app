@@ -13,7 +13,7 @@ neither by hand:
 :func:`lex_security_headers`  RFDS's security headers, allowing exactly lex-app
                           to frame the dashboards
 :func:`lex_app_origins`   the origins lex-app's own pages are served from
-:func:`lex_head_components`  lex-app's overrides of RFDS's chrome
+:func:`lex_head_components`  the LEX look over RFDS (Inter, the token theme)
 ========================  ====================================================
 
 Everything here must stay importable before Django is set up and before any
@@ -55,7 +55,7 @@ def brand_spec():
 
     RFDS derives its accent scales from it and checks it against its contrast
     gates when the app compiles; the navy chrome lex-app's own sidebar uses is
-    set by :func:`lex_head_components`, since RFDS derives chrome from the brand.
+    set by :mod:`lex.lex_app.reflex.theme`, which also pins the accent to this exact teal.
     """
     from rfds import BrandSpec
 
@@ -190,15 +190,22 @@ def framing_policy_transformer(origins: list[str] | None = None):
 
 
 def lex_head_components() -> list:
-    """lex-app's styles over RFDS's, inlined in every page's head: navy chrome, the LEX font,
-    and the embedded layout.
+    """lex-app's look over RFDS's, in every page's head: the Inter font, the LEX theme generated
+    from the design tokens (:mod:`lex.lex_app.reflex.theme`), and the embedded layout.
 
     Inline rather than an app stylesheet, so they need no asset linked into the
-    project; their ``html:root`` selectors outrank RFDS's own, so where in the
-    head they land does not matter. The source is ``_js/lex_rfds.css``.
+    project; their ``html:root:root`` selectors outrank RFDS's own, so where in the
+    head they land does not matter. The embedded layout's source is ``_js/lex_rfds.css``.
     """
     import reflex as rx
 
     from lex.lex_app.reflex._js import HERE
+    from lex.lex_app.reflex.theme import INTER_STYLESHEET, lex_theme_css
 
-    return [rx.el.style((HERE / "lex_rfds.css").read_text(encoding="utf-8"))]
+    css = lex_theme_css() + "\n" + (HERE / "lex_rfds.css").read_text(encoding="utf-8")
+    return [
+        rx.el.link(rel="preconnect", href="https://fonts.googleapis.com"),
+        rx.el.link(rel="preconnect", href="https://fonts.gstatic.com", cross_origin=""),
+        rx.el.link(rel="stylesheet", href=INTER_STYLESHEET),
+        rx.el.style(css),
+    ]

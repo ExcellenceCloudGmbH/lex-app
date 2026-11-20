@@ -99,7 +99,8 @@ def lex_config(**overrides: Any):
 
     The plugins are Radix with RFDS's root theme, and RFDS itself with lex-app's
     brand and locale (:mod:`lex.lex_app.reflex.design`). The *Built with Reflex*
-    badge is off, which plain Reflex honours in every run mode.
+    badge is off, which plain Reflex honours in every run mode. Pages open in light mode,
+    as lex-app does (decision E13).
     """
     import reflex as rx
 
@@ -112,6 +113,9 @@ def lex_config(**overrides: Any):
         "app_module_import": APP_MODULE,
         "telemetry_enabled": False,
         "show_built_with_reflex": False,
+        # lex-app opens in light mode and changes only when the user picks dark in lex-app
+        # (a framed dashboard follows it, host.theme_follower); the OS setting is not consulted.
+        "default_color_mode": "light",
         "plugins": [theme_plugin(), rfds_plugin()],
         # A sitemap advertises pages to crawlers; every page here is behind a
         # sign-in, so it would advertise nothing a crawler could open.

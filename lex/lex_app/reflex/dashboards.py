@@ -361,6 +361,9 @@ def dashboard_page(
                 _resolving(),
             ),
             width="100%",
+            # Stretched, not the stack's default "start": a dashboard's page, grids and tables
+            # take the frame's width instead of their content's.
+            align="stretch",
             spacing="4",
             padding="1em",
         ))

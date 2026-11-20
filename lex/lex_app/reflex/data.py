@@ -580,6 +580,10 @@ def lex_grid(
         ),
         on_mount=state.open(dict(filters or {})),
         width="100%",
+        # A stack shrinks its children to their content by default ("start"). RFDS sizes the
+        # grid's frame at 100% of its block, and the block has no width of its own: shrunk,
+        # the grid collapses to its first column. Stretched, it fills the page.
+        align="stretch",
         spacing="2",
     )
 

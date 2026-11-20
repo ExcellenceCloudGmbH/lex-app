@@ -15,7 +15,7 @@ show controls a user has no grant for.
 Cluster 1bt -- scenarios 1.695-1.706. Type: U.
 Covers: lex/lex_app/reflex/design.py, access.py, shell.py, host.py, app.py,
 config.py (lex_config), session.py (the identity resolver), _js/lex_host.jsx,
-_js/lex_rfds.css.
+_js/lex_rfds.css (the embedded layout) and theme.py (the LEX look, batch 1bz).
 Run: python -m lex pytest lex/test_project/tests/init/test_1bt_reflex_design_system.py -v
 """
 
@@ -389,7 +389,9 @@ class TestCluster01bt_Chrome(SimpleTestCase):
             self.assertIn(expected, rendered, f"the chrome must carry {expected!r}")
         css = (JS_DIR / "lex_rfds.css").read_text()
         self.assertIn(f'.{shell.EMBEDDED_CLASS} [data-rfds-shell="header"]', css)
-        self.assertIn("--rfds-color-chrome-bg: #283c50", css.lower(), "the chrome is lex-app's navy")
+        from lex.lex_app.reflex.theme import lex_theme_css  # the colours moved to the token theme (1bz)
+
+        self.assertIn("--rfds-color-chrome-bg: #283c50", lex_theme_css().lower(), "the chrome is lex-app's navy")
 
 
 _HARNESS = r"""

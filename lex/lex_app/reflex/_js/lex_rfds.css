@@ -1,22 +1,7 @@
-/* lex-app over RFDS: the chrome is lex-app's navy in both modes, as lex-app's own sidenav is,
- * and the text is set in the LEX font. `html:root` outranks RFDS's `:root` / `.light` / `.dark`
- * rules, so the order stylesheets are listed in does not matter. Colours mirror
- * lex/lex_app/design_system/lex_tokens.py (NAVY, NAVY_DEEP, the navy border and icon tones). */
-html:root,
-html:root.light,
-html:root.dark {
-  --rfds-palette-brand-chrome: #283c50;
-  --rfds-palette-brand-chrome-fg: #dfe7ee;
-  --rfds-color-chrome-bg: #283c50;
-  --rfds-color-chrome-fg: #dfe7ee;
-  --rfds-color-chrome-fg-muted: #9fb0bd;
-  --rfds-color-chrome-border: #2a3f52;
-  --rfds-color-chrome-hover: #22323f;
-  --rfds-font-family-sans: "Inter", "Roboto", "Helvetica", "Arial", sans-serif;
-}
-
 /* Inside lex-app's frame (`?lex_embed=1`) the shell already shows the header and navigation:
- * the dashboard's own are hidden, and the main region takes the whole frame. */
+ * the dashboard's own are hidden, and the main region takes the whole frame.
+ * (The LEX look itself -- colours, type, chrome, cards, buttons -- is generated from the design
+ * tokens by lex/lex_app/reflex/theme.py.) */
 .lex-embedded [data-rfds-shell="header"],
 .lex-embedded [data-rfds-shell="sidebar"],
 .lex-embedded [data-rfds-shell="context"] {
