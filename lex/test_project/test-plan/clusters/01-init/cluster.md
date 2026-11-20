@@ -998,3 +998,55 @@ does not remove user launch configurations.
 | 1.727 | The reference example uses every feature and compiles | imports every lex-app dashboard feature; uses ExportMixin, charts, KPIs and `can`; its routes are in the compiled app; the compile ran conformance in strict CI mode |
 
 **Scenario range:** 1.724 – 1.727. **Test file:** `lex/test_project/tests/init/test_1bw_reflex_developer_tooling.py`. **Type:** U. **Status:** ✅ Complete (2026-11-17). Batch: [1bw](batches.md).
+
+---
+
+### 1bx. Reflex dashboards sign in through lex-app's hand-off - no Reflex Enterprise, no Reflex account ✅
+
+**What it tests:** that a Reflex dashboard signs in through lex-app's own sign-in, without Reflex Enterprise: the hand-off round trip and its cookies, the event-socket guard, the session middleware's outcomes (signed in, anonymous, ended, unreadable, blocked), RFDS's identity and lex_event's checks, the access token from Django's sign-in, the hand-off's error pages, sign-out, and export tickets bound to their owner.
+
+**Why a regression matters:** without it a dashboard either cannot sign in without a Reflex account, or leaks its sign-in cookie into page-readable state, outlives a sign-out, runs a guarded handler for anyone, or hands one user's export to another.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.728 | A dashboard signs in through lex-app's hand-off | /auth/start: nonce cookie, 303 to <app>/oidc/handoff?aud=reflex with return=<backend><next>?lex_hs=1; lex-app's code; /auth/handoff: reflex binding, lex_rdash HttpOnly SameSite=Lax 30 days, nonce cleared, 303 to the frontend port (single port: the backend); https: __Host-, Secure, SameSite=None, Partitioned |
+| 1.729 | The event socket carries the digest, never a cookie | /_event (WebSocket and HTTP): no Cookie header, X-Lex-Binding = sha256(handle), a browser's own X-Lex-Binding dropped; other paths keep cookies; POST to a sign-in route passes through |
+| 1.730 | Anonymous sessions go through the hand-off, signed-in ones pass | signed in: passes, identity sub/e-mail/name/issuer, cached a minute; anonymous: page load of /auth/start?next=<page>, Reflex's own events pass; ended sign-in found at the next check, binding revoked; failed read = anonymous; lex_hs=2 -> /auth/blocked; marker cleanup keeps the page's own query |
+| 1.731 | RFDS sees the user and lex_event checks run first | rfds current_identity = the binding's user; guarded handler denied without the grant, allowed with it; untagged allowed for signed-in users; anonymous -> sign_in; lex_event without auth = plain rx.event |
+| 1.732 | The token comes from the sign-in and follows it | current_access_token = the sign-in's token, cached while valid; Keycloak unreachable -> '' and still signed in; ended -> '' and anonymous; no session, no token |
+| 1.733 | Without a sign-in lex-app is told and nothing loops | login_required: 401 page posting lex-auth v2 required/surface reflex to lex-app's origins and marking the tab; a code without our nonce never redeemed; a replayed code refused; unlisted host 400; outage 503 retry; /auth/blocked offers its own tab |
+| 1.734 | Signing out revokes the binding, then signs out of lex-app | LexUser.sign_out loads /auth/logout; binding revoked (logout), forgotten, cookie deleted, 303 to <app>/oidc/total_logout?next=<dashboard> |
+| 1.735 | An export download answers only its owner | the state's principal is the binding's subject; only the owner's request names it; another user's names theirs; no cookie names nobody |
+
+**Scenario range:** 1.728 – 1.735. **Test file:** `lex/test_project/tests/init/test_1bx_reflex_sign_in_handoff.py`. **Type:** I (transactional; 1.731 and 1.735 partly U). **Status:** ✅ Complete (2026-11-19). Batch: [1bx](batches.md).
+
+---
+
+### 1by. Reflex dashboards without Reflex Enterprise - nothing imports it, and lex-app's own one-port proxy ✅
+
+**What it tests:** that nothing lex-app ships imports or requires Reflex Enterprise, and that lex-app's own one-port proxy passes pages, the hot-reload WebSocket, and their bodies and subprotocols through to the frontend server -- only in a one-port development run.
+
+**Why a regression matters:** a regression brings back reflex login (or a paid tier) for every developer and deployment, or leaves a pod whose pages all 404 because nothing passes them on.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.736 | Nothing imports Reflex Enterprise or requires it | child interpreter refusing reflex_enterprise and rfds.enterprise: config and every lex.lex_app.reflex module import, the config is Reflex's own, no Enterprise module loaded; requirements pin reflex and rfds==1.0.0, no reflex-enterprise |
+| 1.737 | The proxy runs only for a one-port development run | REFLEX_USE_SINGLE_PORT set, development, not backend-only -> on; unset, production or backend-only -> off; install registers the lifespan task only when on |
+| 1.738 | Pages pass through to the frontend server | method, path, query, body on; Host the upstream's; hop-by-hop dropped; status, headers, body back; gzip decoded without Content-Encoding; a starting frontend retried with the body every time; never answering -> 502 |
+| 1.739 | The hot-reload socket passes through with its subprotocol | accepted with vite-hmr; text and bytes both ways unchanged; no frontend -> the socket is refused |
+
+**Scenario range:** 1.736 – 1.739. **Test file:** `lex/test_project/tests/init/test_1by_reflex_without_enterprise.py`. **Type:** U. **Status:** ✅ Complete (2026-11-19). Batch: [1by](batches.md).
+
+---
+
+### 1ca. A local run lets the dashboards' sign-in and sign-out send the browser back to them ✅
+
+**What it tests:** that in a local run the dashboards' dev servers (Streamlit 8501, Reflex 8502 and 8503, or a moved Reflex port) are valid `next=` targets for lex-app's sign-in and sign-out, and that nothing else new is.
+
+**Why a regression matters:** a developer cannot sign out of (or in to) a local dashboard -- the browser ends on "Redirect target not allowed." -- or, the other way, a local run or a deployed instance trusts origins it should not: an open redirect.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.745 | A local run trusts the dashboards' dev servers and no more | local: 8501, 8502, 8503 and a moved Reflex port trusted on localhost and 127.0.0.1, total_logout and authenticate redirect back to the dashboard; another loopback port and a foreign site still 400 REDIRECT_NOT_ALLOWED; deployed: no localhost; this local run's real settings carry the dashboards' origins |
+
+**Scenario range:** 1.745 – 1.745. **Test file:** `lex/test_project/tests/init/test_1ca_local_dashboard_redirects.py`. **Type:** I. **Status:** ✅ Complete (2026-11-20). Batch: [1ca](batches.md).

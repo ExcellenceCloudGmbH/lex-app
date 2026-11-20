@@ -182,7 +182,10 @@ class LexAccessState(rx.State):
 
         from lex.lex_app.reflex.auth import current_permissions
 
+        from lex.lex_app.reflex.session import marker_cleanup
+
         identity = current_identity(self)
         if identity is not None:
             remember_grants(identity, await current_permissions(self))
-        return AccessState.load
+        cleanup = marker_cleanup(self)
+        return AccessState.load if cleanup is None else [AccessState.load, cleanup]

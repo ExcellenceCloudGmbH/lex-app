@@ -1,11 +1,11 @@
 """``lex.reflex_app``, compiled once per test process, for every batch that reads the compiled app.
 
-Reflex Enterprise's auth plugin binds itself to the process on the first compile
-and refuses another ("Only one AuthPlugin may be active per process"), so the
-batches asserting on the compiled app (1aq, 1bt) share this one compile instead
-of each making their own. It compiles the app exactly as ``reflex run`` would:
-in a project whose ``rxconfig.py`` is the one ``lex reflex`` writes, with the
-reference ``_reflex_structure.py`` as the project's structure, in CI mode.
+Compiling the app installs process-wide hooks -- RFDS's identity and permission
+resolvers, the navigation's permission checker -- and takes seconds, so the
+batches asserting on the compiled app (1aq, 1bt, 1by) share this one compile
+instead of each making their own. It compiles the app exactly as ``reflex run``
+would: in a project whose ``rxconfig.py`` is the one ``lex reflex`` writes, with
+the reference ``_reflex_structure.py`` as the project's structure, in CI mode.
 """
 
 from __future__ import annotations

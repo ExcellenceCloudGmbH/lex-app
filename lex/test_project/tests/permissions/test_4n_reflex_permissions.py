@@ -6,8 +6,8 @@ Intent (from lex/lex_app/reflex/auth.py and the Streamlit proxy it replaces):
     A Streamlit dashboard reads the user's Keycloak UMA permissions from
     ``st.session_state.permissions``, which the proxy fills. A Reflex
     dashboard reads the same list through ``current_permissions(self)``,
-    and gates a handler, page or var on it with
-    ``auth=has_permission(Model, scope)``. The contract:
+    and gates a handler on it with
+    ``lex_event(auth=has_permission(Model, scope))``. The contract:
 
         * the permissions are the ones ``KeycloakManager`` -- the client
           the API enforces with -- returns for the user's access token,
@@ -15,15 +15,17 @@ Intent (from lex/lex_app/reflex/auth.py and the Streamlit proxy it replaces):
         * a failed lookup keeps what the SAME user was last granted (a
           Keycloak blip must not demote someone mid-session) and never
           lets one user's permissions stand in for another's;
-        * signing out forgets them with the tokens;
+        * without a sign-in there are none, and Keycloak is not asked;
         * ``has_permission`` names a model's resource the way lex-app
           registers it (``<app_label>.<ModelName>``), counts model-wide
           grants only -- as the API's default read check does -- and fails
           closed;
         * ``current_access_token`` hands any state the user's bearer token.
 
-The Reflex state tree is built the way an event sees it (a root ``State``
-holding every substate); the only boundary patched is ``KeycloakManager``,
+The access token comes from the session's binding to the user's lex-app
+sign-in (``lex.lex_app.reflex.session``, batch 1bx): the tests hand a session
+its binding the way the socket guard does (``X-Lex-Binding``) and give the
+binding its token; the only boundary patched is ``KeycloakManager``,
 Keycloak's client.
 
 Scenario numbering matches
@@ -34,6 +36,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -41,12 +44,8 @@ import jwt
 import pytest
 from asgiref.sync import async_to_sync
 
-from lex.lex_app.reflex.auth import (
-    LexKeycloakAuthState,
-    current_access_token,
-    current_permissions,
-    has_permission,
-)
+from lex.lex_app.reflex import auth, session
+from lex.lex_app.reflex.auth import current_access_token, current_permissions, has_permission
 from lex.lex_app.reflex.dashboards import LexDashboardState
 
 from .models import KeycloakItem
@@ -55,20 +54,23 @@ pytestmark = pytest.mark.permissions
 
 _KEYCLOAK = "lex.api.views.authentication.KeycloakManager.KeycloakManager"
 _RESOURCE = "lex_app.KeycloakItem"
+_BINDING = "b" * 64
 
 
 def _token(subject: str, jti: str = "1") -> str:
     """An access token for ``subject``; ``jti`` tells a refreshed one apart."""
-    return jwt.encode({"sub": subject, "jti": jti}, "not-verified-here", algorithm="HS256")
+    return jwt.encode({"sub": subject, "jti": jti, "exp": int(time.time()) + 600}, "not-verified-here",
+                      algorithm="HS256")
 
 
-def _session():
-    """One browser session's state tree: the root state with every substate."""
-    from reflex.istate.data import ReflexURL, RouterData
+def _session(binding: str = _BINDING):
+    """One browser session's state tree, its socket carrying ``binding`` (as the guard sets it)."""
+    from reflex.istate.data import HeaderData, ReflexURL, RouterData
     from reflex.state import State
 
     root = State()
-    root.router = RouterData(url=ReflexURL("http://localhost:8502/"))
+    root.router = RouterData(url=ReflexURL("http://localhost:8502/"), headers=HeaderData.from_router_data(
+        {"headers": {"host": "localhost:8503", "x-lex-binding": binding}}))
     return root
 
 
@@ -76,19 +78,15 @@ def _substate(root, state_cls):
     return root.get_substate(state_cls.get_full_name().split("."))
 
 
-def _present(provider, token: str) -> None:
-    """Put ``token`` in the session's cookie, as a sign-in or a refresh does.
-
-    Between two events Reflex recomputes the computed vars a changed var
-    invalidated -- ``_mark_dirty_computed_vars`` is that step -- so the next
-    event reads ``_access_token`` from the new cookie.
-    """
-    from reflex_enterprise.auth.oidc.state import AccessTokenMetadata
-
-    provider._access_token_data = AccessTokenMetadata(
-        access_token=token, expires_at=time.time() + 300
-    ).to_cookie_value()
-    provider._mark_dirty_computed_vars()
+def _present(subject: str | None, token: str = "", binding: str = _BINDING) -> None:
+    """Sign ``subject`` in on the binding with ``token`` -- or, with ``None``, leave it signed out."""
+    session.forget(binding)
+    if subject is None:
+        return
+    who = SimpleNamespace(sub=subject, issuer="kc", email=f"{subject}@example.com")
+    session._remember(binding, session.Standing(time.monotonic(), 7, who, {"sub": subject}))
+    with session._LOCK:
+        session._TOKENS[7] = (token, int(time.time()) + 600)
 
 
 def _grant(scopes, *, resource=_RESOURCE, record=None) -> dict:
@@ -103,13 +101,17 @@ class _ReflexSession(TestCase):
 
     def setUp(self) -> None:
         self.root = _session()
-        self.provider = _substate(self.root, LexKeycloakAuthState)
         patcher = patch(_KEYCLOAK)
         self.keycloak = patcher.start().return_value
         self.addCleanup(patcher.stop)
+        for cache in (auth._UMA, auth._LAST_BY_SUBJECT):
+            cache.clear()
+            self.addCleanup(cache.clear)
+        session.forget()
+        self.addCleanup(session.forget)
 
     def permissions(self) -> list[dict]:
-        return async_to_sync(current_permissions)(self.provider)
+        return async_to_sync(current_permissions)(self.root)
 
     def asked_with(self) -> list[str]:
         """The access tokens Keycloak was asked about, in order."""
@@ -136,20 +138,19 @@ class TestCluster04n_PermissionLookup(_ReflexSession):
 
         first = _token("ada", jti="1")
         self.keycloak.get_uma_permissions.return_value = [_grant(["read"])]
-        _present(self.provider, first)
+        _present("ada", first)
 
         self.assertEqual(self.permissions(), [_grant(["read"])])
         self.permissions().append(_grant(["delete"]))
         self.assertEqual(self.permissions(), [_grant(["read"])])
         self.assertEqual(self.asked_with(), [first], "one lookup per token")
 
-        cached = self.provider._uma_permissions_token
-        self.assertEqual(cached, hashlib.sha256(first.encode()).hexdigest())
-        self.assertNotIn(first, cached, "backend state is persisted; the token must not be")
+        self.assertEqual(list(auth._UMA), [hashlib.sha256(first.encode()).hexdigest()],
+                         "the cache keeps a digest of the token, never the token")
 
         refreshed = _token("ada", jti="2")
         self.keycloak.get_uma_permissions.return_value = [_grant(["read", "edit"])]
-        _present(self.provider, refreshed)
+        _present("ada", refreshed)
 
         self.assertEqual(self.permissions(), [_grant(["read", "edit"])])
         self.assertEqual(self.asked_with(), [first, refreshed])
@@ -165,11 +166,11 @@ class TestCluster04n_PermissionLookup(_ReflexSession):
         Then:  Ada keeps ``read`` while Keycloak fails, and every read retries
                until it answers; Bob gets ``[]``, never Ada's grants.
         """
-        _present(self.provider, _token("ada", jti="1"))
+        _present("ada", _token("ada", jti="1"))
         self.keycloak.get_uma_permissions.return_value = [_grant(["read"])]
         self.assertEqual(self.permissions(), [_grant(["read"])])
 
-        _present(self.provider, _token("ada", jti="2"))
+        _present("ada", _token("ada", jti="2"))
         failures = {
             "raises": {"side_effect": RuntimeError("keycloak down")},
             "answers nothing": {"side_effect": None, "return_value": None},
@@ -189,56 +190,47 @@ class TestCluster04n_PermissionLookup(_ReflexSession):
         self.assertEqual(self.permissions(), [], "Keycloak's answer, once it gives one, stands")
 
         self.keycloak.get_uma_permissions.return_value = [_grant(["read", "edit"])]
-        _present(self.provider, _token("ada", jti="3"))
+        _present("ada", _token("ada", jti="3"))
         self.assertEqual(self.permissions(), [_grant(["read", "edit"])])
 
         self.keycloak.get_uma_permissions.configure_mock(side_effect=RuntimeError("keycloak down"))
-        _present(self.provider, _token("bob"))
+        _present("bob", _token("bob"))
         with self.assertLogs("lex.lex_app.reflex.auth", "ERROR"):
             self.assertEqual(self.permissions(), [], "another user never inherits Ada's grants")
-        self.assertEqual(self.provider._uma_permissions_subject, "")
 
     # -- 4.77 ----------------------------------------------------------
     def test_4_77_signing_out_forgets_the_permissions(self) -> None:
         """
-        Scenario 4.77: sign-out clears the permissions with the tokens.
+        Scenario 4.77: without a sign-in there are no permissions.
         Given: Ada signed in and granted ``edit``.
-        When:  the session signs out (``_reset_auth``, what ``/logout`` and an
-               expired session both run), then Bob signs in.
-        Then:  nothing of Ada's permissions is left in the session state, the
-               signed-out session sees ``[]`` without asking Keycloak, and Bob
-               gets his own lookup.
+        When:  her session's binding stops answering (she signed out, or her
+               sign-in ended), then Bob signs in on the same session.
+        Then:  the signed-out session sees ``[]`` without asking Keycloak, and
+               no session state holds her permissions; Bob gets his own lookup.
         """
-        _present(self.provider, _token("ada"))
+        _present("ada", _token("ada"))
         self.keycloak.get_uma_permissions.return_value = [_grant(["edit"])]
         self.assertEqual(self.permissions(), [_grant(["edit"])])
 
-        self.provider._reset_auth()
-        self.provider._mark_dirty_computed_vars()
-
-        self.assertEqual(
-            (self.provider._uma_permissions, self.provider._uma_permissions_token,
-             self.provider._uma_permissions_subject),
-            ([], "", ""),
-        )
+        _present(None)
         self.assertEqual(self.permissions(), [])
         self.assertEqual(self.keycloak.get_uma_permissions.call_count, 1)
+        self.assertNotIn("rsname", repr(self.root.dict()), "permissions never live in session state")
 
         bob = _token("bob")
         self.keycloak.get_uma_permissions.return_value = [_grant(["read"])]
-        _present(self.provider, bob)
+        _present("bob", bob)
         self.assertEqual(self.permissions(), [_grant(["read"])])
         self.assertEqual(self.asked_with()[-1], bob)
 
 
 class TestCluster04n_HasPermission(_ReflexSession):
-    """``has_permission`` as an ``auth=`` check."""
+    """``has_permission`` as an ``auth=`` check, as RFDS's PolicyMiddleware runs it."""
 
     def check(self, target, scope="read") -> bool:
-        from reflex_enterprise.auth.types import PageAuthContext
-        from reflex_enterprise.auth.user_state import AuthUserState
+        from rfds.auth import AuthContext
 
-        ctx = PageAuthContext(auth_user_state=_substate(self.root, AuthUserState))
+        ctx = AuthContext(userinfo={}, payload={}, surface="browser", state=self.root, handler="h")
         return async_to_sync(has_permission(target, scope))(ctx)
 
     # -- 4.78 ----------------------------------------------------------
@@ -265,7 +257,7 @@ class TestCluster04n_HasPermission(_ReflexSession):
         self.assertFalse(self.check(KeycloakItem), "signed out: denied")
         self.keycloak.get_uma_permissions.assert_not_called()
 
-        _present(self.provider, _token("ada"))
+        _present("ada", _token("ada"))
         self.assertTrue(self.check(KeycloakItem))
         self.assertTrue(self.check(KeycloakItem, "list"))
         self.assertTrue(self.check(_RESOURCE, "read"))
@@ -281,11 +273,9 @@ class TestCluster04n_HasPermission(_ReflexSession):
         with self.assertRaisesRegex(TypeError, "model class or a Keycloak resource name"):
             has_permission(object())
 
-        fresh = _session()
-        provider = _substate(fresh, LexKeycloakAuthState)
-        self.root, self.provider = fresh, provider
+        self.root = _session("c" * 64)
         self.keycloak.get_uma_permissions.side_effect = RuntimeError("keycloak down")
-        _present(provider, _token("bob"))
+        _present("bob", _token("bob"), binding="c" * 64)
         with self.assertLogs("lex.lex_app.reflex.auth", "ERROR"):
             self.assertFalse(self.check(_RESOURCE), "Keycloak never answered for Bob: denied")
 
@@ -299,9 +289,9 @@ class TestCluster04n_AccessToken(_ReflexSession):
         Scenario 4.79: ``current_access_token`` / ``current_permissions`` from any state.
         Given: a dashboard's own state in a session, signed out and signed in.
         When:  it asks for the user's access token and permissions.
-        Then:  it gets the token the session holds (``""`` signed out) and the
-               user's permissions -- the provider state it reaches is the
-               session's own, so both follow the sign-in.
+        Then:  it gets the token of the session's sign-in (``""`` signed out)
+               and the user's permissions -- read through the session's own
+               binding, so both follow the sign-in.
         """
         dashboard = _substate(self.root, LexDashboardState)
         self.assertEqual(async_to_sync(current_access_token)(dashboard), "")
@@ -309,7 +299,7 @@ class TestCluster04n_AccessToken(_ReflexSession):
 
         token = _token("ada")
         self.keycloak.get_uma_permissions.return_value = [_grant(["read"])]
-        _present(self.provider, token)
+        _present("ada", token)
 
         self.assertEqual(async_to_sync(current_access_token)(dashboard), token)
         self.assertEqual(async_to_sync(current_permissions)(dashboard), [_grant(["read"])])

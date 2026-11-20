@@ -5,15 +5,11 @@ Intent
 ------
 A Reflex dashboard must give its author what a Streamlit dashboard gives:
 
-* **Sign-in against lex-app's Keycloak**, with nothing new to configure. The
-  Streamlit proxy is replaced by Reflex Enterprise's ``AuthPlugin``, and
-  ``LexKeycloakAuthState`` points it at the realm and confidential client the
-  project already has (``KEYCLOAK_URL``, ``KEYCLOAK_REALM``,
-  ``OIDC_RP_CLIENT_ID/SECRET``), honours ``OIDC_ISSUER`` and
-  ``OIDC_VERIFY_SSL`` as the proxy does, and never asks for ``offline_access``,
-  so a dashboard session ends with the Keycloak session as every lex-app session
-  does. ``KEYCLOAK_CLIENT_ID`` -- the
-  *browser's* client in lex-app -- must never be picked up by accident.
+* **Sign-in through lex-app's own**, with nothing new to configure and no
+  Reflex account: plain Reflex and RFDS, the dashboard hand-off of
+  ``lex.lex_app.reflex.session`` (batch 1bx), and ``LexUser`` naming the
+  signed-in user from it. (1.358 and 1.359 tested Reflex Enterprise's
+  Keycloak provider; they retired with it.)
 * **The Django ORM.** Reflex runs handlers on its event loop, where Django
   refuses synchronous queries; ``run_orm`` / ``@orm`` hand synchronous Django
   code to Django's own executor, and every event gets the connection handling
@@ -28,9 +24,8 @@ A Reflex dashboard must give its author what a Streamlit dashboard gives:
   Reflex package under a second name (which would define every state twice);
   and a Django setup that survives the uvloop loop granian runs.
 
-Cluster 1aq -- scenarios 1.357-1.369. Type: U / I.
-Covers: lex/lex_app/reflex/ (config.py, auth.py ``LexKeycloakAuthState`` and
-``LexUser``, django_orm.py, dashboards.py, app.py, Reflex.py,
+Cluster 1aq -- scenarios 1.357-1.369 (1.358-1.359 retired). Type: U / I.
+Covers: lex/lex_app/reflex/ (config.py, auth.py ``LexUser``, django_orm.py, dashboards.py, app.py, Reflex.py,
 examples/_reflex_structure.py), lex/reflex_app.py,
 lex/utilities/config/generic_app_config.py, lex/lex_app/apps.py
 (``ready()``, ``register_models``),
@@ -62,7 +57,7 @@ from django.core.exceptions import SynchronousOnlyOperation
 from django.db import connection, models, transaction
 
 from lex.core.models.LexModel import LexModel
-from lex.lex_app.reflex.auth import LexKeycloakAuthState, LexUser
+from lex.lex_app.reflex.auth import LexUser
 from lex.lex_app.reflex.dashboards import LexDashboardState
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
@@ -122,36 +117,24 @@ class ReflexProbePlain(models.Model):
 #: none of its own, so the probes live in lex_app and dispatch looks there.
 _PROJECT_APP = patch("lex.lex_app.reflex.dashboards._project_app_label", return_value="lex_app")
 
-_OIDC_ENV = (
-    "LEX_KEYCLOAK_ISSUER_URI", "LEX_KEYCLOAK_CLIENT_ID", "LEX_KEYCLOAK_CLIENT_SECRET",
-    "OIDC_ISSUER_URI", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET",
-    "KEYCLOAK_URL", "KEYCLOAK_REALM", "KEYCLOAK_REALM_NAME", "KEYCLOAK_CLIENT_ID",
-    "OIDC_RP_CLIENT_ID", "OIDC_RP_CLIENT_SECRET", "OIDC_ISSUER", "OIDC_VERIFY_SSL",
-)
+def _root_state(url: str = "http://localhost:8502/", binding: str = ""):
+    """A root Reflex state whose router is on ``url``, the way an event sees it.
 
-
-def _root_state(url: str = "http://localhost:8502/"):
-    """A root Reflex state whose router is on ``url``, the way an event sees it."""
-    from reflex.istate.data import ReflexURL, RouterData
+    ``binding``: the ``X-Lex-Binding`` the socket guard put on the session's socket.
+    """
+    from reflex.istate.data import HeaderData, ReflexURL, RouterData
     from reflex.state import State
 
+    headers = {"host": "localhost:8503", "origin": "http://localhost:8502"}
+    if binding:
+        headers["x-lex-binding"] = binding
     root = State()
-    root.router = RouterData(url=ReflexURL(url))
+    root.router = RouterData(url=ReflexURL(url), headers=HeaderData.from_router_data({"headers": headers}))
     return root
 
 
 def _substate(root, state_cls):
     return root.get_substate(state_cls.get_full_name().split("."))
-
-
-@contextlib.contextmanager
-def _oidc_env(**values: str):
-    """Exactly ``values`` for every variable the provider may read."""
-    with patch.dict(os.environ, {}, clear=False):
-        for name in _OIDC_ENV:
-            os.environ.pop(name, None)
-        os.environ.update(values)
-        yield
 
 
 class TestCluster01aq_Config(TestCase):
@@ -160,43 +143,31 @@ class TestCluster01aq_Config(TestCase):
     # -- 1.357 ---------------------------------------------------------
     def test_1_357_lex_config_wires_the_app_module_sign_in_and_defaults(self) -> None:
         """
-        Scenario 1.357: ``lex_config()`` is an rxe.Config wired for Lex App.
+        Scenario 1.357: ``lex_config()`` is a plain rx.Config wired for Lex App.
         Given: no overrides.
         When:  ``lex_config()`` builds the config.
-        Then:  Reflex imports ``lex.reflex_app``; telemetry is off; the
-               AuthPlugin signs in through the lex Keycloak provider, named by
-               import path, never asking for ``offline_access`` (an offline
-               token outlives the Keycloak session); Radix is explicit
-               and the sitemap off; no port is configured (a configured port
-               breaks ``--backend-only`` and ``--env prod``); an override wins.
+        Then:  it is Reflex's own Config (no Reflex Enterprise, so no Reflex
+               account for any run mode); Reflex imports ``lex.reflex_app``;
+               telemetry is off; its plugins are Radix and RFDS only -- sign-in
+               is lex-app's own, added by the app, not a plugin; the sitemap is
+               off; no port is configured (a configured port breaks
+               ``--backend-only`` and ``--env prod``); an override wins.
         """
-        import reflex_enterprise as rxe
-        from reflex_enterprise.plugins.auth import AuthPlugin
+        from reflex.config import Config
 
-        from lex.lex_app.reflex.config import lex_auth_plugin, lex_config
+        from lex.lex_app.reflex.config import lex_config
 
         config = lex_config()
-        self.assertIsInstance(config, rxe.Config)
+        self.assertIs(type(config), Config, "a plain rx.Config, not Reflex Enterprise's")
         self.assertEqual(config.app_module_import, "lex.reflex_app")
         self.assertFalse(config.telemetry_enabled)
         self.assertIsNone(config.frontend_port, "a configured port breaks --backend-only")
         self.assertIsNone(config.backend_port, "two configured ports break --env prod")
-
-        auth = [p for p in config.plugins if isinstance(p, AuthPlugin)]
-        self.assertEqual(len(auth), 1, f"exactly one AuthPlugin, got {config.plugins}")
-        self.assertEqual(auth[0]._auth_providers, ["lex.lex_app.reflex.auth.LexKeycloakAuthState"])
-        self.assertNotIn(
-            "offline_access", auth[0].extra_scopes,
-            "Keycloak refreshes without it; with it, signing out of lex-app no longer ends the session",
-        )
-        self.assertTrue(any(isinstance(p, rx.plugins.RadixThemesPlugin) for p in config.plugins))
+        self.assertEqual([type(p).__name__ for p in config.plugins], ["RadixThemesPlugin", "RFDSPlugin"])
         self.assertIn(rx.plugins.SitemapPlugin, config.disable_plugins)
-
+        self.assertFalse(config.show_built_with_reflex)
         self.assertTrue(lex_config(telemetry_enabled=True).telemetry_enabled, "an override must win")
-
-        plugin = lex_auth_plugin(extra_scopes=["groups"], auth=False)
-        self.assertEqual(plugin.extra_scopes, ["groups"], "a project's scopes are requested as given")
-        self.assertIs(plugin.auth, False, "AuthPlugin options pass through")
+        self.assertNotIn("reflex_enterprise", sys.modules, "nothing here may import Reflex Enterprise")
 
     def test_1_357b_app_names_are_valid_reflex_identifiers(self) -> None:
         """
@@ -247,114 +218,43 @@ class TestCluster01aq_Config(TestCase):
                 self.assertIs(getattr(package, name), getattr(source, name))
 
 
-class TestCluster01aq_KeycloakProvider(TestCase):
-    """The provider signs in against lex-app's own Keycloak settings."""
-
-    def _provider(self):
-        return _substate(_root_state(), LexKeycloakAuthState)
-
-    # -- 1.358 ---------------------------------------------------------
-    def test_1_358_settings_resolve_lex_keycloak_then_oidc_then_lex_app(self) -> None:
-        """
-        Scenario 1.358: the provider's config comes from where a project already has it.
-        Given: only lex-app's own Keycloak settings, then Reflex's shared
-               ``OIDC_*`` and provider-specific ``LEX_KEYCLOAK_*`` on top.
-        When:  the plugin asks the provider for its issuer and client.
-        Then:  lex-app's settings are the fallback -- the realm URL built from
-               KEYCLOAK_URL/KEYCLOAK_REALM, the confidential RP client -- the
-               more specific variable always wins, and KEYCLOAK_CLIENT_ID (the
-               browser's client) is never used.
-        """
-        provider = self._provider()
-        with _oidc_env(
-            KEYCLOAK_URL="https://kc.example.com/", KEYCLOAK_REALM="lex",
-            OIDC_RP_CLIENT_ID="lex-rp", OIDC_RP_CLIENT_SECRET="rp-secret",
-            KEYCLOAK_CLIENT_ID="lex-browser",
-        ):
-            self.assertEqual(async_to_sync(provider._issuer_uri)(), "https://kc.example.com/realms/lex")
-            self.assertEqual(async_to_sync(provider._client_id)(), "lex-rp",
-                             "KEYCLOAK_CLIENT_ID is the browser's client, not this one")
-            self.assertEqual(async_to_sync(provider._client_secret)(), "rp-secret")
-
-            os.environ["OIDC_CLIENT_ID"] = "shared"
-            self.assertEqual(async_to_sync(provider._client_id)(), "shared")
-            os.environ["LEX_KEYCLOAK_CLIENT_ID"] = "specific"
-            self.assertEqual(async_to_sync(provider._client_id)(), "specific")
-
-        with _oidc_env(KEYCLOAK_URL="https://kc.example.com", KEYCLOAK_REALM_NAME="legacy"):
-            self.assertEqual(
-                async_to_sync(provider._issuer_uri)(), "https://kc.example.com/realms/legacy",
-                "KEYCLOAK_REALM_NAME is the realm fallback KeycloakManager also honours",
-            )
-
-        with _oidc_env():
-            with self.assertRaisesRegex(RuntimeError, "client ID not configured"):
-                async_to_sync(provider._client_id)()
-            with self.assertRaisesRegex(RuntimeError, "issuer URI not configured"):
-                async_to_sync(provider._issuer_uri)()
-
-    # -- 1.359 ---------------------------------------------------------
-    def test_1_359_issuer_tls_and_label_follow_the_proxys_settings(self) -> None:
-        """
-        Scenario 1.359: OIDC_ISSUER, OIDC_VERIFY_SSL and the label behave as for the proxy.
-        Given: the provider, with and without OIDC_ISSUER / OIDC_VERIFY_SSL.
-        When:  the plugin asks which issuers to accept, and for its HTTP client.
-        Then:  without OIDC_ISSUER the plugin's own check stands (None); with it,
-               both the configured and the expected issuer are accepted; TLS is
-               verified unless OIDC_VERIFY_SSL turns it off; the variables are
-               ``LEX_KEYCLOAK_*`` and the button reads "Login with Keycloak".
-        """
-        from reflex_enterprise.auth.oidc.utils import DEFAULT_HTTP_CLIENT
-
-        import lex.lex_app.reflex.auth as auth
-
-        provider = self._provider()
-        self.assertEqual(LexKeycloakAuthState.display_name(), "Keycloak")
-        self.assertEqual(
-            LexKeycloakAuthState._env_keys("client_id"), ("LEX_KEYCLOAK_CLIENT_ID", "OIDC_CLIENT_ID")
-        )
-
-        with _oidc_env(KEYCLOAK_URL="http://keycloak:8080", KEYCLOAK_REALM="lex"):
-            self.assertIsNone(async_to_sync(provider._valid_issuers)())
-            os.environ["OIDC_ISSUER"] = "https://auth.example.com/realms/lex/"
-            accepted = async_to_sync(provider._valid_issuers)()
-        self.assertIn("https://auth.example.com/realms/lex", accepted)
-        self.assertIn("https://auth.example.com/realms/lex/", accepted)
-        self.assertIn("http://keycloak:8080/realms/lex", accepted)
-
-        with _oidc_env():
-            self.assertIs(LexKeycloakAuthState._http_client(), DEFAULT_HTTP_CLIENT)
-        with _oidc_env(OIDC_VERIFY_SSL="false"), patch.object(auth, "_UNVERIFIED_HTTP_CLIENT", None), \
-                patch.object(auth.httpx, "AsyncClient") as async_client:
-            client = LexKeycloakAuthState._http_client()
-        async_client.assert_called_once_with(verify=False)
-        self.assertIsNot(client, DEFAULT_HTTP_CLIENT)
+class TestCluster01aq_User(TestCase):
+    """The signed-in user's names, as frontend vars."""
 
     # -- 1.369 ---------------------------------------------------------
     def test_1_369_lex_user_projects_the_names_lex_app_shows(self) -> None:
         """
-        Scenario 1.369: ``LexUser`` adds Keycloak's username and the best name to greet by.
-        Given: signed-in claims with and without a display name.
-        When:  ``LexUser.username`` / ``display_name`` are read.
-        Then:  the username is ``preferred_username``; the display name is the
-               name, else the username, else the email -- empty when signed out.
+        Scenario 1.369: ``LexUser`` names the signed-in user from the session's binding.
+        Given: a session whose binding's sign-in has a name, only a username, only
+               an e-mail; and one with no binding.
+        When:  ``LexUser``'s vars are read.
+        Then:  ``username`` is ``preferred_username``, ``email`` the address;
+               ``display_name`` is the name, else the username, else the email
+               -- all empty without a sign-in.
         """
-        from reflex_enterprise.auth import AuthUserState
+        import time
+
+        from lex.lex_app.reflex import session
 
         cases = [
             ({"sub": "1", "name": "Ada Lovelace", "preferred_username": "ada", "email": "a@x"},
              "ada", "Ada Lovelace"),
-            ({"sub": "1", "preferred_username": "ada", "email": "a@x"}, "ada", "ada"),
-            ({"sub": "1", "email": "a@x"}, "", "a@x"),
+            ({"sub": "1", "name": "", "preferred_username": "ada", "email": "a@x"}, "ada", "ada"),
+            ({"sub": "1", "name": "", "preferred_username": "", "email": "a@x"}, "", "a@x"),
             ({}, "", ""),
         ]
-        for claims, username, display_name in cases:
-            with self.subTest(claims=claims):
-                root = _root_state()
-                if claims:
-                    _substate(root, AuthUserState)._set_user(claims, "lex_keycloak")
+        digest = "e" * 64
+        self.addCleanup(session.forget)
+        for profile, username, display_name in cases:
+            with self.subTest(profile=profile):
+                session.forget()
+                if profile:
+                    who = SimpleNamespace(sub=profile["sub"], issuer="kc", email=profile["email"])
+                    session._remember(digest, session.Standing(time.monotonic(), 7, who, profile))
+                root = _root_state(binding=digest)
                 user = _substate(root, LexUser)
                 self.assertEqual(user.username, username)
+                self.assertEqual(user.email, profile.get("email", ""))
                 self.assertEqual(user.display_name, display_name)
 
 
@@ -679,35 +579,27 @@ class TestCluster01aq_TheCompiledApp(TestCase):
         Given: a project whose rxconfig.py is the one ``lex reflex`` writes,
                the reference ``_reflex_structure.py``, and a model with hooks.
         When:  ``lex.reflex_app`` is imported and compiled.
-        Then:  sign-in routes and the Keycloak provider's popup routes exist;
-               ``/`` runs the sign-in guard before resolving the URL; the
-               Django connection middleware is installed; the provider asks
-               Keycloak for the standard scopes and not ``offline_access``; the
-               structure's own pages (the reference example's ``/records``,
-               ``/grid``, ``/in-lex-app``, ``/calculations``, ``/edit`` since 1bw)
-               and ``main()``, and the model's dashboards, are compiled in.
+        Then:  ``/``, ``/logout`` and the structure's own pages (the reference
+               example's ``/records``, ``/grid``, ``/in-lex-app``,
+               ``/calculations``, ``/edit`` since 1bw) are compiled in, with no
+               Reflex Enterprise sign-in pages; ``/`` loads the user's grants
+               before resolving the URL; lex-app's session middleware runs
+               first, then RFDS's policy gate, then the Django connection
+               middleware; the plugins are Radix and RFDS only; ``main()`` and
+               the model's dashboards are on ``/``.
         """
-        from reflex_enterprise.plugins.auth import AuthPlugin
-
-        for route in ("index", "login", "callback", "logout", "forbidden",
-                      "records", "grid", "in-lex-app", "calculations", "edit",
-                      "_reflex_oidc_lex_keycloak/popup-login", "_reflex_oidc_lex_keycloak/popup-logout"):
+        for route in ("index", "logout", "records", "grid", "in-lex-app", "calculations", "edit"):
             self.assertIn(route, self.pages, f"missing page {route}: {sorted(self.pages)}")
+        for gone in ("login", "callback", "_reflex_oidc_lex_keycloak/popup-login"):
+            self.assertNotIn(gone, self.pages, "Reflex Enterprise's sign-in pages are gone")
 
         handlers = [handler.fn.__qualname__ for handler in self.index_on_load]
-        self.assertEqual(
-            handlers,
-            ["PageGuardState.enforce_login", "LexAccessState.load", "LexDashboardState.resolve"],
-            "the guard must run first: the grants and resolve read Keycloak and the database "
-            "only for a signed-in user (1bt loads the grants for RFDS's permission checks)",
-        )
-        self.assertIn("DjangoConnectionMiddleware", [type(m).__name__ for m in self.middlewares])
-
-        auth = next(p for p in self.plugins if isinstance(p, AuthPlugin))
-        self.assertEqual(auth.auth_providers, [LexKeycloakAuthState])
-        requested = LexKeycloakAuthState.backend_vars["_requested_scopes"].split()
-        self.assertTrue({"openid", "email", "profile"} <= set(requested), requested)
-        self.assertNotIn("offline_access", requested)
+        self.assertEqual(handlers, ["LexAccessState.load", "LexDashboardState.resolve"],
+                         "the grants first; an anonymous session's events go through the sign-in")
+        names = [type(m).__name__ for m in self.middlewares]
+        self.assertEqual(names[:3], ["LexSessionMiddleware", "PolicyMiddleware", "DjangoConnectionMiddleware"],
+                         "the session middleware must see every event first")
+        self.assertEqual([type(p).__name__ for p in self.plugins], ["RadixThemesPlugin", "RFDSPlugin"])
 
         index = str(self.pages["index"])
         self.assertIn("probe record dashboard", index)

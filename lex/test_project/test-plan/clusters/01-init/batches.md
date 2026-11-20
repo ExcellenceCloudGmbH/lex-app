@@ -1548,7 +1548,9 @@ The browser half — Keycloak's redirect and callback, the dashboards rendering 
 mode, sign-out, and a cross-site frame signing in through the popup — was verified end to end
 outside the suite, against a mock OIDC provider, because the suite has no Keycloak or browser.
 
-### Batch 1ar — Reflex dashboards sign in by themselves: no click, and the Keycloak session carries over ✅
+### Batch 1ar — Reflex dashboards sign in by themselves: no click, and the Keycloak session carries over — retired 2026-11-19
+
+> **Retired 2026-11-19** with Reflex Enterprise (Reflex without Reflex Enterprise, PR B): its subject, Reflex Enterprise's `/login` page and silent sign-in, went with Reflex Enterprise; dashboards sign in through lex-app's hand-off ([1bx](#batch-1bx)). Test file removed; letter and scenarios kept.
 
 | Property | Value |
 | --- | --- |
@@ -1597,7 +1599,9 @@ all signed in without a click; a frame signed in silently, and through one click
 not see the provider's session; the button, not a bounce, on coming back from the provider's form; and
 the provider's form again, at once, after signing out.
 
-### Batch 1as — Reflex dashboards: a Keycloak access token too large for its cookie is stored compressed ✅
+### Batch 1as — Reflex dashboards: a Keycloak access token too large for its cookie is stored compressed — retired 2026-11-19
+
+> **Retired 2026-11-19** with Reflex Enterprise (Reflex without Reflex Enterprise, PR B): the access-token cookie it compressed is gone: no token reaches the browser ([1bx](#batch-1bx)). Test file removed; letter and scenarios kept.
 
 | Property | Value |
 | --- | --- |
@@ -1646,7 +1650,9 @@ Keycloak-like token (2.6 KB compressed): top level, reload, a new tab, a restart
 side, a frame with the provider's session, and a frame on the dashboards' own site with no provider
 session at all all stayed signed in; before, the new tab and the second tab were signed out.
 
-### Batch 1at — a Reflex development run behind one port: Reflex Enterprise's single-port proxy gets the Starlette app ✅
+### Batch 1at — a Reflex development run behind one port: Reflex Enterprise's single-port proxy gets the Starlette app — retired 2026-11-19
+
+> **Retired 2026-11-19** with Reflex Enterprise (Reflex without Reflex Enterprise, PR B): it repaired Reflex Enterprise's single-port proxy; lex-app's own proxy is tested in 1by. Test file removed; letter and scenarios kept.
 
 | Property | Value |
 | --- | --- |
@@ -1930,7 +1936,9 @@ threads, now has to apply it itself.
 
 ---
 
-### Batch 1bg — Reflex dashboards stay signed in as long as Keycloak keeps the session ✅
+### Batch 1bg — Reflex dashboards stay signed in as long as Keycloak keeps the session — retired 2026-11-19
+
+> **Retired 2026-11-19** with Reflex Enterprise (Reflex without Reflex Enterprise, PR B): the refresh guard, cross-tab single flight, cookie lifetimes and back-channel receiver served Reflex Enterprise's token cookies; Django's sign-in now refreshes once per sign-in and ends it ([1bx](#batch-1bx)). BUG-048 to BUG-051 note it. Test file removed; letter and scenarios kept.
 
 | Property | Value |
 | --- | --- |
@@ -2494,3 +2502,64 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 | 1.725 | Every template is valid and uses only lex-app's surface | each block parses and imports only names `lex.lex_app.reflex` exports; list and overview are `@lex_page` routes gated on read; object page is a `LexRecordState` dashboard; the overview's ORM read is behind `has_permission` |
 | 1.726 | `check` lints the dashboards and runs the doctor | `lint --strict` over the structure module and the package, then `doctor --app-root`; non-zero when either fails; only the doctor when there is nothing to lint |
 | 1.727 | The reference example uses every feature and compiles | imports every lex-app dashboard feature; uses ExportMixin, charts, KPIs and `can`; its routes are in the compiled app; the compile ran conformance in strict CI mode |
+
+### Batch 1bx — Reflex dashboards sign in through lex-app's hand-off - no Reflex Enterprise, no Reflex account ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.728 – 1.735 |
+| Type | I (transactional; 1.731 and 1.735 partly U) |
+| Files covered | `lex/lex_app/reflex/session.py`, `lex/lex_app/reflex/auth.py` (`current_access_token`, `current_permissions`, `has_permission`, `lex_event`, `LexUser`), `lex/lex_app/reflex/access.py` (marker cleanup), `lex/authentication/dashboards` (reflex audience end to end) |
+| Test file | `lex/test_project/tests/init/test_1bx_reflex_sign_in_handoff.py` |
+| Test classes | `TestCluster01bx_RoundTrip` (1.728), `_SocketGuard` (1.729), `_Middleware` (1.730), `_Checks` (1.731), `_Token` (1.732), `_Pages` (1.733), `_SignOut` (1.734), `_Exports` (1.735) |
+| Fixtures | `lex.lex_app.tests.auth.sign_in`; the real `oidc/handoff` view; a recording ASGI app behind `session.transformer`; `reflex.config.get_config` patched to the two development ports |
+| Tests landed | **8 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.728 | A dashboard signs in through lex-app's hand-off | /auth/start: nonce cookie, 303 to <app>/oidc/handoff?aud=reflex with return=<backend><next>?lex_hs=1; lex-app's code; /auth/handoff: reflex binding, lex_rdash HttpOnly SameSite=Lax 30 days, nonce cleared, 303 to the frontend port (single port: the backend); https: __Host-, Secure, SameSite=None, Partitioned |
+| 1.729 | The event socket carries the digest, never a cookie | /_event (WebSocket and HTTP): no Cookie header, X-Lex-Binding = sha256(handle), a browser's own X-Lex-Binding dropped; other paths keep cookies; POST to a sign-in route passes through |
+| 1.730 | Anonymous sessions go through the hand-off, signed-in ones pass | signed in: passes, identity sub/e-mail/name/issuer, cached a minute; anonymous: page load of /auth/start?next=<page>, Reflex's own events pass; ended sign-in found at the next check, binding revoked; failed read = anonymous; lex_hs=2 -> /auth/blocked; marker cleanup keeps the page's own query |
+| 1.731 | RFDS sees the user and lex_event checks run first | rfds current_identity = the binding's user; guarded handler denied without the grant, allowed with it; untagged allowed for signed-in users; anonymous -> sign_in; lex_event without auth = plain rx.event |
+| 1.732 | The token comes from the sign-in and follows it | current_access_token = the sign-in's token, cached while valid; Keycloak unreachable -> '' and still signed in; ended -> '' and anonymous; no session, no token |
+| 1.733 | Without a sign-in lex-app is told and nothing loops | login_required: 401 page posting lex-auth v2 required/surface reflex to lex-app's origins and marking the tab; a code without our nonce never redeemed; a replayed code refused; unlisted host 400; outage 503 retry; /auth/blocked offers its own tab |
+| 1.734 | Signing out revokes the binding, then signs out of lex-app | LexUser.sign_out loads /auth/logout; binding revoked (logout), forgotten, cookie deleted, 303 to <app>/oidc/total_logout?next=<dashboard> |
+| 1.735 | An export download answers only its owner | the state's principal is the binding's subject; only the owner's request names it; another user's names theirs; no cookie names nobody |
+
+### Batch 1by — Reflex dashboards without Reflex Enterprise - nothing imports it, and lex-app's own one-port proxy ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.736 – 1.739 |
+| Type | U |
+| Files covered | `requirements.txt`, `lex/lex_app/reflex/` (every module's imports), `lex/lex_app/reflex/devproxy.py` (`enabled`, `FrontendProxy`, `install`), `lex/lex_app/reflex/config.py`, `lex/lex_app/reflex/app.py` |
+| Test file | `lex/test_project/tests/init/test_1by_reflex_without_enterprise.py` |
+| Test classes | `TestCluster01by_NoEnterprise` (1.736), `_Switch` (1.737), `_Http` (1.738), `_WebSocket` (1.739) |
+| Fixtures | a child interpreter refusing Reflex Enterprise; `httpx.MockTransport` for the frontend; a `websockets` sync server with the `vite-hmr` subprotocol |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.736 | Nothing imports Reflex Enterprise or requires it | child interpreter refusing reflex_enterprise and rfds.enterprise: config and every lex.lex_app.reflex module import, the config is Reflex's own, no Enterprise module loaded; requirements pin reflex and rfds==1.0.0, no reflex-enterprise |
+| 1.737 | The proxy runs only for a one-port development run | REFLEX_USE_SINGLE_PORT set, development, not backend-only -> on; unset, production or backend-only -> off; install registers the lifespan task only when on |
+| 1.738 | Pages pass through to the frontend server | method, path, query, body on; Host the upstream's; hop-by-hop dropped; status, headers, body back; gzip decoded without Content-Encoding; a starting frontend retried with the body every time; never answering -> 502 |
+| 1.739 | The hot-reload socket passes through with its subprotocol | accepted with vite-hmr; text and bytes both ways unchanged; no frontend -> the socket is refused |
+
+### Batch 1ca — A local run lets the dashboards' sign-in and sign-out send the browser back to them ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.745 – 1.745 |
+| Type | I |
+| Files covered | `lex/lex_app/settings.py` (`_LOCAL_DEV_PORTS`, `_local_dev_origins`, `_cors_allowed_origins`, `_redirect_hosts`), `lex/authentication/middleware.py` (`OidcRedirectGuardMiddleware`, through the views) |
+| Test file | `lex/test_project/tests/init/test_1ca_local_dashboard_redirects.py` |
+| Test classes | `TestCluster01ca_LocalDashboardRedirects` (1.745) |
+| Fixtures | `oauth2_authcodeflow.testing.FakeOP`; the allowlists overridden as settings derives them |
+| Tests landed | **1 pass / 0 fail** (6 subtests) |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.745 | A local run trusts the dashboards' dev servers and no more | local: 8501, 8502, 8503 and a moved Reflex port trusted on localhost and 127.0.0.1, total_logout and authenticate redirect back to the dashboard; another loopback port and a foreign site still 400 REDIRECT_NOT_ALLOWED; deployed: no localhost; this local run's real settings carry the dashboards' origins |

@@ -28,7 +28,7 @@ import os
 import re
 from typing import Any, Callable
 
-#: Where the user signs out: the route Reflex Enterprise's AuthPlugin serves.
+#: Where the user signs out: the page ``create_app`` adds, which hands over to the backend's ``/auth/logout``.
 SIGN_OUT_HREF = "/logout"
 
 #: ``LEX_ENVIRONMENT`` values RFDS's header can badge.
@@ -126,7 +126,6 @@ def lex_chrome(body, *, embedded=None):
     """
     import reflex as rx
     import rfds
-    from reflex_enterprise.auth import User
 
     from lex.lex_app.reflex.auth import LexUser
     from lex.lex_app.reflex.dashboards import LexDashboardState
@@ -141,7 +140,7 @@ def lex_chrome(body, *, embedded=None):
         # `?is_logout_enabled=false` leaves the user's name without the way out.
         user_menu=rx.cond(
             LexDashboardState.logout_enabled,
-            rfds.user_menu(name=LexUser.display_name, email=User.email, sign_out_href=SIGN_OUT_HREF),
+            rfds.user_menu(name=LexUser.display_name, email=LexUser.email, sign_out_href=SIGN_OUT_HREF),
             rx.text(LexUser.display_name, size="2"),
         ),
     )
@@ -185,7 +184,7 @@ def lex_page(
             hidden. This is what the user sees, not access control: the data
             the page loads must be checked by the handlers that load it.
         on_load: Load events, run after the user's grants are loaded.
-        **page_kwargs: Anything else ``rxe.page`` takes (``meta``, ``image``...).
+        **page_kwargs: Anything else ``rx.page`` takes (``meta``, ``image``...).
 
     Returns:
         The page function, unchanged, so it can still be called or tested.
@@ -194,7 +193,7 @@ def lex_page(
         raise ValueError(f"lex_page() routes start with '/', got {route!r}")
 
     def decorator(page_fn: Callable[[], Any]) -> Callable[[], Any]:
-        import reflex_enterprise as rxe
+        import reflex as rx
 
         from lex.lex_app.reflex.access import LexAccessState
 
@@ -223,7 +222,7 @@ def lex_page(
         loads: list[Any] = [LexAccessState.load]
         if on_load is not None:
             loads.extend(on_load if isinstance(on_load, (list, tuple)) else [on_load])
-        rxe.page(route=route, title=title, on_load=loads, **page_kwargs)(page)
+        rx.page(route=route, title=title, on_load=loads, **page_kwargs)(page)
         return page_fn
 
     return decorator

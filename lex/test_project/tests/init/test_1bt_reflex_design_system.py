@@ -3,8 +3,8 @@
 Intent: a project's Reflex dashboards get RFDS -- its components, tokens and
 templates -- with nothing configured by hand, while lex-app keeps the runtime.
 ``lex_config()`` lists RFDS's plugins in the order ``rfds.install()`` demands,
-with lex-app's brand, locale and currency; ``create_app()`` installs RFDS with
-lex-app's sign-in as the only identity, Keycloak's grants as RFDS's
+with lex-app's brand, locale and currency; ``create_app()`` installs RFDS on its
+open path (no Reflex Enterprise) with lex-app's sign-in as the only identity, Keycloak's grants as RFDS's
 permissions, and security headers that let lex-app -- and only lex-app --
 frame a dashboard. A page added with ``@lex_page`` is signed-in, in lex-app's
 chrome (hidden inside lex-app's own frame), with the user's grants loaded; and
@@ -14,8 +14,8 @@ will not compile, render blank inside lex-app, look like another product, or
 show controls a user has no grant for.
 Cluster 1bt -- scenarios 1.695-1.706. Type: U.
 Covers: lex/lex_app/reflex/design.py, access.py, shell.py, host.py, app.py,
-config.py (lex_config), auth.py (LexKeycloakAuthState's RFDS mixin, the login
-page's notice), _js/lex_host.jsx, _js/lex_rfds.css.
+config.py (lex_config), session.py (the identity resolver), _js/lex_host.jsx,
+_js/lex_rfds.css.
 Run: python -m lex pytest lex/test_project/tests/init/test_1bt_reflex_design_system.py -v
 """
 
@@ -69,12 +69,12 @@ class TestCluster01bt_DesignSystemConfig(SimpleTestCase):
         Scenario 1.695: the config carries RFDS, in the order RFDS requires, with lex-app's brand.
         Given: a project's rxconfig.py returning ``lex_config()``.
         When:  the configuration is built.
-        Then:  the plugins are lex-app's AuthPlugin, Radix with RFDS's root theme,
-               and RFDSPlugin -- Radix before RFDS, so RFDS's stylesheets win;
+        Then:  the plugins are Radix with RFDS's root theme and RFDSPlugin --
+               Radix before RFDS, so RFDS's stylesheets win (no sign-in plugin:
+               sign-in is lex-app's own);
                RFDS's brand is the LEX teal; the badge is off; and RFDS's own
                configuration check finds nothing to refuse.
         """
-        from reflex_enterprise.plugins.auth import AuthPlugin
         from rfds import RFDSPlugin
         from rfds.bootstrap import validate_config
 
@@ -84,10 +84,9 @@ class TestCluster01bt_DesignSystemConfig(SimpleTestCase):
         with patch.dict(os.environ, _NO_LEX_ENV):
             config = lex_config()
         names = [type(plugin).__name__ for plugin in config.plugins]
-        self.assertEqual(names, ["AuthPlugin", "RadixThemesPlugin", "RFDSPlugin"],
+        self.assertEqual(names, ["RadixThemesPlugin", "RFDSPlugin"],
                          "RFDS must follow Radix, or rfds.install() refuses to start (FW-09)")
-        self.assertIsInstance(config.plugins[0], AuthPlugin)
-        rfds_plugin = config.plugins[2]
+        rfds_plugin = config.plugins[1]
         self.assertIsInstance(rfds_plugin, RFDSPlugin)
         self.assertEqual(rfds_plugin.brand.primary, TEAL, "the brand is lex-app's teal, not RFDS's indigo")
         self.assertIs(config.show_built_with_reflex, False)
@@ -317,7 +316,7 @@ class TestCluster01bt_Chrome(SimpleTestCase):
         Given: a page function decorated with a route, a title, a heading, an
                icon, a required permission and a load event of its own.
         When:  the decorator runs.
-        Then:  the page is registered with ``rxe.page`` (signed-in), its loads
+        Then:  the page is registered with ``rx.page``, its loads
                are the grants first and then its own; it is listed under its
                heading with the permission that hides it; the original function
                is returned unchanged; and a route without ``/`` is refused.
@@ -336,7 +335,7 @@ class TestCluster01bt_Chrome(SimpleTestCase):
         def cash():
             return "body"
 
-        with patch("reflex_enterprise.page", fake_page):
+        with patch("reflex.page", fake_page):
             returned = shell.lex_page("/cash", title="Cash overview", nav="Finance", icon="money",
                                       requires="lex_app.Fund:read", on_load=own_load)(cash)
         self.assertIs(returned, cash)
@@ -359,7 +358,7 @@ class TestCluster01bt_Chrome(SimpleTestCase):
                its place, and a project without pages has no navigation at all.
         """
         self.assertEqual(shell.nav_sections(), ())
-        with patch("reflex_enterprise.page", lambda **kw: (lambda fn: fn)):
+        with patch("reflex.page", lambda **kw: (lambda fn: fn)):
             for route, heading in (("/a", "Finance"), ("/b", "Risk"), ("/c", "Finance"), ("/a", "Finance")):
                 shell.lex_page(route, title=route.upper(), nav=heading)(lambda: None)
         sections = shell.nav_sections()
@@ -499,20 +498,17 @@ class TestCluster01bt_TheCompiledApp(TestCase):
         Scenario 1.706: the compiled app is RFDS on lex-app's runtime.
         Given: a project whose rxconfig.py is the one ``lex reflex`` writes.
         When:  ``lex.reflex_app`` is imported and compiled.
-        Then:  RFDS is installed; its identity is Reflex Enterprise's signed-in
-               user and its permissions are lex-app's resolver; the side
-               navigation is gated on them; the head carries lex-app's styles;
-               the transformers serve RFDS's routes, its headers without
-               ``X-Frame-Options``, and lex-app's framing policy; and the
-               Keycloak provider carries RFDS's provider behaviour.
+        Then:  RFDS is installed; its identity is lex-app's session (the
+               binding the hand-off left) and its permissions are lex-app's
+               resolver; the side navigation is gated on them; the head carries
+               lex-app's styles; the transformers serve RFDS's routes, its
+               headers without ``X-Frame-Options``, lex-app's framing policy,
+               and -- outermost -- lex-app's sign-in routes and socket guard.
         """
-        from rfds.enterprise.auth.plugin import rxe_identity
-        from rfds.enterprise.auth.providers import RfdsProviderMixin
-
-        from lex.lex_app.reflex.auth import LexKeycloakAuthState
+        from lex.lex_app.reflex import session
 
         self.assertTrue(getattr(self.app, "_rfds_installed", False), "rfds.install() must have run")
-        self.assertEqual(self.resolver, [rxe_identity])
+        self.assertEqual(self.resolver, [session.identity])
         self.assertEqual(self.permission_resolver, [access.lex_permission_resolver])
         self.assertEqual(len(self.checker), 1, "the navigation's permissions must be checked")
         self.assertTrue(any("--rfds-color-chrome-bg" in head for head in self.head),
@@ -524,6 +520,6 @@ class TestCluster01bt_TheCompiledApp(TestCase):
         self.assertEqual(len(headers), 1)
         self.assertIsNone(headers[0].frame_options)
         self.assertTrue(any(getattr(t, "lex_framing_policy", False) for t in transformers))
-        self.assertTrue(issubclass(LexKeycloakAuthState, RfdsProviderMixin))
+        self.assertIs(transformers[-1], session.transformer, "the sign-in layer must see requests first")
         middlewares = [type(m).__name__ for m in self.app._middlewares]
         self.assertIn("GrantsRefreshMiddleware", middlewares)

@@ -28,10 +28,6 @@ from lex.react.views import serve_react
 
 from . import views
 
-# lex-surfaces-reflex-ws: connects the receiver that lets Keycloak's back-channel logouts reach
-# Reflex dashboards (lex:kc_sid_ended:{sid}); loaded wherever /oidc/backchannel-logout is routed.
-from lex.lex_app.reflex import backchannel as _reflex_backchannel  # noqa: E402,F401
-
 _raw_base_path = os.getenv("DJANGO_BASE_PATH")
 url_prefix = _raw_base_path.strip("/") if _raw_base_path else ""
 admin_route = f"{url_prefix}/admin/" if url_prefix else "admin/"

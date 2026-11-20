@@ -31,14 +31,13 @@ nest_asyncio==1.6.0
 Office365-REST-Python-Client==3.3.0
 streamlit==1.66.1
 streamlit-keycloak-lex==1.0.5
-# `lex reflex`. Upper-bounded like streamlit: lex.lex_app.reflex.auth extends
-# reflex-enterprise's OIDC provider hooks, which a 0.10 is free to change.
+# `lex reflex`. Plain Reflex -- no Reflex Enterprise, no Reflex account: the
+# dashboards sign in through lex-app's own sign-in (lex.lex_app.reflex.session).
+# Pinned: the session guard reads the event socket Reflex 0.9 mounts at /_event.
 reflex==0.9.13
-reflex-enterprise==0.9.7
 # The Reflex dashboards' design system: tokens, components, page templates
-# (lex.lex_app.reflex.design). The enterprise extra is its Reflex Enterprise
-# half -- AG Grid, the OIDC provider mixin -- which lex-app runs on already.
-rfds[enterprise]==1.0.0
+# (lex.lex_app.reflex.design), on its open path (no enterprise extra).
+rfds==1.0.0
 sqlalchemy==2.1.5
 django_redis==7.0.0
 django-storages[google]==1.14.6
