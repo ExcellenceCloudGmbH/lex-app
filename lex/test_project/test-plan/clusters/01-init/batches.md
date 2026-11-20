@@ -2567,3 +2567,20 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 | 1.742 | The accent scale is the LEX teal, not RFDS's adjusted brand | indigo-9 = TEAL 500 both modes; hover, accent text, selection washes, on-solid text and page/panel backgrounds from the tokens; the brand passed to RFDS is the same teal |
 | 1.743 | Header, navigation, cards and buttons are lex-app's | navy gradient header with teal glow, no stripe; navy side nav, teal wash + 3 px bar on the current page; 16 px cards with soft elevation; buttons 8 px / 600 / no uppercase / hover lift, none with reduced motion; primary navy gradient + white (light), teal gradient + dark text (dark); soft focus ring, no dashed title outline |
 | 1.744 | Pages load Inter and the theme and open in light mode | lex_config default_color_mode light; head links Inter and inlines the theme then the embedded layout; the embedded layout file carries no colours |
+
+### Batch 1ca — A local run lets the dashboards' sign-in and sign-out send the browser back to them ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.745 – 1.745 |
+| Type | I |
+| Files covered | `lex/lex_app/settings.py` (`_LOCAL_DEV_PORTS`, `_local_dev_origins`, `_cors_allowed_origins`, `_redirect_hosts`), `lex/authentication/middleware.py` (`OidcRedirectGuardMiddleware`, through the views) |
+| Test file | `lex/test_project/tests/init/test_1ca_local_dashboard_redirects.py` |
+| Test classes | `TestCluster01ca_LocalDashboardRedirects` (1.745) |
+| Fixtures | `oauth2_authcodeflow.testing.FakeOP`; the allowlists overridden as settings derives them |
+| Tests landed | **1 pass / 0 fail** (6 subtests) |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.745 | A local run trusts the dashboards' dev servers and no more | local: 8501, 8502, 8503 and a moved Reflex port trusted on localhost and 127.0.0.1, total_logout and authenticate redirect back to the dashboard; another loopback port and a foreign site still 400 REDIRECT_NOT_ALLOWED; deployed: no localhost; this local run's real settings carry the dashboards' origins |

@@ -1137,8 +1137,8 @@ SENDGRID_ECHO_TO_STDOUT = True
 # origins: https://<DOMAIN_HOSTED>, every host in LEX_INSTANCE_HOSTS (app,
 # Streamlit, Reflex; canonical, extra and platform), and the comma-separated
 # LEX_CORS_ALLOWED_ORIGINS. Local runs also accept the dev servers on
-# localhost. No "*" anywhere: with credentials it would let any site act as
-# the signed-in user. LEX_SEC_CORS=false (or LEX_LEGACY_SECURITY=true)
+# localhost, the dashboards' included. No "*" anywhere: with credentials it
+# would let any site act as the signed-in user. LEX_SEC_CORS=false (or LEX_LEGACY_SECURITY=true)
 # restores the old "any origin" behaviour while a project migrates.
 #
 # The same list feeds the redirect allowlists: OidcRedirectGuardMiddleware
@@ -1150,12 +1150,23 @@ from lex.core.instance_hosts import instance_hosts as _instance_hosts  # noqa: E
 from lex.core.security_flags import strict as _security_flag  # noqa: E402
 
 _deployed = os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
-_local_dev_origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-]
+# A local run's dev servers: the React dev server (3000), Django (8000), and the
+# dashboards as `lex streamlit` (8501) and `lex reflex run` (8502 frontend, 8503
+# backend -- the page in single-port mode) start them. A dashboard's sign-in and
+# sign-out send the browser back to it with next=, so its origin must pass the
+# redirect allowlists below like the app's own.
+_LOCAL_DEV_PORTS = ("3000", "8000", "8501", "8502", "8503")
+
+
+def _local_dev_origins(environ=None) -> list:
+    """The loopback origins of a local run: the default dev ports and any Reflex port moved by env."""
+    env = os.environ if environ is None else environ
+    ports = list(_LOCAL_DEV_PORTS)
+    for name in ("REFLEX_FRONTEND_PORT", "REFLEX_BACKEND_PORT"):
+        port = (env.get(name) or "").strip()
+        if port.isdigit() and port not in ports:
+            ports.append(port)
+    return [f"http://{host}:{port}" for port in ports for host in ("localhost", "127.0.0.1")]
 
 
 def _cors_allowed_origins(environ=None, deployed=None) -> list:
@@ -1175,7 +1186,7 @@ def _cors_allowed_origins(environ=None, deployed=None) -> list:
     )
     candidates.extend(env.get("LEX_CORS_ALLOWED_ORIGINS", "").split(","))
     if not is_deployed:
-        candidates.extend(_local_dev_origins)
+        candidates.extend(_local_dev_origins(env))
     origins = []
     for origin in candidates:
         origin = origin.strip().rstrip("/")

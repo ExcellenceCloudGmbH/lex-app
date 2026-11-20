@@ -1054,3 +1054,17 @@ does not remove user launch configurations.
 | 1.744 | Pages load Inter and the theme and open in light mode | lex_config default_color_mode light; head links Inter and inlines the theme then the embedded layout; the embedded layout file carries no colours |
 
 **Scenario range:** 1.740 – 1.744. **Test file:** `lex/test_project/tests/init/test_1bz_reflex_lex_look.py`. **Type:** U. **Status:** ✅ Complete (2026-11-19). Batch: [1bz](batches.md).
+
+---
+
+### 1ca. A local run lets the dashboards' sign-in and sign-out send the browser back to them ✅
+
+**What it tests:** that in a local run the dashboards' dev servers (Streamlit 8501, Reflex 8502 and 8503, or a moved Reflex port) are valid `next=` targets for lex-app's sign-in and sign-out, and that nothing else new is.
+
+**Why a regression matters:** a developer cannot sign out of (or in to) a local dashboard -- the browser ends on "Redirect target not allowed." -- or, the other way, a local run or a deployed instance trusts origins it should not: an open redirect.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.745 | A local run trusts the dashboards' dev servers and no more | local: 8501, 8502, 8503 and a moved Reflex port trusted on localhost and 127.0.0.1, total_logout and authenticate redirect back to the dashboard; another loopback port and a foreign site still 400 REDIRECT_NOT_ALLOWED; deployed: no localhost; this local run's real settings carry the dashboards' origins |
+
+**Scenario range:** 1.745 – 1.745. **Test file:** `lex/test_project/tests/init/test_1ca_local_dashboard_redirects.py`. **Type:** I. **Status:** ✅ Complete (2026-11-20). Batch: [1ca](batches.md).
