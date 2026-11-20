@@ -1068,3 +1068,17 @@ does not remove user launch configurations.
 | 1.745 | A local run trusts the dashboards' dev servers and no more | local: 8501, 8502, 8503 and a moved Reflex port trusted on localhost and 127.0.0.1, total_logout and authenticate redirect back to the dashboard; another loopback port and a foreign site still 400 REDIRECT_NOT_ALLOWED; deployed: no localhost; this local run's real settings carry the dashboards' origins |
 
 **Scenario range:** 1.745 – 1.745. **Test file:** `lex/test_project/tests/init/test_1ca_local_dashboard_redirects.py`. **Type:** I. **Status:** ✅ Complete (2026-11-20). Batch: [1ca](batches.md).
+
+---
+
+### 1cb. lex-app's grids and dashboard pages take the page's width ✅
+
+**What it tests:** that a grid built with `lex_grid`, and every dashboard page lex-app draws (`/` and the Analytics tab), fill the page's width instead of shrinking to their content.
+
+**Why a regression matters:** a grid that shows one column and no visible rows, or a dashboard squeezed into a narrow strip -- what a start-aligned `rx.vstack` does to RFDS's grid and to a project's page.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.746 | Grids and dashboards fill the page width | lex_grid's stack stretches its children and RFDS's grid frame stays 100% wide; the stack directly inside the shell's main region stretches, so a project's page, tables and cards take the frame's width |
+
+**Scenario range:** 1.746 – 1.746. **Test file:** `lex/test_project/tests/init/test_1cb_reflex_full_width.py`. **Type:** U. **Status:** ✅ Complete (2026-11-20). Batch: [1cb](batches.md).

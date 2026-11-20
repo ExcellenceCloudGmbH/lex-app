@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 745
+max_scenario: 746
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2004,3 +2004,19 @@ letters:
       origins; deployed instances are unchanged (their dashboards come from LEX_INSTANCE_HOSTS).
       Letter ca and 1.745: 1bz (1.740-1.744) is allocated on the stacked feat/reflex-lex-look.
       Without the settings change 1.745 fails.
+  cb:
+    title: 'lex-app''s grids and dashboard pages take the page''s width, not their content''s'
+    scenarios: 1.746-1.746
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      Found in a screen recording of a real project: both AG Grid pages showed one narrow
+      column, and the / and Analytics-tab dashboards ran in a narrow strip. rx.vstack aligns
+      its children to the start by default, which shrinks them to their content; RFDS sizes
+      the grid frame at 100% of a block that has no width of its own. lex_grid's stack and
+      the stack dashboard_page puts in the shell's main region now stretch their children.
+      Reproduced and confirmed in a sandboxed headless render (synthetic rows). Removing either
+      align="stretch" fails 1.746.
