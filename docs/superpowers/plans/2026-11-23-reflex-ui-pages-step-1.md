@@ -43,7 +43,7 @@ Every code block in this plan was run before the plan was written: the 22 tests 
 
 ## Changed by review while executing
 
-Tasks 2 to 6 were reviewed and then fixed in two commits; the code and tests shown for them below are the fixed ones, and the later tasks are written against them:
+Tasks 2 to 7 were reviewed and then fixed in three commits; the code and tests shown for them below are the fixed ones, and the later tasks are written against them:
 
 - A value joined into an address is encoded (`links.piece`; a state value with `String(value ?? '')`); `links.info_of` refuses optional and catch-all route forms and parameter names that `ui.link` takes itself.
 - `shown(ctx, component, visible)` takes the build context and accepts a permission, a non-empty list of them, `ui.signed_in`, a state value or a bool.
@@ -53,6 +53,11 @@ Tasks 2 to 6 were reviewed and then fixed in two commits; the code and tests sho
 - `Button.menu_entry(ctx)` and `Link.menu_entry(ctx)` build the action's entry in the page header's menu, keeping tone and icon.
 - A part class may carry `ui_name` (its public name) and `nests` (whether it may sit inside a section).
 - Facts that follow one another in a section become one key-value list; a section inside a section and `empty=` without a table are refused; a section hands `empty=` to a copy of a table.
+- The kinds build their own parts first and then call RFDS's floorplan inside a guard: what RFDS refuses becomes a `PageError` that names the page. Two sections with one title, a blank title and an action called Save are refused by lex first.
+- On a record page a section's `visible=` takes a permission, which RFDS shows as a heading with the reason; a state value there is refused with the advice to use `ui.switch` inside the section.
+- A link or button keeps RFDS's marks when `visible=` wraps it (`Part._wrap`), so a primary action with `visible=` stays primary; the kind marks the first action primary on a copy.
+- `@ui.page` checks `requires=`, `params=` and a route taken twice when the page is declared; `finalize()` checks that every `load=` is a `@ui.load` handler given once, and wraps an error from a page function in a `PageError`. `@ui.dashboard` passes its arguments through, so it works under `@classmethod`.
+- Task 7's test names `tables.table`, because `ui.table` is exported in Task 8. Task 8 was written by the controller while checking the plan's code against the fixed tree.
 
 ## Not in this step
 
@@ -570,6 +575,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
+import unicodedata
 from typing import Any, ClassVar
 
 import reflex as rx
@@ -621,10 +627,14 @@ class Part:
             raise ctx.fail(f"{called(self)} got {called(wrong.value)} where its words belong.",
                            "Write the sentence the user reads, in English: `ui.text(\"3 open requests\")`. "
                            "A state value is shown as it is.") from None
-        return shown(ctx, component, self.visible)
+        return self._wrap(ctx, component)
 
     def _render(self, ctx: Build) -> rx.Component:
         raise NotImplementedError
+
+    def _wrap(self, ctx: Build, component: rx.Component) -> rx.Component:
+        """``component`` as the page shows it: only to whom, and when, ``visible`` says."""
+        return shown(ctx, component, self.visible)
 
 
 def shown(ctx: Build, component: rx.Component, visible: Any) -> rx.Component:
@@ -672,7 +682,9 @@ def say(sentence: Any, **values: Any) -> Any:
 
 
 def slug(text: str) -> str:
-    return re.sub(r"[^0-9a-z]+", "-", text.lower()).strip("-") or "part"
+    """``text`` as an id: its letters without accents, in lower case, joined by dashes."""
+    plain = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^0-9a-z]+", "-", plain.lower()).strip("-") or "part"
 
 
 def called(value: Any) -> str:
@@ -708,7 +720,7 @@ from typing import Any
 
 import reflex as rx
 
-from lex.lex_app.reflex.ui.pages.parts import Build, NotASentence, Part, called, say
+from lex.lex_app.reflex.ui.pages.parts import Build, NotASentence, Part, called, say, shown
 
 TONES = ("neutral", "info", "success", "warning", "danger")
 KINDS = ("text", "number", "money", "percent", "datetime")
@@ -826,6 +838,18 @@ class Message(Part):
 def message(sentence: Any, *, tone: str = "info", visible: Any = None, **values: Any) -> Message:
     """A notice in place. ``{name}`` in the sentence is filled from ``values`` (not ``tone`` or ``visible``)."""
     return Message(sentence, values, _tone(tone), visible)
+
+
+def _marked(inner: rx.Component, wrapper: rx.Component) -> rx.Component:
+    """``wrapper`` carrying the RFDS metadata of the control it wraps.
+
+    The one place lex-app reaches into RFDS's private metadata. RFDS's page header reads a
+    control's kind and intent from it -- which action is the primary one, what is a menu entry --
+    and a ``visible=`` wrapper has none of its own, so the control would lose its role.
+    """
+    from rfds.components.actions._common import get_meta, set_meta
+
+    return wrapper if wrapper is inner else set_meta(wrapper, **get_meta(inner))
 ```
 
 - [ ] **Step 4: Run it and see it pass**
@@ -1200,6 +1224,9 @@ class Link(Part):
     def menu_entry(self, ctx: Build) -> rx.Component:
         return menu_entry(ctx, self.label, self.click(ctx), self.visible)
 
+    def _wrap(self, ctx: Build, component: rx.Component) -> rx.Component:
+        return _marked(component, shown(ctx, component, self.visible))
+
     def _render(self, ctx: Build) -> rx.Component:
         import rfds
 
@@ -1244,6 +1271,9 @@ class Button(Part):
     def menu_entry(self, ctx: Build) -> rx.Component:
         return menu_entry(ctx, self.label, self.click(ctx), self.visible, tone=self.tone, icon=self.icon)
 
+    def _wrap(self, ctx: Build, component: rx.Component) -> rx.Component:
+        return _marked(component, shown(ctx, component, self.visible))
+
     def _render(self, ctx: Build) -> rx.Component:
         import rfds
 
@@ -1255,8 +1285,8 @@ def button(label: Any, handler: Any = None, *, to: Any = None, tone: str = "neut
            visible: Any = None, **values: Any) -> Button:
     """Runs a handler, or opens a page (``to=``, with the page's parameters by name)."""
     if (handler is None) == (to is None):
-        raise ValueError("ui.button() takes a handler or to=, one of them: `ui.button(\"Save\", State.save)` or "
-                         "`ui.button(\"New\", to=new_page)`.")
+        raise ValueError("ui.button() takes a handler or to=, one of them: `ui.button(\"Close fund\", State.close)` "
+                         "or `ui.button(\"New fund\", to=new_fund)`.")
     if values and to is None:
         raise ValueError(f"ui.button(): {', '.join(values)} can only be given with to=, as the page's parameters.")
     return Button(label, handler, to, values, _tone(tone), icon, visible)
@@ -1265,12 +1295,7 @@ def button(label: Any, handler: Any = None, *, to: Any = None, tone: str = "neut
 def menu_entry(ctx: Build, label: Any, click: Any, visible: Any, *, tone: str = "neutral",
                icon: str | None = None) -> rx.Component:
     """An action as an entry of the page header's "More actions" menu."""
-    # The one place lex-app reaches into RFDS's private metadata: RFDS's page header keeps what it
-    # recognises as a menu entry by that metadata, and a ``visible=`` wrapper would otherwise hide it.
-    from rfds.components.actions._common import get_meta, set_meta
     from rfds.components.actions.menu import menu_item
-
-    from lex.lex_app.reflex.ui.pages.parts import shown
 
     try:
         words = say(label)
@@ -1278,7 +1303,7 @@ def menu_entry(ctx: Build, label: Any, click: Any, visible: Any, *, tone: str = 
         raise ctx.fail(f"an action's label is {called(label)}.",
                        "Write the words: `ui.button(\"Close fund\", ...)`.") from None
     entry = menu_item(words, on_select=click, icon=icon, tone="danger" if tone == "danger" else "neutral")
-    return set_meta(shown(ctx, entry, visible), **get_meta(entry))
+    return _marked(entry, shown(ctx, entry, visible))
 ```
 
 - [ ] **Step 4: Run it and see it pass**
@@ -1827,19 +1852,22 @@ def build_all(ctx: Build, parts: list) -> list:
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, ClassVar
+import re
+from typing import Any, Callable, ClassVar
 
 import reflex as rx
 
 from lex.lex_app.reflex.ui import runs
 from lex.lex_app.reflex.ui.pages import tables, vocab
-from lex.lex_app.reflex.ui.pages.parts import Build, Part, say, slug, take
+from lex.lex_app.reflex.ui.pages.parts import Build, NotASentence, Part, called, say, slug, take
 
 
 def states(ctx: Build, load: Any, content: rx.Component, shape: str) -> rx.Component:
     """``content`` once ``load`` has finished; before that its skeleton, or its failure in place."""
     import rfds
 
+    # The page waits as a whole: keeping its header while the body loads would show an empty
+    # title and actions that can be clicked before the data they act on has arrived.
     if load is None:
         return content
     problem = runs.failed(load)
@@ -1910,6 +1938,10 @@ def section(title: str, *content: Any, load: Any = None, empty: Any = None, visi
     if not isinstance(title, str) or not title:
         raise TypeError(f"ui.section() takes its title first, a sentence; got {title!r}")
     return Section(title, tuple(content), load, empty, visible)
+
+
+#: An action RFDS treats as a Save: it wants a "last saved" time beside it, which a page header cannot give.
+_SAVE = re.compile(r"\b(save|speichern|sichern)\b", re.IGNORECASE)
 ```
 
 - [ ] **Step 4: Run it and see it pass**
@@ -2038,7 +2070,18 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         self.assertIn("rfds-skeleton", text, "a skeleton before the load has finished")
         self.assertEqual(page.loads(), ([KindDesk.open], [KindDesk.load_documents]),
                          "the page load and the sections' loads are reported separately")
-        self.assertNotIn("ui_loaded", str(_record().build(CTX)), "without a load the page is shown at once")
+        bare = str(_record().build(CTX))
+        self.assertNotIn("ui_loaded", bare, "without a load the page is shown at once")
+        self.assertIn("name_rx_state_", bare, "the title comes from the state (this page has no other use of it)")
+        odd = str(_record(sections=[kinds.section("2024 results", vocab.text("a")),
+                                    kinds.section("Übersicht", vocab.text("b")),
+                                    kinds.section("概要", vocab.text("c"))]).build(CTX))
+        for anchor in ('"#section-2024-results"', '"#ubersicht"', '"#section-3"'):
+            with self.subTest(anchor=anchor):
+                self.assertIn(anchor, odd, "every title gives a section an id that is a valid anchor")
+        gated = _record(sections=[kinds.section("Details", vocab.text("a"), visible=ui.edit(Group))])._sections(CTX)
+        self.assertEqual([section.permission for section in gated], ["auth.Group:edit"],
+                         "a section's permission is handed to RFDS, which keeps the heading and says why it is empty")
         tabbed = str(_record(tabs=True, sections=[kinds.section("A", vocab.text("a")),
                                                    kinds.section("B", vocab.text("b"))]).build(CTX))
         self.assertIn("rfds-tabs", tabbed, "tabs=True shows one section at a time")
@@ -2050,7 +2093,10 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         Given: record pages with a raw component among the facts, no section, no title, a
                status that is not a ui.status, and a section slot holding a text.
         When:  each is built.
-        Then:  each is a PageError naming the page and the slot and saying what to write.
+        Then:  each is a PageError naming the page and the slot and saying what to write --
+               also two sections with one title, a section hidden by a state value, a blank
+               title, a title that is not words, and an action called Save; a limit of RFDS's
+               own (five tables on one page) names the page and quotes RFDS's sentence.
         """
         cases = {
             "facts": (dict(facts=[rx.text("raw")]),
@@ -2066,10 +2112,31 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
             "sections": (dict(sections=[vocab.text("loose")]),
                          "Page `fund`, slot `sections`: got `ui.text`.\n`sections=` holds `ui.section(title, ...)`."),
         }
+        cases["same title"] = (dict(sections=[kinds.section("Notes", vocab.text("a")), kinds.section("Notes", vocab.text("b"))]),
+                               "Page `fund`, slot `sections`: two sections are both called `Notes`.\n"
+                               "Give each section its own title.")
+        cases["section by state"] = (
+            dict(sections=[kinds.section("Notes", vocab.text("a"), visible=KindDesk.name != "")]),
+            "Page `fund`, slot `sections[0]`: `visible=` on a section of a record page takes a permission.\n"
+            "A section's heading always shows. To hide the section from some users write `visible=ui.read(Model)`; "
+            "to show different content by state, put `ui.switch(...)` inside the section.")
+        cases["blank title"] = (dict(title="   "), "Page `fund`: the page has no title.\n"
+                                                    "Give the kind `title=\"...\"`, or a state value.")
+        cases["title not words"] = (dict(title=5), "Page `fund`: the page's title is `5`.\n"
+                                                    "Give the kind `title=\"...\"`, or a state value.")
+        cases["save"] = (dict(actions=[vocab.button("Save changes", KindDesk.close)]),
+                         "Page `fund`, slot `actions`: an action is called `Save changes`.\n"
+                         "RFDS shows a last-saved time beside a Save action, which a page header cannot give yet. "
+                         "Name the action for what it does (`\"Apply changes\"`); saving belongs to a form.")
         for name, (slots, message) in cases.items():
             with self.subTest(case=name), self.assertRaises(PageError) as raised:
                 _record(**slots).build(CTX)
             self.assertEqual(str(raised.exception), message, f"{name}: the message says what to write")
+        crowded = [kinds.section(f"Table {n}", tables.table(Group, columns=["name"])) for n in "abcde"]
+        with self.assertRaises(PageError) as limit:
+            _record(sections=crowded).build(CTX)
+        self.assertTrue(str(limit.exception).startswith("Page `fund`: RFDS's page layout refuses this page: rfds."),
+                        f"a limit of RFDS's own names the page and quotes RFDS: {limit.exception}")
 
     # -- 1.801 ---------------------------------------------------------
     def test_1_801_actions_are_placed_as_the_page_header_places_them(self) -> None:
@@ -2080,8 +2147,9 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         When:  they are built.
         Then:  the first action is the primary button -- unless it is dangerous, which is never
                primary; exactly one further action is a button; two or more further actions
-               are entries of the "More actions" menu, with their translated sentences;
-               something that is not a button or a link is refused.
+               are entries of the "More actions" menu, with their translated sentences and
+               their tone; a primary action with visible= stays primary; the author's part is
+               not changed; something that is not a button or a link is refused.
         """
         one = str(_record(actions=[vocab.button("Edit", KindDesk.close)]).build(CTX))
         self.assertIn('"data-rfds-intent":"primary"', one, "the first action is primary")
@@ -2095,14 +2163,20 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         self.assertIn('"rfds-menu-item-label"},rfdsI18n.t("Close fund", "Close fund"', three,
                       "two or more further actions are menu entries, translated")
         self.assertIn('"rfds-menu-item-label"},rfdsI18n.t("All groups", "All groups"', three, "the link is an entry too")
+        self.assertIn('"data-rfds-tone":"danger"', three, "a dangerous action keeps its tone in the menu")
         calm = str(_record(actions=[vocab.button("Edit", KindDesk.close), vocab.button("Close fund", KindDesk.close),
                                     vocab.link("All groups", to=group_page, key="1")]).build(CTX))
-        self.assertNotEqual(calm, three, "a dangerous action keeps its tone in the menu")
+        self.assertNotIn('"data-rfds-tone":"danger"', calm, "and only a dangerous one has it")
+        edit = vocab.button("Edit", KindDesk.close, visible=ui.edit(Group))
+        gated = str(_record(actions=[edit, vocab.button("Close fund", KindDesk.close, tone="danger")]).build(CTX))
+        self.assertIn('"data-rfds-intent":"primary"', gated, "a primary action with visible= stays primary")
+        self.assertIn('"data-rfds-intent":"danger"', gated, "and the action beside it is still built")
+        self.assertFalse(edit.primary, "the kind marks a copy primary, never the author's part")
         danger_first = str(_record(actions=[vocab.button("Close fund", KindDesk.close, tone="danger")]).build(CTX))
         self.assertNotIn('"data-rfds-intent":"primary"', danger_first, "a dangerous action is never the primary one")
         with self.assertRaises(PageError) as wrong:
             _record(actions=[vocab.text("loose")]).build(CTX)
-        self.assertIn("slot `actions`: got `ui.text`", str(wrong.exception))
+        self.assertIn("slot `actions`: got `ui.text`", str(wrong.exception), "what is not an action is named")
 
     # -- 1.802 ---------------------------------------------------------
     def test_1_802_a_list_page_is_a_title_a_table_and_its_actions(self) -> None:
@@ -2123,7 +2197,11 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         with self.assertRaises(PageError) as wrong:
             kinds.list_(title="Groups", table=vocab.text("loose")).build(Build(page="groups", route="/groups"))
         self.assertEqual(str(wrong.exception),
-                         "Page `groups`, slot `table`: got Text.\n`table=` holds one `ui.table(Model, columns=[...])`.")
+                         "Page `groups`, slot `table`: got `ui.text`.\n"
+                         "`table=` holds one `ui.table(Model, columns=[...])`.", "a wrong table is named by its ui name")
+        with self.assertRaises(PageError) as no_table:
+            kinds.list_(title="Groups").build(Build(page="groups", route="/groups"))
+        self.assertIn("got nothing (`None`).", str(no_table.exception), "a list without a table says so")
 ```
 
 - [ ] **Step 2: Run it and see it fail**
@@ -2148,6 +2226,31 @@ def _apart(button: rx.Component) -> rx.Component:
     return set_meta(rx.fragment(button), **get_meta(button))
 
 
+def _rfds(ctx: Build, build: Callable[[], Any]) -> Any:
+    """Call one of RFDS's floorplans; a limit of its own becomes a ``PageError`` naming the page."""
+    try:
+        return build()
+    except (ValueError, TypeError) as wrong:
+        raise ctx.fail(f"RFDS's page layout refuses this page: {wrong}",
+                       "The sentence above is RFDS's own: it names the limit the page goes over.") from None
+
+
+def _section_ids(titles: list) -> list:
+    """An id for each section: an anchor in the page's address, so letter-led and unlike the others."""
+    ids: list = []
+    for index, title in enumerate(titles):
+        base = slug(title)
+        if base == "part":
+            base = f"section-{index + 1}"
+        elif not base[0].isalpha():
+            base = f"section-{base}"
+        candidate, number = base, 2
+        while candidate in ids:
+            candidate, number = f"{base}-{number}", number + 1
+        ids.append(candidate)
+    return ids
+
+
 class Kind:
     """A filled page: what `@ui.page` and `@ui.dashboard` functions return."""
 
@@ -2167,12 +2270,16 @@ class Kind:
         ctx = ctx.at("actions", "actions")
         parts = take(ctx, list(self.actions), (vocab.Button, vocab.Link),
                      "`actions=` holds `ui.button(...)` (or `ui.link(...)`, shown as a button).")
+        for part in parts:
+            if isinstance(part.label, str) and _SAVE.search(part.label):
+                raise ctx.fail(f"an action is called `{part.label}`.",
+                               "RFDS shows a last-saved time beside a Save action, which a page header cannot give "
+                               "yet. Name the action for what it does (`\"Apply changes\"`); saving belongs to a form.")
         first = parts[0] if parts and isinstance(parts[0], vocab.Button) and parts[0].tone != "danger" else None
         rest = [part for part in parts if part is not first]
         built: list = []
         if first is not None:
-            first.primary = True
-            built.append(first.build(ctx))
+            built.append(dataclasses.replace(first, primary=True).build(ctx))     # a copy: the part is the author's
         if len(rest) == 1:
             built.append(_apart(rest[0].build(ctx)))
         else:
@@ -2180,9 +2287,14 @@ class Kind:
         return built
 
     def _title(self, ctx: Build) -> Any:
-        if self.title is None or (isinstance(self.title, str) and not self.title):
+        title = self.title
+        if title is None or (isinstance(title, str) and not title.strip()):
             raise ctx.fail("the page has no title.", "Give the kind `title=\"...\"`, or a state value.")
-        return say(self.title)
+        try:
+            return say(title)
+        except NotASentence:
+            raise ctx.fail(f"the page's title is {called(title)}.",
+                           "Give the kind `title=\"...\"`, or a state value.") from None
 
 
 @dataclasses.dataclass(eq=False)
@@ -2198,6 +2310,38 @@ class Record(Kind):
     def loads(self) -> tuple[list, list]:
         return ([self.load] if self.load is not None else []), [s.load for s in self.sections if s.load is not None]
 
+    def _sections(self, ctx: Build) -> list:
+        """The sections as RFDS's object page takes them, each checked first."""
+        from rfds import templates
+
+        from lex.lex_app.reflex.access import permission
+        from lex.lex_app.reflex.ui import guard
+
+        parts = take(ctx.at("sections"), list(self.sections), (Section,), "`sections=` holds `ui.section(title, ...)`.")
+        if not parts:
+            raise ctx.at("sections").fail("a record page needs at least one section.",
+                                          "Add `sections=[ui.section(\"Details\", ...)]`.")
+        titles = [part.title for part in parts]
+        twice = sorted({title for title in titles if titles.count(title) > 1})
+        if twice:
+            raise ctx.at("sections").fail(f"two sections are both called `{twice[0]}`.",
+                                          "Give each section its own title.")
+        built: list = []
+        for index, (part, ident) in enumerate(zip(parts, _section_ids(titles))):
+            at = ctx.at(f"sections[{index}]")
+            needs = None
+            if isinstance(part.visible, guard.Requirement):
+                needs = permission(part.visible.target, part.visible.scope)     # RFDS keeps the heading and says why
+            elif not (part.visible is None or part.visible is guard.signed_in):
+                raise at.fail("`visible=` on a section of a record page takes a permission.",
+                              "A section's heading always shows. To hide the section from some users write "
+                              "`visible=ui.read(Model)`; to show different content by state, put `ui.switch(...)` "
+                              "inside the section.")
+            content = part.body(at)
+            built.append(_rfds(at, lambda part=part, ident=ident, content=content, needs=needs: templates.ObjectSection(
+                id=ident, title_id=part.title, title_default=part.title, content=content, permission=needs)))
+        return built
+
     def build(self, ctx: Build) -> rx.Component:
         import rfds
         from rfds import templates
@@ -2206,27 +2350,24 @@ class Record(Kind):
         if self.status is not None:
             (badge,) = take(ctx.at("status"), self.status, (vocab.Status,), "`status=` holds one `ui.status(word, tone=)`.")
             head.append(badge.build(ctx.at("status")))
-        facts = take(ctx.at("facts"), list(self.facts), (vocab.Fact,),
-                     "Use `ui.fact(label, value)`.")
+        facts = take(ctx.at("facts"), list(self.facts), (vocab.Fact,), "Use `ui.fact(label, value)`.")
         if facts:
             head.append(rfds.key_value(*vocab.build_all(ctx.at("facts"), facts), columns=min(3, len(facts))))
-        parts = take(ctx.at("sections"), list(self.sections), (Section,), "`sections=` holds `ui.section(title, ...)`.")
-        if not parts:
-            raise ctx.at("sections").fail("a record page needs at least one section.",
-                                          "Add `sections=[ui.section(\"Details\", ...)]`.")
-        built = [templates.ObjectSection(id=slug(part.title), title_id=part.title, title_default=part.title,
-                                         content=part.build(ctx.at(f"sections[{index}]")))
-                 for index, part in enumerate(parts)]
-        page = templates.object_page(
-            title=self._title(ctx), path=ctx.route or "/", header=rfds.stack(*head) if head else rx.fragment(),
-            sections=built, navigation="tabs" if self.tabs and len(built) > 1 else "anchor",
-            actions=self._buttons(ctx))
+        sections, actions, title = self._sections(ctx), self._buttons(ctx), self._title(ctx)
+        page = _rfds(ctx, lambda: templates.object_page(
+            title=title, path=ctx.route or "/", header=rfds.stack(*head) if head else rx.fragment(),
+            sections=sections, navigation="tabs" if self.tabs and len(sections) > 1 else "anchor", actions=actions))
         return states(ctx, self.load, page, "rect")
 
 
 def record(*, title: Any, load: Any = None, status: Any = None, facts: Any = (), sections: Any = (),
            tabs: bool = False, actions: Any = ()) -> Record:
-    """One thing: its key facts, then its parts."""
+    """One thing: its key facts, then its parts.
+
+    The first of ``actions`` is the primary one, unless it is dangerous or a link; one further
+    action is a button, and two or more further actions go into a "More actions" menu.
+    ``tabs=True`` shows one section at a time.
+    """
     return Record(title, load, status, tuple(facts), tuple(sections), bool(tabs), tuple(actions))
 
 
@@ -2241,14 +2382,15 @@ class List(Kind):
         from rfds import templates
 
         if not isinstance(self.table, tables.Table):
-            raise ctx.at("table").fail(f"got {type(self.table).__name__}.", "`table=` holds one `ui.table(Model, columns=[...])`.")
-        page = templates.list_report(title=self._title(ctx), path=ctx.route or "/",
-                                     table=self.table.build(ctx.at("table")), actions=self._buttons(ctx))
+            raise ctx.at("table").fail(f"got {called(self.table)}.",
+                                       "`table=` holds one `ui.table(Model, columns=[...])`.")
+        table, actions, title = self.table.build(ctx.at("table")), self._buttons(ctx), self._title(ctx)
+        page = _rfds(ctx, lambda: templates.list_report(title=title, path=ctx.route or "/", table=table, actions=actions))
         return states(ctx, self.load, page, "table")
 
 
 def list_(*, title: Any, load: Any = None, table: Any = None, actions: Any = ()) -> List:
-    """Finding things: a table to search, sort and open from."""
+    """Finding things: a table to search, sort and open from. ``actions`` are placed as on a record page."""
     return List(title, load, table, tuple(actions))
 ```
 
@@ -2313,7 +2455,7 @@ from lex import ui
 from lex.lex_app.reflex import app as lex_app_module
 from lex.lex_app.reflex import shell
 from lex.lex_app.reflex.ui import handlers
-from lex.lex_app.reflex.ui.pages import declare, kinds, links, vocab
+from lex.lex_app.reflex.ui.pages import declare, kinds, links, tables, vocab
 from lex.lex_app.reflex.ui.pages.parts import PageError
 
 pytestmark = pytest.mark.init
@@ -2329,6 +2471,10 @@ class DeclareDesk(ui.State):
     @ui.load
     def load_documents(self):
         self.name = self.name
+
+    @ui.action
+    def touch(self):
+        self.name = "touched"
 
 
 class TestCluster01ct_PageDeclare(SimpleTestCase):
@@ -2353,15 +2499,17 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
         Then:  decorating calls neither function and returns it unchanged, with what a link
                needs (route, its arguments, its declared query parameters); registration builds
                each page in lex-app's chrome under its route, with the permission from
-               requires= as RFDS's permission string and the opener last in its load events; a
-               route that does not start with "/" is refused.
+               requires= as RFDS's permission string and the opener last in its load events. A
+               route that does not start with "/", a requires= that is not one permission, a
+               params= given as one string, and a second function at a route are refused when
+               the page is declared.
         """
         calls: list = []
 
         @declare.page("/funds", nav="Funds")
         def funds():
             calls.append("funds")
-            return kinds.list_(title="Funds", table=ui.table(Group, columns=["name"], open=fund),
+            return kinds.list_(title="Funds", table=tables.table(Group, columns=["name"], open=fund),
                                actions=[vocab.button("First", to=fund, key="1")])
 
         @declare.page("/funds/[key]", requires=ui.read(Group), params=["tab"])
@@ -2384,6 +2532,22 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
                          "requires= becomes the page's permission string")
         with self.assertRaises(ValueError, msg="a route starts with /"):
             declare.page("funds")
+        with self.assertRaises(TypeError) as wrong_requires:
+            declare.page("/open", requires=[ui.read(Group)])
+        self.assertIn("Leave it out for a page any signed-in user may see", str(wrong_requires.exception),
+                      "a wrong requires= is refused when the page is declared, with the route and what to write")
+        self.assertIn("'/open'", str(wrong_requires.exception), "the route is named")
+        declare.page("/anyone", requires=ui.signed_in)(lambda: None)
+        self.assertIsNone(declare._DECLARED["/anyone"].permission, "ui.signed_in is a page for any signed-in user")
+        declare._DECLARED.pop("/anyone")
+        with self.assertRaises(TypeError, msg="params= is a list of names, not one string"):
+            declare.page("/funds", params="tab")
+        with self.assertRaises(ValueError) as twice:
+            @declare.page("/funds")
+            def other_funds():
+                return None
+        self.assertIn("`other_funds` needs a route of its own", str(twice.exception),
+                      "two functions cannot be the page at one route")
 
     # -- 1.804 ---------------------------------------------------------
     def test_1_804_registration_hands_over_the_navigation_entry_and_the_loads(self) -> None:
@@ -2395,12 +2559,13 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
         When:  lex-app registers the declared pages.
         Then:  the navigation entry carries the kind's title; the kind's load is registered as
                the page's required load and the section's load as an optional one; registering
-               twice adds nothing; a navigation page without a fixed title, and a function that
-               does not return a kind, are refused with what to write.
+               twice adds nothing; a navigation page without a fixed title, a load= that is not
+               a @ui.load handler, one load given twice, a page function that raises, and a
+               function that does not return a kind, are each refused with the page named.
         """
         @declare.page("/funds", nav="Funds", icon="list")
         def funds():
-            return kinds.list_(title="All funds", table=ui.table(Group, columns=["name"]))
+            return kinds.list_(title="All funds", table=tables.table(Group, columns=["name"]))
 
         @declare.page("/funds/[key]")
         def fund():
@@ -2424,8 +2589,40 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
             declare.finalize()
         self.assertEqual(str(no_title.exception),
                          "Page `moving`: a page listed in the navigation needs a fixed title.\n"
-                         "Give the kind `title=\"...\"`, or leave `nav=` out.")
+                         "Give the kind `title=\"...\"`, or leave `nav=` out.", "a navigation page needs fixed words")
         declare._DECLARED.pop("/moving")
+
+        @declare.page("/acting")
+        def acting():
+            return kinds.record(title="Acting", load=DeclareDesk.touch, sections=[kinds.section("A", vocab.text("a"))])
+
+        with self.assertRaises(PageError) as not_a_load:
+            declare.finalize()
+        self.assertTrue(str(not_a_load.exception).startswith("Page `acting`: `load=` got "),
+                        f"a handler that is not a load is refused as the page's load: {not_a_load.exception}")
+        self.assertIn("Pass a handler declared with `@ui.load`, without arguments", str(not_a_load.exception),
+                      "with what to pass")
+        declare._DECLARED.pop("/acting")
+
+        @declare.page("/doubled")
+        def doubled():
+            return kinds.record(title="Doubled", load=DeclareDesk.open,
+                                sections=[kinds.section("A", vocab.text("a"), load=DeclareDesk.open)])
+
+        with self.assertRaises(PageError) as same_load:
+            declare.finalize()
+        self.assertIn("is given as a load twice", str(same_load.exception), "one load is the page's or a section's")
+        declare._DECLARED.pop("/doubled")
+
+        @declare.page("/broken")
+        def broken():
+            return kinds.record(title="Broken", sections=[kinds.section(5)])
+
+        with self.assertRaises(PageError) as raised:
+            declare.finalize()
+        self.assertTrue(str(raised.exception).startswith("Page `broken`: its function raised TypeError:"),
+                        f"an error inside a page function is given the page's name: {raised.exception}")
+        declare._DECLARED.pop("/broken")
 
         @declare.page("/raw")
         def raw():
@@ -2434,7 +2631,8 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
         with self.assertRaises(PageError) as not_a_kind:
             declare.finalize()
         self.assertEqual(str(not_a_kind.exception),
-                         "Page `raw`: it returned Text.\nReturn a page kind: `ui.record(...)`, `ui.list(...)`.")
+                         "Page `raw`: it returned Text.\nReturn a page kind: `ui.record(...)`, `ui.list(...)`.",
+                         "a function that does not return a kind is told what to return")
 
     # -- 1.805 ---------------------------------------------------------
     def test_1_805_a_dashboard_starts_its_loads_on_mount_and_create_app_registers_the_pages(self) -> None:
@@ -2443,9 +2641,9 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
         Given: a dashboard function returning a record with a load, and lex-app's create_app.
         When:  the dashboard is called, and create_app's source is read.
         Then:  the dashboard returns the built page, a component, whose load starts when it
-               mounts (a dashboard has no opener); it is not a link target; create_app loads the
-               project's module, then registers the declared pages, before it adds the home
-               page.
+               mounts (a dashboard has no opener); it is not a link target; on a model it sits
+               under @classmethod and receives the model; create_app loads the project's
+               module, then registers the declared pages, before it adds the home page.
         """
         @declare.dashboard
         def main():
@@ -2456,6 +2654,17 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
         self.assertIn("on_mount", built.event_triggers, "its load starts when it mounts")
         self.assertIsNone(links.page_info(main), "a dashboard is not a page to link to")
         self.assertEqual(main.__name__, "main", "it keeps its name, for lex-app's structure module")
+
+        class Model:
+            """Stands for a project model with a dashboard hook."""
+
+            @classmethod
+            @declare.dashboard
+            def reflex_main(cls):
+                return kinds.record(title=cls.__name__, sections=[kinds.section("A", vocab.text("a"))])
+
+        self.assertIsInstance(Model.reflex_main(), rx.Component, "a model's hook is a class method above @ui.dashboard")
+        self.assertIn('rfdsI18n.t("Model", "Model"', str(Model.reflex_main()), "and the function receives the model")
         source = inspect.getsource(lex_app_module.create_app)
         self.assertLess(source.index("load_structure()"), source.index("declare.finalize()"),
                         "the project's module is loaded before its pages are registered")
@@ -2481,7 +2690,7 @@ import dataclasses
 from typing import Any, Callable
 
 from lex.lex_app.reflex.ui.pages import kinds, links
-from lex.lex_app.reflex.ui.pages.parts import Build, PageError
+from lex.lex_app.reflex.ui.pages.parts import Build, PageError, called
 
 
 @dataclasses.dataclass
@@ -2490,7 +2699,7 @@ class Declared:
     info: links.PageInfo
     nav: str | None
     icon: str | None
-    requires: Any
+    permission: str | None
     done: bool = False
 
 
@@ -2498,42 +2707,78 @@ class Declared:
 _DECLARED: dict[str, Declared] = {}
 
 
-def _kind_of(fn: Callable[[], Any]) -> kinds.Kind:
-    kind = fn()
+def _kind_of(fn: Callable[..., Any], *args: Any) -> kinds.Kind:
+    """What the page function returns, checked; an error of its own is given the page's name."""
+    try:
+        kind = fn(*args)
+    except PageError:
+        raise
+    except Exception as wrong:
+        raise PageError(f"Page `{fn.__name__}`: its function raised {type(wrong).__name__}: {wrong}\n"
+                        "A page function only describes the page: it returns `ui.record(...)` or "
+                        "`ui.list(...)` and does nothing else.") from wrong
     if not isinstance(kind, kinds.Kind):
         raise PageError(f"Page `{fn.__name__}`: it returned {type(kind).__name__}.\n"
                         "Return a page kind: `ui.record(...)`, `ui.list(...)`.")
     return kind
 
 
+def _loads(name: str, kind: kinds.Kind) -> tuple[list, list]:
+    """The kind's (page loads, part loads), each checked to be a load a page can start."""
+    page_loads, part_loads = kind.loads()
+    for load in (*page_loads, *part_loads):
+        if getattr(getattr(load, "fn", None), "__ui_kind__", "") != "load":
+            raise PageError(f"Page `{name}`: `load=` got {called(load)}.\n"
+                            "Pass a handler declared with `@ui.load`, without arguments: `load=FundState.open`. "
+                            "It reads the page's values from `self.params`.")
+    seen: list = []
+    for load in (*page_loads, *part_loads):
+        if any(load is other for other in seen):
+            raise PageError(f"Page `{name}`: `{load.fn.__qualname__}` is given as a load twice.\n"
+                            "A load belongs to the page or to one section.")
+        seen.append(load)
+    return page_loads, part_loads
+
+
+def _permission(route: str, requires: Any) -> str | None:
+    """The page's permission string; ``None`` when any signed-in user may see it."""
+    from lex.lex_app.reflex.access import permission
+    from lex.lex_app.reflex.ui import guard
+
+    if requires is None or requires is guard.signed_in:
+        return None
+    if isinstance(requires, guard.Requirement):
+        return permission(requires.target, requires.scope)
+    raise TypeError(f"ui.page({route!r}, requires=) takes one permission: ui.read(Model), ui.create(Model), "
+                    f"ui.edit(Model), ui.delete(Model) or ui.permission(...); got {requires!r}. "
+                    "Leave it out for a page any signed-in user may see.")
+
+
 def page(route: str, *, nav: str | None = None, icon: str | None = None, requires: Any = None,
          params: Any = ()) -> Callable[[Callable[[], Any]], Callable[[], Any]]:
     """Declare a page: its address, its place in the navigation, who may see it.
 
-    The function returns a page kind. It is called when lex-app builds the pages, after the
-    whole module is loaded, so it may name pages declared further down.
+    The function returns a page kind and does nothing else: lex-app calls it when it registers
+    the pages -- after the whole module is loaded, so it may name pages declared further down --
+    and again when the page is built. A page that is declared wrongly stops the app from starting,
+    with an error that names it.
     """
     if not route.startswith("/"):
         raise ValueError(f"ui.page() routes start with '/', got {route!r}")
+    if isinstance(params, str):
+        raise TypeError(f"ui.page({route!r}, params=) takes a list of names: params=[{params!r}]")
+    permission = _permission(route, requires)
 
     def decorator(fn: Callable[[], Any]) -> Callable[[], Any]:
+        known = _DECLARED.get(route)
+        if known is not None and (known.fn.__module__, known.fn.__qualname__) != (fn.__module__, fn.__qualname__):
+            raise ValueError(f"ui.page({route!r}): `{known.fn.__name__}` already is the page at this route; "
+                             f"`{fn.__name__}` needs a route of its own.")
         fn.__ui_page__ = links.info_of(route, fn.__name__, params)
-        _DECLARED[route] = Declared(fn, fn.__ui_page__, nav, icon, requires)
+        _DECLARED[route] = Declared(fn, fn.__ui_page__, nav, icon, permission)
         return fn
 
     return decorator
-
-
-def _permission(requires: Any) -> str | None:
-    if requires is None:
-        return None
-    from lex.lex_app.reflex.access import permission
-    from lex.lex_app.reflex.ui import guard
-
-    if isinstance(requires, guard.Requirement):
-        return permission(requires.target, requires.scope)
-    raise TypeError("ui.page(requires=) takes one of ui.read(Model), ui.create(Model), ui.edit(Model), "
-                    f"ui.delete(Model) or ui.permission(...); got {requires!r}")
 
 
 def finalize() -> None:
@@ -2549,30 +2794,36 @@ def finalize() -> None:
     for route, declared in list(_DECLARED.items()):
         if declared.done:
             continue
+        name = declared.fn.__name__
         kind = _kind_of(declared.fn)
         title = kind.title
         if declared.nav and not isinstance(title, str):
-            raise PageError(f"Page `{declared.fn.__name__}`: a page listed in the navigation needs a fixed title.\n"
+            raise PageError(f"Page `{name}`: a page listed in the navigation needs a fixed title.\n"
                             "Give the kind `title=\"...\"`, or leave `nav=` out.")
+        required, optional = _loads(name, kind)
 
         def body(fn: Callable[[], Any] = declared.fn, route: str = route) -> rx.Component:
             return _kind_of(fn).build(Build(page=fn.__name__, route=route))
 
-        body.__name__ = declared.fn.__name__
+        body.__name__ = name
         body.__qualname__ = declared.fn.__qualname__
-        permission = _permission(declared.requires)
-        lex_page(route, title=title if isinstance(title, str) else declared.fn.__name__.replace("_", " ").capitalize(),
-                 nav=declared.nav, icon=declared.icon, requires=permission)(body)
-        required, optional = kind.loads()
-        handlers.register_page(route, required, optional, permission or "")
+        lex_page(route, title=title if isinstance(title, str) else name.replace("_", " ").capitalize(),
+                 nav=declared.nav, icon=declared.icon, requires=declared.permission)(body)
+        handlers.register_page(route, required, optional, declared.permission or "")
         declared.done = True
 
 
-def dashboard(fn: Callable[[], Any]) -> Callable[[], Any]:
-    """Mark a page that is not a route: the project's ``main()``, a model's record dashboard."""
+def dashboard(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Mark a page that is not a route: the project's ``main()``, or a model's dashboard hook.
 
-    def built() -> Any:
-        return _kind_of(fn).build(Build(page=fn.__name__, mounts=True))
+    On a model the hook is a class method; ``@classmethod`` goes above ``@ui.dashboard``. A
+    dashboard has no opener, so its loads start when their part of the page mounts.
+    """
+
+    def built(*args: Any) -> Any:
+        kind = _kind_of(fn, *args)
+        _loads(fn.__name__, kind)
+        return kind.build(Build(page=fn.__name__, mounts=True))
 
     built.__name__ = fn.__name__
     built.__qualname__ = fn.__qualname__
