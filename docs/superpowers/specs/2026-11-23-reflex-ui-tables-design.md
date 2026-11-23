@@ -1,6 +1,6 @@
 # lex.ui tables: rows from a handler, a filtered model, and what a table does by itself
 
-**Status:** design approved in conversation on 2026-11-23; nothing is implemented.
+**Status:** design approved in conversation on 2026-11-23; implemented on `feat/reflex-ui-tables` (section 5.13 records what building it settled).
 **Step 2 of the pages piece.** Step 1 (`ui.record`, `ui.list`, the vocabulary) is
 `2026-11-23-reflex-ui-pages-design.md` and PR #911. The handler layer it builds on is
 `2026-11-23-reflex-ui-action-state-layer-design.md` and PR #909.
@@ -314,6 +314,31 @@ Cluster 1 batches, next free letters, through `ui.testing` and Reflex's own even
 
 `ui.testing.rows(PersonState.roles, user=..., params=..., search="", filters={})` returns the rows
 a table would get, so a project tests its rows in one line.
+
+### 5.13 What building it settled
+
+Built and tested the same day; these differ from, or add to, the sections above:
+
+- **A row that leads to a page of its own is a button, not a link.** RFDS encodes every value it
+  puts into a row-link template, so a whole address held in a row cannot be the identity cell's
+  link. With `open="field"`, the first cell is a button whose click sends the row's key to the
+  table's state, which looks up that row's `ui.address` on the server and opens it. A table whose
+  `open=` is one page keeps a real link. A cell's `open=` is a real link.
+- **The first column names the row and is drawn as text.** RFDS draws the identity cell itself and
+  ignores a custom cell there, so a first column with `show=`, `open=`, `status`, `tag` or `tags`
+  is refused with "Put a plain column first, such as the name".
+- **A filter's "All" has the value `__all__`**: RFDS's dropdown refuses an empty value.
+- **A model table's export and totals wait.** In this version `export=` and `totals=` on a model
+  table are refused ("work on tables over a `@ui.rows` handler in this version"); a model table's
+  filters take fields with choices or yes/no fields. A model table reads again on its own triggers
+  and when the page opens again, not after a handler of the state its `where=` values come from.
+- **`currency=` tells a code from a field by its letters**: three capitals is a code (`"EUR"`),
+  anything else a field name (`"ccy"`).
+- **Every page open tells its tables to read again.** A table already on screen is not mounted
+  again when the user moves to another record of the same page, so `ui_open` sends each of the
+  page's tables a `reopen`. This also covers a mount event that carries the previous page's
+  address (section 6).
+- **`lex reflex check` does not yet list dangerous row actions** (5.9); it accepts `@ui.rows`.
 
 ---
 
