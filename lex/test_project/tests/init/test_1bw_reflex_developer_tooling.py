@@ -107,9 +107,9 @@ class TestCluster01bw_Add(_Project):
         Then:  it parses; every name it imports from ``lex.lex_app.reflex`` is
                one the package exports; list and overview pages are ``@lex_page``
                routes gated on the model's read grant; the object page is a
-               ``LexRecordState`` dashboard for ``reflex_main``, whose suggested
+               ``ui.State`` dashboard for ``reflex_main``, whose suggested
                import names the project's package; the overview's database read
-               is behind ``has_permission``.
+               is behind its ``@ui.load``'s ``requires=``.
         """
         exported = set(lex_reflex.__all__)
         for block in scaffold.BLOCKS:
@@ -124,14 +124,16 @@ class TestCluster01bw_Add(_Project):
                 self.assertLessEqual(imported, exported, f"imports a name lex.lex_app.reflex does not export")
         self.assertIn("@lex_page(", scaffold.render("list_report", "CashPosition")[1])
         record = scaffold.render("object_page", "CashPosition", package="crm")[1]
-        self.assertIn("class CashPositionRecordState(LexRecordState)", record)
+        self.assertIn("class CashPositionRecordState(ui.State)", record, "the record page's state is a ui.State")
         self.assertNotIn("@lex_page", record)
         self.assertIn("from crm._dashboards.cash_position_object_page import", record,
                       "the hook imports the project's package by name, never relatively")
         self.assertNotIn("Imported by _reflex_structure.py", record, "an object page is never registered")
-        for state in ('"ok"', '"denied"', '"missing"', '"unavailable"'):
-            self.assertIn(state, record, f"the record page handles record_state {state}")
-        self.assertIn("auth=has_permission(", scaffold.render("overview", "CashPosition")[1])
+        for outcome in ("ui.failed(CashPositionRecordState.open)", "ui.running(CashPositionRecordState.open)",
+                        "lex_view("):
+            self.assertIn(outcome, record, f"the record page handles its load's outcome with {outcome}")
+        self.assertIn("@ui.load(requires=ui.permission(", scaffold.render("overview", "CashPosition")[1],
+                      "the overview's count declares what it requires")
 
 
 class TestCluster01bw_Check(_Project):
@@ -183,8 +185,9 @@ class TestCluster01bw_TheExample(SimpleTestCase):
         Given: ``examples/_reflex_structure.py``.
         When:  it is read, and compiled in the app as ``reflex run`` compiles it.
         Then:  it imports every feature lex-app gives a dashboard (pages, chrome
-               permissions, tables, grid, records, the API, lex_view with flows,
-               widgets, the ORM bridge); its pages are in the compiled app under
+               permissions, tables, grid, lex_view with flows, widgets, the ORM
+               bridge) and writes its handlers with lex.ui (loads, actions, the API
+               as the user, refusals, status); its pages are in the compiled app under
                one navigation heading; and the compile passed RFDS's
                conformance checks in their strict CI mode.
         """
@@ -197,12 +200,14 @@ class TestCluster01bw_TheExample(SimpleTestCase):
         imported = {alias.name for node in ast.walk(tree)
                     if isinstance(node, ast.ImportFrom) and node.module == "lex.lex_app.reflex"
                     for alias in node.names}
-        for feature in ("lex_page", "lex_table", "lex_grid", "LexRecordState", "lex_api", "lex_view", "Flow",
-                        "lex_widgets", "calculation", "calculation_log", "has_permission", "permission",
-                        "run_orm", "current_permissions", "LexUser"):
+        for feature in ("lex_page", "lex_table", "lex_grid", "lex_view", "Flow", "lex_widgets", "calculation",
+                        "calculation_log", "permission", "run_orm", "LexUser"):
             self.assertIn(feature, imported, f"the example shows {feature}")
+        for used in ("from lex import ui", "ui.State", "@ui.load", "@ui.action", "ui.Refuse", "ui.failed(",
+                     "ui.running(", "self.api.", "self.can("):
+            self.assertIn(used, source, f"the example shows lex.ui's {used}")
         for used in ("ExportMixin", "export_menu", "rfds.bar_chart", "rfds.kpi_tile", "can("):
-            self.assertIn(used, source)
+            self.assertIn(used, source, f"the example shows {used}")
 
         compiled = compiled_app()
         for route in ("records", "grid", "in-lex-app", "calculations", "edit"):
