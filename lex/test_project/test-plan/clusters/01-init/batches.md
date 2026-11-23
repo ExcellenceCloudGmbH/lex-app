@@ -3045,3 +3045,23 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 | --- | --- | --- |
 | 1.821 | A lex ui table sits inside a raw page | the table is RFDS's data table over its generated state, inside the raw page; a whole page kind and something that is not a lex.ui part are refused with what to write; a mistake in the embedded part names it by the name given |
 | 1.822 | A handler body reads the users permission list | both see the user's Keycloak permissions as Keycloak lists them; outside a handler body reading them is refused |
+
+### Batch 1cz — lex.ui tables: a table that leaves the screen keeps none of its rows ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.823 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/rows_table.py` (`close`) |
+| Test file | `lex/test_project/tests/init/test_1cz_ui_table_close.py` |
+| Test classes | `TestCluster01cz_TableClose` (1.823) |
+| Fixtures | the people table of batch 1cw, through `ui.testing.Harness` |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Found while moving the reviewed customer project's tables to lex.ui: `close` only marked the table hidden, so its last
+page stayed in the tab's state. 1.815's hidden table now holds no row either.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.823 | A table that leaves the screen keeps none of its rows | once it has left, its state holds no row, no count, no totals and no filter choice; when it appears again it reads its rows afresh |

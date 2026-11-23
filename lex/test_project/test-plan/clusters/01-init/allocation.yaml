@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 822
+max_scenario: 823
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2367,3 +2367,14 @@ letters:
       xfail: 0
     note: >-
       A project written in raw Reflex moves to lex.ui one table at a time (`ui.embed`), and a handler body reaches the user's Keycloak permission list for the project's own logic (`self.user.permissions`). These tests fail on a project that must convert a whole page before it can use one `@ui.rows` table, or a handler that cannot call the project's own logic.
+  cz:
+    title: 'lex.ui tables: a table that leaves the screen keeps none of its rows'
+    scenarios: '1.823'
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      A table's rows stay in the tab's state only while it is on screen; `close` drops its page, count, totals and
+      filter choices. These tests fail on a person's data left in a state nobody looks at any more.

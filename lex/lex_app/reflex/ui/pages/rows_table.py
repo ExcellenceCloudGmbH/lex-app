@@ -78,7 +78,13 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
 
     @rx.event
     def close(self):
+        """The table left the screen: it forgets what it showed, so no row stays in the tab's state."""
         self.shown = False
+        self.page_rows = []
+        self.total_rows = 0
+        self.totals_rows = []
+        self.choices = {}
+        self._row_to = {}
 
     @rx.event
     async def reread(self):

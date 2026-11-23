@@ -255,7 +255,7 @@ class TestCluster01cw_RowsTable(SimpleTestCase):
         after_action, after_refresh, while_hidden = asyncio.run(scenario())
         self.assertEqual(after_action, ["Ada Example", "Bob Example"], "a handler of the same state: read again")
         self.assertEqual(after_refresh, ["Ada Example"], "ui.refresh from another state: read again")
-        self.assertEqual(while_hidden, ["Ada Example"], "a table that is not on screen does not read")
+        self.assertEqual(while_hidden, [], "a table that is not on screen does not read (and keeps no row, 1.823)")
 
     # -- 1.816 ---------------------------------------------------------
     def test_1_816_opening_the_page_again_and_a_list_pages_search_in_the_address(self) -> None:

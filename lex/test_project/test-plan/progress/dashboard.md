@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 101 | 822 | 796 | 3 | 0 |
+| 1. Init — Project Bootstrap | 102 | 823 | 797 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -124,6 +124,7 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1cw | lex.ui tables: a table over a @ui.rows handler, end to end | 1.812-1.817 | complete | 6 | 0 | 0 | lex-app generates the table's state; it reads every row as the user, searches, filters, sorts and pages them on the server, keeps only the visible page of the used fields in the browser's state, reads again after a handler of the same state, on `ui.refresh` and when its page opens again, totals per currency and exports what it shows (spec 5.5-5.8, 5.10). These tests fail on a field the table does not show reaching the browser, a link built from data, a table that keeps showing what a handler has just changed, or a broken handler that breaks the page instead of the table. |
 | 1cx | lex.ui tables: what a column and a table refuse; a model table narrowed with where= | 1.818-1.820 | complete | 3 | 0 | 0 | Everything about a table that can be checked before a row is read stops the app from starting with the page, the slot and what to write; a model table is narrowed with `where=` and read through lex-app's API (spec 5.2, 5.3, 5.11). These tests fail on a table that breaks only in the browser, a column kind drawn differently from page to page, or a model table that cannot be narrowed without leaving the API. |
 | 1cy | lex.ui adoption: a lex.ui part inside a raw page; the user's permissions in a body | 1.821-1.822 | complete | 2 | 0 | 0 | A project written in raw Reflex moves to lex.ui one table at a time (`ui.embed`), and a handler body reaches the user's Keycloak permission list for the project's own logic (`self.user.permissions`). These tests fail on a project that must convert a whole page before it can use one `@ui.rows` table, or a handler that cannot call the project's own logic. |
+| 1cz | lex.ui tables: a table that leaves the screen keeps none of its rows | 1.823 | complete | 1 | 0 | 0 | A table's rows stay in the tab's state only while it is on screen; `close` drops its page, count, totals and filter choices. These tests fail on a person's data left in a state nobody looks at any more. |
 | 1d |  | 1.23-1.30 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1e |  | 1.30-1.43 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |

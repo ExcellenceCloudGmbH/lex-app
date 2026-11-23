@@ -1449,3 +1449,15 @@ does not remove user launch configurations.
 | 1.822 | A handler body reads the users permission list | both see the user's Keycloak permissions as Keycloak lists them; outside a handler body reading them is refused |
 
 **Scenario range:** 1.821 – 1.822. **Test file:** `lex/test_project/tests/init/test_1cy_ui_adoption.py`. **Type:** I. **Status:** ✅ Complete (2026-11-23). Batch: [1cy](batches.md).
+
+### 1cz. lex.ui tables: a table that leaves the screen keeps none of its rows ✅
+
+**What it tests:** A table's rows - often people, read for one user from another system - stay in the tab's state only while the table is on screen; once it leaves, its page, count, totals and filter choices are gone.
+
+**Why a regression matters:** a person's data left in a state nobody looks at any more, which Reflex keeps for an hour and pickles to Redis with two workers.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.823 | A table that leaves the screen keeps none of its rows | once it has left, its state holds no row, no count, no totals and no filter choice; when it appears again it reads its rows afresh |
+
+**Scenario range:** 1.823. **Test file:** `lex/test_project/tests/init/test_1cz_ui_table_close.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1cz](batches.md).
