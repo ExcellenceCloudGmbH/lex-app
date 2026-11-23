@@ -47,7 +47,8 @@ class TestCluster01cy_Adoption(SimpleTestCase):
         Scenario 1.821: ui.embed.
         Given: a raw Reflex page that holds one lex.ui table, and things that are not one part.
         When:  the table is embedded and the page is built.
-        Then:  the table is RFDS's data table over its generated state, inside the raw page; a whole
+        Then:  the table is RFDS's data table over its generated state, inside the raw page, captioned
+               with the name given; a whole
                page kind and something that is not a lex.ui part are refused with what to write; a
                mistake in the embedded part names it by the name given.
         """
@@ -56,6 +57,7 @@ class TestCluster01cy_Adoption(SimpleTestCase):
         built = str(page)
         self.assertIn("rfds-data-table", built, "the embedded table is RFDS's data table")
         self.assertIn("A page in raw Reflex", built, "inside the raw page")
+        self.assertIn('rfdsI18n.t("items table", "items table"', built, "the name given is the table's caption")
         with self.assertRaises(TypeError) as kind:
             ui.embed(ui.record(title="Whole", sections=[ui.section("A", ui.text("a"))]))
         self.assertIn("a whole page kind goes on a @ui.page or a @ui.dashboard", str(kind.exception),

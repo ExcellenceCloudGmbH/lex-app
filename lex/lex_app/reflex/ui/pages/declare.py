@@ -173,7 +173,8 @@ def embed(part: Any, *, name: str = "embedded") -> Any:
 
     For moving a project one table at a time: ``ui.embed(ui.table(State.rows, columns=[...]))``
     sits in a page built with raw Reflex and RFDS. Its loads and its rows start when it appears;
-    ``name`` names it in an error. A whole page kind goes on a ``@ui.page`` or a ``@ui.dashboard``.
+    ``name`` names it in an error and is a table's caption. A whole page kind goes on a
+    ``@ui.page`` or a ``@ui.dashboard``.
     """
     from lex.lex_app.reflex.ui.pages.parts import Part
 
@@ -182,7 +183,8 @@ def embed(part: Any, *, name: str = "embedded") -> Any:
                         "goes on a @ui.page or a @ui.dashboard.")
     if not isinstance(part, Part):
         raise TypeError(f"ui.embed() takes a lex.ui part such as ui.table(...); got {called(part)}")
-    return part.build(Build(page=str(name), mounts=True))
+    caption = "" if name == "embedded" else str(name)       # a table's caption: the name it is given
+    return part.build(Build(page=str(name), mounts=True, caption=caption))
 
 
 def dashboard(fn: Callable[..., Any]) -> Callable[..., Any]:
