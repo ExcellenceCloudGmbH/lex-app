@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Any, Callable
 
 import reflex as rx
 
@@ -230,3 +230,72 @@ def menu_entry(ctx: Build, label: Any, click: Any, visible: Any, *, tone: str = 
 
     entry = menu_item(say(label), on_select=click, icon=icon, tone="danger" if tone == "danger" else "neutral")
     return set_meta(shown(ctx, entry, visible), **get_meta(entry))
+
+
+@dataclasses.dataclass(eq=False)
+class CustomBlock(Part):
+    ui_name = "custom_block"
+
+    component: Any
+    reason: str
+    visible: Any = None
+
+    def _render(self, ctx: Build) -> rx.Component:
+        return self.component
+
+
+def custom_block(component: Any, *, reason: str, visible: Any = None) -> CustomBlock:
+    """The marked way out: a raw component, with one sentence saying why the vocabulary did not do."""
+    if not isinstance(component, rx.Component):
+        raise TypeError(f"ui.custom_block() takes a component, got {type(component).__name__}")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("ui.custom_block() needs reason=: one sentence saying why the vocabulary did not do")
+    return CustomBlock(component, reason.strip(), visible)
+
+
+@dataclasses.dataclass(eq=False)
+class Each(Part):
+    items: Any
+    render: Callable[[Any], Part]
+    visible: Any = None
+
+    def _render(self, ctx: Build) -> rx.Component:
+        def one(item: Any) -> rx.Component:
+            part = self.render(item)
+            if not isinstance(part, Part):
+                raise ctx.fail("the function given to `ui.each` did not return a lex component.",
+                               "Return one of the `ui.*` components, or `ui.custom_block(...)`.")
+            return part.build(ctx)
+
+        return rx.foreach(self.items, one)
+
+
+def each(items: Any, render: Callable[[Any], Part], *, visible: Any = None) -> Each:
+    """Repeats ``render`` for every item."""
+    return Each(items, render, visible)
+
+
+@dataclasses.dataclass(eq=False)
+class Switch(Part):
+    value: Any
+    cases: dict
+    visible: Any = None
+
+    def _render(self, ctx: Build) -> rx.Component:
+        for part in self.cases.values():
+            if not isinstance(part, Part):
+                raise ctx.fail("a case of `ui.switch` is not a lex component.",
+                               "Give each case one of the `ui.*` components, or `ui.custom_block(...)`.")
+        return rx.match(self.value, *[(key, part.build(ctx)) for key, part in self.cases.items()], rx.fragment())
+
+
+def switch(value: Any, cases: dict, *, visible: Any = None) -> Switch:
+    """Shows the case whose key equals ``value``; nothing when none does."""
+    return Switch(value, dict(cases), visible)
+
+
+CONTENT = (Text, Fact, Status, Message, Link, Button, CustomBlock, Each, Switch)
+
+
+def build_all(ctx: Build, parts: list) -> list:
+    return [part.build(ctx) for part in parts]
