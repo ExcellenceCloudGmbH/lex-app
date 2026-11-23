@@ -35,9 +35,9 @@ DATA: dict[str, list] = {}
 
 def fresh() -> None:
     DATA["rows"] = [
-        {"id": 1, "name": "Ada Example", "roles": ["Director", "Signatory"], "amount": "10.50", "currency": "EUR",
+        {"id": 1, "name": "Ada Example", "roles": ["Director", "Signatory"], "amount": "4", "currency": "EUR",
          "kind": "person", "email": "ada@example.test"},
-        {"id": 2, "name": "Fund One", "roles": ["Prokura"], "amount": "4", "currency": "USD", "kind": "company",
+        {"id": 2, "name": "Fund One", "roles": ["Prokura"], "amount": "10.50", "currency": "USD", "kind": "company",
          "email": "fund@example.test"},
         {"id": 3, "name": "Bob Example", "roles": [], "amount": "1.50", "currency": "EUR", "kind": "person",
          "email": "bob@example.test"}]
@@ -89,13 +89,13 @@ class OtherDesk(ui.State):
         return ui.refresh(TableDesk.people)
 
 
-def build_people_table(route: str = "/people/[key]", slot: str = "sections") -> type:
+def build_people_table(route: str = "/people/[key]", slot: str = "sections", listing: bool = False) -> type:
     table = ui.table(TableDesk.people, open="goes_to", search=True, filters=["kind", "roles"], export=True,
                      totals={"amount": "sum"},
                      columns=["name", ui.column("roles", kind="tags"),
                               ui.column("amount", kind="money", currency="currency"), ui.column("kind", kind="status")],
                      row_actions=lambda row: [ui.button("End role", TableDesk.end, row["id"])])
-    table.build(Build(page="person", route=route, slot=slot, caption="Roles"))
+    table.build(Build(page="person", route=route, slot=slot, caption="Roles", page_search=listing))
     return rows_table._BY_HANDLER[rows_table.handler_key(TableDesk.people)][-1]
 
 
@@ -152,7 +152,8 @@ class TestCluster01cw_RowsTable(SimpleTestCase):
         When:  the user searches for a tag, filters by kind and by a tag, and sorts by amount.
         Then:  a search finds a row by its tag; each filter keeps the matching rows; the filter
                choices are the column's values after "All"; the first sort of a money column is
-               high to low.
+               high to low; clearing the filters clears the dropdowns; a filter the browser sends
+               on a field the table does not show is refused.
         """
         state = build_people_table()
 
@@ -169,18 +170,26 @@ class TestCluster01cw_RowsTable(SimpleTestCase):
                 await (await h.send(state, "set_choice", field="kind", value=""))
                 await (await h.send(state, "set_choice", field="roles", value="Prokura"))
                 by_tag = [row["name"] for row in await page_of(h, state)]
-                await (await h.send(state, "clear_all"))
+                await (await h.send(state, "clear_filters"))
+                chosen_after_clear = dict((await h._state(state)).chosen)
+                try:
+                    await (await h.send(state, "apply_filter", key="email", value={"op": "starts_with", "value": "a"}))
+                except Exception:  # noqa: BLE001 - the refusal is the event's own error
+                    pass
+                hidden_filter = dict((await h._state(state)).filters)
                 await (await h.send(state, "sort_by", key="amount"))
                 ordered = [row["name"] for row in await page_of(h, state)]
-                return choices, searched, by_kind, by_tag, ordered
+                return choices, searched, by_kind, by_tag, ordered, chosen_after_clear, hidden_filter
 
-        choices, searched, by_kind, by_tag, ordered = asyncio.run(scenario())
+        choices, searched, by_kind, by_tag, ordered, chosen_after_clear, hidden_filter = asyncio.run(scenario())
         self.assertEqual(searched, ["Ada Example"], "a search finds a row by one of its tags")
         self.assertEqual(by_kind, ["Ada Example", "Bob Example"], "a filter keeps the rows of that kind")
         self.assertEqual(by_tag, ["Fund One"], "a filter on tags keeps the rows that carry the tag")
         self.assertEqual([c["label"] for c in choices["kind"]], ["All", "company", "person"],
                          "the choices are the column's values after All")
-        self.assertEqual(ordered, ["Ada Example", "Fund One", "Bob Example"], "money sorts high to low first")
+        self.assertEqual(ordered, ["Fund One", "Ada Example", "Bob Example"], "money sorts high to low first")
+        self.assertEqual(chosen_after_clear, {}, "clearing the filters also clears the dropdowns that show them")
+        self.assertEqual(hidden_filter, {}, "the browser cannot filter on a field the table does not show")
 
     # -- 1.814 ---------------------------------------------------------
     def test_1_814_totals_per_currency_and_export_of_what_is_shown(self) -> None:
@@ -189,7 +198,7 @@ class TestCluster01cw_RowsTable(SimpleTestCase):
         Given: the table of 1.812, with amounts in two currencies, filtered to persons.
         When:  the totals are computed and the table is exported.
         Then:  there is one totals row per currency over all matching rows; the export has the
-               columns' labels, the matching rows only, and tags joined.
+               columns' labels and each amount's currency, the matching rows only, and tags joined.
         """
         state = build_people_table()
 
@@ -203,9 +212,11 @@ class TestCluster01cw_RowsTable(SimpleTestCase):
                 return totals, export
 
         totals, (labels, lines, _about) = asyncio.run(scenario())
-        self.assertEqual([(row["name"], row["amount"]) for row in totals], [("Total (EUR)", "12.00"), ("Total (USD)", "4")],
+        self.assertEqual([(row["name"], row["amount"]) for row in totals], [("Total (EUR)", "5.50"), ("Total (USD)", "10.50")],
                          "one totals row per currency, over every matching row")
-        self.assertEqual(labels, ["Name", "Roles", "Amount", "Kind"], "the export's columns are the table's labels")
+        self.assertEqual(labels, ["Name", "Roles", "Amount", "Currency", "Kind"],
+                         "the export's columns are the table's labels, with each amount's currency beside it")
+        self.assertEqual(lines[0]["Currency"], "EUR", "so amounts in two currencies are told apart in the file")
         self.assertEqual([line["Name"] for line in lines], ["Ada Example", "Bob Example"], "it exports the matching rows")
         self.assertEqual(lines[0]["Roles"], "Director; Signatory", "tags are joined in a file")
 
@@ -249,11 +260,12 @@ class TestCluster01cw_RowsTable(SimpleTestCase):
         Given: the table on a record page, and a table with search on a list page.
         When:  the page's opener runs again (another record of the same page), and the list page
                is opened with ?q= in its address.
-        Then:  the opener tells the page's table to read its first page again; the list page's
-               table starts with the address's search, and typing a search writes it back.
+        Then:  the opener tells the page's table to read its first page again (not a table that
+               appears only after a load, which reads when it appears); the list page's table
+               starts with the address's search, and typing a search writes it back.
         """
         record = build_people_table()
-        listing = build_people_table(route="/people", slot="table")
+        listing = build_people_table(route="/people", slot="table", listing=True)
 
         async def scenario():
             with patch.object(ui_state, "_page_permitted", return_value=True), patch.dict(handlers._PAGES):
@@ -282,6 +294,11 @@ class TestCluster01cw_RowsTable(SimpleTestCase):
         self.assertEqual(listing.query_param, "q",
                          "a list page keeps its table's search in the address as ?q=")
         self.assertEqual(record.query_param, "", "a table in a record's section does not")
+        gated = ui.table(TableDesk.people, columns=["name"], filters=["name"]).build(
+            Build(page="later", route="/later/[key]", caption="Later", under_load=True))
+        self.assertNotIn("/later/[key]", rows_table._BY_ROUTE,
+                         "a table that appears only after a load is not read again by the page's opener")
+        self.assertIsNotNone(gated, "it builds all the same")
 
     # -- 1.817 ---------------------------------------------------------
     def test_1_817_a_broken_rows_handler_breaks_only_its_table(self) -> None:

@@ -82,6 +82,7 @@ class TestCluster01cx_TableChecks(SimpleTestCase):
             "show and kind": (dict(kind="text", show=lambda row: ui.text("x")), "give kind= or show=, not both"),
             "open": (dict(open="/funds/1"), "names the row's field that holds a ui.address"),
             "currency": (dict(kind="money", currency="E-R"), "takes a code such as \"EUR\""),
+            "a code in small letters": (dict(kind="money", currency="eur"), "a code is written in capitals"),
         }
         for name, (options, words) in wrong.items():
             with self.subTest(case=name), self.assertRaises(ValueError) as refused:
@@ -107,8 +108,8 @@ class TestCluster01cx_TableChecks(SimpleTestCase):
                                     "`filters=` names kind, which is not a column."),
             "total not a column": (lambda: ui.table(rows, columns=["name"], totals={"amount": "sum"}),
                                    "`totals=` names amount, which is not a column."),
-            "total kind": (lambda: ui.table(rows, columns=["name", "amount"], totals={"amount": "avg"}),
-                           "A total is \"sum\" or \"count\"."),
+            "total kind": (lambda: ui.table(rows, columns=["name", "amount"], totals={"amount": "count"}),
+                           "A total is the \"sum\" of a number, money or percent column"),
             "sum of text": (lambda: ui.table(rows, columns=["name", "amount"], totals={"amount": "sum"}),
                             "`totals=` sums amount, which is not a number."),
             "show returns": (lambda: ui.table(rows, columns=["name", ui.column("x", show=lambda row: "x")]),
@@ -118,11 +119,15 @@ class TestCluster01cx_TableChecks(SimpleTestCase):
             "search without text": (lambda: ui.table(rows, columns=[ui.column("n", kind="number")], search=True),
                                     "the table has no text column to search"),
             "first column drawn": (lambda: ui.table(rows, columns=[ui.column("roles", kind="tags"), "name"]),
-                                   "The first column names the row and is drawn as text"),
+                                   "is a `tags` column.\nThe first column names the row and is the row's link"),
             "model where": (lambda: ui.table(Group, columns=["name"], where={"colour": 1}),
                             "`where=` names colour, which Group does not have."),
             "model export": (lambda: ui.table(Group, columns=["name"], export=True),
-                             "`export=` and `totals=` work on tables over a `@ui.rows` handler in this version."),
+                             "a model table cannot export or total yet."),
+            "model link from data": (lambda: ui.table(Group, columns=["name", ui.column("id", open="name")]),
+                                     "A model's field is data and never becomes a link."),
+            "id column beside another key": (lambda: ui.table(rows, columns=["name", "id"], key="code"),
+                                             "a column is called `id`, and the table's key is another field."),
             "model filter": (lambda: ui.table(Group, columns=["name"], filters=["name"]),
                              "`filters=` names name, whose values are not a fixed set."),
             "no columns": (lambda: ui.table(rows), "the table has no columns."),
@@ -150,7 +155,9 @@ class TestCluster01cx_TableChecks(SimpleTestCase):
         When:  they are built.
         Then:  the table's state receives the where= values when it appears (a state value
                included); the toolbar has a search box; a filter offers the field's choices after
-               "All"; two tables narrowed differently never share a state.
+               "All"; two tables narrowed differently never share a state; a column keeps its
+               field's kind; the field a row button reads reaches the browser; building the same
+               table twice finds one state class.
         """
         component = ui.table(Group, columns=["name"], where={"id": CheckDesk.group}, search=True, visible=True).build(CTX)
         mount = str(mount_of(component))
@@ -167,3 +174,16 @@ class TestCluster01cx_TableChecks(SimpleTestCase):
         other = data.table_state(Group, columns=[{"field": "name"}], filters={"id": 2})
         self.assertIsNot(one, other, "two tables narrowed differently never share rows")
         self.assertTrue(hasattr(one, "set_choice"), "a model table's filter dropdown has its event")
+        kinds = str(ui.table(User, columns=["username", "date_joined"], visible=True).build(CTX))
+        self.assertIn("instant", kinds, "a model column keeps the kind its field gives it (a date-time)")
+
+        def make():
+            return ui.table(User, columns=["username", ui.column("is_active", kind="status", tones={"true": "success"})],
+                            row_actions=lambda row: [ui.button("Lock", CheckDesk.end, row["email"])], visible=True)
+
+        make().build(CTX)
+        before = len(data._STATE_CACHE)
+        make().build(CTX)
+        self.assertEqual(len(data._STATE_CACHE), before, "building a page twice finds one state class")
+        state = next(cls for cls in data._STATE_CACHE.values() if "email" in getattr(cls, "row_fields", ()))
+        self.assertIn("email", state.row_fields, "the field a row button reads reaches the browser")

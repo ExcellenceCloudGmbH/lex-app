@@ -12,13 +12,17 @@ from lex.lex_app.reflex.ui.pages import links
 from lex.lex_app.reflex.ui.pages.parts import Build, Part, called, say
 
 #: What a column's kind is called in RFDS's column spec; the last four are drawn by lex-app.
+#: What a column's kind is called in RFDS's column spec; status, tag and tags are drawn by lex-app.
 _RFDS_KIND = {"text": "text", "number": "number", "money": "money", "percent": "percent", "date": "date",
               "datetime": "instant", "status": "text", "tag": "text", "tags": "text"}
+#: A column's kind as an exported cell's type (RFDS's semantic types).
+_EXPORT_KIND = {"number": "number", "money": "amount", "percent": "ratio", "date": "date", "datetime": "instant"}
 KINDS = tuple(_RFDS_KIND)
 _DRAWN = ("status", "tag", "tags")
 _NUMERIC = ("number", "money", "percent")
 _TEXTUAL = (None, "text", "status", "tag", "tags")
 _CODE = re.compile(r"[A-Z]{3}")
+_COMMON_CODES = {"EUR", "USD", "GBP", "CHF", "JPY", "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "CAD", "AUD", "CNY"}
 _FIELD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
@@ -37,12 +41,18 @@ def column(key: str, *, label: str | None = None, kind: str | None = None, curre
            tones: dict | None = None, open: str | None = None, show: Callable[[Any], Any] | None = None) -> Column:
     """A table column that needs more than its name.
 
-    ``kind`` is text, number, money, percent, date, datetime, status, tag or tags, each drawn the
-    same way on every page. ``currency`` goes with money: a code (``"EUR"``) or the name of the
+    ``kind`` says what the values are, and each kind is drawn the same way on every page: text,
+    number, money, percent, date, datetime; ``status`` (a word with a tone), ``tag`` (one label),
+    ``tags`` (a list of labels).
+
+    ``currency`` goes with money: three capitals is a code (``"EUR"``); anything else names the
     row's field that holds the code (``currency="currency"``). ``tones`` goes with status:
     ``{"Open": "info", "Late": "warning"}``. ``open`` names the row's field holding a
-    ``ui.address``: the cell becomes a link. ``show`` draws a cell no kind describes: a function
-    of the row returning ``ui.text``, ``ui.status`` or ``ui.link``.
+    ``ui.address``: the cell becomes a link.
+
+    ``show`` draws a cell no kind describes: a function of the row returning ``ui.text``,
+    ``ui.status`` or ``ui.link``. ``row["x"]`` there stands for the value in the browser, not the
+    value itself: a Python ``if`` on it cannot work; use ``visible=`` or ``ui.switch``.
     """
     from lex.lex_app.reflex.ui.pages.vocab import TONES
 
@@ -55,6 +65,9 @@ def column(key: str, *, label: str | None = None, kind: str | None = None, curre
         raise ValueError(f"{where}, label=) takes a sentence; got {label!r}")
     if currency is not None and kind != "money":
         raise ValueError(f"{where}, currency=) goes with kind=\"money\"")
+    if isinstance(currency, str) and re.fullmatch(r"[a-z]{3}", currency) and currency.upper() in _COMMON_CODES:
+        raise ValueError(f"{where}, currency=) got {currency!r}: a code is written in capitals, "
+                         f"currency=\"{currency.upper()}\"; a field holding the code is named otherwise.")
     if currency is not None and not (isinstance(currency, str) and _FIELD.fullmatch(currency)):
         raise ValueError(f"{where}, currency=) takes a code such as \"EUR\", or the name of the row's field that "
                          f"holds the code; got {currency!r}")
@@ -126,9 +139,10 @@ class Table(Part):
             raise ctx.fail("the table has no columns.", "Name them: `columns=[\"name\", ui.column(\"amount\", kind=\"money\")]`.")
         first = cols[0]
         if first.kind in _DRAWN or first.show is not None or first.open is not None:
-            raise ctx.fail(f"the first column, `{first.key}`, is drawn by `{'show=' if first.show else 'open=' if first.open else first.kind}`.",
-                           "The first column names the row and is drawn as text (and is the row's link). Put a "
-                           "plain column first, such as the name.")
+            what = "a `show=` column" if first.show else "an `open=` column" if first.open else f"a `{first.kind}` column"
+            raise ctx.fail(f"the first column, `{first.key}`, is {what}.",
+                           "The first column names the row and is the row's link, so it is shown as plain text. "
+                           "Put a plain column first, such as the name.")
         unknown = [name for name in self.filters if name not in keys]
         if unknown:
             raise ctx.fail(f"`filters=` names {', '.join(unknown)}, which is not a column.",
@@ -138,11 +152,12 @@ class Table(Part):
             if col is None:
                 raise ctx.fail(f"`totals=` names {name}, which is not a column.",
                                f"Total columns of the table: {', '.join(keys)}.")
-            if how not in ("sum", "count"):
-                raise ctx.fail(f"`totals=` asks for {how!r} of {name}.", "A total is \"sum\" or \"count\".")
-            if how == "sum" and col.kind not in _NUMERIC:
+            if how != "sum":
+                raise ctx.fail(f"`totals=` asks for {how!r} of {name}.",
+                               "A total is the \"sum\" of a number, money or percent column: `totals={\"amount\": \"sum\"}`.")
+            if col.kind not in _NUMERIC:
                 raise ctx.fail(f"`totals=` sums {name}, which is not a number.",
-                               f"Give it kind=\"number\", \"money\" or \"percent\", or count it: `{{{name!r}: \"count\"}}`.")
+                               "Give it kind=\"number\", \"money\" or \"percent\".")
         if self.search and not any(c.kind in _TEXTUAL and c.show is None for c in cols):
             raise ctx.fail("`search=True`, and the table has no text column to search.",
                            "Add a text column, or leave search out.")
@@ -163,12 +178,19 @@ class Table(Part):
                                    "Return a list of `ui.button(...)` / `ui.link(...)`: "
                                    "`row_actions=lambda row: [ui.button(\"Approve\", State.approve, row[\"id\"])]`.")
 
-    def _specs(self, ctx: Build, cols: list[Column], headers: dict[str, str]) -> list[dict]:
+    def _specs(self, ctx: Build, cols: list[Column], base: dict[str, dict]) -> list[dict]:
         from rfds.components.tables import column as rfds_column
 
         specs = []
         for c in cols:
-            header = c.label or headers.get(c.key) or c.key.replace("_", " ").capitalize()
+            given = base.get(c.key)
+            if given is not None and c.kind is None and c.show is None and c.open is None and c.currency is None:
+                spec = dict(given)                       # a model's field: its own kind and label
+                if c.label is not None:
+                    spec.update(header=c.label, header_id=c.label)
+                specs.append(spec)
+                continue
+            header = c.label or (given or {}).get("header") or c.key.replace("_", " ").capitalize()
             options: dict[str, Any] = {"header_id": header}
             if c.currency is not None:
                 if _CODE.fullmatch(c.currency):
@@ -255,16 +277,21 @@ class Table(Part):
                 raise ctx.fail(f"`where=` names {name}, which {model.__name__} does not have.",
                                f"Narrow by its fields: {', '.join(sorted(known))}.")
         if self.export or self.totals:
-            raise ctx.fail("`export=` and `totals=` work on tables over a `@ui.rows` handler in this version.",
-                           "Read the rows in a `@ui.rows` handler, or leave them out.")
+            raise ctx.fail("a model table cannot export or total yet.",
+                           "Leave `export=` and `totals=` out; they come with the model's export permission.")
+        linked = [c.key for c in cols if c.open is not None]
+        if linked:
+            raise ctx.fail(f"column `{linked[0]}` has `open=`, which only a `@ui.rows` table's rows can carry.",
+                           "A model's field is data and never becomes a link. Read the rows in a `@ui.rows` "
+                           "handler that builds each address with `ui.address(...)`.")
         for name in self.filters:
             field = known.get(name)
             if field is not None and not (field.choices or field.get_internal_type() == "BooleanField"):
                 raise ctx.fail(f"`filters=` names {name}, whose values are not a fixed set.",
                                "A model table filters on fields with choices, or yes/no fields; search the others.")
         self._check(ctx, cols)
-        headers = {c["field"]: c.get("header", "") for c in data.lex_columns(model, [c.key for c in cols])}
-        specs = self._specs(ctx, cols, headers)
+        base = {c["field"]: dict(c) for c in data.lex_columns(model, [c.key for c in cols])}
+        specs = self._specs(ctx, cols, base)
         key = model._meta.pk.name
         props: dict[str, Any] = {"row_key": key, "row_fields": (key,)}     # the key stays in each row, shown or not
         if self.open is not None:
@@ -279,22 +306,39 @@ class Table(Part):
         if actions is not None:
             props["row_actions"] = actions
         search_field = "" if not self.search else data._default_search_field(model)
+        used: set[str] = {key}
+        for c in cols:
+            if c.show is not None:
+                used |= _record(c.show)[1]
+        if self.row_actions is not None:
+            used |= _record(self.row_actions)[1]
         state = data.table_state(model, columns=specs, search_field=search_field, filters=self.where,
-                                 row_fields=(key,))
+                                 row_fields=tuple(sorted(used)), choice_fields=tuple(self.filters))
         from lex.lex_app.reflex.ui.pages import rows_table
 
         options = {}
         for name in self.filters:
             field = known[name]
             pairs = field.choices or [(True, "Yes"), (False, "No")]
-            options[name] = [{"value": rows_table.ALL, "label": "All"}, *({"value": str(v).lower() if isinstance(v, bool) else str(v),
-                                                               "label": str(label)} for v, label in pairs)]
+            options[name] = [{"value": rows_table.ALL, "label": "All"},
+                             *({"value": str(v).lower() if isinstance(v, bool) else str(v), "label": str(label)}
+                               for v, label in pairs if not isinstance(label, (list, tuple)))]
         toolbar = self._toolbar(ctx, state, cols, choices=options)
         if toolbar is not None:
             props["toolbar"] = toolbar
-        table = rfds.data_table(state=state, columns=specs, caption=str(model._meta.verbose_name_plural).capitalize(),
+        caption = say(ctx.caption) if ctx.caption else str(model._meta.verbose_name_plural).capitalize()
+        table = rfds.data_table(state=state, columns=specs, caption=caption,
                                 **{k: v for k, v in props.items() if k != "row_fields"})
-        return rx.box(table, on_mount=state.open(dict(self.where or {})), width="100%")
+        # Keyed by its where= values: when one of them changes (another record of the same page), the
+        # table is a new one to React, so it appears again and reads with the new values.
+        values = [v for v in dict(self.where or {}).values() if isinstance(v, rx.Var)]
+        extra: dict[str, Any] = {}
+        if values:
+            joined = values[0].to(str)
+            for v in values[1:]:
+                joined = joined + "|" + v.to(str)
+            extra = {"key": joined}
+        return rx.box(table, on_mount=state.open(dict(self.where or {})), width="100%", **extra)
 
     # -- a @ui.rows handler -------------------------------------------------------------------------
     def _rows(self, ctx: Build) -> rx.Component:
@@ -309,7 +353,10 @@ class Table(Part):
         self._check(ctx, cols)
         specs = self._specs(ctx, cols, {})
         key = self.key or "id"
-        needed = tuple(c.key for c in cols)
+        if key != "id" and "id" in [c.key for c in cols]:
+            raise ctx.fail("a column is called `id`, and the table's key is another field.",
+                           "Rename the column's field, or leave `key=` out so `id` is the key.")
+        needed = tuple([c.key for c in cols] + [c.currency for c in cols if c.currency and not _CODE.fullmatch(c.currency)])
         fields: set[str] = {key, *needed}
         open_fields = [c.open for c in cols if c.open]
         row_open = ""
@@ -333,10 +380,15 @@ class Table(Part):
             tags_fields=tuple(c.key for c in cols if c.kind == "tags"), choice_fields=tuple(self.filters),
             search_fields=tuple(c.key for c in cols if c.kind in ("text", None, "status", "tag") and c.show is None),
             totals_spec=totals_spec, totals_currency=money[0].currency if money and self.totals else "",
-            export_columns=tuple((c.key, c.label or c.key.replace("_", " ").capitalize()) for c in cols),
-            query_param="q" if (self.search and ctx.slot == "table" and ctx.route) else "",
+            export_columns=_export_columns(cols),
+            export_kinds={label: _EXPORT_KIND[c.kind] for c, label in zip(cols, (lbl for _, lbl in _export_columns(cols)))
+                          if c.kind in _EXPORT_KIND},
+            query_param="q" if (self.search and ctx.page_search and ctx.route) else "",
+            searchable=bool(self.search), exportable=bool(self.export),
             entity=self.source.fn.__name__.replace("_", " "))
-        rows_table.on_route(ctx.route, state)
+        rows_table._CACHE_BY_TABLE[id(self)] = state
+        if not ctx.under_load:          # under a load the table appears again after it, and reads then
+            rows_table.on_route(ctx.route, state)
         props: dict[str, Any] = {"row_key": "id"}
         if self.open is not None and not isinstance(self.open, str):
             props["row_href"] = links.row_href(ctx, self.open, "id")
@@ -353,9 +405,20 @@ class Table(Part):
         toolbar = self._toolbar(ctx, state, cols, choices=True)
         if toolbar is not None:
             props["toolbar"] = toolbar
-        caption = say(ctx.caption) if ctx.caption else say("Rows")
+        caption = say(ctx.caption) if ctx.caption else say(ctx.page.replace("_", " ").capitalize())
         table = rfds.data_table(state=state, columns=specs, caption=caption, **props)
         return rx.box(table, on_mount=state.open, on_unmount=state.close, width="100%")
+
+
+def _export_columns(cols: list[Column]) -> tuple[tuple[str, str], ...]:
+    """The exported columns: each column's field and label, and a money column's currency field."""
+    out: list[tuple[str, str]] = []
+    for c in cols:
+        out.append((c.key, c.label or c.key.replace("_", " ").capitalize()))
+        if c.currency and not _CODE.fullmatch(c.currency) and c.currency not in [k for k, _ in out] \
+                and c.currency not in [col.key for col in cols]:
+            out.append((c.currency, "Currency"))
+    return tuple(out)
 
 
 def _is_model(source: Any) -> bool:
@@ -395,16 +458,27 @@ def table(source: Any, *, columns: Any = (), key: str | None = None, where: dict
           row_actions: Callable[[Any], Any] | None = None, empty: Any = None, visible: Any = None) -> Table:
     """Rows from a model, or from a ``@ui.rows`` handler, paged on the server and read as the user.
 
-    ``columns`` are field names or ``ui.column(...)``s. ``key`` names the field that tells rows
-    apart (a model: its primary key; rows: ``"id"``). ``where=`` narrows a model:
-    ``{"fund": FundState.id}``. ``open=`` is a page (each row's key goes into its one argument),
-    or the name of the field holding each row's ``ui.address``. ``search=True`` adds a search box;
-    ``filters=`` names columns the user can filter on; ``export=True`` adds CSV and Excel export;
-    ``totals={"amount": "sum"}`` adds a totals row over all matching rows; ``row_actions`` is a
-    function of the row returning buttons. ``empty=`` is the sentence when there are no rows.
+    Where the rows come from:
+      ``ui.table(Holding, where={"fund": FundState.id}, ...)`` -- a model, read through lex-app's
+      API. ``where=`` chooses which rows to show; who may see them is decided by the model's
+      ``permission_list`` / ``permission_read``, never by ``where=``.
+      ``ui.table(FundState.holdings, ...)`` -- a ``@ui.rows`` handler's list of dicts.
 
-    A model table is shown only to users who may read the model; ``visible=True`` shows it to
-    everyone, and the rows are still read as the user.
+    What the user can do:
+      ``search=True`` a search box; ``filters=["kind"]`` a dropdown per column; ``export=True``
+      CSV and Excel of every matching row; ``open=`` a page (the row's key goes into its one
+      argument, a real link), or the name of a field holding each row's ``ui.address`` (the row is
+      a button that opens it); ``row_actions=lambda row: [ui.button(...)]``.
+
+    What lex-app does by itself:
+      25 rows a page, sorting by column, loading rows, the error in place, ``empty=`` when there
+      are no rows, "No rows match" with a way to clear the search; ``totals={"amount": "sum"}``
+      adds a totals row over every matching row, one per currency.
+
+    ``columns`` are field names or ``ui.column(...)``s; the first names the row and is plain text.
+    ``key`` names the field that tells rows apart (a model: its primary key; rows: ``"id"``). Only
+    the fields the table uses reach the browser. A model table is shown only to users who may read
+    the model; ``visible=True`` shows it to everyone, and the rows are still read as the user.
     """
     if isinstance(columns, str):
         raise TypeError(f"ui.table(columns=) takes a list of names: columns=[{columns!r}]")

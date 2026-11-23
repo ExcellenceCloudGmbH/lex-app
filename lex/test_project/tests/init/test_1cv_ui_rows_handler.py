@@ -117,7 +117,8 @@ class TestCluster01cv_RowsHandler(SimpleTestCase):
         Then:  the rows carry the user and the field; lex-app searches and filters a handler
                without `search`, and a handler with `search` gets the text; writing a field fails
                the read and leaves the field as it was; a dict is refused with what to return;
-               a missing permission refuses the read.
+               a missing permission refuses the read (a PermissionError in a test); given the
+               table, the rows come back as its browser gets them.
         """
         read = testing.rows(RowsDesk.people, user="ada")
         self.assertEqual([(r["name"], r["seen_by"], r["label"]) for r in read][:1], [("Ada Example", "ada", "people")],
@@ -136,12 +137,13 @@ class TestCluster01cv_RowsHandler(SimpleTestCase):
             testing.rows(RowsDesk.broken)
         self.assertIn("returned dict; a @ui.rows handler returns a list of dicts", str(shape.exception),
                       "a value that is not a list says what to return")
-        with self.assertRaises(Exception) as denied:
+        with self.assertRaises(PermissionError, msg="a rows handler that requires a permission does not run without it"):
             testing.rows(RowsDesk.groups)
-        self.assertEqual(type(denied.exception).__name__, "_NotPermitted",
-                         "a rows handler that requires a permission does not run without it")
         self.assertEqual(testing.rows(RowsDesk.groups, grants=["auth.Group:read"]), [{"id": 1, "name": "x"}],
                          "and runs with it")
+        shown = testing.rows(RowsDesk.people, table=ui.table(RowsDesk.people, columns=["name"], search=True), search="bob")
+        self.assertEqual(shown, [{"id": "3", "name": "Bob Example"}],
+                         "with table=, the rows come back as that table's browser gets them: its fields only")
 
     # -- 1.810 ---------------------------------------------------------
     def test_1_810_an_address_is_built_in_python_from_a_page(self) -> None:
@@ -170,7 +172,8 @@ class TestCluster01cv_RowsHandler(SimpleTestCase):
         Given: a rows handler with a table registered for it.
         When:  a handler returns ui.refresh(handler).
         Then:  the result is accepted beside ui.toast; it becomes the event that makes that
-               table read again; something that is not a rows handler is refused.
+               table read again, and is itself that list of events for a raw Reflex handler;
+               something that is not a rows handler is refused.
         """
         state = rows_table.state_for(RowsDesk.people, columns=[{"field": "name", "header": "Name", "kind": "text"}],
                                      row_fields=["id", "name"], needed=("name",))
@@ -178,5 +181,7 @@ class TestCluster01cv_RowsHandler(SimpleTestCase):
         self.assertEqual(len(found), 2, "ui.refresh is a result like ui.toast")
         events = results.to_events([found[1]])
         self.assertIn(state.reread, events, "it becomes the table's read-again event")
+        self.assertIn(state.reread, list(ui.refresh(RowsDesk.people)),
+                      "and is itself that list of events, so a raw Reflex handler can return it as it is")
         with self.assertRaises(TypeError, msg="only rows handlers are refreshed"):
             ui.refresh(RowsDesk.label)

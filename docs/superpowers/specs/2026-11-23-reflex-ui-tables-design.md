@@ -329,9 +329,29 @@ Built and tested the same day; these differ from, or add to, the sections above:
   is refused with "Put a plain column first, such as the name".
 - **A filter's "All" has the value `__all__`**: RFDS's dropdown refuses an empty value.
 - **A model table's export and totals wait.** In this version `export=` and `totals=` on a model
-  table are refused ("work on tables over a `@ui.rows` handler in this version"); a model table's
-  filters take fields with choices or yes/no fields. A model table reads again on its own triggers
-  and when the page opens again, not after a handler of the state its `where=` values come from.
+  table are refused ("a model table cannot export or total yet"); a model table's filters take
+  fields with choices or yes/no fields, and its search covers its first plain text field. A model
+  table is keyed by its `where=` values: when one changes (another record of the same page), it
+  appears again and reads with the new value. It does not read again after a handler of the state
+  its `where=` values come from. A column's `open=` is refused on a model table: a model's field is
+  data and never becomes a link.
+- **Only the fields the table uses ever leave the handler.** Rows are cut down to those fields
+  before search, filters and sort, the browser can filter only on the table's `filters=`, and a
+  table without `search=True` ignores a search it is sent. Without this, the count of matching rows
+  would let the browser learn a hidden value.
+- **A total is a sum.** `count` is not offered: RFDS draws totals only on number columns, so a
+  count of text would show nothing and a count of money would show as money. `totals=` takes
+  `"sum"` on number, money and percent columns.
+- **An export carries each amount's currency** (a "Currency" column when the currency is a field
+  that is not shown) and the cells' types, and records the chosen filters in RFDS's audit hook.
+- **A table that appears only after a load is not re-read by the page opener**: it appears again
+  after the load and reads then. Only a table outside any load is told to `reopen`.
+- **`ui.refresh(...)` is itself a list of Reflex events**, so a handler written in raw Reflex can
+  return it as it is (needed while a project moves one page at a time).
+- **`ui.testing.rows(handler, table=ui.table(...))`** runs the rows through that table's own
+  rules and returns them as its browser gets them; a missing permission raises `PermissionError`.
+- **On a list page the search box stays in the table's toolbar**, not above the table, and only a
+  rows table keeps it in the address as `?q=`.
 - **`currency=` tells a code from a field by its letters**: three capitals is a code (`"EUR"`),
   anything else a field name (`"ccy"`).
 - **Every page open tells its tables to read again.** A table already on screen is not mounted
@@ -339,6 +359,10 @@ Built and tested the same day; these differ from, or add to, the sections above:
   page's tables a `reopen`. This also covers a mount event that carries the previous page's
   address (section 6).
 - **`lex reflex check` does not yet list dangerous row actions** (5.9); it accepts `@ui.rows`.
+- **Two additions for moving a project one table at a time** (from starting the reviewed
+  project's refactor): `ui.embed(part, name=)` builds one lex.ui part into a Reflex component for
+  a page not yet written with `ui.page`, and `self.user.permissions` gives a handler body the
+  user's Keycloak permission list for a project's own logic.
 
 ---
 

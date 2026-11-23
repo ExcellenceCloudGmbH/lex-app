@@ -39,9 +39,13 @@ class Download:
     data: Any = None
 
 
-@dataclasses.dataclass(frozen=True)
-class Refresh:
-    handlers: tuple
+class Refresh(list):
+    """What ``ui.refresh`` returns: the Reflex events that make those tables read again.
+
+    A list of events, so a handler written in raw Reflex can return it as it is.
+    """
+
+    handlers: tuple = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -80,7 +84,11 @@ def refresh(*handlers: Any) -> Refresh:
 
     if not handlers or not all(rows.is_rows(h) for h in handlers):
         raise TypeError("ui.refresh() takes @ui.rows handlers: `return ui.refresh(FundState.holdings)`")
-    return Refresh(tuple(handlers))
+    from lex.lex_app.reflex.ui.pages import rows_table
+
+    out = Refresh(rows_table.reread_events(handlers=handlers))
+    out.handlers = tuple(handlers)
+    return out
 
 
 def progress(fraction: float, message: str = "") -> Progress:
@@ -90,7 +98,8 @@ def progress(fraction: float, message: str = "") -> Progress:
 
 def split(value: Any, *, handler: str) -> tuple[list, Progress | None]:
     """A handler's returned or yielded value as (results, progress report)."""
-    items = [] if value is None else list(value) if isinstance(value, (list, tuple)) else [value]
+    items = ([] if value is None else [value] if isinstance(value, Refresh)
+             else list(value) if isinstance(value, (list, tuple)) else [value])
     out: list = []
     report: Progress | None = None
     for item in items:

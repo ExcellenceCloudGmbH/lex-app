@@ -42,6 +42,9 @@ def rows(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any:
     It reads only: setting a field fails the read. The database is reached through ``self.api``,
     or directly when ``requires=`` says what the handler needs, as for every handler. A slow
     source caches where it reads (Django's ``cache.get_or_set``); lex-app keeps nothing.
+
+    ``self.params`` comes from the address and can be anything: pass ``self.user`` to your logic
+    so that it returns only what this user may see.
     """
 
     def decorate(fn: Callable[..., Any]) -> Any:

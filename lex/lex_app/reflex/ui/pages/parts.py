@@ -24,6 +24,8 @@ class Build:
     place: str = "body"                 # "body" or "actions": a link in actions is a button
     mounts: bool = False                # a dashboard: a load starts when its part mounts
     caption: str = ""                   # the title a table in this part is named by (its section's)
+    under_load: bool = False            # the part appears only after a load has finished
+    page_search: bool = False           # a list page's table: its search is the page's, kept in the address
 
     def at(self, slot: str, place: str | None = None) -> "Build":
         return dataclasses.replace(self, slot=slot, place=place or self.place)

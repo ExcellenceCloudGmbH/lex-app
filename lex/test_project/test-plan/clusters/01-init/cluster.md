@@ -1400,9 +1400,9 @@ does not remove user launch configurations.
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.808 | A rows handler is a plain function that tables read | a plain function with no argument, or with `search` alone, is a rows handler; a generator, an async function and any other argument are refused with what to write; the browser cannot send it as an event; `lex reflex check` accepts it |
-| 1.809 | Rows are read as the user on a read only copy | the rows carry the user and the field; lex-app searches and filters a handler without `search`, and a handler with `search` gets the text; writing a field fails the read and leaves the field as it was; a dict is refused with what to return; a missing permission refuses the read |
+| 1.809 | Rows are read as the user on a read only copy | the rows carry the user and the field; lex-app searches and filters a handler without `search`, and a handler with `search` gets the text; writing a field fails the read and leaves the field as it was; a dict is refused with what to return; a missing permission refuses the read (a PermissionError in a test); given the table, the rows come back as its browser gets them |
 | 1.810 | An address is built in python from a page | the argument and the query value are encoded into the page's route; an empty key gives no address; a value the page does not take, a missing argument, and something that is not a page are refused |
-| 1.811 | Refresh names rows handlers and becomes their tables events | the result is accepted beside ui.toast; it becomes the event that makes that table read again; something that is not a rows handler is refused |
+| 1.811 | Refresh names rows handlers and becomes their tables events | the result is accepted beside ui.toast; it becomes the event that makes that table read again, and is itself that list of events for a raw Reflex handler; something that is not a rows handler is refused |
 
 **Scenario range:** 1.808 – 1.811. **Test file:** `lex/test_project/tests/init/test_1cv_ui_rows_handler.py`. **Type:** I. **Status:** ✅ Complete (2026-11-23). Batch: [1cv](batches.md).
 
@@ -1415,10 +1415,10 @@ does not remove user launch configurations.
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.812 | The browser gets one page of the fields the table uses | its state holds the rows with only the columns' fields, the currency field, the key and the link field; the e-mail address stays on the server; the plain string is no link; the table's state is reachable for later reads |
-| 1.813 | Search filters and sort run on the server | a search finds a row by its tag; each filter keeps the matching rows; the filter choices are the column's values after "All"; the first sort of a money column is high to low |
-| 1.814 | Totals per currency and export of what is shown | there is one totals row per currency over all matching rows; the export has the columns' labels, the matching rows only, and tags joined |
+| 1.813 | Search filters and sort run on the server | a search finds a row by its tag; each filter keeps the matching rows; the filter choices are the column's values after "All"; the first sort of a money column is high to low; clearing the filters clears the dropdowns; a filter the browser sends on a field the table does not show is refused |
+| 1.814 | Totals per currency and export of what is shown | there is one totals row per currency over all matching rows; the export has the columns' labels and each amount's currency, the matching rows only, and tags joined |
 | 1.815 | A handler of the state or ui refresh makes the table read again | after each the table shows the new rows without being asked; a table that is not on screen does not read |
-| 1.816 | Opening the page again and a list pages search in the address | the opener tells the page's table to read its first page again; the list page's table starts with the address's search, and typing a search writes it back |
+| 1.816 | Opening the page again and a list pages search in the address | the opener tells the page's table to read its first page again (not a table that appears only after a load, which reads when it appears); the list page's table starts with the address's search, and typing a search writes it back |
 | 1.817 | A broken rows handler breaks only its table | a refusal shows its own words in the table; a failure shows a message with a reference and never its detail; a filter of more than 50 values is the table's error too (the advice to search goes to the log, with the reference) |
 
 **Scenario range:** 1.812 – 1.817. **Test file:** `lex/test_project/tests/init/test_1cw_ui_rows_table.py`. **Type:** I. **Status:** ✅ Complete (2026-11-23). Batch: [1cw](batches.md).
@@ -1433,7 +1433,7 @@ does not remove user launch configurations.
 | --- | --- | --- |
 | 1.818 | A column says what it is and is checked when declared | each kind is accepted; a currency code and a currency field are told apart; tones go with status only; show= and kind= are not given together; a link field must be a field name; a wrong kind names the kinds |
 | 1.819 | A table declared wrongly names the page the slot and what to write | each is a PageError naming the page and the slot, saying what it got and what to write |
-| 1.820 | A model table is narrowed with where and searched through the api | the table's state receives the where= values when it appears (a state value included); the toolbar has a search box; a filter offers the field's choices after "All"; two tables narrowed differently never share a state |
+| 1.820 | A model table is narrowed with where and searched through the api | the table's state receives the where= values when it appears (a state value included); the toolbar has a search box; a filter offers the field's choices after "All"; two tables narrowed differently never share a state; a column keeps its field's kind; the field a row button reads reaches the browser; building the same table twice finds one state class |
 
 **Scenario range:** 1.818 – 1.820. **Test file:** `lex/test_project/tests/init/test_1cx_ui_table_checks.py`. **Type:** U. **Status:** ✅ Complete (2026-11-23). Batch: [1cx](batches.md).
 

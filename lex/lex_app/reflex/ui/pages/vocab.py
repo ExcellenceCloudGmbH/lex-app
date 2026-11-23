@@ -242,6 +242,7 @@ def button(label: Any, handler: Any = None, *args: Any, to: Any = None, tone: st
 
     Values after the handler are passed to it: in a table's ``row_actions``,
     ``ui.button("Approve", State.approve, row["id"])``; the button then shows that row's run.
+    The values come back from the browser: check them in the handler.
     """
     if args and handler is None:
         raise ValueError("ui.button(): values after the label go to a handler; give the handler first.")

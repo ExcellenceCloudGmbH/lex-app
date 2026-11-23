@@ -175,7 +175,13 @@ class Invocation:
             self.saved.setdefault(id(other), (other, workcopy.snapshot(other)))
             return other
         if state_cls not in self.drafts:
-            self.drafts[state_cls] = self.on_loop(self._draft_of(state_cls))
+            if self.kind == "rows":               # a table's event already holds the user's lock
+                from lex.lex_app.reflex.ui.rows import ReadOnly
+
+                other = self.on_loop(self.live.get_state(state_cls))
+                self.drafts[state_cls] = ReadOnly(state_cls, workcopy.snapshot(other))
+            else:
+                self.drafts[state_cls] = self.on_loop(self._draft_of(state_cls))
         return self.drafts[state_cls]
 
     async def _draft_of(self, state_cls: Any) -> workcopy.Draft:

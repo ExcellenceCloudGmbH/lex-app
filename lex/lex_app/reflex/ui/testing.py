@@ -318,12 +318,15 @@ def run(state_cls: Any, handler: str, *, user: str = "tester", grants: Any = (),
 
 
 def rows(handler: Any, *, user: str = "tester", grants: Any = (), params: dict | None = None, api: Any = None,
-         fields: dict | None = None, search: str = "", filters: dict | None = None) -> list[dict]:
+         fields: dict | None = None, search: str = "", filters: dict | None = None, table: Any = None) -> list[dict]:
     """The rows a table over the ``@ui.rows`` ``handler`` would get, after its search and filters.
 
     Run as ``user`` with ``grants`` and the page's ``params``; ``fields`` seeds the state. A
-    broken handler raises here (a list that is not of dicts, a write to the state) instead of
-    showing the table's error, so a project's test fails on it.
+    broken handler raises here (a list that is not of dicts, a write to the state, a missing
+    permission as ``PermissionError``) instead of showing the table's error, so a project's test
+    fails on it. Given ``table=ui.table(...)``, the rows go through that table's own rules -- its
+    checks, the fields the browser receives, its search over its text columns and tags -- and
+    come back as the browser would get them.
     """
     from rfds.state.table import query_rows
 
@@ -335,13 +338,25 @@ def rows(handler: Any, *, user: str = "tester", grants: Any = (), params: dict |
             if fields:
                 await harness.set_fields(handler.state, **fields)
             owner = await harness._state(handler.state)
-            got = await rows_mod.read(handler, owner, search=search)
+            try:
+                got = await rows_mod.read(handler, owner, search=search)
+            except handlers._NotPermitted:
+                raise PermissionError(f"{handler.fn.__ui_key__} requires a permission the user does not have") from None
             for outcome in harness.outcomes:
                 if outcome.kind != "ok":
                     raise AssertionError(outcome.message)
             return got
 
     found = asyncio.run(scenario())
+    if table is not None:
+        from lex.lex_app.reflex.ui.pages import rows_table
+        from lex.lex_app.reflex.ui.pages.parts import Build
+
+        table.build(Build(page="test", caption="Rows"))
+        cls = rows_table._CACHE_BY_TABLE[id(table)]
+        wired = cls._wire(handler.fn.__ui_key__, found)
+        picked = {name: {"op": "eq", "value": value} for name, value in (filters or {}).items()}
+        return cls._matching(wired, sort=[], filters=picked, query=search)
     text = "" if rows_mod.takes_search(handler) else search
     picked = {name: {"op": "eq", "value": value} for name, value in (filters or {}).items()}
     if not text and not picked:

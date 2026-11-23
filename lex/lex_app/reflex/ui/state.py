@@ -125,7 +125,7 @@ class State(rx.State):
         tables = rows_table.reopen_events(page)     # a table already on screen: the new record's rows
         if entry is None or not _page_permitted(self, entry.requires):
             self._ui_pending_loads, self._ui_optional_loads, self._ui_started = [], [], []
-            return tables or None
+            return None
         from lex.lex_app.reflex.ui import runs as ui_runs
 
         # A page shows its skeleton until its loads have finished in this visit.

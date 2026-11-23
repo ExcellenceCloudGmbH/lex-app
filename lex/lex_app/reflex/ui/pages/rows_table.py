@@ -28,6 +28,8 @@ _BY_HANDLER: dict[str, list[type]] = {}
 _BY_ROUTE: dict[str, list[type]] = {}
 _BY_OWNER: dict[str, list[type]] = {}
 _CACHE: dict[tuple, type] = {}
+#: id of a ui.table part -> the state class built for it (for ``ui.testing.rows(table=...)``).
+_CACHE_BY_TABLE: dict[int, type] = {}
 _COUNTER = itertools.count(1)
 
 
@@ -51,7 +53,10 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
     totals_spec: ClassVar[tuple[Mapping[str, Any], ...]] = ()
     totals_currency: ClassVar[str] = ""               # the money field whose currency splits the totals
     export_columns: ClassVar[tuple[tuple[str, str], ...]] = ()
+    export_kinds: ClassVar[dict[str, str]] = {}       # an exported column's label -> its semantic kind
     query_param: ClassVar[str] = ""
+    searchable: ClassVar[bool] = False                # the table has a search box
+    exportable: ClassVar[bool] = False                # the table has an export menu
 
     shown: bool = False
     totals_rows: list[dict] = []
@@ -95,7 +100,7 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
     @rx.event(supersedes=True)
     async def set_query(self, value: str):
         text = " ".join(str(value or "").split())[:200]
-        if text == self.query:
+        if text == self.query or not type(self).searchable:      # no search box: no search
             return
         self.query = text
         self.page = 0
@@ -116,12 +121,27 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
         async for _ in choose(self, field, value):
             yield
 
+    def _store_filter(self, key: str, value: Mapping[str, Any]) -> bool:
+        # Only the table's own filters: a filter on any other field would let the browser learn,
+        # from the count of matching rows, a value the table does not show.
+        if key not in type(self).choice_fields:
+            raise ValueError(f"{type(self).__name__}: {key!r} is not one of the table's filters")
+        return super()._store_filter(key, value)
+
     @rx.event
-    async def clear_all(self):
-        """"Clear search and filters"."""
-        self.query, self.filters, self.chosen, self.page = "", {}, {}, 0
-        async for _ in self.load():
-            yield
+    async def clear_filters(self):
+        """"Clear filters": every filter, and the dropdowns that show them."""
+        self.chosen = {}
+        if self.filters:
+            self.filters = {}
+            await self._after_filter_change()
+
+    @rx.event
+    async def remove_filter(self, key: str):
+        self.chosen = {k: v for k, v in self.chosen.items() if k != key}
+        if key in self.filters:
+            self.filters = {k: v for k, v in self.filters.items() if k != key}
+            await self._after_filter_change()
 
     @rx.event
     def go(self, key: str):
@@ -145,11 +165,12 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
         except Exception as exc:  # noqa: BLE001 - the table's error slot, never the exception's text
             raise RFDSUserError(rows_mod.describe(exc, handler.fn.__ui_key__, "")) from None
 
-    def _wire(self, key: str, raw: list) -> list[dict]:
+    @classmethod
+    def _wire(cls, key: str, raw: list) -> list[dict]:
         from lex.lex_app.reflex.data import wire_value
         from lex.lex_app.reflex.ui.pages.links import Address
 
-        cls = type(self)
+        keep = set(cls.row_fields)
         out: list[dict] = []
         seen: set[str] = set()
         for index, row in enumerate(raw):
@@ -164,6 +185,8 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
             seen.add(ident)
             wire: dict[str, Any] = {}
             for name, value in row.items():
+                if name not in keep:            # a field the table does not use never leaves the server
+                    continue
                 if name in cls.open_fields:
                     wire[name] = str(value) if isinstance(value, Address) else ""
                 elif name in cls.tags_fields:
@@ -194,14 +217,14 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
                            *({"value": v, "label": v} for v in sorted(values, key=str.casefold))]
         return found
 
-    def _matching(self, rows: list[dict], *, sort: list, filters: dict, query: str) -> list[dict]:
-        cls = type(self)
+    @classmethod
+    def _matching(cls, rows: list[dict], *, sort: list, filters: dict, query: str) -> list[dict]:
         plain = {k: v for k, v in (filters or {}).items() if k not in cls.tags_fields}
         for name, spec in (filters or {}).items():
             if name in cls.tags_fields:
                 wanted = str(spec.get("value", ""))
                 rows = [r for r in rows if wanted in (r.get(name) or [])]
-        text = "" if cls.takes_search else query
+        text = "" if cls.takes_search or not cls.searchable else query
         if text and cls.tags_fields:              # a word may also be found among a row's tags
             words = text.casefold().split()
 
@@ -261,8 +284,13 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
         return page, len(found)
 
     # -- export ------------------------------------------------------------------------------------
+    async def _export_column_kinds(self) -> dict[str, str]:
+        return dict(type(self).export_kinds)
+
     async def _export_rows(self, kind: str) -> tuple[list[str], list[dict], dict[str, str]]:
         cls = type(self)
+        if not cls.exportable:                    # no export menu: nothing to export
+            return [], [], {}
         rows = await self._all(self.query)
         found = self._matching(rows, sort=list(self.sort), filters=dict(self.filters), query=self.query)
         labels = [label for _, label in cls.export_columns]
@@ -274,6 +302,8 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
                 line[label] = "; ".join(value) if isinstance(value, list) else value
             out.append(line)
         about = {"Search": self.query} if self.query else {}
+        if self.chosen:
+            about["Filters"] = "; ".join(f"{name} = {value}" for name, value in sorted(self.chosen.items()))
         return labels, out, about
 
 
@@ -292,19 +322,22 @@ async def choose(state: Any, field: str, value: str):
 
 def state_for(handler: Any, *, columns: Sequence[Mapping[str, Any]], row_fields: Sequence[str], **config: Any) -> type:
     """One table state class per distinct table: the same rows handler and the same configuration."""
-    key = (handler_key(handler), tuple(sorted((k, repr(v)) for k, v in config.items())),
-           repr(tuple(columns)), tuple(row_fields))
+    from lex.lex_app.reflex.data import stable
+
+    key = (handler_key(handler), stable(config), stable(tuple(columns)), tuple(row_fields))
     cls = _CACHE.get(key)
     if cls is not None:
         return cls
     owner = handler.state
     name = f"RowsTable_{owner.__name__}_{handler.fn.__name__}_{next(_COUNTER)}"
     classvars = {"owner": owner, "handler_name": handler.fn.__name__, "table_columns": tuple(columns),
+                 "page_size_options": (25, 50, 100, 200),
                  "row_fields": tuple(row_fields), "takes_search": rows_mod.takes_search(handler),
                  "export_entity": str(config.pop("entity", handler.fn.__name__)), **config}
     annotations = {k: ClassVar[Any] for k in classvars}
+    annotations["page_size"] = int
     cls = type(name, (LexRowsTableState, rx.State), {"__module__": __name__, "__annotations__": annotations,
-                                                     **classvars})
+                                                     "page_size": 25, **classvars})
     globals()[name] = cls          # reachable by name, for Reflex's state managers (see data._state_for)
     _CACHE[key] = cls
     _BY_HANDLER.setdefault(handler_key(handler), []).append(cls)
