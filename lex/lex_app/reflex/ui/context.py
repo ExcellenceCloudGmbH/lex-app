@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextvars
 import dataclasses
 from typing import Any, Awaitable, Callable, Mapping, Sequence
@@ -124,7 +125,21 @@ class Invocation:
 
     def on_loop(self, coro: Awaitable[Any]) -> Any:
         """Run ``coro`` on the event loop from the body's thread and wait for it."""
-        return asyncio.run_coroutine_threadsafe(coro, self.loop).result(LOOP_TIMEOUT_SECONDS)
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is self.loop:
+            if hasattr(coro, "close"):
+                coro.close()
+            raise RuntimeError("on_loop is for a handler body's worker thread; code already on the "
+                               "event loop should await the coroutine instead")
+        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        try:
+            return future.result(LOOP_TIMEOUT_SECONDS)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            raise
 
     def can(self, target: Any, scope: str = "read") -> bool:
         """Whether Keycloak grants the user ``scope`` on ``target`` (model-wide)."""

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from unittest import TestCase
+from unittest import TestCase, mock
 
 import httpx
 import pytest
@@ -70,7 +70,9 @@ class TestCluster01cf_Context(TestCase):
         When:  the body reads them through the current invocation.
         Then:  the user's four names are there; a parameter reads as an attribute or with
                get(); a missing one is an AttributeError that says so; can() answers from the
-               grants; outside a handler, current() says it only works inside one.
+               grants; outside a handler, current() says it only works inside one; on_loop
+               refuses the event loop's own thread, and on a timeout it cancels the coroutine
+               so it never completes (a retry cannot duplicate a write).
         """
         session = _session(["tok"], grants=[{"rsname": "auth.Group", "scopes": ["read"]}], section="open")
 
@@ -86,6 +88,51 @@ class TestCluster01cf_Context(TestCase):
         with self.assertRaises(RuntimeError) as outside:
             context.current()
         self.assertIn("inside a lex.ui handler", str(outside.exception))
+        async def on_own_thread():
+            inv = context.Invocation(handler="T.h", kind="action", session=session,
+                                     loop=asyncio.get_running_loop(), live=None, orm=False)
+            with self.assertRaises(RuntimeError, msg="on_loop from the loop's own thread must refuse") as refused:
+                inv.on_loop(asyncio.sleep(0))
+            return str(refused.exception)
+
+        self.assertIn("worker thread", asyncio.run(on_own_thread()))
+
+        finished = []
+
+        async def slow():
+            await asyncio.sleep(0.3)
+            finished.append("done")
+
+        async def timed_out():
+            with mock.patch.object(context, "LOOP_TIMEOUT_SECONDS", 0.05):
+                def body(inv):
+                    return inv.on_loop(slow())
+
+                inv = context.Invocation(handler="T.h", kind="action", session=session,
+                                         loop=asyncio.get_running_loop(), live=None, orm=False)
+
+                def call():
+                    token = context.enter(inv)
+                    try:
+                        return body(inv)
+                    finally:
+                        context.leave(token)
+
+                try:
+                    await pools.run("interactive", call)
+                except Exception as exc:  # noqa: BLE001
+                    error = exc
+                else:
+                    error = None
+            await asyncio.sleep(0.5)
+            return error
+
+        try:
+            error = asyncio.run(timed_out())
+        finally:
+            pools.shutdown()
+        self.assertIsNotNone(error, "a body that waits past the timeout gets an error")
+        self.assertEqual(finished, [], "the timed-out coroutine was cancelled and never completed")
         self.assertEqual(context.User.from_profile({"sub": "s", "name": "N", "preferred_username": "u", "email": "e"}),
                          context.User(id="s", name="N", username="u", email="e"))
 
