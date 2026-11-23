@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 820
+max_scenario: 822
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2357,3 +2357,13 @@ letters:
       through lex-app's API (spec 5.2, 5.3, 5.11). These tests fail on a table that breaks only in
       the browser, a column kind drawn differently from page to page, or a model table that cannot
       be narrowed without leaving the API.
+  cy:
+    title: 'lex.ui adoption: a lex.ui part inside a raw page; the user''s permissions in a body'
+    scenarios: 1.821-1.822
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      A project written in raw Reflex moves to lex.ui one table at a time (`ui.embed`), and a handler body reaches the user's Keycloak permission list for the project's own logic (`self.user.permissions`). These tests fail on a project that must convert a whole page before it can use one `@ui.rows` table, or a handler that cannot call the project's own logic.

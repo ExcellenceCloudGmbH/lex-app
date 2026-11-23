@@ -167,6 +167,24 @@ def finalize() -> None:
         declared.done = True
 
 
+def embed(part: Any, *, name: str = "embedded") -> Any:
+    """One lex.ui part -- a ``ui.table``, a ``ui.section`` -- as a Reflex component, for a page
+    that is not (yet) written with ``@ui.page``.
+
+    For moving a project one table at a time: ``ui.embed(ui.table(State.rows, columns=[...]))``
+    sits in a page built with raw Reflex and RFDS. Its loads and its rows start when it appears;
+    ``name`` names it in an error. A whole page kind goes on a ``@ui.page`` or a ``@ui.dashboard``.
+    """
+    from lex.lex_app.reflex.ui.pages.parts import Part
+
+    if isinstance(part, kinds.Kind):
+        raise TypeError("ui.embed() takes one part such as ui.table(...) or ui.section(...); a whole page kind "
+                        "goes on a @ui.page or a @ui.dashboard.")
+    if not isinstance(part, Part):
+        raise TypeError(f"ui.embed() takes a lex.ui part such as ui.table(...); got {called(part)}")
+    return part.build(Build(page=str(name), mounts=True))
+
+
 def dashboard(fn: Callable[..., Any]) -> Callable[..., Any]:
     """Mark a page that is not a route: the project's ``main()``, or a model's dashboard hook.
 

@@ -1259,7 +1259,7 @@ does not remove user launch configurations.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.783 | from lex import ui has every name | each public name is the implementation's own object, ui.ApiError is lex-app's API error, and ui.testing is the test helper module; nothing else is public beside the page names and the table names, which batches 1cu and 1cv cover |
+| 1.783 | from lex import ui has every name | each public name is the implementation's own object, ui.ApiError is lex-app's API error, and ui.testing is the test helper module; nothing else is public beside the page names and the table and adoption names, which batches 1cu, 1cv and 1cy cover |
 | 1.784 | The scaffold templates are written on the layer | none contains async, await, run_orm or lex_api (as a name or an attribute); every state with handlers is a ui.State; the object page and the overview use ui.State with @ui.load; neither the lex.ui check nor RFDS's strict lint reports an error or a warning on any of them; the object page shows its load's failure, else the loaded record, else a spinner; its load, started on mount, reports a refusal in place (in ui.failed, no redirect) |
 | 1.785 | The reference example is written on the layer | outside RFDS's own async export hook it contains no async, await, run_orm or lex_api; every state with handlers is a ui.State; the lex.ui check reports no error and neither check a warning; the overview's load, started on mount, reports its refusal in place on `/` (in ui.failed, no redirect), with the export menu offered only while the load has not failed; a viewer who may not read the featured model is refused by the load (no redirect) and by the export; a viewer who may read some models sees the same counts on screen and in the export, only for those models; the record dashboard reads the model `?model=` names, refuses a missing or unknown one -- in ui.failed, with no redirect -- and shows failure, else the record, else a spinner; the edit page is a form submitted to one action, with no per-keystroke handler, and `save` writes the submitted values |
 
@@ -1436,3 +1436,16 @@ does not remove user launch configurations.
 | 1.820 | A model table is narrowed with where and searched through the api | the table's state receives the where= values when it appears (a state value included); the toolbar has a search box; a filter offers the field's choices after "All"; two tables narrowed differently never share a state |
 
 **Scenario range:** 1.818 – 1.820. **Test file:** `lex/test_project/tests/init/test_1cx_ui_table_checks.py`. **Type:** U. **Status:** ✅ Complete (2026-11-23). Batch: [1cx](batches.md).
+
+### 1cy. lex.ui adoption: a lex.ui part inside a raw page; the user's permissions in a body ✅
+
+**What it tests:** A project written in raw Reflex moves to lex.ui one table at a time (`ui.embed`), and a handler body reaches the user's Keycloak permission list for the project's own logic (`self.user.permissions`).
+
+**Why a regression matters:** a project that must convert a whole page before it can use one `@ui.rows` table, or a handler that cannot call the project's own logic.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.821 | A lex ui table sits inside a raw page | the table is RFDS's data table over its generated state, inside the raw page; a whole page kind and something that is not a lex.ui part are refused with what to write; a mistake in the embedded part names it by the name given |
+| 1.822 | A handler body reads the users permission list | both see the user's Keycloak permissions as Keycloak lists them; outside a handler body reading them is refused |
+
+**Scenario range:** 1.821 – 1.822. **Test file:** `lex/test_project/tests/init/test_1cy_ui_adoption.py`. **Type:** I. **Status:** ✅ Complete (2026-11-23). Batch: [1cy](batches.md).

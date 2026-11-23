@@ -29,6 +29,18 @@ class User:
     username: str = ""
     email: str = ""
 
+    @property
+    def permissions(self) -> list:
+        """The user's Keycloak permissions, as Keycloak lists them (``{"rsname": ..., "scopes": [...]}``).
+
+        For a project's own logic that takes the permission list; to ask about one model, use
+        ``self.can(Model, "read")``. Only inside a handler body.
+        """
+        inv = active()
+        if inv is None:
+            raise RuntimeError("self.user.permissions only works inside a lex.ui handler body")
+        return list(inv.on_loop(inv.session.permissions()))
+
     @classmethod
     def from_profile(cls, profile: Mapping[str, Any]) -> "User":
         return cls(id=str(profile.get("sub") or ""), name=str(profile.get("name") or ""),
