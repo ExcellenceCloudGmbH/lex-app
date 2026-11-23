@@ -218,3 +218,24 @@ letters:
       a 404; 12.79 DELETE removes the pieces; 12.80 expired uploads are swept when a new one
       starts. Letter q, past 12p (#878) and the 12l reserved for the feat/ext-* branches; first
       drafted as 12i (12.42-12.49), which lex-app-v2 already holds.
+
+  r:
+    title: Clearing relations and nullable values through a multipart update
+    scenarios: 12.81-12.87
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      LEX-1582: emptying a foreign key in the edit form and saving kept the old value with no
+      error. The admin frontend sends every update as multipart PATCH, FormData cannot carry
+      null, so the cleared field was dropped, the backend read the missing key as "keep" and
+      answered its no-op 200. The frontend now sends an explicit empty value for every field
+      the user emptied (process-admin-general-client F9 batch 9i). On the backend an empty
+      value already cleared a nullable FK or scalar, but a many-to-many rejected the "[]"
+      marker the frontend sends for an emptied multi-select as "Incorrect type";
+      LexManyRelatedField now reads "" and "[]" in form input as an empty set. 12.81 "" clears a
+      nullable FK; 12.82 omitting the key keeps it; 12.83 "" on a required field is a 400, never
+      a silent no-op; 12.84 "[]" clears a many-to-many; 12.85 "" clears one too; 12.86 repeated
+      keys still replace the set; 12.87 "" clears a nullable date and FK together.

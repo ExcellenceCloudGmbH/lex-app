@@ -11,6 +11,8 @@ from lex.audit_logging.utils.latest_calculation import is_calculation_model
 from lex.core.calculation_closing import calculation_closed_reason
 from lex.core.models.LexModel import LexModel, UserContext
 from rest_framework import serializers, viewsets
+from rest_framework.relations import MANY_RELATION_KWARGS
+from rest_framework.utils import html
 
 logger = logging.getLogger(__name__)
 
@@ -328,6 +330,40 @@ class LexClearableImageField(LexClearableFileField, serializers.ImageField):
     """Image variant of :class:`LexClearableFileField` (same clear semantics)."""
 
 
+# Values a form client sends for an emptied many-to-many (LEX-1582). FormData
+# cannot carry an empty list: repeating the key zero times means "omitted",
+# so the admin frontend sends ``"[]"`` (a bare ``""`` is accepted as well).
+_EMPTY_MANY_MARKERS = ("", "[]")
+
+
+class LexManyRelatedField(serializers.ManyRelatedField):
+    """ManyRelatedField that reads an empty-list marker in form input as ``[]``.
+
+    Stock DRF hands every multipart value to the child relation, so the marker
+    reached ``PrimaryKeyRelatedField`` as a pk and failed with "Incorrect type",
+    which made a many-to-many impossible to clear from the edit form. JSON
+    input is unaffected: it can send ``[]`` itself.
+    """
+
+    def get_value(self, dictionary):
+        value = super().get_value(dictionary)
+        if html.is_html_input(dictionary) and isinstance(value, list):
+            value = [item for item in value if item not in _EMPTY_MANY_MARKERS]
+        return value
+
+
+class LexPrimaryKeyRelatedField(serializers.PrimaryKeyRelatedField):
+    """PrimaryKeyRelatedField whose ``many=True`` form is :class:`LexManyRelatedField`."""
+
+    @classmethod
+    def many_init(cls, *args, **kwargs):
+        list_kwargs = {"child_relation": cls(*args, **kwargs)}
+        for key in kwargs:
+            if key in MANY_RELATION_KWARGS:
+                list_kwargs[key] = kwargs[key]
+        return LexManyRelatedField(**list_kwargs)
+
+
 # --- UPDATED PERMISSION-AWARE BASE SERIALIZER ---
 class LexSerializer(serializers.ModelSerializer):
     """
@@ -345,6 +381,9 @@ class LexSerializer(serializers.ModelSerializer):
         models.FileField: LexClearableFileField,
         models.ImageField: LexClearableImageField,
     }
+    # Model relations, so an emptied many-to-many can be cleared from a form
+    # (see LexManyRelatedField).
+    serializer_related_field = LexPrimaryKeyRelatedField
 
     # ------------------------------------------------------------------
     # Per-serializer caches (populated once, reused across all records)

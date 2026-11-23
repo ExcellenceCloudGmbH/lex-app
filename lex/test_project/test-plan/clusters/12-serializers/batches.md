@@ -184,3 +184,30 @@ purpose.
 Letter q: 12p is #878's and 12l is reserved for the feat/ext-* branches. The batch was first drafted as 12i (12.42–12.49), which `lex-app-v2` already holds.
 
 ---
+
+### Batch 12r — Clearing relations and nullable values through a multipart update ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 12.81 – 12.87 |
+| Type | E |
+| Files covered | `lex/api/serializers/base_serializers.py` (`LexManyRelatedField`, `LexPrimaryKeyRelatedField`, `LexSerializer.serializer_related_field`), `lex/api/views/model_entries/One.py` (update, no-op detection) |
+| Test file | `lex/test_project/tests/serializers/test_12r_multipart_relation_clear.py` |
+| Test classes | `TestCluster12r_MultipartRelationClear` |
+| Fixtures | cluster-12 `TaggableItem` / `TagItem` (from 12f), `WideItem` / `RelatedItem` |
+| Tests landed | **7 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 12.81 | `""` clears a nullable FK | multipart PATCH `primary_tag=""` is 200; the FK is NULL in the database and the response |
+| 12.82 | omitting the FK keeps it | a PATCH naming only `title` changes the title and leaves the FK |
+| 12.83 | emptying a required field is refused | `title=""` is a 400 and nothing is written — never the silent no-op 200 |
+| 12.84 | `"[]"` clears a many-to-many | the marker the frontend sends for an emptied multi-select leaves no tag attached |
+| 12.85 | `""` clears a many-to-many | a bare empty value leaves no tag attached |
+| 12.86 | repeated keys still replace the set | `tags` repeated for one new tag attaches exactly that tag |
+| 12.87 | `""` clears a nullable scalar | a nullable date and a nullable FK sent empty together are both NULL |
+
+**Why a regression matters:** LEX-1582 (customer report, 2026-11-18). A value emptied in the edit form came back after save, and nothing — no error, no log — said the save had done nothing. FormData has no null, so an empty value is the only way a form client can say "clear"; if the backend stops reading it as one, every clear silently becomes "keep" again. Frontend twin: process-admin-general-client F9 batch 9i (the provider sends `''` for every emptied field that had a value). Ship both halves together.
+
+---

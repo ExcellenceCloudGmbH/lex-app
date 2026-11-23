@@ -182,3 +182,21 @@ not load.
 | 12.80 | expired uploads are swept | an upload past the TTL is removed when the next one starts |
 
 **Scenario range:** 12.73 – 12.80. **Test file:** `lex/test_project/tests/serializers/test_12q_chunked_upload.py`. **Type:** E. **Status:** ✅ Complete. Batch: [12q](batches.md).
+
+### 12r. Clearing relations and nullable values through a multipart update ✅
+
+**What it tests:** the admin frontend sends every update as multipart PATCH, and FormData cannot carry null, so it sends an empty value for a field the user emptied. An empty value clears a nullable FK or scalar, `""` and `"[]"` clear a many-to-many (`LexManyRelatedField`), an omitted key keeps the stored value, and an empty value on a required field is a 400.
+
+**Why a regression matters:** LEX-1582 — an FK emptied in the edit form came back after save with no error, because the cleared field never reached the backend and the update was answered as a no-op. If any of these stop holding, a clear silently becomes "keep" again.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 12.81 | `""` clears a nullable FK | 200; FK NULL in database and response |
+| 12.82 | omitting the FK keeps it | other field changes, FK untouched |
+| 12.83 | emptying a required field is refused | 400; nothing written |
+| 12.84 | `"[]"` clears a many-to-many | no tag attached |
+| 12.85 | `""` clears a many-to-many | no tag attached |
+| 12.86 | repeated keys still replace the set | exactly the new tag attached |
+| 12.87 | `""` clears a nullable scalar | nullable date and FK both NULL |
+
+**Scenario range:** 12.81 – 12.87. **Test file:** `lex/test_project/tests/serializers/test_12r_multipart_relation_clear.py`. **Type:** E. **Status:** ✅ Complete. Batch: [12r](batches.md). Paired with process-admin-general-client F9 batch 9i.
