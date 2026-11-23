@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import inspect
+import os
 import threading
 import uuid
 from typing import Any
@@ -146,16 +148,37 @@ def cancel(handler: Any) -> Any:
 
 HEARTBEAT_SECONDS = 10
 HEARTBEAT_TTL_SECONDS = 30
+#: Longest a Redis call may take: a sweep runs under the user's lock, a beat must not stall.
+REDIS_TIMEOUT_SECONDS = 2
+
+_CLIENT: Any = None
 
 
 def _redis() -> Any:
-    """Reflex's Redis client when one is configured, else ``None``."""
-    try:
-        from reflex.utils import prerequisites
+    """This process's Redis client, built on first use; ``None`` only when Redis is not configured.
 
-        return prerequisites.get_redis()
-    except Exception:  # noqa: BLE001
-        return None
+    Raises when the client cannot be built: callers treat that as "unknown", not as "no Redis".
+    """
+    global _CLIENT
+    if _CLIENT is not None:
+        return _CLIENT
+    from reflex.utils import prerequisites
+
+    client = prerequisites.get_redis()
+    if client is not None:
+        _CLIENT = client
+    return client
+
+
+def _renew_after_fork() -> None:
+    """A forked worker is another process: its own id, and not its parent's Redis connection."""
+    global BOOT, _CLIENT
+    BOOT = uuid.uuid4().hex
+    _CLIENT = None
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_renew_after_fork)
 
 
 def _heartbeat_key(boot: str) -> str:
@@ -166,40 +189,71 @@ async def alive(boot: str) -> bool:
     """Whether the backend process ``boot`` is still running."""
     if boot == BOOT:
         return True
-    redis = _redis()
-    if redis is None:
-        return False  # one process holds every tab: another boot id is a process that ended
     try:
-        return bool(await redis.exists(_heartbeat_key(boot)))
-    except Exception:  # noqa: BLE001 - Redis unreachable: do not clear what may still run
+        redis = _redis()
+        if redis is None:
+            return False  # one process holds every tab: another boot id is a process that ended
+        return bool(await asyncio.wait_for(redis.exists(_heartbeat_key(boot)), REDIS_TIMEOUT_SECONDS))
+    except Exception:  # noqa: BLE001 - Redis unreachable or slow: do not clear what may still run
         return True
 
 
 async def sweep(s: Any, alive: Any = None) -> int:
-    """Clear the marks of runs whose process is gone; returns how many. Call under the lock."""
+    """Clear the marks of runs whose process is gone; returns how many. Call under the lock.
+
+    One time budget for the whole sweep and one question per process; marks left unanswered stay
+    for the next page open.
+    """
     check = alive or globals()["alive"]
+    boots = dict(s._ui_boots)
+    gone: dict[str, bool] = {}
+
+    async def ask() -> None:
+        for boot in dict.fromkeys(boots.values()):
+            if boot == BOOT:
+                continue
+            try:
+                gone[boot] = not await check(boot)
+            except Exception:  # noqa: BLE001 - unknown: leave the marks
+                gone[boot] = False
+
+    try:
+        await asyncio.wait_for(ask(), REDIS_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        pass
     cleared = 0
-    for entry, boot in list(dict(s._ui_boots).items()):
-        if boot == BOOT or await check(boot):
-            continue
-        key, _, arg = entry.rpartition("|")
-        mark_finished(s, key, arg)
-        cleared += 1
+    for entry, boot in boots.items():
+        if gone.get(boot):
+            key, _, arg = entry.partition("|")
+            mark_finished(s, key, arg)
+            cleared += 1
     return cleared
+
+
+async def _close(client: Any) -> None:
+    closer = getattr(client, "aclose", None) or getattr(client, "close", None)
+    if closer is None:
+        return
+    result = closer()
+    if inspect.isawaitable(result):
+        await asyncio.wait_for(result, REDIS_TIMEOUT_SECONDS)
 
 
 @contextlib.asynccontextmanager
 async def heartbeat(app: Any):
     """A lifespan task: while the backend runs, keep this process's heartbeat in Redis."""
+    global _CLIENT
 
     async def beat() -> None:
         while True:
-            redis = _redis()
-            if redis is not None:
-                try:
-                    await redis.set(_heartbeat_key(BOOT), "1", ex=HEARTBEAT_TTL_SECONDS)
-                except Exception:  # noqa: BLE001 - a missed beat only delays a sweep
-                    pass
+            try:
+                redis = _redis()
+                if redis is not None:
+                    await asyncio.wait_for(
+                        redis.set(_heartbeat_key(BOOT), "1", ex=HEARTBEAT_TTL_SECONDS), REDIS_TIMEOUT_SECONDS
+                    )
+            except Exception:  # noqa: BLE001 - a missed beat only delays a sweep
+                pass
             await asyncio.sleep(HEARTBEAT_SECONDS)
 
     task = asyncio.ensure_future(beat())
@@ -207,3 +261,15 @@ async def heartbeat(app: Any):
         yield
     finally:
         task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        try:
+            client = _redis()
+            if client is not None:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(client.delete(_heartbeat_key(BOOT)), REDIS_TIMEOUT_SECONDS)
+                with contextlib.suppress(Exception):
+                    await _close(client)
+        except Exception:  # noqa: BLE001 - nothing to clean up
+            pass
+        _CLIENT = None
