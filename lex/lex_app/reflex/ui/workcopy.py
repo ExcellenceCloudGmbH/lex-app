@@ -1,9 +1,13 @@
-"""Copies of a state's fields: the snapshot a failed handler returns to, and a job's working copy."""
+"""Copies of a state's fields: the snapshot a failed handler returns to, and a job's working copy.
+
+Because a state's fields are copied, a field cannot hold an object that cannot be copied (a lock, a client, a connection); keep those outside the state.
+"""
 
 from __future__ import annotations
 
 import copy
 import inspect
+import pickle
 import types
 from typing import Any
 
@@ -25,17 +29,44 @@ def _plain(value: Any) -> Any:
     return copy.deepcopy(getattr(value, "__wrapped__", value))
 
 
+def _differs(a: Any, b: Any) -> bool:
+    """Whether two field values differ, without trusting ``!=`` on array-like or never-equal values."""
+    if a is b:
+        return False
+    try:
+        result = a != b
+        if isinstance(result, bool):
+            return result
+    except Exception:
+        pass
+    try:
+        return pickle.dumps(a) != pickle.dumps(b)
+    except Exception:
+        return True
+
+
 def snapshot(state: Any) -> dict[str, Any]:
     """Deep copies of the state's own fields."""
     target = raw(state)
-    return {name: _plain(getattr(target, name)) for name in fields_of(type(target))}
+    state_cls = type(target)
+    snap = {}
+    for name in fields_of(state_cls):
+        try:
+            snap[name] = _plain(getattr(target, name))
+        except Exception as exc:
+            raise TypeError(
+                f"{state_cls.__name__}.{name} cannot be copied. lex.ui copies a state's fields (to discard a "
+                f"failed handler's changes and for a job's working copy), so objects that cannot be copied - "
+                f"locks, clients, connections - belong outside the state, for example in a module-level holder."
+            ) from exc
+    return snap
 
 
 def restore(state: Any, snap: dict[str, Any]) -> None:
     """Set every field that differs from ``snap`` back to its snapshot value."""
     target = raw(state)
     for name, value in snap.items():
-        if _plain(getattr(target, name)) != value:
+        if _differs(_plain(getattr(target, name)), value):
             setattr(state, name, copy.deepcopy(value))
 
 
@@ -53,6 +84,13 @@ def reset(state: Any, keep: tuple[str, ...] = ()) -> None:
         setattr(state, name, default)
 
 
+def _not_own(state_cls: Any, name: str) -> str:
+    return (
+        f"{state_cls.__name__}.{name} is not one of this state's own fields. A load or job sees only its own "
+        f"state's fields; read a parent's or another state's field with self.state(Parent).{name}."
+    )
+
+
 class Draft:
     """What a load or job body sees as ``self``: the state's fields, as a working copy."""
 
@@ -68,6 +106,11 @@ class Draft:
         if name in values:
             return values[name]
         state_cls = object.__getattribute__(self, "_cls")
+        inherited = set(getattr(state_cls, "inherited_vars", {}) or {}) | set(
+            getattr(state_cls, "inherited_backend_vars", {}) or {}
+        )
+        if name in inherited:
+            raise AttributeError(_not_own(state_cls, name))
         try:
             static = inspect.getattr_static(state_cls, name)
         except AttributeError:
@@ -86,7 +129,12 @@ class Draft:
             return computed(self)
         if inspect.isfunction(static):
             return types.MethodType(static, self)
-        return getattr(state_cls, name)
+        found = getattr(state_cls, name)
+        from reflex.vars.base import Var
+
+        if isinstance(found, Var):
+            raise AttributeError(_not_own(state_cls, name))
+        return found
 
     def __setattr__(self, name: str, value: Any) -> None:
         values = object.__getattribute__(self, "_values")
@@ -99,7 +147,7 @@ class Draft:
         """The fields whose value differs from the last merge (assignments and in-place changes)."""
         values = object.__getattribute__(self, "_values")
         base = object.__getattribute__(self, "_base")
-        return {name: value for name, value in values.items() if value != base.get(name)}
+        return {name: value for name, value in values.items() if _differs(value, base.get(name))}
 
     def rebase(self, values: dict[str, Any]) -> None:
         """Start again from ``values`` (the live state's fields after a merge)."""
