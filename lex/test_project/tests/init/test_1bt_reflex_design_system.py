@@ -317,7 +317,9 @@ class TestCluster01bt_Chrome(SimpleTestCase):
                icon, a required permission and a load event of its own.
         When:  the decorator runs.
         Then:  the page is registered with ``rx.page``, its loads
-               are the grants first and then its own; it is listed under its
+               are the grants first, then its own, and -- as every lex page's
+               load events end -- the lex.ui opener (``ui_open``) carrying the
+               page's route; it is listed under its
                heading with the permission that hides it; the original function
                is returned unchanged; and a route without ``/`` is refused.
         """
@@ -335,13 +337,22 @@ class TestCluster01bt_Chrome(SimpleTestCase):
         def cash():
             return "body"
 
-        with patch("reflex.page", fake_page):
+        from lex.lex_app.reflex.ui import handlers as ui_handlers
+
+        # lex_page records the page in lex.ui's process-wide page registry: keep it out of later tests.
+        with patch("reflex.page", fake_page), patch.dict(ui_handlers._PAGES):
             returned = shell.lex_page("/cash", title="Cash overview", nav="Finance", icon="money",
                                       requires="lex_app.Fund:read", on_load=own_load)(cash)
         self.assertIs(returned, cash)
         self.assertEqual(captured["route"], "/cash")
         self.assertEqual(captured["title"], "Cash overview")
-        self.assertEqual(captured["on_load"], [access.LexAccessState.load, own_load])
+        from lex.lex_app.reflex.ui.state import State as UiState
+
+        loads = captured["on_load"]
+        self.assertEqual(loads[:2], [access.LexAccessState.load, own_load], "the grants first, then the page's own")
+        # An EventSpec's arguments are Vars, which do not compare with ==; their rendering does.
+        self.assertEqual([str(event) for event in loads[2:]], [str(UiState.ui_open("/cash"))],
+                         "the lex.ui opener ends the load events, naming only the page's route")
         self.assertEqual(shell.nav_entries(), [shell.NavEntry("/cash", "Cash overview", "Finance", "money",
                                                               "lex_app.Fund:read")])
         with self.assertRaises(ValueError):

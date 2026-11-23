@@ -582,19 +582,21 @@ class TestCluster01aq_TheCompiledApp(TestCase):
         Then:  ``/``, ``/logout`` and the structure's own pages (the reference
                example's ``/records``, ``/grid``, ``/in-lex-app``,
                ``/calculations``, ``/edit`` since 1bw) are compiled in, with no
-               Reflex Enterprise sign-in pages; ``/`` loads the user's grants
-               before resolving the URL; lex-app's session middleware runs
+               Reflex Enterprise sign-in pages, and ``/ui-error`` (where a
+               failed ``@ui.load`` sends the browser) is; ``/`` loads the user's
+               grants before resolving the URL and, as every lex page's load
+               events end, then runs the lex.ui opener; lex-app's session middleware runs
                first, then RFDS's policy gate, then the Django connection
                middleware; the plugins are Radix and RFDS only; ``main()`` and
                the model's dashboards are on ``/``.
         """
-        for route in ("index", "logout", "records", "grid", "in-lex-app", "calculations", "edit"):
+        for route in ("index", "logout", "ui-error", "records", "grid", "in-lex-app", "calculations", "edit"):
             self.assertIn(route, self.pages, f"missing page {route}: {sorted(self.pages)}")
         for gone in ("login", "callback", "_reflex_oidc_lex_keycloak/popup-login"):
             self.assertNotIn(gone, self.pages, "Reflex Enterprise's sign-in pages are gone")
 
-        handlers = [handler.fn.__qualname__ for handler in self.index_on_load]
-        self.assertEqual(handlers, ["LexAccessState.load", "LexDashboardState.resolve"],
+        handlers = [getattr(handler, "handler", handler).fn.__qualname__ for handler in self.index_on_load]
+        self.assertEqual(handlers, ["LexAccessState.load", "LexDashboardState.resolve", "State.ui_open"],
                          "the grants first; an anonymous session's events go through the sign-in")
         names = [type(m).__name__ for m in self.middlewares]
         self.assertEqual(names[:3], ["LexSessionMiddleware", "PolicyMiddleware", "DjangoConnectionMiddleware"],

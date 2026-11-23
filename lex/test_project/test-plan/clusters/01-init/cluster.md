@@ -378,7 +378,7 @@ does not remove user launch configurations.
 | 1.363 | from the router | `resolve` and `current_record` read the URL an event sees, through the ORM |
 | 1.364 | embed and logout | `lex_embed` and `is_logout_enabled` as lex-app sends them |
 | 1.365 | the dispatch page | overriding hooks compiled in, broken hooks and structure modules refused loudly |
-| 1.366 | the compiled app | sign-in routes, guard before `resolve`, connection middleware, every dashboard |
+| 1.366 | the compiled app | sign-in routes, no Reflex Enterprise pages, `/ui-error` (where a failed `@ui.load` sends the browser), guard before `resolve`, then the lex.ui opener as every lex page's load events end, connection middleware, every dashboard |
 | 1.367 | registration | the `Reflex` report and sidebar entry only when enabled; discovery never imports the Reflex package twice |
 | 1.368 | granian's uvloop | Django setup on uvloop carries on and patches nothing, and `async_to_sync` works after it (rewritten for BUG-046; see 1bo below) |
 | 1.369 | `LexUser` | `username` and `display_name` from Keycloak's claims |
@@ -931,7 +931,7 @@ does not remove user launch configurations.
 | 1.699 | Grants become permission strings, model-wide only | `<app_label>.<Model>:<scope>` per model-wide scope; record-scoped and malformed grants ignored; `permission()` spells the same string and refuses a scope with a colon |
 | 1.700 | The resolver answers from fresh grants and fails closed | remembered identity gets its strings; another subject with the same e-mail, an anonymous one, and the same identity after the TTL get nothing |
 | 1.701 | `LexAccessState.load` loads grants, then RFDS's `AccessState` | signed-in user's grants remembered and the handler returns `AccessState.load`; nothing remembered for an anonymous visitor |
-| 1.702 | `@lex_page` registers a signed-in page that loads grants first | `rxe.page` gets the route, title and loads `[LexAccessState.load, own]`; the nav entry carries heading, icon and permission; the function is returned unchanged; a route without `/` is refused |
+| 1.702 | `@lex_page` registers a signed-in page that loads grants first | `rx.page` gets the route, title and loads `[LexAccessState.load, own, ui_open]` (the lex.ui opener, carrying the route, ends every lex page's loads); the nav entry carries heading, icon and permission; the function is returned unchanged; a route without `/` is refused |
 | 1.703 | Navigation lists the overview, then each heading | overview first, headings in registration order, a re-registered page listed once in its old place, no navigation without pages |
 | 1.704 | The chrome hides inside lex-app and follows its theme | the shell, `LexThemeFollower`, the `restored` notice, the embedded class, the title, the logout condition; the CSS hides header/sidebar under the class and sets the navy chrome |
 | 1.705 | The browser bridge obeys only lex-app and reports sign-in state | URL mode first, then only the parent's v1 messages at an allowed origin with a known mode; `restored` only after `required`, once, to the parent's exact origin, lex-auth v2 shape |
@@ -993,9 +993,9 @@ does not remove user launch configurations.
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.724 | `add` writes a page and registers it once | `_dashboards/` package and page; `_reflex_structure.py` created with `main()` and the import once; refused without `--force`; `--no-register` and `object_page` leave the structure alone; bad model, block or route exit non-zero |
-| 1.725 | Every template is valid and uses only lex-app's surface | each block parses and imports only names `lex.lex_app.reflex` exports; list and overview are `@lex_page` routes gated on read; object page is a `LexRecordState` dashboard; the overview's ORM read is behind `has_permission` |
+| 1.725 | Every template is valid and uses only lex-app's surface | each block parses and imports only names `lex.lex_app.reflex` exports; list and overview are `@lex_page` routes gated on read; object page is a `ui.State` dashboard for `reflex_main`, whose suggested import names the project's package; the overview's database read is behind its `@ui.load`'s `requires=` |
 | 1.726 | `check` lints the dashboards and runs the doctor | `lint --strict` over the structure module and the package, then `doctor --app-root`; non-zero when either fails; only the doctor when there is nothing to lint |
-| 1.727 | The reference example uses every feature and compiles | imports every lex-app dashboard feature; uses ExportMixin, charts, KPIs and `can`; its routes are in the compiled app; the compile ran conformance in strict CI mode |
+| 1.727 | The reference example uses every feature and compiles | imports every feature lex-app gives a dashboard (pages, chrome permissions, tables, grid, lex_view with flows, widgets, the ORM bridge) and writes its handlers with lex.ui (loads, actions, the API as the user, refusals, status); its pages are in the compiled app under one navigation heading; the compile ran conformance in strict CI mode |
 
 **Scenario range:** 1.724 – 1.727. **Test file:** `lex/test_project/tests/init/test_1bw_reflex_developer_tooling.py`. **Type:** U. **Status:** ✅ Complete (2026-11-17). Batch: [1bw](batches.md).
 
@@ -1030,7 +1030,7 @@ does not remove user launch configurations.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.736 | Nothing imports Reflex Enterprise or requires it | child interpreter refusing reflex_enterprise and rfds.enterprise: config and every lex.lex_app.reflex module import, the config is Reflex's own, no Enterprise module loaded; requirements pin reflex and rfds==1.0.0, no reflex-enterprise |
+| 1.736 | Nothing imports Reflex Enterprise or requires it | child interpreter refusing reflex_enterprise and rfds.enterprise: config, every lex.lex_app.reflex module and lex.ui import, the config is Reflex's own, no Enterprise module loaded; requirements pin reflex and rfds==1.0.0, no reflex-enterprise |
 | 1.737 | The proxy runs only for a one-port development run | REFLEX_USE_SINGLE_PORT set, development, not backend-only -> on; unset, production or backend-only -> off; install registers the lifespan task only when on |
 | 1.738 | Pages pass through to the frontend server | method, path, query, body on; Host the upstream's; hop-by-hop dropped; status, headers, body back; gzip decoded without Content-Encoding; a starting frontend retried with the body every time; never answering -> 502 |
 | 1.739 | The hot-reload socket passes through with its subprotocol | accepted with vite-hmr; text and bytes both ways unchanged; no frontend -> the socket is refused |
@@ -1082,3 +1082,185 @@ does not remove user launch configurations.
 | 1.746 | Grids and dashboards fill the page width | lex_grid's stack stretches its children and RFDS's grid frame stays 100% wide; the stack directly inside the shell's main region stretches, so a project's page, tables and cards take the frame's width |
 
 **Scenario range:** 1.746 – 1.746. **Test file:** `lex/test_project/tests/init/test_1cb_reflex_full_width.py`. **Type:** U. **Status:** ✅ Complete (2026-11-20). Batch: [1cb](batches.md).
+
+---
+
+### 1cc. lex.ui results and thread pools ✅
+
+**What it tests:** the four values a handler may return or yield and how each becomes a browser event (an in-app path is a redirect, another site a whole-page navigation, a toast RFDS's toast, a download Reflex's download), and the two thread pools handler bodies run on, sized by `LEX_UI_ACTION_THREADS` (16) and `LEX_UI_JOB_THREADS` (8).
+
+**Why a regression matters:** a handler whose result is silently dropped, a wrong value that is accepted instead of refused with the handler's name, or long jobs and page loads sharing one pool so that an export starves every other click.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.747 | A handler returns plain values and nothing else | goto, toast and download are results; progress is the progress report, clamped to 0..1; None is nothing; a wrong tone, an empty path, a download of nothing and any other object (a raw Reflex event) are refused with the handler's name |
+| 1.748 | Values become browser events and are recorded for tests | an in-app path is Reflex's redirect, another site (a full URL, or //host) a whole-page navigation, the toast RFDS's toast of that tone, the download Reflex's download; with the test recorder on, the values themselves are recorded in order |
+| 1.749 | Bodies run on sized pools with the caller's context | functions run off the calling thread on a thread named for their pool, and see the caller's context variables; the sizes come from LEX_UI_ACTION_THREADS and LEX_UI_JOB_THREADS (16 and 8 by default, at least 1); a full pool queues: on a one-thread pool a second call waits its turn and does not fail |
+
+**Scenario range:** 1.747 – 1.749. **Test file:** `lex/test_project/tests/init/test_1cc_ui_results_and_pools.py`. **Type:** U. **Status:** ✅ Complete (2026-11-23). Batch: [1cc](batches.md).
+
+---
+
+### 1cd. lex.ui guard: requires values, the query block, the acting user ✅
+
+**What it tests:** what `requires=` accepts (nothing, one value or a list, `ui.read(Model)`, `ui.signed_in`, a named resource) and how the user's model-wide Keycloak grants are checked against it; the block that refuses ORM queries in a handler that declared nothing; and the operation context that makes ORM writes name the signed-in user.
+
+**Why a regression matters:** a dashboard showing rows the grid would hide (the ORM applies no hidden fields or row rules), a record-scoped edit grant treated as access to the whole model, an empty `requires=` that guards nothing, or created_by / edited_by naming nobody.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.750 | requires= values and the grant check | nothing declared is None; one value or a list is a tuple; ui.read(Group) holds; a record-scoped edit does not open the model; a list needs all; ui.signed_in always holds; a named resource works like a model; an empty list is refused |
+| 1.751 | Queries are refused inside the block and work after it | inside block_queries a query raises UnguardedQuery naming the handler and the two ways out (self.api, requires=); after the block queries work again |
+| 1.752 | The acting user is set for audit fields | inside acting_user lex-app's operation context carries a request whose user is authenticated and reads as the username (the e-mail when there is none, the user's id when there is neither); it is restored afterwards |
+
+**Scenario range:** 1.750 – 1.752. **Test file:** `lex/test_project/tests/init/test_1cd_ui_guard.py`. **Type:** I. **Status:** ✅ Complete (2026-11-23). Batch: [1cd](batches.md).
+
+---
+
+### 1ce. lex.ui working copy: snapshot, restore, draft, merge ✅
+
+**What it tests:** the snapshot of a state's own fields and its restore and reset, the draft a job body sees as `self` (fields, computed values, helpers, and the misuse it refuses), and the merge that writes back only what the draft changed.
+
+**Why a regression matters:** a job overwriting the user's input with stale values, half-finished changes staying on screen after an error, a field the state cannot copy failing somewhere unrelated instead of by name, or a NaN or array value read as "changed".
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.753 | A snapshot holds the state's own fields and restores them | the snapshot holds deep copies of the class's own fields only; restore puts every changed field back; reset sets fields to their class defaults except the kept one; a field holding an uncopyable object makes snapshot raise a TypeError naming it |
+| 1.754 | A draft reads and writes fields and reaches helpers | fields behave as on the state; a computed value and an underscore helper work on the draft's values; assigning an undeclared field and calling another event handler are refused with a message that says what to do; so is reading an inherited field |
+| 1.755 | Merge writes only what the draft changed | the first merge writes progress and rows and leaves the user's note; the draft then sees the user's note; when both changed the same field the job's value wins; a NaN or a value whose != is not a bool is compared safely, not read as changed |
+
+**Scenario range:** 1.753 – 1.755. **Test file:** `lex/test_project/tests/init/test_1ce_ui_working_copy.py`. **Type:** U. **Status:** ✅ Complete (2026-11-23). Batch: [1ce](batches.md).
+
+---
+
+### 1cf. lex.ui context: user, params, grants, the API as the user ✅
+
+**What it tests:** the invocation a handler body reads its user, parameters and grants from, the bridge that waits on the event loop, and `self.api` (list with filters, search and ordering, get, create, update, delete) called as the user with a fresh token each time.
+
+**Why a regression matters:** a handler acting as nobody or with a token that expired mid-job, a missing parameter that fails with an unhelpful error, a timed-out call that still completes later and duplicates a write, or a 403 that is not reported as a refusal.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.756 | User, params and grants are reachable from the body | the user's four names are there; a parameter reads as an attribute or with get(); a missing one is an AttributeError that says so; can() answers from the grants; outside a handler current() says it only works inside one; on_loop refuses the event loop's own thread, and on a timeout it cancels the coroutine so it never completes |
+| 1.757 | The API is called as the user, with a fresh token each time | each call carries the token current at that moment as a bearer token; list sends the filters (a list as repeated values), the search on the model's text field and the ordering, and returns plain rows with the total count, trimmed to the fields asked for; get, create, update and delete hit lex-app's routes and return the row |
+| 1.758 | A refusal is an API error and a stand-in replaces the API | 403 raises LexApiError with denied true; no token raises 401; with a stand-in, self.api is the stand-in itself |
+
+**Scenario range:** 1.756 – 1.758. **Test file:** `lex/test_project/tests/init/test_1cf_ui_context.py`. **Type:** U. **Status:** ✅ Complete (2026-11-23). Batch: [1cf](batches.md).
+
+---
+
+### 1cg. ui.State and handler status ✅
+
+**What it tests:** what `ui.State` adds to a Reflex state, how a run's life is recorded (started, progress, finished or failed, overlapping runs for different rows, the registry that lets one run per key and argument in), and the view helpers `running`, `failed` and `progress_of`.
+
+**Why a regression matters:** a spinner that never stops, a button that stays disabled after a failure, a second row's run clearing the first's mark, or a project writing its own busy flags again.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.759 | ui.State adds fields and helpers but no event handlers of its own | ui.State is a real Reflex state with the status fields and the visit counter; user, api, params, can and state are properties, not event handlers; the project's state inherits the status fields and keeps only its own as its own; those five names are reserved -- a project state declaring a field (with or without a default), a computed var or a method of one of them is refused when the class is defined, with a message naming the state and the name and saying to rename it |
+| 1.760 | Status marks follow a run's life | running lists the rows in flight; progress holds the fraction and the message; finishing removes the row and the progress, records the failure message, and a new start clears the previous failure; the registry lets one run per key and argument in, and a cancel request reaches every run of that handler |
+| 1.761 | Views read status with running, failed and progress_of | each is a Reflex expression over ui.State's status fields under the handler's key, with a default when nothing was recorded; the per-row form compares the row as text |
+
+**Scenario range:** 1.759 – 1.761. **Test file:** `lex/test_project/tests/init/test_1cg_ui_state_and_status.py`. **Type:** U. **Status:** ✅ Complete (2026-11-23). Batch: [1cg](batches.md).
+
+---
+
+### 1ch. @ui.action: plain synchronous handlers and their failures ✅
+
+**What it tests:** `@ui.action` end to end through `ui.testing`: the happy path, what the browser sees in order, a failure's discard and what the log and the user get, refusals and API answers shown in their own words, the ORM rule with and without `requires=`, and the event loop staying free while a body sleeps or is cancelled.
+
+**Why a regression matters:** a slow click stalling every user, half-applied values after an error, an exception's text or a traceback reaching the browser, a state field that cannot be copied or a session that cannot be resolved leaving the handler marked running forever, or a database query running without a declared requirement.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.762 | A plain function runs off the loop on the live state | the body ran on an interactive pool thread and saw the user and the parameter; the fields changed and reached the browser; the toast was shown; nothing is running afterwards and no failure is recorded; an async def under @ui.action is refused |
+| 1.763 | Running is shown first and each yield flushes | the browser first learns the handler is running, then sees steps=1 before the body has finished, then steps=2; running is cleared at the end; the goto is sent |
+| 1.764 | A failure discards what was not shown and hides the detail | the fields are back at what the yield showed; the user gets an error toast with a reference and without the exception's text; the failure message is recorded for the view; the log holds the traceback by default and only the type with LEX_UI_LOG_ERROR_TEXT=false; an uncopyable field, an unresolvable session and a wrong yielded value each end as an unexpected error with nothing left running; a finally in the body runs before the restore. A body that calls another handler of its state (self.reload()) fails the action instead of silently doing nothing: its change is restored, the sibling never ran, and the log names both handlers and says to use an underscore method |
+| 1.765 | Refusals and API answers are shown in their own words | a ui.Refuse message is shown as written, as a warning, and its changes are discarded; a 403 is the standard "not permitted" message; a validation error is shown with the API's detail -- lex-app's own refusal body by its detail alone, and a body without one as its fields' name: text pairs, never its code, error or traceback; none is reported as an unexpected error |
+| 1.766 | The database is reachable only with requires | without requires= the query is refused and reported as an unexpected error whose log names the handler and the way out; with the grant the count is read; without the grant the body never runs, the user is told they are not permitted, that message is recorded as the failure and nothing is left running |
+| 1.767 | The loop stays free and a slow action is called out | the event loop keeps ticking while a body sleeps; a 1.1 s run in development logs a warning that names the handler and says to make it a job; a cancelled body's thread finishes, nothing is left marked running, and a following action on the same tab still runs; a stopped body whose cleanup raises is logged as a warning, not swallowed |
+
+**Scenario range:** 1.762 – 1.767. **Test file:** `lex/test_project/tests/init/test_1ch_ui_action.py`. **Type:** I. **Status:** ✅ Complete (2026-11-23). Batch: [1ch](batches.md).
+
+---
+
+### 1ci. @ui.job: long work on a working copy ✅
+
+**What it tests:** `@ui.job` end to end: the user typing during a job, the job winning a same-field conflict, repeats ignored per tab and set of arguments, a full job pool queueing, cancel and stop-on-leave ending a job at its next yield with its cleanup, a cancellation during the wind-up, a failing job keeping what it had merged, and a job whose `requires=` is not met.
+
+**Why a regression matters:** a frozen screen during an export, a job overwriting what the user typed, the same export running twice from repeated clicks, a Cancel that never takes effect or skips the job's cleanup, or a failed job that loses what it had already shown.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.768 | The user keeps working and their changes survive | the user's event returns at once; the job saw the old note until its next yield and the new one after it; at the end the job's fields and the user's note both stand; another state the job changed through self.state() is merged too; the toast is shown; the browser got progress at each yield |
+| 1.769 | The job wins when both change the same field | a job that sets status and a user who sets it meanwhile: the job's value stands |
+| 1.770 | One run at a time per tab and set of arguments | for "a" sent three times rapidly the job ran once and the repeats were ignored; "b" ran beside it; a later "a" after it finished ran again. A call with a different second argument runs beside the first (only the exact same arguments are a repeat) and the view still sees each run under its first argument; on a full one-thread job pool a second job waits its turn instead of failing |
+| 1.771 | Cancel takes effect at the next yield | the job stops within a few steps, its finally block runs and it is no longer running; what the stopped body changed in its cleanup is never merged; ui.cancel(handler) is the event for a Cancel button. A job whose task is cancelled while its wind-up waits for the user's lock is still wound up: not left running, its failure recorded, its claim released |
+| 1.772 | Stop on leave ends the job when the page changes | a job with stop_on_leave=True stops at its next yield when the user opens another page, and its cleanup runs |
+| 1.773 | A failing job keeps what was merged and reports | what was merged at the yield stays, the later change is discarded, an error toast is shown, the failure message is readable with ui.failed, and it is no longer running. A job whose requires= is not met (under a store like Redis) never runs: the user is told they are not permitted, the message is recorded, the warning names the handler and the user's id, nothing is left running |
+
+**Scenario range:** 1.768 – 1.773. **Test file:** `lex/test_project/tests/init/test_1ci_ui_job.py`. **Type:** I. **Status:** ✅ Complete (2026-11-23). Batch: [1ci](batches.md).
+
+---
+
+### 1cj. @ui.load: page loads, the opener, the error page ✅
+
+**What it tests:** `@ui.load` for both kinds: the reset-then-fill order, the opener's order and permission check from the server's page registry, results that arrive after the user left, failures of required and optional loads, loads started on mount by a dashboard, and the wiring (`lex_page`, the error page, `create_app`).
+
+**Why a regression matters:** a page flashing another record's data, a load starting before sign-in or under a permission the browser chose, a stale result overwriting a newer one, one broken region taking the whole page to the error page, or a dashboard whose data never lands because its mount event beat the opener.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.774 | A load resets the state, then fills it -- once per visit | the rows were emptied before the body ran, then filled from this visit's parameter; the kept field was not reset; the browser saw the empty rows first; within one visit the optional load does not reset what the required one filled, and the next visit's first load clears it. A dashboard's load started on mount lands after the opener (and after a navigation from another page), resets the state at every start, and leaves nothing running |
+| 1.775 | The opener starts required loads, then optional ones | the on_load list is split, keeping handlers and leaving a plain Reflex handler in place; the opener takes only the route, checks the permission the page was registered with, starts a new visit, then the required load, then the optional one; a user lacking the permission or an unknown route starts nothing; each same-named twin page starts its own state's load. A load started on mount starts no optional load and leaves the opener's required load pending |
+| 1.776 | Stale results are discarded | a result that arrives after the user opened another page is not written; a cancelled required load is not running, stays pending and starts no optional load. A load started on mount is dropped only when a newer run of itself starts (older finishing last or first, same argument overlapping); the newer run keeps its process record; a run whose browser moved on still fills its own state. A load whose task is cancelled while its wind-up waits for the user's lock is still wound up and not left running |
+| 1.777 | A failed required load shows the error page, an optional one its region | a required failure records a reference and the page to retry (its query string kept, never the error page), sends the browser to the error page without the exception's text, ends the visit so a second failure changes nothing, and does nothing once the browser has moved on; an optional failure sends nobody anywhere and leaves its message for ui.failed. A dashboard's load fails in place: no redirect, no recorded error, the visit not ended, the message with a reference left for ui.failed; an earlier page's recorded error survives the next opener. "Try again" only ever returns to a path of this site (one leading slash, no backslash), else to /. A load the user may not run, under a store like Redis, never runs: the refusal is in ui.failed, the warning names the handler and the user's id, nothing is left running |
+| 1.778 | lex_page adds the opener and the error page exists | a page's on_load is the access load, any plain handler, then the opener carrying only the route; the error page shows the message and a way to try again; create_app loads rfds.toast before it adds a page, so it is never first imported in the middle of an event; lex_page refuses a route whose dynamic argument is named like a ui.State helper, and a load declared with arguments; create_app, once the project's pages are declared, refuses any page route with such an argument |
+
+**Scenario range:** 1.774 – 1.778. **Test file:** `lex/test_project/tests/init/test_1cj_ui_load.py`. **Type:** I. **Status:** ✅ Complete (2026-11-23). Batch: [1cj](batches.md).
+
+---
+
+### 1ck. lex.ui clears runs whose process is gone ✅
+
+**What it tests:** the sweep that clears the runs of a process that is gone (and keeps those of a live one), and how liveness is decided: locally only this process, with Redis a heartbeat key with an expiry, failing open on a Redis that errors, hangs or cannot be built.
+
+**Why a regression matters:** a button that stays disabled until the user opens a new tab after a backend restart, a live worker's run cleared by mistake, or a hanging Redis stalling every page open.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.779 | A sweep clears runs of a process that is gone | the dead process's run is cleared with its progress; this process's run stays; a process another worker reports alive keeps its run; an argument containing "|" is cleared completely; a dead process is asked about once however many runs it had; two runs under one key and argument keep their process record until the last finishes, and a sweep clears them all; a liveness check that hangs ends the sweep within its budget and leaves the marks; opening a page sweeps |
+| 1.780 | Liveness is local without Redis and a heartbeat with it | without Redis only this process is alive; with Redis a process is alive while its heartbeat key exists, and the heartbeat writes this process's key with an expiry; a Redis that errors, hangs or cannot be built leaves a process counted alive; a failed beat does not end the heartbeat; ending it deletes the key and closes the one client; a forked child gets its own id |
+
+**Scenario range:** 1.779 – 1.780. **Test file:** `lex/test_project/tests/init/test_1ck_ui_stale_runs.py`. **Type:** U. **Status:** ✅ Complete (2026-11-23). Batch: [1ck](batches.md).
+
+---
+
+### 1cl. @ui.custom and the lex.ui findings of lex reflex check ✅
+
+**What it tests:** `@ui.custom` as an ordinary Reflex handler carrying a mark, and the static check over project code: errors for unmarked raw handlers and for undecorated public methods of a `ui.State`, recognised through import aliases and across files by inheritance; one error for a file that cannot be analysed; errors for a field, computed var or method named like a body helper and for `self.<handler>()` of a sibling handler; notes for custom handlers and `requires=ui.signed_in`; a warning for a handler that names a model manager without declaring what it requires; and the exit code of `run_check` (non-zero on an error, 0 on warnings and notes only).
+
+**Why a regression matters:** raw Reflex handlers creeping back into project code with no one seeing, an unguarded model manager passing review, or `lex reflex check` returning success because RFDS's checks passed while lex.ui's found an error.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.781 | ui.custom is a marked Reflex handler | an async handler under @ui.custom on a ui.State is an ordinary Reflex event handler -- async allowed, background on request -- that carries the custom mark |
+| 1.782 | The check fails on unmarked raw handlers and lists the rest | the raw handler is an error; the custom handler and the signed_in requirement are notes; the unguarded manager is a warning; the guarded one and the plain state raise nothing; the report returns 1, and run_check returns non-zero even when RFDS's own checks pass. Undecorated public methods of a ui.State are errors (helpers, properties, static and class methods and computed vars are not); handlers are recognised through import aliases; a state inheriting a ui state from another file is checked; a file that cannot be analysed is one error naming it; a field, computed var or method named like a body helper (user, api, params, can, state) is an error; self.<handler>() of the state's own or an inherited handler, from any method, is an error that says to use an underscore method; run_check returns 0 when only warnings and notes are found |
+
+**Scenario range:** 1.781 – 1.782. **Test file:** `lex/test_project/tests/init/test_1cl_ui_custom_and_check.py`. **Type:** U. **Status:** ✅ Complete (2026-11-23). Batch: [1cl](batches.md).
+
+---
+
+### 1cm. The lex.ui namespace; templates and the reference example on the layer ✅
+
+**What it tests:** the public `lex.ui` namespace against the implementation, the three templates `lex reflex add` writes, and the reference `_reflex_structure.py`: no async plumbing, every state a `ui.State`, nothing for either lint to report, and the example's behaviour for a viewer without, or with some, read grants.
+
+**Why a regression matters:** a template or the reference example that teaches the old async plumbing again, a name missing or different from the implementation's, a dashboard that frames a record before it has arrived, or an export that gives out models the viewer may not read.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.783 | from lex import ui has every name | each public name is the implementation's own object, ui.ApiError is lex-app's API error, and ui.testing is the test helper module |
+| 1.784 | The scaffold templates are written on the layer | none contains async, await, run_orm or lex_api (as a name or an attribute); every state with handlers is a ui.State; the object page and the overview use ui.State with @ui.load; neither the lex.ui check nor RFDS's strict lint reports an error or a warning on any of them; the object page shows its load's failure, else the loaded record, else a spinner; its load, started on mount, reports a refusal in place (in ui.failed, no redirect) |
+| 1.785 | The reference example is written on the layer | outside RFDS's own async export hook it contains no async, await, run_orm or lex_api; every state with handlers is a ui.State; the lex.ui check reports no error and neither check a warning; the overview's load, started on mount, reports its refusal in place on `/` (in ui.failed, no redirect), with the export menu offered only while the load has not failed; a viewer who may not read the featured model is refused by the load (no redirect) and by the export; a viewer who may read some models sees the same counts on screen and in the export, only for those models; the record dashboard reads the model `?model=` names, refuses a missing or unknown one -- in ui.failed, with no redirect -- and shows failure, else the record, else a spinner; the edit page is a form submitted to one action, with no per-keystroke handler, and `save` writes the submitted values |
+
+**Scenario range:** 1.783 – 1.785. **Test file:** `lex/test_project/tests/init/test_1cm_ui_namespace_and_examples.py`. **Type:** U. **Status:** ✅ Complete (2026-11-23). Batch: [1cm](batches.md).

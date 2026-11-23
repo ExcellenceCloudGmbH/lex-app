@@ -12,10 +12,10 @@ so the page is part of the app the next time it compiles:
 ========================  ====================================================
 
 Every template uses lex-app's surface (``lex_page``, ``lex_table``,
-``LexRecordState``, ``permission``), so what it writes is signed-in, in
-lex-app's chrome, and reads its data through lex-app's API as the user. The
-folder starts with ``_`` so Django's model discovery never imports a dashboard
--- and with it Reflex -- into the Django process.
+``lex_view``) and ``lex.ui`` (``ui.State``, ``@ui.load``), so what it writes
+is signed-in, in lex-app's chrome, and reads its data through lex-app's API as
+the user. The folder starts with ``_`` so Django's model discovery never
+imports a dashboard -- and with it Reflex -- into the Django process.
 
 ``lex reflex check`` runs RFDS's ``lint --strict`` over the project's
 dashboards and ``doctor`` over the project, as CI does.
@@ -65,9 +65,11 @@ def ${func}():
 
 _OBJECT_PAGE = _HEADER + '''import reflex as rx
 import rfds
+import rfds.types
 from django.apps import apps
 
-from lex.lex_app.reflex import LexRecordState, lex_view
+from lex import ui
+from lex.lex_app.reflex import lex_view
 from lex.lex_app.settings import repo_name
 
 
@@ -75,12 +77,20 @@ def _model():
     return apps.get_model(repo_name, "${model}")
 
 
-class ${state}(LexRecordState):
+class ${state}(ui.State):
     """The ${model} the URL names, read through lex-app's API as the user."""
 
-    @rx.event
-    async def load(self):
-        await self.record()
+    pk: str = ""
+    record: dict[str, rfds.types.WireValue] = {}
+
+    # Started on mount by the page below: a failure shows in place, through ui.failed.
+    @ui.load
+    def open(self):
+        self.pk = str(self.params.get("pk") or "")
+        if not self.pk:
+            raise ui.Refuse("This link does not name a ${model}.")
+        # A record the user may not see, or that is gone, shows itself as a message in place.
+        self.record = self.api.get(_model(), self.pk)
 
 
 def ${func}() -> rx.Component:
@@ -91,28 +101,28 @@ def ${func}() -> rx.Component:
             from ${package}._dashboards.${module} import ${func}
             return ${func}()
     """
+    problem = ui.failed(${state}.open)
     return rfds.page(
-        rx.match(
-            ${state}.record_state,
-            ("ok", rx.fragment(
-                rfds.page_header(title=${state}.record_title, path="/${model_lower}"),
+        rfds.page_header(title="${model} " + ${state}.pk, path="/${model_lower}"),
+        rx.cond(
+            problem != "",
+            rfds.inline_message(problem, tone="warning"),
+            rx.cond(
+                ${state}.record,
                 # lex-app's own record page: its fields, actions and history, as the user may see them.
                 lex_view(f"${model_lower}/{${state}.pk}/show", height=600),
-            )),
-            ("denied", rfds.inline_message("You may not see this record.", tone="warning")),
-            ("missing", rfds.inline_message("This record does not exist.", tone="neutral")),
-            ("unavailable", rfds.inline_message("lex-app cannot be reached; try again shortly.", tone="danger")),
-            rfds.spinner(label="Loading"),
+                rfds.spinner(label="Loading"),
+            ),
         ),
-        on_mount=${state}.load,
+        on_mount=${state}.open,
     )
 '''
 
-_OVERVIEW = _HEADER + '''import reflex as rx
-import rfds
+_OVERVIEW = _HEADER + '''import rfds
 from django.apps import apps
 
-from lex.lex_app.reflex import has_permission, lex_page, lex_table, run_orm
+from lex import ui
+from lex.lex_app.reflex import lex_page, lex_table
 from lex.lex_app.settings import repo_name
 
 ROUTE = "${route}"
@@ -122,22 +132,19 @@ def _model():
     return apps.get_model(repo_name, "${model}")
 
 
-def _count() -> int:
-    return _model()._default_manager.count()
-
-
-class ${state}(rx.State):
+class ${state}(ui.State):
     """The overview's figures, computed in the database."""
 
     total: int = 0
 
-    @rx.event(auth=has_permission(f"{repo_name}.${model}", "read"))
-    async def load(self):
-        self.total = await run_orm(_count)
+    # Counting rows reads the database directly, so the load says what it requires.
+    @ui.load(requires=ui.permission(f"{repo_name}.${model}", "read"))
+    def open(self):
+        self.total = _model()._default_manager.count()
 
 
 @lex_page(ROUTE, title="${title}", nav="${nav}", requires=f"{repo_name}.${model}:read",
-          on_load=${state}.load)
+          on_load=${state}.open)
 def ${func}():
     """KPIs over ${model}, then its records."""
     return rfds.page(
@@ -232,11 +239,14 @@ def check_paths(project_root: Path) -> list[str]:
 
 
 def run_check(project_root: Path) -> int:
-    """RFDS's ``lint --strict`` over the dashboards, then ``doctor`` over the project; 0 = clean."""
+    """lex.ui's findings, RFDS's ``lint --strict`` over the dashboards, then ``doctor``; 0 = clean."""
     from rfds.cli import main as rfds_main
+
+    from lex.lex_app.reflex.ui import checks
 
     paths = check_paths(project_root)
     status = 0
     if paths:
+        status = checks.report(checks.find(paths)) or status
         status = rfds_main(["lint", "--strict", *paths]) or status
     return rfds_main(["doctor", "--app-root", str(project_root)]) or status

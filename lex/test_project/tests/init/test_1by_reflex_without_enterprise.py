@@ -54,6 +54,7 @@ config = lex_config()
 for name in ("access", "auth", "app", "dashboards", "data", "design", "devproxy", "embed", "host",
              "scaffold", "session", "shell", "django_orm"):
     importlib.import_module("lex.lex_app.reflex." + name)
+importlib.import_module("lex.ui")
 print("OK", type(config).__module__, sorted(m for m in sys.modules if "enterprise" in m))
 """
 
@@ -66,7 +67,7 @@ class TestCluster01by_NoEnterprise(TestCase):
         """
         Scenario 1.736: plain Reflex and core RFDS are all lex-app needs.
         Given: an interpreter where importing reflex_enterprise or rfds.enterprise fails.
-        When:  the config is built and every module of lex.lex_app.reflex is imported; and the
+        When:  the config is built and every module of lex.lex_app.reflex, and lex.ui, is imported; and the
                requirements are read.
         Then:  all of it works, the config is Reflex's own, no Enterprise module is loaded;
                the requirements pin plain `reflex` and `rfds` without its enterprise extra, and
