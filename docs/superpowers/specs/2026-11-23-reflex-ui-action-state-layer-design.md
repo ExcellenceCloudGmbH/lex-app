@@ -66,12 +66,19 @@ One "open this item" button takes about 70 lines of handler: claim a busy flag, 
 in a worker thread, check the user is still on the page, map errors to a toast with an incident
 reference, release the flag.
 
+Three further findings:
+
+- **The design system has leaked into project code.** A theme cannot prevent a 2,120-line project
+  stylesheet and 721 inline styles; predefined page templates and components with no styling
+  arguments can. That is pieces 2 and 3 (section 3).
+- **Real async needs are rare** (section 5.3).
+- **The project cannot benchmark the calculation page**: it has no `CalculationModel` subclass.
+
 Two caveats recorded so expectations are right: the 37,000 lines of business logic are not reduced by
 any wrapper, and part of the unreadability is comment style (paragraph-long docstrings full of rule and
 slice identifiers), which needs a writing convention and is not addressed here.
 
-The project has no `CalculationModel` subclass, so it cannot serve as the benchmark for the calculation
-page (piece 4 below); a project with calculations must.
+The calculation page (piece 4 below) therefore has to be driven by a project that has calculations.
 
 ---
 
@@ -290,6 +297,10 @@ open; loads and jobs compare the visit they started in with the current one.
 - The body runs in a worker thread on the live state while Reflex holds the user's lock.
 - In development, an action that runs longer than one second logs a warning that it should be a job
   (one second is Reflex's own lock-warning threshold).
+- Repeat clicks queue and run in order (section 5.3). Protection against a double click is the
+  button's job: the lex button will disable itself in the browser the moment it is clicked
+  (components spec). A handler that must never run twice checks its own precondition, or is written
+  as a job.
 
 **`@ui.job`**
 
@@ -362,7 +373,7 @@ A handler therefore needs no `try`/`except` for the normal cases:
 ```python
 @ui.action
 def approve(self, request_id: int):
-    if self.locked:
+    if self.closed:
         raise ui.Refuse("This request is closed.")
     self.api.update(Request, request_id, {"status": "approved"})   # a validation error shows itself
 ```
@@ -445,7 +456,56 @@ page for it.
 
 ### 6.9 Before and after
 
-The reviewed project's "open this item" handler, about 70 lines today, becomes:
+The reviewed project's "open this item" handler takes about 70 lines today. Its shape, shortened, with
+the project's names replaced:
+
+```python
+@rx.event(background=True)
+async def open_ticket(self, code: str):
+    events, claimed = [], False
+    async with self:
+        if self.opening or not self.loaded:
+            return
+        locale = await locale_of(self)
+        try:
+            args = await session_args(self)
+        except Exception as error:
+            self.open_error = translate(locale, "error.generic", incident=_log_incident("session", error))
+            events = [toast.error(self.open_error)]
+        else:
+            self.opening = code
+            self.open_error = ""
+            claimed = True
+        page = self._page_sequence
+    if not claimed:
+        for event in events:
+            yield event
+        return
+    try:
+        try:
+            result = await run_in_worker(ticket_logic.open, code, *args)
+            incident = ""
+        except Exception as error:
+            result, incident = None, _log_incident("open_ticket", error)
+        async with self:
+            if page != self._page_sequence:
+                return                      # the user left meanwhile
+            if result is None:
+                self.open_error = translate(locale, "error.generic", incident=incident)
+                events = [toast.error(self.open_error)]
+            elif not result["ok"]:
+                self.open_error = result["message"]
+            else:
+                events = [rx.redirect(f"/tickets/{result['code']}")]
+    finally:
+        async with self:
+            if self.opening == code:
+                self.opening = ""
+    for event in events:
+        yield event
+```
+
+With the layer, the same behaviour is:
 
 ```python
 from lex import ui
@@ -463,7 +523,26 @@ class Tickets(ui.State):
         return ui.goto(f"/tickets/{ticket.code}")
 ```
 
-It is a job, not an action, because the original ignores a second press while one is running.
+| What the long version does by hand | Where it went |
+| --- | --- |
+| Busy flag claimed, checked and released | The job runs once at a time; the view reads `ui.running(Tickets.open_ticket, code)` |
+| Reading the session and its failure path | `self.user`, resolved before the body runs |
+| Running in a worker thread | Every body runs off the event loop |
+| "The user left meanwhile" counter | The visit check built into loads and jobs |
+| Catching the exception, logging an incident, building a translated toast | The standard unexpected-error path |
+| A refusal in the business logic's own words | The logic raises `ui.Refuse(message)` |
+| Locking around every state change | The merge at `yield` and at the end |
+
+It is a job, not an action, because the original ignores a second press while one is running, and
+only a job can do that.
+
+### 6.10 What changed between the conversation and this spec
+
+| Said in conversation | In this spec | Why |
+| --- | --- | --- |
+| `@ui.action(once=True)` drops a repeat click | Removed. A job ignores repeats; an action queues them. | Reflex takes the user's lock before it starts any handler, so a click arriving while an action runs cannot be examined until the action has finished. The probe showed three rapid clicks running twice. |
+| An ORM query without a declared permission "fails the build" | Blocked at run time; flagged by the check on a best-effort basis | Detecting ORM use by reading code is not reliable. Blocking the query on the worker thread is. |
+| `ui.running` and `ui.failed` | Plus `ui.progress_of` | A view needs to read what `yield ui.progress(...)` recorded. |
 
 ---
 
