@@ -102,18 +102,19 @@ def _apart(button: rx.Component) -> rx.Component:
     type compare equal, so a second button beside a primary one was dropped. A fragment is another
     type; RFDS reads the button's kind and intent from the wrapper.
     """
-    from rfds.components.actions._common import get_meta, set_meta
-
-    return set_meta(rx.fragment(button), **get_meta(button))
+    return vocab._marked(button, rx.fragment(button))
 
 
 def _rfds(ctx: Build, build: Callable[[], Any]) -> Any:
-    """Call one of RFDS's floorplans; a limit of its own becomes a ``PageError`` naming the page."""
+    """Call one of RFDS's floorplans; a limit of its own becomes a ``PageError`` naming the page.
+
+    ``build`` calls RFDS and nothing else: whatever it raises is reported as RFDS's refusal.
+    """
     try:
         return build()
     except (ValueError, TypeError) as wrong:
         raise ctx.fail(f"RFDS's page layout refuses this page: {wrong}",
-                       "The sentence above is RFDS's own: it names the limit the page goes over.") from None
+                       "The sentence above is RFDS's own: it names the limit the page goes over.") from wrong
 
 
 def _section_ids(titles: list) -> list:
@@ -234,10 +235,11 @@ class Record(Kind):
         facts = take(ctx.at("facts"), list(self.facts), (vocab.Fact,), "Use `ui.fact(label, value)`.")
         if facts:
             head.append(rfds.key_value(*vocab.build_all(ctx.at("facts"), facts), columns=min(3, len(facts))))
-        sections, actions, title = self._sections(ctx), self._buttons(ctx), self._title(ctx)
+        title, actions, sections = self._title(ctx), self._buttons(ctx), self._sections(ctx)   # lex's checks first
+        header = rfds.stack(*head) if head else rx.fragment()
         page = _rfds(ctx, lambda: templates.object_page(
-            title=title, path=ctx.route or "/", header=rfds.stack(*head) if head else rx.fragment(),
-            sections=sections, navigation="tabs" if self.tabs and len(sections) > 1 else "anchor", actions=actions))
+            title=title, path=ctx.route or "/", header=header, sections=sections,
+            navigation="tabs" if self.tabs and len(sections) > 1 else "anchor", actions=actions))
         return states(ctx, self.load, page, "rect")
 
 
@@ -265,7 +267,7 @@ class List(Kind):
         if not isinstance(self.table, tables.Table):
             raise ctx.at("table").fail(f"got {called(self.table)}.",
                                        "`table=` holds one `ui.table(Model, columns=[...])`.")
-        table, actions, title = self.table.build(ctx.at("table")), self._buttons(ctx), self._title(ctx)
+        title, actions, table = self._title(ctx), self._buttons(ctx), self.table.build(ctx.at("table"))
         page = _rfds(ctx, lambda: templates.list_report(title=title, path=ctx.route or "/", table=table, actions=actions))
         return states(ctx, self.load, page, "table")
 

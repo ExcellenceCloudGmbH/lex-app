@@ -131,7 +131,7 @@ def message(sentence: Any, *, tone: str = "info", visible: Any = None, **values:
 def _marked(inner: rx.Component, wrapper: rx.Component) -> rx.Component:
     """``wrapper`` carrying the RFDS metadata of the control it wraps.
 
-    The one place lex-app reaches into RFDS's private metadata. RFDS's page header reads a
+    The one place lex.ui reaches into RFDS's private metadata. RFDS's page header reads a
     control's kind and intent from it -- which action is the primary one, what is a menu entry --
     and a ``visible=`` wrapper has none of its own, so the control would lose its role.
     """

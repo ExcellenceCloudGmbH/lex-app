@@ -51,7 +51,7 @@ class ExampleFund(ui.State):
 
     @ui.load
     def load_notes(self):
-        self.notes = [f"Opened by {self.user.name}"]
+        self.notes = [f"{self.name} was opened by {self.user.name}"]     # reads what the page load wrote
 
 
 class TestCluster01cu_PagesNamespace(SimpleTestCase):
@@ -65,15 +65,17 @@ class TestCluster01cu_PagesNamespace(SimpleTestCase):
         Scenario 1.806: lex.ui.
         Given: `from lex import ui`.
         When:  the names of this piece are looked up.
-        Then:  each exists and is listed in __all__; ui.list is the page kind (the built-in is
-               untouched elsewhere); no component or kind takes a styling argument.
+        Then:  each exists and is listed in __all__ -- except ui.list, the page kind, which a
+               star import must not put in place of Python's list; no component or kind takes
+               a styling argument.
         """
         for name in PAGE_NAMES:
             with self.subTest(name=name):
                 self.assertTrue(hasattr(ui, name), f"ui.{name} exists")
-                self.assertIn(name, ui.__all__, f"ui.{name} is listed")
+                if name != "list":
+                    self.assertIn(name, ui.__all__, f"ui.{name} is listed")
         self.assertEqual(ui.list.__name__, "list_", "ui.list is the page kind")
-        self.assertEqual(list("ab"), ["a", "b"], "the built-in list is untouched here")
+        self.assertNotIn("list", ui.__all__, "`from lex.ui import *` does not hide Python's list")
         styling = {"class_name", "style", "props", "gap", "width", "padding", "margin", "align", "justify"}
         for name in ("record", "list", "section", "text", "fact", "status", "message", "table", "column", "button",
                      "link", "each", "switch", "custom_block"):
@@ -126,7 +128,7 @@ class TestCluster01cu_PagesNamespace(SimpleTestCase):
             self.assertNotIn("rx.", source, f"{function.__name__} uses no raw Reflex component")
             self.assertNotIn("rfds.", source, f"{function.__name__} uses no raw RFDS component")
 
-        made = Group.objects.create(name="Example group")
+        made, created = Group.objects.get_or_create(name="Example group")
         self.addCleanup(made.delete)
 
         async def scenario():
@@ -144,5 +146,6 @@ class TestCluster01cu_PagesNamespace(SimpleTestCase):
         self.assertEqual(status["ui_loaded"], {"ExampleFund.open": True, "ExampleFund.load_notes": True},
                          "the page load and then the section's load both finished")
         self.assertEqual(status["ui_failed"], {}, "nothing failed")
-        self.assertEqual((fields["name"], fields["members"], fields["notes"]), ("Example group", 0, ["Opened by ada"]),
-                         "the state holds what the loads read")
+        self.assertEqual((fields["name"], fields["members"]), ("Example group", 0), "the state holds what the page read")
+        self.assertEqual(fields["notes"], ["Example group was opened by ada"],
+                         "the section's load ran after the page's: it read the name the page load wrote")

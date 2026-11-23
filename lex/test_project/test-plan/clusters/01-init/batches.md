@@ -2964,5 +2964,5 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.806 | One import gives the page kinds and the vocabulary | each name exists and is listed in __all__; ui.list is the page kind (the built-in is untouched elsewhere); no component or kind takes a styling argument |
+| 1.806 | One import gives the page kinds and the vocabulary | each name exists and is listed in __all__ -- except ui.list, the page kind, which a star import must not put in place of Python's list; no component or kind takes a styling argument |
 | 1.807 | A list and a record page build, register and load | both build without one raw component in the page functions; the list links its rows to the record page; opening the record page runs the page load and then the section's load, both end loaded, and the state holds what they read |

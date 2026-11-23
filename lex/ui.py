@@ -49,7 +49,8 @@ progress_of/cancel``        event of a Cancel button
 ``ui.testing``              run a handler in a unit test
 ``@ui.page``                where a page lives: its route, navigation, who may see it
 ``@ui.dashboard``           a page that is not a route (the project's ``main()``)
-``ui.record/list``          the page kinds: named slots, placed by lex-app
+``ui.record/list``          the page kinds: named slots, placed by lex-app (``ui.list`` is
+                            left out of ``import *``, which would hide Python's ``list``)
 ``ui.section``              a titled part of a page; ``load=`` makes it load on its own
 ``ui.text/fact/status/      what fills the slots; none takes a styling argument
 message/table/column/
@@ -79,6 +80,6 @@ from lex.lex_app.reflex.ui.state import State
 __all__ = [
     "ApiError", "PageError", "Refuse", "State", "action", "button", "cancel", "column", "create", "custom",
     "custom_block", "dashboard", "delete", "download", "each", "edit", "fact", "failed", "goto", "job",
-    "link", "list", "load", "loaded", "message", "page", "permission", "progress", "progress_of", "read",
+    "link", "load", "loaded", "message", "page", "permission", "progress", "progress_of", "read",
     "record", "running", "section", "signed_in", "status", "switch", "table", "testing", "text", "toast",
 ]
