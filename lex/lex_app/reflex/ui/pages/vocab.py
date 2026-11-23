@@ -41,7 +41,8 @@ def shape(value: Any, kind: str, currency: Any = None) -> Any:
         return rfds.percent(value)
     if kind == "datetime":
         return rfds.timestamp(value)
-    raise ValueError(f"kind= must be one of {', '.join(KINDS)}; got {kind!r}")
+    raise ValueError(f"kind= must be one of {', '.join(KINDS)}; got {kind!r}. "
+                         "`date`, `year`, `bool` and `choice` come with forms.")
 
 
 @dataclasses.dataclass(eq=False)
@@ -87,7 +88,8 @@ def fact(label: Any, value: Any, *, kind: str = "text", currency: Any = None, vi
     in the user's), or ``"text"``.
     """
     if kind not in KINDS:
-        raise ValueError(f"kind= must be one of {', '.join(KINDS)}; got {kind!r}")
+        raise ValueError(f"kind= must be one of {', '.join(KINDS)}; got {kind!r}. "
+                         "`date`, `year`, `bool` and `choice` come with forms.")
     if currency is not None and kind != "money":
         raise ValueError(f"ui.fact(currency=) goes with kind=\"money\"; got kind={kind!r}")
     return Fact(label, value, kind, visible, currency)
@@ -106,7 +108,8 @@ class Status(Part):
 
 
 def status(word: Any, *, tone: str = "neutral", visible: Any = None) -> Status:
-    """A small badge."""
+    """A small badge: one word about the thing's state. ``tone`` is one of the tones:
+    neutral, info, success, warning, danger."""
     return Status(word, _tone(tone), visible)
 
 
@@ -158,7 +161,7 @@ class Link(Part):
 
             model, pk = self.record
             return (lex_app_base_url().rstrip("/") + "/" + model._meta.model_name + "/"
-                    + links.piece(ctx, "pk", pk) + "/show"), True
+                    + links.piece(ctx, "pk", pk, instead="Write `record=(Model, row.id)`.") + "/show"), True
         return self.href, True
 
     def click(self, ctx: Build) -> Any:

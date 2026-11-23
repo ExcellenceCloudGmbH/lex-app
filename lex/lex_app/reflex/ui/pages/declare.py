@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 from typing import Any, Callable
 
 from lex.lex_app.reflex.ui.pages import kinds, links
@@ -23,20 +24,52 @@ class Declared:
 _DECLARED: dict[str, Declared] = {}
 
 
+_PAGES_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _raised_by_lex(error: BaseException) -> bool:
+    """Whether ``error`` comes from a ``ui.*`` component refusing its arguments (its message says what to write)."""
+    tb = error.__traceback__
+    while tb is not None and tb.tb_next is not None:
+        tb = tb.tb_next
+    return tb is not None and os.path.dirname(os.path.abspath(tb.tb_frame.f_code.co_filename)) == _PAGES_DIR
+
+
 def _kind_of(fn: Callable[..., Any], *args: Any) -> kinds.Kind:
     """What the page function returns, checked; an error of its own is given the page's name."""
     try:
         kind = fn(*args)
     except PageError:
         raise
+    except (ValueError, TypeError) as wrong:
+        if _raised_by_lex(wrong):
+            raise PageError(f"Page `{fn.__name__}`: {wrong}") from wrong
+        raise _raised(fn, wrong) from wrong
     except Exception as wrong:
-        raise PageError(f"Page `{fn.__name__}`: its function raised {type(wrong).__name__}: {wrong}\n"
-                        "A page function only describes the page: it returns `ui.record(...)` or "
-                        "`ui.list(...)` and does nothing else.") from wrong
+        raise _raised(fn, wrong) from wrong
+    if kind is None:
+        raise PageError(f"Page `{fn.__name__}`: it returned nothing. Did you forget `return`?\n"
+                        "Return a page kind: `ui.record(...)`, `ui.list(...)`.")
     if not isinstance(kind, kinds.Kind):
         raise PageError(f"Page `{fn.__name__}`: it returned {type(kind).__name__}.\n"
                         "Return a page kind: `ui.record(...)`, `ui.list(...)`.")
     return kind
+
+
+def _raised(fn: Callable[..., Any], wrong: Exception) -> PageError:
+    return PageError(f"Page `{fn.__name__}`: its function raised {type(wrong).__name__}: {wrong}\n"
+                     "A page function only describes the page: it returns `ui.record(...)` or "
+                     "`ui.list(...)` and does nothing else.")
+
+
+def _named(load: Any) -> str:
+    """A handler as the author wrote it: `FundState.close`, which is an `@ui.action`."""
+    fn = getattr(load, "fn", None)
+    if fn is None:
+        return called(load)
+    name = ".".join(fn.__qualname__.split(".")[-2:])
+    kind = getattr(fn, "__ui_kind__", "")
+    return f"`{name}`, which is an `@ui.{kind}`" if kind else f"`{name}`, which is not a lex.ui handler"
 
 
 def _loads(name: str, kind: kinds.Kind) -> tuple[list, list]:
@@ -44,7 +77,7 @@ def _loads(name: str, kind: kinds.Kind) -> tuple[list, list]:
     page_loads, part_loads = kind.loads()
     for load in (*page_loads, *part_loads):
         if getattr(getattr(load, "fn", None), "__ui_kind__", "") != "load":
-            raise PageError(f"Page `{name}`: `load=` got {called(load)}.\n"
+            raise PageError(f"Page `{name}`: `load=` got {_named(load)}.\n"
                             "Pass a handler declared with `@ui.load`, without arguments: `load=FundState.open`. "
                             "It reads the page's values from `self.params`.")
     seen: list = []
@@ -78,6 +111,10 @@ def page(route: str, *, nav: str | None = None, icon: str | None = None, require
     the pages -- after the whole module is loaded, so it may name pages declared further down --
     and again when the page is built. A page that is declared wrongly stops the app from starting,
     with an error that names it.
+
+    ``requires=`` and ``visible=`` decide what is shown, never what is allowed: a value a page
+    shows reaches the browser. What a user may read or change is enforced by each handler's own
+    ``requires=`` and by lex-app's API, which acts as the user.
     """
     if not route.startswith("/"):
         raise ValueError(f"ui.page() routes start with '/', got {route!r}")
@@ -117,6 +154,7 @@ def finalize() -> None:
             raise PageError(f"Page `{name}`: a page listed in the navigation needs a fixed title.\n"
                             "Give the kind `title=\"...\"`, or leave `nav=` out.")
         required, optional = _loads(name, kind)
+        kind.build(Build(page=name, route=route))      # every slot checked now: a wrong page stops the start
 
         def body(fn: Callable[[], Any] = declared.fn, route: str = route) -> rx.Component:
             return _kind_of(fn).build(Build(page=fn.__name__, route=route))
@@ -133,12 +171,24 @@ def dashboard(fn: Callable[..., Any]) -> Callable[..., Any]:
     """Mark a page that is not a route: the project's ``main()``, or a model's dashboard hook.
 
     On a model the hook is a class method; ``@classmethod`` goes above ``@ui.dashboard``. A
-    dashboard has no opener, so its loads start when their part of the page mounts.
+    dashboard has no opener, so its loads start when their part of the page mounts, and each
+    clears its state's fields as it starts: the loads of one dashboard each fill a state of their
+    own.
     """
 
     def built(*args: Any) -> Any:
         kind = _kind_of(fn, *args)
-        _loads(fn.__name__, kind)
+        page_loads, part_loads = _loads(fn.__name__, kind)
+        owners: dict[str, str] = {}
+        for load in (*page_loads, *part_loads):
+            state, _, handler = load.fn.__qualname__.rpartition(".")
+            short = state.rpartition(".")[2]
+            if state in owners:
+                raise PageError(f"Page `{fn.__name__}`: `{short}.{owners[state]}` and `{short}.{handler}` both load "
+                                f"into `{short}`.\nOn a dashboard each load clears its state when its part of the "
+                                "page appears, so one would clear what the other read. Give each load a state of "
+                                "its own, or read everything in one load.")
+            owners[state] = handler
         return kind.build(Build(page=fn.__name__, mounts=True))
 
     built.__name__ = fn.__name__

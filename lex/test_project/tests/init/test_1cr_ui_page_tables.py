@@ -91,6 +91,9 @@ class TestCluster01cr_PageTables(SimpleTestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError, msg="a column is checked when it is declared"):
                 tables.column("name", **bad)
         self.assertEqual(tables._RFDS_KIND["datetime"], "instant", "datetime is RFDS's instant")
+        with self.assertRaises(TypeError) as one_string:
+            tables.table(Group, columns="name")
+        self.assertIn("columns=['name']", str(one_string.exception), "one name is not read letter by letter")
 
         def no_argument():
             """A page without a route argument."""

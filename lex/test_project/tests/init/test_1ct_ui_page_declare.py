@@ -132,8 +132,10 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
         Then:  the navigation entry carries the kind's title; the kind's load is registered as
                the page's required load and the section's load as an optional one; registering
                twice adds nothing; a navigation page without a fixed title, a load= that is not
-               a @ui.load handler, one load given twice, a page function that raises, and a
-               function that does not return a kind, are each refused with the page named.
+               a @ui.load handler, one load given twice, a page function that raises, a
+               component refusing its arguments, something that is not a section in sections=,
+               a function without return, and a function that does not return a kind, are
+               each refused with the page named.
         """
         @declare.page("/funds", nav="Funds", icon="list")
         def funds():
@@ -170,8 +172,9 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
 
         with self.assertRaises(PageError) as not_a_load:
             declare.finalize()
-        self.assertTrue(str(not_a_load.exception).startswith("Page `acting`: `load=` got "),
-                        f"a handler that is not a load is refused as the page's load: {not_a_load.exception}")
+        self.assertTrue(str(not_a_load.exception).startswith(
+            "Page `acting`: `load=` got `DeclareDesk.touch`, which is an `@ui.action`.\n"),
+            f"a handler that is not a load is refused, named as the author wrote it: {not_a_load.exception}")
         self.assertIn("Pass a handler declared with `@ui.load`, without arguments", str(not_a_load.exception),
                       "with what to pass")
         declare._DECLARED.pop("/acting")
@@ -188,13 +191,46 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
 
         @declare.page("/broken")
         def broken():
-            return kinds.record(title="Broken", sections=[kinds.section(5)])
+            return kinds.record(title="Broken", sections=[kinds.section("A", vocab.text("a"))], tabs=1 / 0)
 
         with self.assertRaises(PageError) as raised:
             declare.finalize()
-        self.assertTrue(str(raised.exception).startswith("Page `broken`: its function raised TypeError:"),
+        self.assertTrue(str(raised.exception).startswith("Page `broken`: its function raised ZeroDivisionError:"),
                         f"an error inside a page function is given the page's name: {raised.exception}")
         declare._DECLARED.pop("/broken")
+
+        @declare.page("/toned")
+        def toned():
+            return kinds.record(title="Toned", status=vocab.status("Open", tone="red"),
+                                sections=[kinds.section("A", vocab.text("a"))])
+
+        with self.assertRaises(PageError) as wrong_argument:
+            declare.finalize()
+        self.assertEqual(str(wrong_argument.exception),
+                         "Page `toned`: tone= must be one of neutral, info, success, warning, danger; got 'red'",
+                         "a component refusing its arguments keeps its own sentence, with the page named")
+        declare._DECLARED.pop("/toned")
+
+        @declare.page("/loose")
+        def loose():
+            return kinds.record(title="Loose", sections=[tables.table(Group, columns=["name"])])
+
+        with self.assertRaises(PageError) as not_a_section:
+            declare.finalize()
+        self.assertEqual(str(not_a_section.exception),
+                         "Page `loose`, slot `sections`: got `ui.table`.\n`sections=` holds `ui.section(title, ...)`.",
+                         "every slot is checked when the pages are registered")
+        declare._DECLARED.pop("/loose")
+
+        @declare.page("/forgotten")
+        def forgotten():
+            kinds.record(title="Forgotten", sections=[kinds.section("A", vocab.text("a"))])
+
+        with self.assertRaises(PageError) as no_return:
+            declare.finalize()
+        self.assertTrue(str(no_return.exception).startswith("Page `forgotten`: it returned nothing. Did you forget"),
+                        f"a page function without return is told so: {no_return.exception}")
+        declare._DECLARED.pop("/forgotten")
 
         @declare.page("/raw")
         def raw():
@@ -214,7 +250,8 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
         When:  the dashboard is called, and create_app's source is read.
         Then:  the dashboard returns the built page, a component, whose load starts when it
                mounts (a dashboard has no opener); it is not a link target; on a model it sits
-               under @classmethod and receives the model; create_app loads the project's
+               under @classmethod and receives the model; two of its loads on one state are
+               refused, since each clears its state as it starts; create_app loads the project's
                module, then registers the declared pages, before it adds the home page.
         """
         @declare.dashboard
@@ -236,6 +273,17 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
                 return kinds.record(title=cls.__name__, sections=[kinds.section("A", vocab.text("a"))])
 
         self.assertIsInstance(Model.reflex_main(), rx.Component, "a model's hook is a class method above @ui.dashboard")
+
+        @declare.dashboard
+        def shared():
+            return kinds.record(title="Shared", load=DeclareDesk.open,
+                                sections=[kinds.section("A", vocab.text("a"), load=DeclareDesk.load_documents)])
+
+        with self.assertRaises(PageError) as one_state:
+            shared()
+        self.assertTrue(str(one_state.exception).startswith(
+            "Page `shared`: `DeclareDesk.open` and `DeclareDesk.load_documents` both load into `DeclareDesk`."),
+            f"two loads of one dashboard on one state are refused: each would clear the other: {one_state.exception}")
         self.assertIn('rfdsI18n.t("Model", "Model"', str(Model.reflex_main()), "and the function receives the model")
         source = inspect.getsource(lex_app_module.create_app)
         self.assertLess(source.index("load_structure()"), source.index("declare.finalize()"),

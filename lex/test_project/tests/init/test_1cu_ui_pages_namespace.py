@@ -44,7 +44,7 @@ class ExampleFund(ui.State):
 
     @ui.load(requires=ui.read(Group))
     def open(self):
-        group = Group.objects.filter(pk=self.params.get("key", "0")).first()
+        group = Group.objects.filter(pk=self.params["key"]).first()
         if group is None:
             raise ui.Refuse("This group does not exist.")
         self.name, self.members = group.name, group.user_set.count()

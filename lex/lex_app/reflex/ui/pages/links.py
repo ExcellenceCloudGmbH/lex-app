@@ -81,7 +81,7 @@ def row_href(ctx: Build, target: Callable[..., Any], row_key: str) -> str:
     return info.route.replace(f"[{info.arguments[0]}]", "{" + row_key + "}")
 
 
-def piece(ctx: Build, name: str, value: Any) -> Any:
+def piece(ctx: Build, name: str, value: Any, instead: str | None = None) -> Any:
     """``value`` as one piece of an address, encoded so that it stays one piece.
 
     A value from data must not be able to change the page or add a parameter: a fixed value is
@@ -89,7 +89,7 @@ def piece(ctx: Build, name: str, value: Any) -> Any:
     """
     import reflex as rx
 
-    instead = f"Pass text or a number: `{name}=row.id`, `{name}=7`."
+    instead = instead or f"Pass text or a number: `{name}=row.id`, `{name}=7`."
     if isinstance(value, rx.Var):
         kind = typing.get_origin(value._var_type) or value._var_type
         if kind in (bool, list, dict, tuple, set):

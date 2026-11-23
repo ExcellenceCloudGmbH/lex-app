@@ -39,9 +39,10 @@ def create_app():
       ``/ui-error``, where a failed ``@ui.load`` sends the browser, and
       ``/logout``, where RFDS's user menu signs out.
 
-    Further pages come from the project itself: any ``@lex_page`` or
-    ``@rx.page`` in ``_reflex_structure.py``, or in a module it imports, is
-    added when the app compiles. Once they are declared, no page route may have
+    Further pages come from the project itself: any ``@ui.page``,
+    ``@lex_page`` or ``@rx.page`` in ``_reflex_structure.py``, or in a module it
+    imports, is added when the app compiles (``@ui.page`` pages are registered
+    once that module is loaded, so a page may link to one declared after it). Once they are declared, no page route may have
     a dynamic argument named like a ``ui.State`` helper (``[user]``, ``[state]``...):
     Reflex would make it a field of every state and hide the helper.
     """

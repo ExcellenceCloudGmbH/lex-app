@@ -118,7 +118,8 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         When:  each is built.
         Then:  each is a PageError naming the page and the slot and saying what to write --
                also two sections with one title, a section hidden by a state value, a blank
-               title, a title that is not words, and an action called Save; a limit of RFDS's
+               title, a title that is not words, two badges, and an action called Save (one
+               fact or one section given without brackets is a list of one); a limit of RFDS's
                own (five tables on one page) names the page and quotes RFDS's sentence.
         """
         cases = {
@@ -135,6 +136,8 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
             "sections": (dict(sections=[vocab.text("loose")]),
                          "Page `fund`, slot `sections`: got `ui.text`.\n`sections=` holds `ui.section(title, ...)`."),
         }
+        cases["two badges"] = (dict(status=[vocab.status("Open"), vocab.status("Late")]),
+                               "Page `fund`, slot `status`: got 2 badges.\n`status=` holds one `ui.status(word, tone=)`.")
         cases["same title"] = (dict(sections=[kinds.section("Notes", vocab.text("a")), kinds.section("Notes", vocab.text("b"))]),
                                "Page `fund`, slot `sections`: two sections are both called `Notes`.\n"
                                "Give each section its own title.")
@@ -155,6 +158,9 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
             with self.subTest(case=name), self.assertRaises(PageError) as raised:
                 _record(**slots).build(CTX)
             self.assertEqual(str(raised.exception), message, f"{name}: the message says what to write")
+        one = str(kinds.record(title="Fund", facts=vocab.fact("Vintage", "2020"),
+                               sections=kinds.section("Notes", vocab.text("a"))).build(CTX))
+        self.assertIn('rfdsI18n.t("Vintage", "Vintage"', one, "one fact without brackets is taken as a list of one")
         crowded = [kinds.section(f"Table {n}", tables.table(Group, columns=["name"])) for n in "abcde"]
         with self.assertRaises(PageError) as limit:
             _record(sections=crowded).build(CTX)

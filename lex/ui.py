@@ -25,8 +25,9 @@
             title=FundState.name,
             load=FundState.open,
             facts=[ui.fact("Vintage", FundState.vintage)],
-            sections=[ui.section("Holdings", ui.table(Holding, columns=["name"]), empty="No holdings yet.")],
-            actions=[ui.button("Close fund", FundState.close, tone="danger")],
+            sections=[ui.section("Notes", ui.each(FundState.notes, lambda note: ui.text(note)),
+                                 load=FundState.load_notes)],
+            actions=[ui.button("Export", FundState.export)],
         )
 
 ==========================  =====================================================
@@ -56,6 +57,7 @@ progress_of/cancel``        event of a Cancel button
 message/table/column/
 button/link``
 ``ui.each/switch``          repetition and choice; ``visible=`` on every component
+                            decides what is shown, never what is allowed
 ``ui.custom_block``         a raw component, marked for review with its reason
 ``ui.PageError``            a page declared wrongly: says the page, the slot, what to write
 ==========================  =====================================================

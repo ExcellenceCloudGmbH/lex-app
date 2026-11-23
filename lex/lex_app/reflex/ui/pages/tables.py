@@ -101,7 +101,9 @@ def table(source: Any, *, columns: Any = (), open: Any = None, empty: Any = None
 
     ``columns`` names the fields to show (``ui.column`` for one that needs its own label or kind);
     ``open=`` a page makes each row a link to it; ``empty=`` is the sentence shown when the model
-    has no rows at all. The table is shown only to users who may read the model, unless
-    ``visible=`` says otherwise.
+    has no rows at all. The table is shown only to users who may read the model; ``visible=True``
+    shows it to everyone, and the rows are still read as the user.
     """
-    return Table(source, tuple(columns), open, empty, visible)
+    if isinstance(columns, str):
+        raise TypeError(f"ui.table(columns=) takes a list of names: columns=[{columns!r}]")
+    return Table(source, tuple(columns) if isinstance(columns, (list, tuple)) else (columns,), open, empty, visible)

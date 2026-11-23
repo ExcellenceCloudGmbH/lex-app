@@ -13,6 +13,11 @@ from lex.lex_app.reflex.ui.pages import tables, vocab
 from lex.lex_app.reflex.ui.pages.parts import Build, NotASentence, Part, called, say, slug, take
 
 
+def _many(value: Any) -> tuple:
+    """A list slot as given: a list, one part, or nothing. The kind checks what is in it."""
+    return () if value is None else tuple(value) if isinstance(value, (list, tuple)) else (value,)
+
+
 def states(ctx: Build, load: Any, content: rx.Component, shape: str) -> rx.Component:
     """``content`` once ``load`` has finished; before that its skeleton, or its failure in place."""
     import rfds
@@ -190,7 +195,8 @@ class Record(Kind):
     actions: tuple = ()
 
     def loads(self) -> tuple[list, list]:
-        return ([self.load] if self.load is not None else []), [s.load for s in self.sections if s.load is not None]
+        parts = [s for s in self.sections if isinstance(s, Section)]     # anything else is refused when built
+        return ([self.load] if self.load is not None else []), [s.load for s in parts if s.load is not None]
 
     def _sections(self, ctx: Build) -> list:
         """The sections as RFDS's object page takes them, each checked first."""
@@ -230,7 +236,10 @@ class Record(Kind):
 
         head: list = []
         if self.status is not None:
-            (badge,) = take(ctx.at("status"), self.status, (vocab.Status,), "`status=` holds one `ui.status(word, tone=)`.")
+            given = take(ctx.at("status"), self.status, (vocab.Status,), "`status=` holds one `ui.status(word, tone=)`.")
+            if len(given) != 1:
+                raise ctx.at("status").fail(f"got {len(given)} badges.", "`status=` holds one `ui.status(word, tone=)`.")
+            (badge,) = given
             head.append(badge.build(ctx.at("status")))
         facts = take(ctx.at("facts"), list(self.facts), (vocab.Fact,), "Use `ui.fact(label, value)`.")
         if facts:
@@ -247,11 +256,16 @@ def record(*, title: Any, load: Any = None, status: Any = None, facts: Any = (),
            tabs: bool = False, actions: Any = ()) -> Record:
     """One thing: its key facts, then its parts.
 
+    ``title`` is a sentence or a state value. ``load=`` is the ``@ui.load`` that fills the page;
+    until it has finished the page shows a skeleton, and its failure in place. ``status=`` is one
+    ``ui.status``; ``facts=`` a list of ``ui.fact``; ``sections=`` a list of ``ui.section``.
+
     The first of ``actions`` is the primary one, unless it is dangerous or a link; one further
-    action is a button, and two or more further actions go into a "More actions" menu.
-    ``tabs=True`` shows one section at a time.
+    action is a button, and two or more further actions go into a "More actions" menu. To open a
+    page from ``actions=``, use ``ui.button(label, to=page)``. ``tabs=True`` shows one section at
+    a time.
     """
-    return Record(title, load, status, tuple(facts), tuple(sections), bool(tabs), tuple(actions))
+    return Record(title, load, status, _many(facts), _many(sections), bool(tabs), _many(actions))
 
 
 @dataclasses.dataclass(eq=False)
@@ -274,4 +288,4 @@ class List(Kind):
 
 def list_(*, title: Any, load: Any = None, table: Any = None, actions: Any = ()) -> List:
     """Finding things: a table to search, sort and open from. ``actions`` are placed as on a record page."""
-    return List(title, load, table, tuple(actions))
+    return List(title, load, table, _many(actions))
