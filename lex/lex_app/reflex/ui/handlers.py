@@ -193,9 +193,7 @@ async def _shielded(wind_up: Any) -> Any:
         try:
             await asyncio.shield(task)
         except asyncio.CancelledError as exc:
-            if task.done():
-                break
-            cancelled = exc
+            cancelled = exc     # also when the wind-up had just finished: the caller was cancelled all the same
     if cancelled is not None:
         raise cancelled
     return task.result()
@@ -299,9 +297,10 @@ def action(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any
     the same user's other clicks wait. Changes reach the browser at each ``yield`` and at the
     end. On failure, what the browser was not yet shown is discarded and the user is told.
 
-    A body cannot run another handler of the state: ``self.reload()`` fails the action. Move the
-    shared work into a method whose name starts with ``_`` (``self._reload()``) and call it from
-    both handlers.
+    A body cannot run another handler of the state. Calling another action (``self.reload()``)
+    fails this one with an error that says so; calling a load or a job does nothing at all, and
+    only ``lex reflex check`` reports it. Move the shared work into a method whose name starts
+    with ``_`` (``self._reload()``) and call it from both handlers.
     """
 
     def decorate(fn: Callable[..., Any]) -> Any:

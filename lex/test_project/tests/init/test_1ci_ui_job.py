@@ -283,6 +283,7 @@ class TestCluster01ci_Job(TestCase):
                 return list(h.outcomes)
 
         pools.shutdown()                      # the next pool is built with the size below
+        self.addCleanup(pools.shutdown)       # and later tests get pools of the usual size again
         with patch.dict(os.environ, {"LEX_UI_JOB_THREADS": "1"}):
             outcomes = asyncio.run(full_pool())
         self.assertEqual((sorted(RAN), outcomes), (["x", "y"], []), "both jobs ran; neither failed")

@@ -351,10 +351,13 @@ one. A load started on a component's `on_mount` is not tied to the visit (below)
   (components spec). A handler that must never run twice checks its own precondition, or is written
   as a job.
 - A body cannot run another handler of its state. Reflex turns every public method into an event
-  handler, and calling one from a body only builds it: in an action, `self.reload()` fails the action
-  with an error that says so (in a load or a job, reaching a handler through `self` already raises).
+  handler, and calling one from a body only builds it. In an action, calling another action
+  (`self.reload()`) fails the action with an error that says so; calling a load or a job from an
+  action does nothing and raises nothing, because Reflex hands back a stand-in for a background
+  handler. In a load or a job, reaching a handler through `self` raises. `lex reflex check` reports
+  every `self.<handler>(...)` in a state's methods (6.7), so the check is what catches all of them.
   Work that two handlers share goes into a method whose name starts with `_` (`self._reload()`),
-  which both call; `lex reflex check` reports `self.<handler>(...)` in a state's methods (6.7).
+  which both call.
 
 **`@ui.job`**
 
@@ -667,6 +670,9 @@ only a job can do that.
 | Jobs with distinct arguments | Any signed-in user can queue any number of jobs with distinct arguments, as with any Reflex handler |
 | One process record per handler and first argument | Overlapping runs started by different worker processes can clear a spinner early, or keep a dead one until that worker restarts; data is unaffected |
 | The copy cost on thousands of rows | Not measured |
+| An action cancelled twice | Reflex cancels a handler once; only a shutdown that outlasts its drain timeout cancels again. A second cancellation can let the discard run while the body's thread is still finishing. Jobs and loads are unaffected: their body writes a working copy and their wind-up is shielded |
+| Two runs of one job whose arguments differ only in order | Keyword arguments collected by `**kwargs`, and keys inside a dictionary argument, are compared in the order given, so such a pair runs twice rather than once. Nothing is dropped |
+| Two quick mounts of one load that needs a permission lookup | With a cold permission cache the older run can take the state after the newer one, so the older parameters win until the next run |
 
 ---
 
