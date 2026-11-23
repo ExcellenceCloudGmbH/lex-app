@@ -93,9 +93,13 @@ def create_app():
     from lex.lex_app.reflex.ui.state import State as UiState
 
     _load_lazy_states()  # rfds.toast defines states; imported mid-event, they would register too late
+    structure = load_structure()
+    from lex.lex_app.reflex.ui.pages import declare
+
+    declare.finalize()  # the project's module is loaded: hand its @ui.page pages to lex-app
     register_page("/", [], [], "")
     app.add_page(
-        dashboard_page(load_structure()),
+        dashboard_page(structure),
         route="/",
         on_load=[LexAccessState.load, LexDashboardState.resolve, UiState.ui_open("/")],
     )
