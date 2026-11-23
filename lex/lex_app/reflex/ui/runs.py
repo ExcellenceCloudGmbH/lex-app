@@ -138,6 +138,13 @@ def running(handler: Any, arg: Any = None) -> Any:
     return active.length() > 0 if arg is None else active.contains(_as_text(arg))
 
 
+def loaded(handler: Any) -> Any:
+    """In a view: whether the load ``handler`` has finished since the page opened."""
+    from lex.lex_app.reflex.ui.state import State
+
+    return State.ui_loaded.get(key_of(handler), False)
+
+
 def failed(handler: Any) -> Any:
     """In a view: the failure message of ``handler``'s last run, or ''."""
     from lex.lex_app.reflex.ui.state import State

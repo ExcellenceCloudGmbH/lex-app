@@ -35,6 +35,7 @@
                             ``ui.signed_in`` -- needed to query the database directly
 ``ui.running/failed/        a handler's status, for views; ``ui.cancel`` is the
 progress_of/cancel``        event of a Cancel button
+``ui.loaded``               whether a load has finished since the page opened
 ``ui.testing``              run a handler in a unit test
 ==========================  =====================================================
 
@@ -46,11 +47,11 @@ from lex.lex_app.reflex.ui import testing
 from lex.lex_app.reflex.ui.guard import create, delete, edit, permission, read, signed_in
 from lex.lex_app.reflex.ui.handlers import action, custom, job, load
 from lex.lex_app.reflex.ui.results import Refuse, download, goto, progress, toast
-from lex.lex_app.reflex.ui.runs import cancel, failed, progress_of, running
+from lex.lex_app.reflex.ui.runs import cancel, failed, loaded, progress_of, running
 from lex.lex_app.reflex.ui.state import State
 
 __all__ = [
     "ApiError", "Refuse", "State", "action", "cancel", "create", "custom", "delete", "download", "edit",
-    "failed", "goto", "job", "load", "permission", "progress", "progress_of", "read", "running",
+    "failed", "goto", "job", "load", "loaded", "permission", "progress", "progress_of", "read", "running",
     "signed_in", "testing", "toast",
 ]

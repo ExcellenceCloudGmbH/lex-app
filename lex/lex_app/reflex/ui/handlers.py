@@ -621,6 +621,8 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                     message = outcome.message if outcome is not None and current else ""
                     if started:
                         runs.mark_finished(self, key, arg, error=message)
+                    if current and succeeded:
+                        self.ui_loaded = {**dict(self.ui_loaded), key: True}
                     elif message:
                         self.ui_failed = {**dict(self.ui_failed), key: message}
                     # Started on mount, or optional: the failure stays in place, in ui_failed.
@@ -678,7 +680,10 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                             else:
                                 runs.mark_started(self, key, arg)
                                 started = True
-                    page_bound = by_opener and not optional
+                        self.ui_loaded = {**dict(self.ui_loaded), key: False}
+                        entry = page_of(self._ui_page) if by_opener else None
+                        required_here = ident in {load_id(h) for h in (entry.required if entry else ())}
+                    page_bound = by_opener and required_here
                     if failure is not None:
                         raise failure
                     inv = context.Invocation(handler=key, kind="load", session=session,
