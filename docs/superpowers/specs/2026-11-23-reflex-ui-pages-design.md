@@ -449,6 +449,8 @@ time.
   hold rule 3 of 6.1.
 - `ui.empty` and `ui.tabs` were dropped in favour of `empty=` and `tabs=True`.
 - `ui.dashboard` was added, so a page that is not a route is marked as clearly as one that is.
+- A permission in `visible=` is written with the same values `requires=` takes, such as
+  `ui.edit(Fund)`; the conversation's sketch used a separate helper.
 
 ---
 
