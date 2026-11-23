@@ -17,7 +17,7 @@ LOOP_TIMEOUT_SECONDS = 60.0
 #: The body's helpers on ``self`` (``ui.State``). A field, method or computed var of a ``ui.State``
 #: may not take these names, nor may a page route's dynamic argument (Reflex makes it a field of
 #: every state, which it reads before the helper).
-RESERVED = ("user", "api", "params", "can", "state")
+RESERVED = ("user", "api", "params", "can", "state", "tab_id")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -86,6 +86,8 @@ class Session:
     api: Any = None
     #: An httpx-style async client for ``LexApi`` (tests).
     api_client: Any = None
+    #: The browser tab the event came from (Reflex's client token): ``self.tab_id``.
+    tab: str = ""
 
 
 def _params_of(state: Any) -> Params:
@@ -114,8 +116,12 @@ async def _default_resolve(state: Any) -> Session:
     async def permissions() -> list:
         return await auth.permissions_of(await token())
 
+    try:
+        tab = str(target.router.session.client_token or "")
+    except Exception:  # noqa: BLE001 - a state without router data comes from no tab
+        tab = ""
     return Session(user=User.from_profile(session.profile(target)), params=_params_of(target),
-                   token=token, permissions=permissions)
+                   token=token, permissions=permissions, tab=tab)
 
 
 _resolver: Callable[[Any], Awaitable[Session]] = _default_resolve

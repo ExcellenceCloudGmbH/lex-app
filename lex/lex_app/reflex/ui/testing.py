@@ -140,7 +140,7 @@ class Harness:
 
             return context.Session(user=context.User(id=user, name=user, username=user, email=f"{user}@example.test"),
                                    params=context.Params(params), token=token, permissions=permissions,
-                                   api=api if api is not None else _NoApi())
+                                   api=api if api is not None else _NoApi(), tab=self.token)
 
         self._previous = (context.set_resolver(resolve), results.RECORDER, handlers.OUTCOMES)
         results.RECORDER = self.results

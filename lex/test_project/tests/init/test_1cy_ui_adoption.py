@@ -35,7 +35,7 @@ class AdoptionDesk(ui.State):
 
     @ui.action
     def remember(self):
-        self.granted = [p["rsname"] for p in self.user.permissions]
+        self.granted = [p["rsname"] for p in self.user.permissions] + [f"tab:{self.tab_id}"]
 
 
 class TestCluster01cy_Adoption(SimpleTestCase):
@@ -75,14 +75,16 @@ class TestCluster01cy_Adoption(SimpleTestCase):
         Scenario 1.822: self.user.permissions.
         Given: a rows handler and an action that read self.user.permissions, and a user with two grants.
         When:  they run as that user; and the permissions are read outside a body.
-        Then:  both see the user's Keycloak permissions as Keycloak lists them; outside a handler
-               body reading them is refused.
+        Then:  both see the user's Keycloak permissions as Keycloak lists them, and the action sees
+               the browser tab it runs for (self.tab_id); outside a handler body reading the
+               permissions is refused.
         """
         grants = ["auth.Group:read", "auth.User:read"]
         (row,) = testing.rows(AdoptionDesk.items, grants=grants)
         self.assertEqual(row["by"], "auth.Group,auth.User", "a rows handler reads the user's permission list")
         ran = testing.run(AdoptionDesk, "remember", grants=grants)
-        self.assertEqual(sorted(ran.fields["granted"]), ["auth.Group", "auth.User"], "so does an action")
+        self.assertEqual(sorted(ran.fields["granted"]), ["auth.Group", "auth.User", "tab:tab1"],
+                         "so does an action, and self.tab_id is the browser tab it runs for")
         from lex.lex_app.reflex.ui.context import User
 
         with self.assertRaises(RuntimeError, msg="only inside a handler body"):

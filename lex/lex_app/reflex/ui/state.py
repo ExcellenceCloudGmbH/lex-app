@@ -100,6 +100,8 @@ class State(rx.State):
     params = property(lambda self: context.current().session.params)
     can = property(lambda self: context.current().can)
     state = property(lambda self: context.current().state_of)
+    #: The browser tab the handler runs for (Reflex's client token): for a project's own per-tab store.
+    tab_id = property(lambda self: context.current().session.tab)
 
     @rx.event
     async def ui_open(self, page: str):
