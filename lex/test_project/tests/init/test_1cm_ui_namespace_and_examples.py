@@ -159,7 +159,10 @@ class TestCluster01cm_Namespace(TestCase):
         }
         for name, obj in expected.items():
             self.assertIs(getattr(ui, name), obj, f"ui.{name}")
-        self.assertEqual(sorted(ui.__all__), sorted(expected), "nothing else is public")
+        pages = {"page", "dashboard", "record", "list", "section", "text", "fact", "status", "message", "table", "column",
+                 "button", "link", "each", "switch", "custom_block", "loaded", "PageError"}   # batch 1cu covers these
+        self.assertEqual(sorted(set(ui.__all__) - pages), sorted(expected),
+                         "nothing else is public beside the page names")
 
     # -- 1.784 ---------------------------------------------------------
     def test_1_784_the_scaffold_templates_are_written_on_the_layer(self) -> None:

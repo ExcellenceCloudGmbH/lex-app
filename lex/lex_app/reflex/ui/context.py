@@ -36,7 +36,7 @@ class User:
 
 
 class Params:
-    """The page's route and query values: ``params.section`` or ``params.get("w")``."""
+    """The page's route and query values: ``params.key``, ``params["key"]`` or ``params.get("w")``."""
 
     def __init__(self, values: Mapping[str, Any]):
         self._values = dict(values)
@@ -51,6 +51,12 @@ class Params:
             return self._values[name]
         except KeyError:
             raise AttributeError(f"the page has no parameter {name!r}; use params.get({name!r}) for an optional one") from None
+
+    def __getitem__(self, name: str) -> Any:
+        try:
+            return self._values[name]
+        except KeyError:
+            raise KeyError(f"the page has no parameter {name!r}; use params.get({name!r}) for an optional one") from None
 
     def __contains__(self, name: str) -> bool:
         return name in self._values

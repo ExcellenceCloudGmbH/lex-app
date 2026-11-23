@@ -2813,6 +2813,156 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.783 | from lex import ui has every name | each public name is the implementation's own object, ui.ApiError is lex-app's API error, and ui.testing is the test helper module |
+| 1.783 | from lex import ui has every name | each public name is the implementation's own object, ui.ApiError is lex-app's API error, and ui.testing is the test helper module; nothing else is public beside the page names, which batch 1cu covers |
 | 1.784 | The scaffold templates are written on the layer | none contains async, await, run_orm or lex_api (as a name or an attribute); every state with handlers is a ui.State; the object page and the overview use ui.State with @ui.load; neither the lex.ui check nor RFDS's strict lint reports an error or a warning on any of them; the object page shows its load's failure, else the loaded record, else a spinner; its load, started on mount, reports a refusal in place (in ui.failed, no redirect) |
 | 1.785 | The reference example is written on the layer | outside RFDS's own async export hook it contains no async, await, run_orm or lex_api; every state with handlers is a ui.State; the lex.ui check reports no error and neither check a warning; the overview's load, started on mount, reports its refusal in place on `/` (in ui.failed, no redirect), with the export menu offered only while the load has not failed; a viewer who may not read the featured model is refused by the load (no redirect) and by the export; a viewer who may read some models sees the same counts on screen and in the export, only for those models; the record dashboard reads the model `?model=` names, refuses a missing or unknown one -- in ui.failed, with no redirect -- and shows failure, else the record, else a spinner; the edit page is a form submitted to one action, with no per-keystroke handler, and `save` writes the submitted values |
+
+### Batch 1cn — lex.ui: a load says when it has finished; the page registry decides who owns the error page ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.786 – 1.787 |
+| Type | I |
+| Files covered | `lex/lex_app/reflex/ui/runs.py` (loaded), `ui/state.py` (ui_loaded, ui_open), `ui/handlers.py` (load) |
+| Test file | `lex/test_project/tests/init/test_1cn_ui_loaded.py` |
+| Test classes | `TestCluster01cn_Loaded` (1.786–1.787) |
+| Fixtures | a small page state with two loads, one registered as required and one as optional, driven through `ui.testing` |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.786 | A load says when it has finished | ui.loaded(handler) is a view value that is false until the load has finished and true afterwards; opening the page again puts it back to false before the load runs, so a revisit shows the skeleton and not the last visit's content |
+| 1.787 | Where a load is registered decides whether it owns the error page | a section's load that refuses puts its message in ui_failed and is not marked loaded, and neither the error page nor a redirect follows: the page stays, the section reports in place |
+
+### Batch 1co — lex.ui pages: parts, translated sentences, text / fact / status / message ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.788 – 1.790 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/parts.py`, `ui/pages/vocab.py` (text, fact, status, message) |
+| Test file | `lex/test_project/tests/init/test_1co_ui_page_parts.py` |
+| Test classes | `TestCluster01co_PageParts` (1.788–1.790) |
+| Fixtures | parts built on a stand-in page and slot, with a state value and RFDS's translation and formatters |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.788 | The sentence is the message | each sentence reaches RFDS's translation as both the id and the English default, with its values; a state value is shown as it is, untranslated; a tone outside the five is refused when the part is declared |
+| 1.789 | A value says what it is and who sees it | each kind goes through RFDS's own formatter for it; a whole number is shown without decimals and any other with two; money takes a currency; an unknown kind, and a currency without kind="money", are refused when the fact is declared. visible= takes a permission (RFDS's check, with the string a page's requires= gives), a list of them (all must hold), ui.signed_in (always shown), or a state value; anything else, and an empty list, is refused with what to write. No component of the vocabulary takes a styling argument |
+| 1.790 | A slot names what it refuses and what to write | the error names the page and the slot, says what it got, and says what to write instead; a single part and a list are both accepted; nothing gives an empty list |
+
+### Batch 1cp — lex.ui pages: links by page function; ui.link and ui.button ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.791 – 1.793 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/links.py`, `ui/pages/vocab.py` (link, button, menu_entry) |
+| Test file | `lex/test_project/tests/init/test_1cp_ui_page_links.py` |
+| Test classes | `TestCluster01cp_PageLinks` (1.791–1.793) |
+| Fixtures | two stand-in pages, one with a route argument and a declared query parameter |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.791 | An address is built from the page and its parameters | fixed values give a plain address; state values give an expression that joins them into it (a number is turned into text); a missing or unknown parameter is an error naming the linking page, the target page, its route and what it takes; a function that is not a page is refused with what to pass instead; a table's row link is the route with its one argument replaced by the row's key |
+| 1.792 | A link leads to a page, a record or an outside site | to= stays in the app; record= opens lex-app's own page of that record; href= takes only a full outside address and opens it as external; exactly one of the three is required; among actions the same link is drawn as a button |
+| 1.793 | A button runs a handler or opens a page | a handler button calls the handler on click; a to= button goes to the page's address; both or neither is refused; tone="danger" gives RFDS's danger intent; the first action of a page is the primary one; a menu entry carries the translated sentence and the same click |
+
+### Batch 1cq — lex.ui pages: sections with their own loading and failure; each, switch, custom_block ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.794 – 1.796 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/kinds.py` (section, states), `ui/pages/vocab.py` (each, switch, custom_block) |
+| Test file | `lex/test_project/tests/init/test_1cq_ui_page_sections.py` |
+| Test classes | `TestCluster01cq_PageSections` (1.794–1.796) |
+| Fixtures | sections, each, switch and custom_block built on a stand-in page and dashboard with a state value |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.794 | A section with a load shows its skeleton, then its content or its failure | without a load the section is its content; with one, the content is shown only once ui.loaded says so, before that the failure message when there is one, else a skeleton (a table's, when the section is one table); on a page nothing is mounted (the opener starts the load); on a dashboard the load starts when the section mounts; a section's title is a sentence and comes first. Facts that follow one another form one key-value list; a section inside a section, and empty= without a table, are refused |
+| 1.795 | each repeats and switch chooses | each item is rendered through the part the function returns; a function that returns a raw component is refused with what to return; switch shows the case matching the value and nothing otherwise; a case that is not a lex component is refused |
+| 1.796 | Anything else goes through the marked way out | directly a raw component is refused, with the page, the slot and what to write; through ui.custom_block with a reason it is accepted and built as it is, and an error names it by its public name; without a reason, or with something that is not a component, custom_block is refused. A section hands its empty= sentence to a copy of its table, never to the author's part |
+
+### Batch 1cr — lex.ui pages: ui.table over a model; rows that open a page ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.797 – 1.798 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/tables.py` (table, column), `lex/lex_app/reflex/data.py` |
+| Test file | `lex/test_project/tests/init/test_1cr_ui_page_tables.py` |
+| Test classes | `TestCluster01cr_PageTables` (1.797–1.798) |
+| Fixtures | a throwaway model and two stand-in pages, one with exactly one route argument |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.797 | ui.table(Model) is the server-paged table | it is RFDS's data table over lex-app's paged table state for that model, showing the named columns under the model's own field labels; something that is not a model is refused with what to pass |
+| 1.798 | Rows open a page, an empty table says so, a column can be relabelled | each row links to the page's address with the row's key in place of the page's argument; the empty sentence is translated and shown by RFDS's empty state; the column carries the given label; open= a page without exactly one argument is refused |
+
+### Batch 1cs — lex.ui pages: the record and list kinds ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.799 – 1.802 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/kinds.py` (record, list_, Kind) |
+| Test file | `lex/test_project/tests/init/test_1cs_ui_page_kinds.py` |
+| Test classes | `TestCluster01cs_PageKinds` (1.799–1.802) |
+| Fixtures | record and list pages built on stand-in pages with a state, a load and sections |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.799 | A record page places status, facts and sections and waits for its load | it is RFDS's object page: the title in the page header, the status and the facts in the header area, each section under its translated heading; the whole page sits behind the load's loaded check, with a skeleton and the failure in place before it; the kind reports its page load and its sections' loads separately; tabs=True with two sections uses RFDS's tab navigation |
+| 1.800 | A record page refuses what does not belong | each is a PageError naming the page and the slot and saying what to write -- also two sections with one title, a section hidden by a state value, a blank title, a title that is not words, two badges, and an action called Save (one fact or one section given without brackets is a list of one); a limit of RFDS's own (five tables on one page) names the page and quotes RFDS's sentence |
+| 1.801 | Actions are placed as the page header places them | the first action is the primary button -- unless it is dangerous, which is never primary; exactly one further action is a button; two or more further actions are entries of the "More actions" menu, with their translated sentences and their tone; a primary action with visible= stays primary; the author's part is not changed; something that is not a button or a link is refused |
+| 1.802 | A list page is a title, a table and its actions | it is RFDS's list report with the translated title, the table and the primary action; a table slot holding anything but a ui.table is refused |
+
+### Batch 1ct — lex.ui pages: @ui.page, @ui.dashboard, registration once the module is loaded ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.803 – 1.805 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/declare.py` (page, dashboard, finalize), `lex/lex_app/reflex/app.py` (create_app) |
+| Test file | `lex/test_project/tests/init/test_1ct_ui_page_declare.py` |
+| Test classes | `TestCluster01ct_PageDeclare` (1.803–1.805) |
+| Fixtures | stand-in pages declared in a scratch registry, the navigation and RFDS's page registry saved and restored |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.803 | A page is declared without being called and may link forward | decorating calls neither function and returns it unchanged, with what a link needs (route, its arguments, its declared query parameters); registration builds each page in lex-app's chrome under its route, with the permission from requires= as RFDS's permission string and the opener last in its load events. A route that does not start with "/", a requires= that is not one permission, a params= given as one string, and a second function at a route are refused when the page is declared |
+| 1.804 | Registration hands over the navigation entry and the loads | the navigation entry carries the kind's title; the kind's load is registered as the page's required load and the section's load as an optional one; registering twice adds nothing; a navigation page without a fixed title, a load= that is not a @ui.load handler, one load given twice, a page function that raises, a component refusing its arguments, something that is not a section in sections=, a function without return, and a function that does not return a kind, are each refused with the page named |
+| 1.805 | A dashboard starts its loads on mount and create_app registers the pages | the dashboard returns the built page, a component, whose load starts when it mounts (a dashboard has no opener); it is not a link target; on a model it sits under @classmethod and receives the model; two of its loads on one state are refused, since each clears its state as it starts; create_app loads the project's module, then registers the declared pages, before it adds the home page |
+
+### Batch 1cu — lex.ui pages: the namespace; a list and a record page end to end ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.806 – 1.807 |
+| Type | I |
+| Files covered | `lex/ui.py`, `lex/lex_app/reflex/ui/pages/` |
+| Test file | `lex/test_project/tests/init/test_1cu_ui_pages_namespace.py` |
+| Test classes | `TestCluster01cu_PagesNamespace` (1.806–1.807) |
+| Fixtures | a throwaway model; a list page and a record page registered and opened through `ui.testing` by a user with the grant |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.806 | One import gives the page kinds and the vocabulary | each name exists and is listed in __all__ -- except ui.list, the page kind, which a star import must not put in place of Python's list; no component or kind takes a styling argument |
+| 1.807 | A list and a record page build, register and load | both build without one raw component in the page functions; the list links its rows to the record page; opening the record page runs the page load and then the section's load, both end loaded, and the state holds what they read |

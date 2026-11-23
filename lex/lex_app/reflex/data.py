@@ -473,18 +473,24 @@ def _filters_identity(filters: Mapping[str, Any] | None) -> tuple:
 
 
 def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_field: str = "",
-                page_size: int = 25, filters: Mapping[str, Any] | None = None) -> type:
+                page_size: int = 25, filters: Mapping[str, Any] | None = None,
+                row_fields: Sequence[str] = ()) -> type:
     """The :class:`LexTableState` for one table of ``model`` (one class per distinct table).
 
     The table opens at ``page_size`` rows, which is also among the sizes the
-    user can pick.
+    user can pick. ``row_fields`` are kept in each row besides the columns'
+    own fields -- a primary key that is not shown, for the row's link.
     """
     sizes = tuple(sorted({25, 50, 100, int(page_size)}))
-    return _state_for(LexTableState, model, {
+    classvars: dict[str, Any] = {
         "table_columns": tuple(columns),
         "search_field": search_field,
         "page_size_options": sizes,
-    }, defaults={"page_size": int(page_size)}, identity=_filters_identity(filters))
+    }
+    if row_fields:
+        classvars["row_fields"] = tuple(row_fields)
+    return _state_for(LexTableState, model, classvars, defaults={"page_size": int(page_size)},
+                      identity=_filters_identity(filters))
 
 
 def _default_search_field(model: Any) -> str:
@@ -505,6 +511,7 @@ def lex_table(
     caption: Any = None,
     search_field: str | None = None,
     page_size: int = 25,
+    row_fields: Sequence[str] = (),
     **table_props: Any,
 ) -> rx.Component:
     """RFDS's ``data_table`` over a model, server-paged through the lex-app API as the user.
@@ -518,6 +525,7 @@ def lex_table(
         caption: The table's accessible caption (default: the model's plural name).
         search_field: The field the quick search matches (default: the first plain text field).
         page_size: Rows per page (RFDS shows at most 200).
+        row_fields: Fields kept in each row besides the columns' own (a key that is not shown).
         **table_props: Anything else ``rfds.data_table`` takes (``row_href``,
             ``on_row_click``, ``toolbar``, ``density``...).
     """
@@ -525,7 +533,8 @@ def lex_table(
 
     cols = list(columns) if columns is not None else lex_columns(model, fields)
     search = _default_search_field(model) if search_field is None else search_field
-    state = table_state(model, columns=cols, search_field=search, page_size=page_size, filters=filters)
+    state = table_state(model, columns=cols, search_field=search, page_size=page_size, filters=filters,
+                        row_fields=row_fields)
     table = rfds.data_table(
         state=state,
         columns=cols,

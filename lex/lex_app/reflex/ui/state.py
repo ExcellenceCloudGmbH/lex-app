@@ -75,6 +75,8 @@ class State(rx.State):
     #: Handler key -> the failure message of its last run.
     ui_failed: dict[str, str] = {}
     ui_progress: dict[str, float] = {}
+    #: Load key -> whether its last run finished; a page shows its skeleton until then.
+    ui_loaded: dict[str, bool] = {}
     ui_progress_message: dict[str, str] = {}
     #: Counts page openings in this tab; loads and jobs compare it with the visit they started in.
     ui_visit: int = 0
@@ -121,6 +123,11 @@ class State(rx.State):
         if entry is None or not _page_permitted(self, entry.requires):
             self._ui_pending_loads, self._ui_optional_loads, self._ui_started = [], [], []
             return None
+        from lex.lex_app.reflex.ui import runs as ui_runs
+
+        # A page shows its skeleton until its loads have finished in this visit.
+        self.ui_loaded = {**dict(self.ui_loaded),
+                          **{ui_runs.key_of(h): False for h in (*entry.required, *entry.optional)}}
         self._ui_pending_loads = [handlers.load_id(h) for h in entry.required]
         self._ui_optional_loads = [handlers.load_id(h) for h in entry.optional] if entry.required else []
         starting = list(entry.required or entry.optional)

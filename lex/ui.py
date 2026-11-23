@@ -19,6 +19,17 @@
                 build(part)
                 yield ui.progress(done / 10, "Building")
 
+    @ui.page("/funds/[key]", requires=ui.read(Fund))
+    def fund():
+        return ui.record(
+            title=FundState.name,
+            load=FundState.open,
+            facts=[ui.fact("Vintage", FundState.vintage)],
+            sections=[ui.section("Notes", ui.each(FundState.notes, lambda note: ui.text(note)),
+                                 load=FundState.load_notes)],
+            actions=[ui.button("Export", FundState.export)],
+        )
+
 ==========================  =====================================================
 ``ui.State``                base class of a page state: ``self.user``, ``self.api``,
                             ``self.params``, ``self.can()``, ``self.state()``
@@ -35,7 +46,20 @@
                             ``ui.signed_in`` -- needed to query the database directly
 ``ui.running/failed/        a handler's status, for views; ``ui.cancel`` is the
 progress_of/cancel``        event of a Cancel button
+``ui.loaded``               whether a load has finished since the page opened
 ``ui.testing``              run a handler in a unit test
+``@ui.page``                where a page lives: its route, navigation, who may see it
+``@ui.dashboard``           a page that is not a route (the project's ``main()``)
+``ui.record/list``          the page kinds: named slots, placed by lex-app (``ui.list`` is
+                            left out of ``import *``, which would hide Python's ``list``)
+``ui.section``              a titled part of a page; ``load=`` makes it load on its own
+``ui.text/fact/status/      what fills the slots; none takes a styling argument
+message/table/column/
+button/link``
+``ui.each/switch``          repetition and choice; ``visible=`` on every component
+                            decides what is shown, never what is allowed
+``ui.custom_block``         a raw component, marked for review with its reason
+``ui.PageError``            a page declared wrongly: says the page, the slot, what to write
 ==========================  =====================================================
 
 Import this module only in the Reflex process: it defines Reflex states.
@@ -45,12 +69,19 @@ from lex.lex_app.reflex.data import LexApiError as ApiError
 from lex.lex_app.reflex.ui import testing
 from lex.lex_app.reflex.ui.guard import create, delete, edit, permission, read, signed_in
 from lex.lex_app.reflex.ui.handlers import action, custom, job, load
+from lex.lex_app.reflex.ui.pages.declare import dashboard, page
+from lex.lex_app.reflex.ui.pages.kinds import list_ as list  # noqa: A001 - ui.list is the page kind
+from lex.lex_app.reflex.ui.pages.kinds import record, section
+from lex.lex_app.reflex.ui.pages.parts import PageError
+from lex.lex_app.reflex.ui.pages.tables import column, table
+from lex.lex_app.reflex.ui.pages.vocab import button, custom_block, each, fact, link, message, status, switch, text
 from lex.lex_app.reflex.ui.results import Refuse, download, goto, progress, toast
-from lex.lex_app.reflex.ui.runs import cancel, failed, progress_of, running
+from lex.lex_app.reflex.ui.runs import cancel, failed, loaded, progress_of, running
 from lex.lex_app.reflex.ui.state import State
 
 __all__ = [
-    "ApiError", "Refuse", "State", "action", "cancel", "create", "custom", "delete", "download", "edit",
-    "failed", "goto", "job", "load", "permission", "progress", "progress_of", "read", "running",
-    "signed_in", "testing", "toast",
+    "ApiError", "PageError", "Refuse", "State", "action", "button", "cancel", "column", "create", "custom",
+    "custom_block", "dashboard", "delete", "download", "each", "edit", "fact", "failed", "goto", "job",
+    "link", "load", "loaded", "message", "page", "permission", "progress", "progress_of", "read",
+    "record", "running", "section", "signed_in", "status", "switch", "table", "testing", "text", "toast",
 ]

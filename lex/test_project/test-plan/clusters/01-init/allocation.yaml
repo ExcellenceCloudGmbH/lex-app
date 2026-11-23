@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 785
+max_scenario: 807
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2199,3 +2199,116 @@ letters:
       form submitted to one action; its home dashboard reports a refusal in place and its
       export gives out only what the viewer may read. These tests fail if a template teaches
       async, `run_orm` or `lex_api` plumbing again.
+  cn:
+    title: 'lex.ui: a load says when it has finished; the page registry decides who owns the error page'
+    scenarios: 1.786-1.787
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      A page shows a skeleton until its load has finished, so the layer says `loaded` (false
+      before the load has started, true after it, and reset when the page is opened again),
+      and where a load is registered, not its own `optional=`, decides whether its failure
+      takes over the page (spec 5.2 and 6.4). These tests fail if a page flashes empty content before
+      its data arrives, or if a failed section replaces the whole page with the error page.
+  co:
+    title: 'lex.ui pages: parts, translated sentences, text / fact / status / message'
+    scenarios: 1.788-1.790
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      A page is made of parts that only describe what is on it; lex-app builds the components,
+      passes the author's sentence to RFDS's translation as both id and default, and refuses
+      anything outside the vocabulary with a message that says what to write (spec 6.5, 6.8). These
+      tests fail if a raw component slips into a slot, a label is left untranslated, or an
+      error does not say what to do.
+  cp:
+    title: 'lex.ui pages: links by page function; ui.link and ui.button'
+    scenarios: 1.791-1.793
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      A link points at a page function, never a route string; its parameters are checked
+      against the page's route and declared query parameters when the page is built, and the
+      error names both pages. A button that opens a page follows the same rule, and an outside
+      site is the only place an address is written out (spec 6.7). These tests fail if a link
+      builds a wrong address without complaint, or an in-app link opens a new tab.
+  cq:
+    title: 'lex.ui pages: sections with their own loading and failure; each, switch, custom_block'
+    scenarios: 1.794-1.796
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      The author never writes a loading, failed or empty branch: a section with its own load
+      shows a skeleton until that load has finished and its failure in place, and `ui.each`
+      and `ui.switch` cover repetition and choice, while anything else goes through
+      `ui.custom_block`, which must say why (spec 6.4, 6.6). These tests fail if content is
+      shown before its data, a failed section leaves a blank, or raw components enter a page
+      unmarked.
+  cr:
+    title: 'lex.ui pages: ui.table over a model; rows that open a page'
+    scenarios: 1.797-1.798
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.table(Model)` is lex-app's server-paged table through the API as the user, the same
+      component and look everywhere, with the columns named by field, a row that opens a page
+      named by its function, and a sentence for "nothing here" (spec 6.5, 6.7). These tests fail if
+      a table reads all rows into the browser, a row link is written as a string, or an empty
+      table has no words.
+  cs:
+    title: 'lex.ui pages: the record and list kinds'
+    scenarios: 1.799-1.802
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      A page kind fixes where everything sits, on RFDS's own floorplan for that shape (the
+      object page for one record, the list report for finding things), shows a skeleton until
+      the page's load has finished, places the actions as RFDS's page header does, and refuses
+      what does not belong in a slot (spec 6.3, 6.4). These tests fail if a page renders without its
+      data, a slot accepts anything, or actions land in the wrong place.
+  ct:
+    title: 'lex.ui pages: @ui.page, @ui.dashboard, registration once the module is loaded'
+    scenarios: 1.803-1.805
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      A page function returns a page kind and may name pages declared below it, so it is not
+      called when decorated; once the project's module is loaded, lex-app hands every declared
+      page its chrome, its navigation entry, its permission and its loads, and `@ui.dashboard`
+      builds the kind and starts its loads on mount (spec 6.2). These tests fail if a page
+      cannot link forward, a page's loads never start, or a navigation entry has no words.
+  cu:
+    title: 'lex.ui pages: the namespace; a list and a record page end to end'
+    scenarios: 1.806-1.807
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      A project writes `from lex import ui` and finds the page decorators, the kinds and the
+      vocabulary beside the handler layer, and nothing that takes a styling argument; a list
+      page that opens a record page builds, registers and loads exactly as a project's would
+      (spec 6.1, 6.5). These tests fail if a name is missing from the namespace, a styling argument
+      creeps into the vocabulary, or a page builds but never loads.
