@@ -77,6 +77,8 @@ def split(value: Any, *, handler: str) -> tuple[list, Progress | None]:
     out: list = []
     report: Progress | None = None
     for item in items:
+        if item is None:        # a helper that had nothing to say: `return [ui.toast("Saved"), self._read()]`
+            continue
         if isinstance(item, Progress):
             report = item
         elif isinstance(item, (Goto, Toast, Download)):

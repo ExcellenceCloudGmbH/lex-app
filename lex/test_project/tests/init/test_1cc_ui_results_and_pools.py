@@ -44,6 +44,8 @@ class TestCluster01cc_Results(TestCase):
         self.assertEqual(out, [results.Goto("/a"), results.Toast("Saved", "success")], "results keep their order")
         self.assertEqual(report, results.Progress(1.0, "Reading"), "progress is clamped")
         self.assertEqual(results.split(None, handler="h"), ([], None), "None is nothing")
+        self.assertEqual(results.split([results.toast("Saved"), None], handler="h")[0], [results.Toast("Saved", "info", "")],
+                         "a None inside a list is nothing too: a helper that had nothing to return")
         self.assertEqual(results.split(results.goto("/b", replace=True), handler="h")[0], [results.Goto("/b", True)])
         for bad in (lambda: results.toast("x", tone="loud"), lambda: results.goto(""), lambda: results.download()):
             with self.assertRaises(ValueError, msg="invalid values are refused when built"):
