@@ -204,7 +204,7 @@ class TestCluster01bw_TheExample(SimpleTestCase):
                         "calculation_log", "permission", "run_orm", "has_permission", "record_model", "LexUser"):
             self.assertIn(feature, imported, f"the example shows {feature}")
         for used in ("from lex import ui", "ui.State", "@ui.load", "@ui.action", "ui.Refuse", "ui.failed(",
-                     "rfds.form(", "self.api.", "self.can("):
+                     "rfds.form(", "ui.running(", "self.api.", "self.can("):
             self.assertIn(used, source, f"the example shows lex.ui's {used}")
         for used in ("ExportMixin", "export_menu", "rfds.bar_chart", "rfds.kpi_tile", "can("):
             self.assertIn(used, source, f"the example shows {used}")

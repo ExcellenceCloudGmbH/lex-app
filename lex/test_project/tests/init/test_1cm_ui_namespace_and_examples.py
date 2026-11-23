@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import contextlib
+import io
 import re
 import sys
 import tempfile
@@ -81,6 +83,20 @@ def _branch_order(page: str, state: str, content: str) -> list[int]:
     return [failure, message, start, page.find(content, max(start, 0)), page.find("RfdsSpinnerView", max(start, 0))]
 
 
+def _check_reports(paths: list[str]) -> tuple[list[str], int, str]:
+    """What ``lex reflex check`` reports on ``paths``, through the entry points ``scaffold.run_check`` uses.
+
+    Returns the lex.ui errors and warnings, RFDS's strict lint exit status, and its output.
+    """
+    from rfds.cli import main as rfds_main
+
+    findings = [f"{f.level}: {f.message}" for f in checks.find(paths) if f.level in ("error", "warning")]
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        status = rfds_main(["lint", "--strict", *paths])
+    return findings, status, output.getvalue()
+
+
 def _components(component) -> list:
     """``component`` and every component under it."""
     found = [component]
@@ -97,7 +113,7 @@ class _Api:
 
     def get(self, model, pk):
         self.calls.append(("get", model, pk))
-        return {"id": pk, "short_description": f"Record {pk}", "name": "Alpha"}
+        return {"id": pk, "short_description": f"Record {pk}", "name": "Alpha", "tags": [3, 5]}
 
     def update(self, model, pk, data):
         self.calls.append(("update", model, pk, data))
@@ -153,7 +169,8 @@ class TestCluster01cm_Namespace(TestCase):
         When:  their handler code is inspected and checked.
         Then:  none contains async, await, run_orm or lex_api (as a name or an attribute); every
                state with handlers is a ui.State; the object page and the overview use
-               ui.State with @ui.load; the lex.ui check finds no error in them; the object
+               ui.State with @ui.load; neither the lex.ui check nor RFDS's strict lint (what
+               `lex reflex check` runs) reports an error or a warning on any of them; the object
                page shows its load's failure, else the loaded record, else a spinner -- so
                nothing is framed before the record has arrived.
         """
@@ -168,8 +185,10 @@ class TestCluster01cm_Namespace(TestCase):
                 with tempfile.TemporaryDirectory() as folder:
                     path = Path(folder) / f"{block}.py"
                     path.write_text(source, encoding="utf-8")
-                    self.assertEqual(_errors(checks.find([str(path)])), [],
-                                     f"the lex.ui check must pass what {block} writes")
+                    findings, status, output = _check_reports([str(path)])
+                    self.assertEqual(findings, [], f"the lex.ui check reports nothing on what {block} writes")
+                    self.assertEqual(status, 0, f"RFDS's strict lint reports nothing on what {block} writes:\n{output}")
+                    self.assertIn("0 total", output, f"RFDS's strict lint finds nothing in {block}:\n{output}")
 
         module, source = scaffold.render("object_page", "Ticket", package="demo")
         rendered = types.ModuleType(f"lex_1cm_rendered_{module}")
@@ -189,7 +208,9 @@ class TestCluster01cm_Namespace(TestCase):
         When:  its handler code is inspected and checked.
         Then:  outside RFDS's own async export hook it contains no async, await, run_orm or
                lex_api; every state with handlers is a ui.State; the lex.ui check reports no
-               error. The overview's load is optional and its refusal shows in place on `/`;
+               error, and neither it nor RFDS's strict lint reports a warning. The overview's
+               load is optional and its refusal shows in place on `/`, where the export menu
+               is offered only while the load has not failed;
                a viewer who may not read the featured model is refused by the load (no
                redirect) and by the export; a viewer who may read some models sees the same
                counts on screen and in the export, only for those models. The record
@@ -210,6 +231,10 @@ class TestCluster01cm_Namespace(TestCase):
             self.assertIn("ui.State", [ast.unparse(base) for base in cls.bases], f"{cls.name} is a ui.State")
         self.assertEqual(_errors(checks.find([str(_EXAMPLE)])), [], "the lex.ui check must pass the example")
         self.assertIn("from lex import ui", source, "the example imports the layer as projects do")
+        findings, status, output = _check_reports([str(_EXAMPLE)])
+        self.assertEqual(findings, [], "the lex.ui check reports no error or warning on the example")
+        self.assertEqual(status, 0, f"RFDS's strict lint reports nothing on the example:\n{output}")
+        self.assertIn("0 total", output, f"RFDS's strict lint finds nothing in the example:\n{output}")
 
         with patch.object(example, "featured", lambda: Group), \
                 patch.object(example, "_project_models", lambda: [Group, Permission]):
@@ -220,6 +245,11 @@ class TestCluster01cm_Namespace(TestCase):
             failure = home.find("ui_failed")
             self.assertGreater(failure, -1, "main() reads the overview load's failure")
             self.assertGreater(home.find("rfds-inline-message", failure), -1, "and shows it in an inline message")
+            menu = home.find("rfds-export-menu")
+            condition = home[home.rfind("jsx(Fragment,{},(", 0, menu):menu]
+            self.assertIn("ui_failed", condition, "the export menu is shown under a condition on the load's failure")
+            self.assertFalse(condition.startswith("jsx(Fragment,{},(!("),
+                             "the export menu is shown when the load did not fail, not when it did")
 
             refused = testing.run(example.OverviewState, "open")
             self.assertTrue(refused.refused, "a viewer who may not read the featured model is refused")
@@ -243,6 +273,8 @@ class TestCluster01cm_Namespace(TestCase):
                 read = testing.run(example.RecordState, "open", api=api,
                                    params={"model": fund._meta.model_name, "pk": "7"})
                 self.assertEqual(read.outcomes, [], "the named record is read")
+                self.assertEqual(read.fields["record"]["tags"], [3, 5],
+                                 "a record keeps a field holding a list (many-to-many ids)")
                 self.assertEqual(api.calls, [("get", fund, "7")], "from the model ?model= names, not the featured one")
                 for params in ({"pk": "7"}, {"model": "nosuchmodel", "pk": "7"}, {"model": fund._meta.model_name}):
                     with self.subTest(params=params):
@@ -258,6 +290,8 @@ class TestCluster01cm_Namespace(TestCase):
             self.assertEqual(setters, [], "the edit page has no per-keystroke handler")
             edit_page = example.edit()
             self.assertNotIn("onChange", str(edit_page), "no input sends its keystrokes to the state")
+            self.assertIn('ui_running_rx_state_?.["EditState.save"]', str(edit_page),
+                          "the Save button shows the save in flight")
             submits = [[event.handler.fn for event in trigger.events] for component in _components(edit_page)
                        for name, trigger in component.event_triggers.items() if name == "on_submit"]
             self.assertEqual(submits, [[example.EditState.save.fn]], "the page's one form is submitted to EditState.save")

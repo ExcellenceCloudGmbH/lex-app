@@ -65,8 +65,8 @@ def ${func}():
 
 _OBJECT_PAGE = _HEADER + '''import reflex as rx
 import rfds
+import rfds.types
 from django.apps import apps
-from rfds.types import WireRow
 
 from lex import ui
 from lex.lex_app.reflex import lex_view
@@ -81,7 +81,7 @@ class ${state}(ui.State):
     """The ${model} the URL names, read through lex-app's API as the user."""
 
     pk: str = ""
-    record: WireRow = {}
+    record: dict[str, rfds.types.WireValue] = {}
 
     @ui.load(optional=True)
     def open(self):

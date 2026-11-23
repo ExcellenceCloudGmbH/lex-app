@@ -51,9 +51,9 @@ from typing import Any, ClassVar
 
 import reflex as rx
 import rfds
+import rfds.types
 from rfds.auth import can
 from rfds.patterns.exports import ExportMixin, export_menu
-from rfds.types import WireRow
 
 from lex import ui
 from lex.lex_app.reflex import (
@@ -106,7 +106,7 @@ def _resource(model: Any) -> str:
 # -- / : the overview ------------------------------------------------------------
 
 
-def _row_counts(readable: list) -> list[WireRow]:
+def _row_counts(readable: list) -> list[rfds.types.WireRow]:
     """What one viewer may see: how many rows each model in ``readable`` holds -- plain Django.
 
     The screen and the export both call it, so they always agree. A viewer who may not read the
@@ -124,7 +124,7 @@ class OverviewState(ExportMixin, ui.State):
     """The overview's figures, per viewer; the counts are also its CSV export."""
 
     export_entity: ClassVar[str] = "row-counts"
-    counts: list[WireRow] = []
+    counts: list[rfds.types.WireRow] = []
     total: int = 0
     readable: list[str] = []
 
@@ -141,6 +141,7 @@ class OverviewState(ExportMixin, ui.State):
 
     async def _export_rows(self, kind: str):
         # RFDS's ExportMixin awaits this hook outside lex.ui, so it asks has_permission, not self.can.
+        # The backstop: main() hides the menu from a viewer the load refused; this refuses the event.
         from lex.lex_app.reflex import has_permission, run_orm
 
         readable = [model for model in _project_models() if await has_permission(model, "read")(self)]
@@ -154,7 +155,9 @@ def main() -> rx.Component:
     problem = ui.failed(OverviewState.open)
     return rfds.page(
         rfds.page_header(title="Overview", path="/", subtitle=LexUser.display_name,
-                         secondary_actions=[export_menu(on_export=OverviewState.export, kinds=("csv",))]),
+                         # Offered only while the figures are shown; _export_rows refuses on the server too.
+                         secondary_actions=[rx.cond(problem == "",
+                                                    export_menu(on_export=OverviewState.export, kinds=("csv",)))]),
         rx.cond(problem != "", rfds.inline_message(problem, tone="warning")),
         rfds.grid(
             rfds.kpi_tile(label="Rows you may read", value=OverviewState.total, kind="count"),
@@ -323,7 +326,8 @@ def edit() -> rx.Component:
                 rfds.text_input(name="pk", label="Record id", required=True),
                 rfds.text_input(name="field_name", label="Field", required=True),
                 rfds.text_input(name="value", label="New value"),
-                rfds.form_actions(rfds.button("Save", intent="primary", type="submit")),
+                rfds.form_actions(rfds.button("Save", intent="primary", type="submit",
+                                              loading=ui.running(EditState.save))),
                 id="edit-record",
                 on_submit=EditState.save,
             ),
@@ -335,7 +339,7 @@ def edit() -> rx.Component:
 # -- a record dashboard, for the model's reflex_main ----------------------------------------
 
 
-def _facts(record: WireRow, limit: int = 6) -> list[dict[str, str]]:
+def _facts(record: dict[str, rfds.types.WireValue], limit: int = 6) -> list[dict[str, str]]:
     """The first few of a record's own fields, as label and text."""
     own = [(name, value) for name, value in record.items()
            if name not in ("id_field", "short_description") and not name.startswith("lex_reserved")
@@ -346,7 +350,7 @@ def _facts(record: WireRow, limit: int = 6) -> list[dict[str, str]]:
 class RecordState(ui.State):
     """The record ``?model=&pk=`` names, read through lex-app's API as the user."""
 
-    record: WireRow = {}
+    record: dict[str, rfds.types.WireValue] = {}
     facts: list[dict[str, str]] = []
 
     @ui.load(optional=True)
