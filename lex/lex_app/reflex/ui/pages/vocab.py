@@ -20,16 +20,23 @@ def _tone(tone: str) -> str:
     return tone
 
 
-def shape(value: Any, kind: str) -> Any:
+def _whole(value: Any) -> bool:
+    """Whether ``value`` is a whole number: an int, or a state value typed int."""
+    if isinstance(value, rx.Var):
+        return value._var_type is int
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def shape(value: Any, kind: str, currency: Any = None) -> Any:
     """``value`` shown as its ``kind``, formatted for the user's locale."""
     import rfds
 
     if kind == "text":
         return value
     if kind == "number":
-        return rfds.number(value, digits=0)
+        return rfds.number(value, digits=0 if _whole(value) else 2)
     if kind == "money":
-        return rfds.money(value)
+        return rfds.money(value, currency)
     if kind == "percent":
         return rfds.percent(value)
     if kind == "datetime":
@@ -48,7 +55,11 @@ class Text(Part):
 
 
 def text(sentence: Any, *, visible: Any = None, **values: Any) -> Text:
-    """A sentence or a paragraph. ``{name}`` in it is filled from ``values``."""
+    """A sentence or a paragraph, written in English; it is translated for the user.
+
+    ``{name}`` in it is filled from ``values`` (a value cannot be called ``visible``). A state
+    value is shown as it is.
+    """
     return Text(sentence, values, visible)
 
 
@@ -58,18 +69,28 @@ class Fact(Part):
     value: Any
     kind: str = "text"
     visible: Any = None
+    currency: Any = None
 
     def _render(self, ctx: Build) -> rx.Component:
         import rfds
 
-        return rfds.kv_item(say(self.label), shape(self.value, self.kind))
+        return rfds.kv_item(say(self.label), shape(self.value, self.kind, self.currency))
 
 
-def fact(label: Any, value: Any, *, kind: str = "text", visible: Any = None) -> Fact:
-    """A label and its value."""
+def fact(label: Any, value: Any, *, kind: str = "text", currency: Any = None, visible: Any = None) -> Fact:
+    """A label and its value.
+
+    ``kind`` says what the value is, and lex-app formats it for the user's locale:
+    ``"number"`` (a whole number without decimals, any other with two), ``"money"`` (in
+    ``currency=``, a code such as ``"EUR"`` or a state value; else the home currency),
+    ``"percent"`` (a ratio: 0.6 shows 60%), ``"datetime"`` (an instant with its time zone, shown
+    in the user's), or ``"text"``.
+    """
     if kind not in KINDS:
         raise ValueError(f"kind= must be one of {', '.join(KINDS)}; got {kind!r}")
-    return Fact(label, value, kind, visible)
+    if currency is not None and kind != "money":
+        raise ValueError(f"ui.fact(currency=) goes with kind=\"money\"; got kind={kind!r}")
+    return Fact(label, value, kind, visible, currency)
 
 
 @dataclasses.dataclass(eq=False)
@@ -103,7 +124,7 @@ class Message(Part):
 
 
 def message(sentence: Any, *, tone: str = "info", visible: Any = None, **values: Any) -> Message:
-    """A notice in place."""
+    """A notice in place. ``{name}`` in the sentence is filled from ``values`` (not ``tone`` or ``visible``)."""
     return Message(sentence, values, _tone(tone), visible)
 
 
@@ -124,12 +145,16 @@ class Link(Part):
             from lex.lex_app.reflex.embed import lex_app_base_url
 
             model, pk = self.record
-            return lex_app_base_url().rstrip("/") + "/" + model._meta.model_name + "/" + links.as_text(pk) + "/show", True
+            return (lex_app_base_url().rstrip("/") + "/" + model._meta.model_name + "/"
+                    + links.piece(ctx, "pk", pk) + "/show"), True
         return self.href, True
 
     def click(self, ctx: Build) -> Any:
         where, outside = self.target(ctx)
         return rx.redirect(where, is_external=outside)
+
+    def menu_entry(self, ctx: Build) -> rx.Component:
+        return menu_entry(ctx, self.label, self.click(ctx), self.visible)
 
     def _render(self, ctx: Build) -> rx.Component:
         import rfds
@@ -145,9 +170,16 @@ def link(label: Any, *, to: Any = None, record: Any = None, href: str | None = N
     """Goes somewhere: ``to=`` a page (with its parameters by name), ``record=(Model, pk)``, or ``href=`` an outside site."""
     given = [name for name, value in (("to", to), ("record", record), ("href", href)) if value is not None]
     if len(given) != 1:
-        raise ValueError("ui.link() takes exactly one of to=, record= or href=; got " + (", ".join(given) or "none"))
-    if href is not None and "://" not in href:
-        raise ValueError(f"ui.link(href=) is for an outside site (https://...); got {href!r}. Use to= for a page.")
+        raise ValueError("ui.link() takes exactly one of to=, record= or href=; got " + (", ".join(given) or "none")
+                         + ". Write `ui.link(\"Open\", to=some_page, key=...)`.")
+    if values and to is None:
+        raise ValueError(f"ui.link(): {', '.join(values)} can only be given with to=, as the page's parameters.")
+    if href is not None and not (isinstance(href, str) and href.startswith(("http://", "https://"))):
+        raise ValueError(f"ui.link(href=) is for an outside site and takes a fixed address starting with https://; "
+                         f"got {href!r}. For a page of the dashboards use to=. Mail and phone links are not supported yet.")
+    if record is not None and not (isinstance(record, tuple) and len(record) == 2 and hasattr(record[0], "_meta")
+                                   and record[1] is not None):
+        raise ValueError("ui.link(record=) takes (Model, pk): `record=(Fund, row.id)`.")
     return Link(label, to, values, record, href, visible)
 
 
@@ -165,6 +197,9 @@ class Button(Part):
     def click(self, ctx: Build) -> Any:
         return rx.redirect(links.href(ctx, self.to, self.values)) if self.to is not None else self.handler
 
+    def menu_entry(self, ctx: Build) -> rx.Component:
+        return menu_entry(ctx, self.label, self.click(ctx), self.visible, tone=self.tone, icon=self.icon)
+
     def _render(self, ctx: Build) -> rx.Component:
         import rfds
 
@@ -174,20 +209,24 @@ class Button(Part):
 
 def button(label: Any, handler: Any = None, *, to: Any = None, tone: str = "neutral", icon: str | None = None,
            visible: Any = None, **values: Any) -> Button:
-    """Runs a handler, or opens a page (``to=``)."""
+    """Runs a handler, or opens a page (``to=``, with the page's parameters by name)."""
     if (handler is None) == (to is None):
-        raise ValueError("ui.button() takes a handler or to=, one of them")
+        raise ValueError("ui.button() takes a handler or to=, one of them: `ui.button(\"Save\", State.save)` or "
+                         "`ui.button(\"New\", to=new_page)`.")
+    if values and to is None:
+        raise ValueError(f"ui.button(): {', '.join(values)} can only be given with to=, as the page's parameters.")
     return Button(label, handler, to, values, _tone(tone), icon, visible)
 
 
-def menu_entry(ctx: Build, label: Any, click: Any, visible: Any) -> rx.Component:
+def menu_entry(ctx: Build, label: Any, click: Any, visible: Any, *, tone: str = "neutral",
+               icon: str | None = None) -> rx.Component:
     """An action as an entry of the page header's "More actions" menu."""
-    import rfds
+    # The one place lex-app reaches into RFDS's private metadata: RFDS's page header keeps what it
+    # recognises as a menu entry by that metadata, and a ``visible=`` wrapper would otherwise hide it.
     from rfds.components.actions._common import get_meta, set_meta
+    from rfds.components.actions.menu import menu_item
 
     from lex.lex_app.reflex.ui.pages.parts import shown
 
-    from rfds.components.actions.menu import menu_item
-
-    entry = menu_item(say(label), on_select=click)
-    return set_meta(shown(entry, visible), **get_meta(entry))     # RFDS keeps what it recognises as a menu entry
+    entry = menu_item(say(label), on_select=click, icon=icon, tone="danger" if tone == "danger" else "neutral")
+    return set_meta(shown(ctx, entry, visible), **get_meta(entry))

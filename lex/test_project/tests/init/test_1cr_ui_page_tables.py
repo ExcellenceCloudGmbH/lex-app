@@ -48,12 +48,22 @@ class TestCluster01cr_PageTables(SimpleTestCase):
         built = str(tables.table(Group, columns=["name"]).build(CTX))
         self.assertIn("rfds-data-table", built, "RFDS's data table")
         self.assertIn("page_rows", built, "rows come a page at a time from the table's state")
-        self.assertIn("name", built, "the named column is shown")
+        self.assertIn('"Name"', built, "the named column is shown under the field's own label")
+        self.assertIn("auth.Group:read", built, "the table is shown only to users who may read the model")
+        self.assertNotIn("auth.Group:read", str(tables.table(Group, columns=["name"], visible=True).build(CTX)),
+                         "unless visible= says otherwise")
         with self.assertRaises(PageError) as wrong:
             tables.table([{"name": "a"}], columns=["name"]).build(CTX.at("table"))
         self.assertEqual(str(wrong.exception),
-                         "Page `groups`, slot `table`: `ui.table` got list, not a model.\n"
-                         "Pass a model class: `ui.table(Fund, columns=[...])`.")
+                         "Page `groups`, slot `table`: `ui.table` takes a model class and reads its rows from the "
+                         "server; it cannot show rows you hold yourself (a list, or a state value) yet.\n"
+                         "Pass a model: `ui.table(Fund, columns=[...])`.", "the refusal says what a table can show")
+        with self.assertRaises(PageError) as unknown:
+            tables.table(Group, columns=["nmae"]).build(CTX.at("table"))
+        self.assertEqual(str(unknown.exception),
+                         "Page `groups`, slot `table`: Group has no column nmae.\n"
+                         "Its columns are: id, name. A many-to-many field cannot be a column.",
+                         "a wrong column name lists the model's columns")
 
     # -- 1.798 ---------------------------------------------------------
     def test_1_798_rows_open_a_page_an_empty_table_says_so_and_a_column_can_be_relabelled(self) -> None:
@@ -66,15 +76,25 @@ class TestCluster01cr_PageTables(SimpleTestCase):
                column carries the given label; open= a page without exactly one argument is
                refused.
         """
-        built = str(tables.table(Group, columns=[tables.column("name", label="Group")], open=group_page,
+        built = str(tables.table(Group, columns=[tables.column("name", label="Team", kind="text")], open=group_page,
                                  empty="No groups yet.").build(CTX))
-        self.assertIn("/groups/", built, "rows link to the page")
+        self.assertIn('"/groups/"', built, "rows link to the page")
+        self.assertIn("encodeURIComponent", built, "with the row's key encoded into the address")
         self.assertIn('rfdsI18n.t("No groups yet.", "No groups yet."', built, "the empty sentence is a message")
-        self.assertIn("Group", built, "the column's own label is used")
+        self.assertIn('rfdsI18n.t("Team", "Team"', built,
+                      "the column's own label is used, and translated like every other sentence")
+        self.assertNotIn('"Name"', built, "in place of the field's label")
+        for bad in (dict(kind="colour"), dict(label=""), dict(currency="EUR")):
+            with self.subTest(bad=bad), self.assertRaises(ValueError, msg="a column is checked when it is declared"):
+                tables.column("name", **bad)
+        self.assertEqual(tables._RFDS_KIND["datetime"], "instant", "datetime is RFDS's instant")
 
         def no_argument():
             """A page without a route argument."""
 
         no_argument.__ui_page__ = links.info_of("/groups", "no_argument")
-        with self.assertRaises(PageError, msg="open= needs a page with exactly one argument"):
+        with self.assertRaises(PageError) as no_key:
             tables.table(Group, columns=["name"], open=no_argument).build(CTX)
+        self.assertEqual(str(no_key.exception),
+                         "Page `groups`: `open=` needs a page with exactly one route argument, got 'no_argument'.\n"
+                         "Declare the page as `@ui.page(\"/things/[key]\")`.", "open= needs a page with one argument")

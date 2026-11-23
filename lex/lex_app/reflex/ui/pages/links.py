@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import dataclasses
 import re
+import typing
 from typing import Any, Callable
+from urllib.parse import quote
 
 from lex.lex_app.reflex.ui.pages.parts import Build
 
@@ -21,8 +23,21 @@ class PageInfo:
     params: tuple[str, ...] = ()        # further query parameters the page accepts
 
 
+#: Words ``ui.link`` and ``ui.button`` take themselves: a page parameter of that name could not be passed.
+RESERVED = ("to", "record", "href", "visible", "label", "handler", "tone", "icon")
+
+
 def info_of(route: str, name: str, params: Any = ()) -> PageInfo:
-    return PageInfo(name, route, tuple(_ARGUMENT.findall(route)), tuple(params))
+    """What a link needs to know about the page at ``route``; refuses what a link could not address."""
+    if "[[" in route or "[..." in route:
+        raise ValueError(f"ui.page({route!r}): only plain route arguments are supported, such as "
+                         "\"/things/[key]\"; optional and catch-all arguments are not.")
+    arguments, params = tuple(_ARGUMENT.findall(route)), tuple(params)
+    taken = [word for word in (*arguments, *params) if word in RESERVED]
+    if taken:
+        raise ValueError(f"ui.page({route!r}): a page parameter cannot be named {', '.join(taken)}; "
+                         "`ui.link` and `ui.button` use that word themselves. Rename it.")
+    return PageInfo(name, route, arguments, params)
 
 
 def page_info(target: Any) -> PageInfo | None:
@@ -42,17 +57,18 @@ def href(ctx: Build, target: Callable[..., Any], values: dict) -> Any:
         problem = " and ".join(part for part in (
             f"is missing {', '.join(missing)}" if missing else "",
             f"does not accept {', '.join(unknown)}" if unknown else "") if part)
+        example = "".join(f", {name}=..." for name in info.arguments)
         raise ctx.fail(f"a link to page `{info.name}` ({info.route}) {problem}.",
-                       f"Page `{info.name}` takes: {accepted}.")
+                       f"Page `{info.name}` takes: {accepted}. Write `to={info.name}{example}`.")
     path: Any = ""
     rest = info.route
     for name in info.arguments:
         before, _, rest = rest.partition(f"[{name}]")
-        path = path + before + as_text(values[name])
+        path = path + before + piece(ctx, name, values[name])
     path = path + rest
     query = [(name, values[name]) for name in info.params if name in values]
     for index, (name, value) in enumerate(query):
-        path = path + ("?" if index == 0 else "&") + name + "=" + as_text(value)
+        path = path + ("?" if index == 0 else "&") + name + "=" + piece(ctx, name, value)
     return path
 
 
@@ -65,9 +81,21 @@ def row_href(ctx: Build, target: Callable[..., Any], row_key: str) -> str:
     return info.route.replace(f"[{info.arguments[0]}]", "{" + row_key + "}")
 
 
-def as_text(value: Any) -> Any:
-    """``value`` as a piece of an address: text, or a Var that gives text."""
+def piece(ctx: Build, name: str, value: Any) -> Any:
+    """``value`` as one piece of an address, encoded so that it stays one piece.
+
+    A value from data must not be able to change the page or add a parameter: a fixed value is
+    quoted here, a state value by the browser.
+    """
     import reflex as rx
 
-    return value.to_string(use_json=False) if isinstance(value, rx.Var) and value._var_type is not str else (
-        value if isinstance(value, rx.Var) else str(value))
+    instead = "Pass text or a number: `key=row.id`, `key=7`."
+    if isinstance(value, rx.Var):
+        kind = typing.get_origin(value._var_type) or value._var_type
+        if kind in (bool, list, dict, tuple, set):
+            raise ctx.fail(f"the value for `{name}` in a link is a {getattr(kind, '__name__', kind)} from the state.", instead)
+        text = value if kind is str else value.to_string(use_json=False)
+        return rx.Var(f"encodeURIComponent({text!s})", _var_data=text._get_all_var_data()).to(str)
+    if value is None or isinstance(value, bool) or str(value) in ("", ".", ".."):
+        raise ctx.fail(f"the value for `{name}` in a link is {value!r}.", instead)
+    return quote(str(value), safe="")

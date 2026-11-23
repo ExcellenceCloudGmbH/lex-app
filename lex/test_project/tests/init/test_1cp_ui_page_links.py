@@ -28,6 +28,7 @@ pytestmark = pytest.mark.init
 class LinksDesk(ui.State):
     fund: str = ""
     count: int = 0
+    tags: list[str] = []
 
     @ui.action
     def close(self):
@@ -72,17 +73,35 @@ class TestCluster01cp_PageLinks(SimpleTestCase):
         self.assertEqual(links.href(CTX, funds_page, {}), "/funds", "a page without arguments needs none")
         joined = str(links.href(CTX, fund_page, {"key": LinksDesk.fund}))
         self.assertIn('"/funds/"+', joined, "a state value is joined into the address")
-        self.assertIn("fund_rx_state_", joined)
+        self.assertIn("fund_rx_state_", joined, "the state value is in the address")
+        self.assertIn("encodeURIComponent(", joined, "and the browser encodes it, so it stays one piece")
+        self.assertEqual(links.href(CTX, fund_page, {"key": "a/b", "tab": "x&y=1"}), "/funds/a%2Fb?tab=x%26y%3D1",
+                         "a fixed value is encoded: it cannot change the page or add a parameter")
+        for bad in (None, True, "", ".."):
+            with self.subTest(value=bad), self.assertRaises(PageError) as refused:
+                links.href(CTX, fund_page, {"key": bad})
+            self.assertEqual(str(refused.exception),
+                             f"Page `home`: the value for `key` in a link is {bad!r}.\n"
+                             "Pass text or a number: `key=row.id`, `key=7`.", "a value that cannot be an address piece is refused")
+        with self.assertRaises(PageError, msg="a list from the state cannot be an address piece"):
+            links.href(CTX, fund_page, {"key": LinksDesk.tags})
+        for route in ("/docs/[[...slug]]", "/docs/[...slug]", "/posts/[[v]]"):
+            with self.subTest(route=route), self.assertRaises(ValueError, msg="only plain route arguments"):
+                links.info_of(route, "docs")
+        with self.assertRaises(ValueError) as reserved:
+            links.info_of("/funds/[to]", "fund", ["label"])
+        self.assertIn("cannot be named to, label", str(reserved.exception), "a parameter named like a link's own word is refused")
         self.assertIn("count_rx_state_", str(links.href(CTX, fund_page, {"key": LinksDesk.count})),
                       "a number from the state is accepted")
         with self.assertRaises(PageError) as wrong:
             links.href(CTX, fund_page, {"tab": "x", "page": 2})
         self.assertEqual(str(wrong.exception),
                          "Page `home`: a link to page `fund_page` (/funds/[key]) is missing key and does not accept "
-                         "page.\nPage `fund_page` takes: key, tab.", "the error names both pages and what the target takes")
+                         "page.\nPage `fund_page` takes: key, tab. Write `to=fund_page, key=...`.",
+                         "the error names both pages, what the target takes and what to write")
         with self.assertRaises(PageError) as not_a_page:
             links.href(CTX, lambda: None, {})
-        self.assertIn("Pass a function declared with `@ui.page`", str(not_a_page.exception))
+        self.assertIn("Pass a function declared with `@ui.page`", str(not_a_page.exception), "what to pass instead")
         self.assertEqual(links.row_href(CTX, fund_page, "id"), "/funds/{id}", "a row link fills the page's one argument")
         with self.assertRaises(PageError, msg="a page without exactly one argument cannot be opened from a row"):
             links.row_href(CTX, funds_page, "id")
@@ -102,7 +121,18 @@ class TestCluster01cp_PageLinks(SimpleTestCase):
         self.assertIn('rfdsI18n.t("Open", "Open"', inside, "the label is a sentence")
         record = vocab.link("Open in lex-app", record=(Group, 5))
         where, outside = record.target(CTX)
-        self.assertTrue(str(where).endswith("/group/5/show") and outside, f"record= leads to lex-app's record page: {where}")
+        self.assertTrue(str(where).endswith("/group/5/show"), f"record= leads to lex-app's record page: {where}")
+        self.assertTrue(outside, "which opens outside the dashboards")
+        self.assertIn("_blank", str(record.build(CTX)), "an outside link opens a new tab")
+        self.assertNotIn("_blank", inside, "a link to a page stays in the app")
+        for bad_record in (Group, (Group,), (Group, None), ("group", 5)):
+            with self.subTest(record=str(bad_record)[:20]), self.assertRaises(ValueError, msg="record= takes (Model, pk)"):
+                vocab.link("X", record=bad_record)
+        with self.assertRaises(ValueError, msg="parameters belong to to="):
+            vocab.link("Docs", href="https://example.org", key="7")
+        with self.assertRaises(ValueError) as mail:
+            vocab.link("Mail", href="mailto:a@example.org")
+        self.assertIn("Mail and phone links are not supported yet", str(mail.exception), "the refusal says so")
         docs = vocab.link("Docs", href="https://example.org/docs")
         self.assertEqual(docs.target(CTX), ("https://example.org/docs", True), "href= is an outside site")
         for bad in ({}, {"to": fund_page, "href": "https://example.org"}):
@@ -128,16 +158,30 @@ class TestCluster01cp_PageLinks(SimpleTestCase):
         """
         run = vocab.button("Close fund", LinksDesk.close)
         built = run.build(CTX)
-        self.assertIn('rfdsI18n.t("Close fund", "Close fund"', str(built))
+        self.assertIn('rfdsI18n.t("Close fund", "Close fund"', str(built), "the label is a sentence")
+        self.assertNotIn('"data-rfds-intent":"primary"', str(built), "a button is not primary unless the kind says so")
         self.assertIs(run.click(CTX), LinksDesk.close, "a handler button calls the handler")
         go = vocab.button("New fund", to=fund_page, key="new")
         self.assertIn("/funds/new", str(go.click(CTX)), "a to= button goes to the page")
         for bad in ((LinksDesk.close, {"to": funds_page}), (None, {})):
             with self.subTest(bad=str(bad)[:30]), self.assertRaises(ValueError, msg="a handler or to=, one of them"):
                 vocab.button("X", bad[0], **bad[1])
-        self.assertIn("danger", str(vocab.button("Delete", LinksDesk.close, tone="danger").build(CTX)), "danger intent")
+        danger = vocab.button("Delete", LinksDesk.close, tone="danger")
+        self.assertIn('"data-rfds-intent":"danger"', str(danger.build(CTX)), "danger intent")
         first = vocab.button("Save", LinksDesk.close)
         first.primary = True
-        self.assertIn("primary", str(first.build(CTX)), "the kind marks the first action primary")
-        entry = str(vocab.menu_entry(CTX, "Close fund", run.click(CTX), None))
-        self.assertIn('rfdsI18n.t("Close fund", "Close fund"', entry, "a menu entry is translated too")
+        self.assertIn('"data-rfds-intent":"primary"', str(first.build(CTX)), "the kind marks the first action primary")
+        with self.assertRaises(ValueError, msg="parameters belong to to="):
+            vocab.button("X", LinksDesk.close, key="7")
+        with self.assertRaises(PageError, msg="a to= button checks the page's parameters like a link"):
+            vocab.button("New", to=fund_page).click(CTX)
+        from rfds.components.actions._common import get_meta
+
+        entry = run.menu_entry(CTX)
+        self.assertIn('rfdsI18n.t("Close fund", "Close fund"', str(entry), "a menu entry is translated too")
+        self.assertEqual(get_meta(entry).get("kind"), "menu_item", "RFDS recognises it as a menu entry")
+        hidden = vocab.button("Close fund", LinksDesk.close, visible=LinksDesk.fund != "").menu_entry(CTX)
+        self.assertEqual(get_meta(hidden).get("kind"), "menu_item", "and still does when visible= wraps it")
+        self.assertIn("fund_rx_state_", str(hidden), "the wrapper carries the condition")
+        self.assertNotEqual(str(danger.menu_entry(CTX)).replace("Delete", "Close fund"), str(entry),
+                            "a dangerous action keeps its tone in the menu")

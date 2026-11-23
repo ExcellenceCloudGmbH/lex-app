@@ -31,6 +31,7 @@ pytestmark = pytest.mark.init
 class PartsDesk(ui.State):
     name: str = ""
     amount: float = 0.0
+    count: int = 0
     stamp: str = ""
     open_now: bool = False
 
@@ -64,6 +65,14 @@ class TestCluster01co_PageParts(SimpleTestCase):
         self.assertNotIn("rfdsI18n", shown, "and never translated")
         with self.assertRaises(ValueError, msg="a tone outside the five is refused"):
             vocab.status("Open", tone="blue")
+        with self.assertRaises(PageError) as no_words:
+            vocab.text(3).build(CTX)
+        self.assertEqual(str(no_words.exception),
+                         "Page `fund`: `ui.text` got `3` where its words belong.\n"
+                         "Write the sentence the user reads, in English: `ui.text(\"3 open requests\")`. "
+                         "A state value is shown as it is.", "something that is not a sentence is named, with what to write")
+        with self.assertRaises(PageError, msg="an empty label is not a sentence either"):
+            vocab.fact("", 1).build(CTX)
 
     # -- 1.789 ---------------------------------------------------------
     def test_1_789_a_value_says_what_it_is_and_who_sees_it(self) -> None:
@@ -71,30 +80,53 @@ class TestCluster01co_PageParts(SimpleTestCase):
         Scenario 1.789: kind= and visible=.
         Given: facts of each kind, and parts with visible= a permission and a state value.
         When:  they are built.
-        Then:  money, number, percent and datetime go through RFDS's formatters (formatted for
-               the user's locale); an unknown kind is refused when the fact is declared;
-               visible=ui.edit(Model) shows the part only to a user holding that permission
-               (RFDS's permission check, the same string a page's requires= gives);
-               visible=<state value> shows it while the value holds; no component of the
-               vocabulary takes a styling argument.
+        Then:  each kind goes through RFDS's own formatter for it; a whole number is shown
+               without decimals and any other with two; money takes a currency; an unknown
+               kind, and a currency without kind="money", are refused when the fact is
+               declared. visible= takes a permission (RFDS's check, with the string a page's
+               requires= gives), a list of them (all must hold), ui.signed_in (always shown),
+               or a state value; anything else, and an empty list, is refused with what to
+               write. No component of the vocabulary takes a styling argument.
         """
-        money = str(vocab.fact("Net asset value", PartsDesk.amount, kind="money").build(CTX))
-        plain = str(vocab.fact("Name", PartsDesk.name).build(CTX))
+        money = str(vocab.fact("Net asset value", PartsDesk.amount, kind="money", currency="EUR").build(CTX))
         self.assertIn('rfdsI18n.t("Net asset value"', money, "the label is a sentence")
-        self.assertNotEqual(money.replace("Net asset value", "Name").replace("amount", "name"), plain,
-                            "a money value is rendered through a formatter, not as the bare value")
-        for kind, value, name in (("number", PartsDesk.amount, "amount"), ("percent", PartsDesk.amount, "amount"),
-                                  ("datetime", PartsDesk.stamp, "stamp")):
+        self.assertIn('"data-slot":"rfds-money"', money, "money goes through RFDS's money formatter")
+        self.assertIn("EUR", money, "in the currency given")
+        for kind, value, mark in (("number", PartsDesk.amount, "rfds-number"), ("percent", PartsDesk.amount, "rfds-percent"),
+                                  ("datetime", PartsDesk.stamp, "rfds-timestamp"), ("money", PartsDesk.amount, "rfds-money")):
             with self.subTest(kind=kind):
-                self.assertIn(f"{name}_rx_state_", str(vocab.fact("X", value, kind=kind).build(CTX)), f"kind={kind} builds")
+                self.assertIn(f'"data-slot":"{mark}"', str(vocab.fact("X", value, kind=kind).build(CTX)),
+                              f"kind={kind} uses RFDS's formatter for it")
+        self.assertNotIn("data-slot\":\"rfds-number", str(vocab.fact("Name", PartsDesk.name).build(CTX)),
+                         "text is shown as it is")
+        self.assertEqual((vocab._whole(3), vocab._whole(PartsDesk.count), vocab._whole(2.5), vocab._whole(PartsDesk.amount),
+                          vocab._whole(True)), (True, True, False, False, False),
+                         "a whole number is an int or a state value typed int")
+        whole, decimal = (str(vocab.shape(value, "number")) for value in (PartsDesk.count, PartsDesk.amount))
+        self.assertNotEqual(whole.replace("count", "amount"), decimal, "whole numbers and decimals are formatted differently")
         with self.assertRaises(ValueError, msg="an unknown kind is refused"):
             vocab.fact("X", 1, kind="colour")
+        with self.assertRaises(ValueError, msg="a currency goes with money only"):
+            vocab.fact("X", 1, kind="number", currency="EUR")
 
         guarded = str(vocab.text("Editors only", visible=ui.edit(Group)).build(CTX))
         self.assertIn("auth.Group:edit", guarded, "a permission in visible= is checked with the page's permission string")
         stateful = str(vocab.text("While open", visible=PartsDesk.open_now).build(CTX))
         self.assertIn("open_now_rx_state_", stateful, "a state value in visible= conditions the part")
-        self.assertNotIn("open_now_rx_state_", str(vocab.text("While open").build(CTX)), "and only when given")
+        plain_text = str(vocab.text("While open").build(CTX))
+        self.assertNotIn("open_now_rx_state_", plain_text, "and only when given")
+        both = str(vocab.text("While open", visible=[ui.read(Group), ui.edit(Group)]).build(CTX))
+        self.assertIn("auth.Group:read", both, "a list of permissions: the first must hold")
+        self.assertIn("auth.Group:edit", both, "and the second")
+        self.assertEqual(str(vocab.text("While open", visible=ui.signed_in).build(CTX)), plain_text,
+                         "every user of the dashboards is signed in: always shown")
+        with self.assertRaises(PageError) as wrong:
+            vocab.text("While open", visible="editors").build(CTX)
+        self.assertEqual(str(wrong.exception),
+                         "Page `fund`: `visible=` got `'editors'`.\nGive a permission -- `visible=ui.edit(Model)` -- "
+                         "or a state value: `visible=State.is_open`.", "anything else is refused with what to write")
+        with self.assertRaises(PageError, msg="an empty list is refused, not shown to everyone"):
+            vocab.text("While open", visible=[]).build(CTX)
 
         for factory in (vocab.text, vocab.fact, vocab.status, vocab.message):
             with self.subTest(component=factory.__name__):
@@ -121,6 +153,10 @@ class TestCluster01co_PageParts(SimpleTestCase):
         with self.assertRaises(PageError) as other:
             parts.take(ctx, [vocab.status("Open")], (vocab.Fact,), instead)
         self.assertIn("got `ui.status`", str(other.exception), "another lex component is named by its ui name")
+        with self.assertRaises(PageError) as nothing:
+            parts.take(ctx, [None], (vocab.Fact,), instead)
+        self.assertIn("got nothing (`None`).", str(nothing.exception), "a None inside the list is named as nothing")
+        self.assertTrue(parts.called("x" * 200).endswith("...`"), "a long value is cut before its closing mark")
         one = vocab.fact("A", 1)
         self.assertEqual((parts.take(ctx, one, (vocab.Fact,), instead), parts.take(ctx, [one], (vocab.Fact,), instead),
                           parts.take(ctx, None, (vocab.Fact,), instead)), ([one], [one], []),
