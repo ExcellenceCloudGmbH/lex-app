@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import dataclasses
 import threading
 import uuid
@@ -138,3 +140,70 @@ def cancel(handler: Any) -> Any:
     from lex.lex_app.reflex.ui.state import State
 
     return State.ui_cancel(key_of(handler))
+
+
+# -- runs whose process is gone ---------------------------------------------------------
+
+HEARTBEAT_SECONDS = 10
+HEARTBEAT_TTL_SECONDS = 30
+
+
+def _redis() -> Any:
+    """Reflex's Redis client when one is configured, else ``None``."""
+    try:
+        from reflex.utils import prerequisites
+
+        return prerequisites.get_redis()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _heartbeat_key(boot: str) -> str:
+    return f"lex:ui:boot:{boot}"
+
+
+async def alive(boot: str) -> bool:
+    """Whether the backend process ``boot`` is still running."""
+    if boot == BOOT:
+        return True
+    redis = _redis()
+    if redis is None:
+        return False  # one process holds every tab: another boot id is a process that ended
+    try:
+        return bool(await redis.exists(_heartbeat_key(boot)))
+    except Exception:  # noqa: BLE001 - Redis unreachable: do not clear what may still run
+        return True
+
+
+async def sweep(s: Any, alive: Any = None) -> int:
+    """Clear the marks of runs whose process is gone; returns how many. Call under the lock."""
+    check = alive or globals()["alive"]
+    cleared = 0
+    for entry, boot in list(dict(s._ui_boots).items()):
+        if boot == BOOT or await check(boot):
+            continue
+        key, _, arg = entry.rpartition("|")
+        mark_finished(s, key, arg)
+        cleared += 1
+    return cleared
+
+
+@contextlib.asynccontextmanager
+async def heartbeat(app: Any):
+    """A lifespan task: while the backend runs, keep this process's heartbeat in Redis."""
+
+    async def beat() -> None:
+        while True:
+            redis = _redis()
+            if redis is not None:
+                try:
+                    await redis.set(_heartbeat_key(BOOT), "1", ex=HEARTBEAT_TTL_SECONDS)
+                except Exception:  # noqa: BLE001 - a missed beat only delays a sweep
+                    pass
+            await asyncio.sleep(HEARTBEAT_SECONDS)
+
+    task = asyncio.ensure_future(beat())
+    try:
+        yield
+    finally:
+        task.cancel()

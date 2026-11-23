@@ -68,6 +68,9 @@ class State(rx.State):
 
         self.ui_visit += 1
         self.ui_error = {}
+        from lex.lex_app.reflex.ui import runs
+
+        await runs.sweep(self)
         self._ui_page = page
         self._ui_reset = []
         entry = handlers.page_of(page)

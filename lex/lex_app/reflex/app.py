@@ -83,6 +83,9 @@ def create_app():
     app.add_middleware(DjangoConnectionMiddleware())
     app.add_middleware(GrantsRefreshMiddleware())
     devproxy.install(app)
+    from lex.lex_app.reflex.ui import runs as ui_runs
+
+    app.register_lifespan_task(ui_runs.heartbeat)
     from lex.lex_app.reflex.ui.handlers import register_page
     from lex.lex_app.reflex.ui.state import ERROR_ROUTE, error_page
     from lex.lex_app.reflex.ui.state import State as UiState
