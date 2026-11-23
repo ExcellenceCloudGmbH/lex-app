@@ -198,7 +198,8 @@ class TestCluster01cw_RowsTable(SimpleTestCase):
         Given: the table of 1.812, with amounts in two currencies, filtered to persons.
         When:  the totals are computed and the table is exported.
         Then:  there is one totals row per currency over all matching rows; the export has the
-               columns' labels and each amount's currency, the matching rows only, and tags joined.
+               columns' labels and each amount's currency, the matching rows only, and tags joined;
+               each exported column keeps its own cell type.
         """
         state = build_people_table()
 
@@ -217,6 +218,9 @@ class TestCluster01cw_RowsTable(SimpleTestCase):
         self.assertEqual(labels, ["Name", "Roles", "Amount", "Currency", "Kind"],
                          "the export's columns are the table's labels, with each amount's currency beside it")
         self.assertEqual(lines[0]["Currency"], "EUR", "so amounts in two currencies are told apart in the file")
+        state = build_people_table()
+        self.assertEqual(state.export_kinds, {"Amount": "amount"},
+                         "each exported column keeps its own cell type, the currency column added after money included")
         self.assertEqual([line["Name"] for line in lines], ["Ada Example", "Bob Example"], "it exports the matching rows")
         self.assertEqual(lines[0]["Roles"], "Director; Signatory", "tags are joined in a file")
 

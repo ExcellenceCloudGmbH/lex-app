@@ -157,7 +157,9 @@ class TestCluster01cx_TableChecks(SimpleTestCase):
                included); the toolbar has a search box; a filter offers the field's choices after
                "All"; two tables narrowed differently never share a state; a column keeps its
                field's kind; the field a row button reads reaches the browser; building the same
-               table twice finds one state class.
+               table twice finds one state class; its state takes only its where= keys and its own
+               filters, while lex_table's own state still filters on any field; search covers a
+               shown text column only.
         """
         component = ui.table(Group, columns=["name"], where={"id": CheckDesk.group}, search=True, visible=True).build(CTX)
         mount = str(mount_of(component))
@@ -187,3 +189,9 @@ class TestCluster01cx_TableChecks(SimpleTestCase):
         self.assertEqual(len(data._STATE_CACHE), before, "building a page twice finds one state class")
         state = next(cls for cls in data._STATE_CACHE.values() if "email" in getattr(cls, "row_fields", ()))
         self.assertIn("email", state.row_fields, "the field a row button reads reaches the browser")
+        plain = data.table_state(Group, columns=[{"field": "name"}])
+        self.assertIsNone(plain.choice_fields, "lex_table's own state still filters on any field, as before")
+        narrowed_state = next(cls for cls in data._STATE_CACHE.values() if getattr(cls, "scope_fields", None) == ("id",))
+        self.assertEqual(narrowed_state.choice_fields, (), "a ui.table without filters= accepts no filter from the browser")
+        with self.assertRaises(PageError, msg="a model table searches a shown text column, or refuses search"):
+            ui.table(User, columns=["date_joined"], search=True).build(CTX)

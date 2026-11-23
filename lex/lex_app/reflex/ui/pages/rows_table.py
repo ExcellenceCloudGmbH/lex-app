@@ -289,8 +289,10 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
 
     async def _export_rows(self, kind: str) -> tuple[list[str], list[dict], dict[str, str]]:
         cls = type(self)
-        if not cls.exportable:                    # no export menu: nothing to export
-            return [], [], {}
+        if not cls.exportable:                    # no export menu: no export
+            from rfds.errors import RFDSUserError
+
+            raise RFDSUserError("This table cannot be exported.")
         rows = await self._all(self.query)
         found = self._matching(rows, sort=list(self.sort), filters=dict(self.filters), query=self.query)
         labels = [label for _, label in cls.export_columns]
@@ -302,8 +304,9 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
                 line[label] = "; ".join(value) if isinstance(value, list) else value
             out.append(line)
         about = {"Search": self.query} if self.query else {}
-        if self.chosen:
-            about["Filters"] = "; ".join(f"{name} = {value}" for name, value in sorted(self.chosen.items()))
+        if self.filters:
+            about["Filters"] = "; ".join(f"{name} = {dict(spec).get('value', '')}"
+                                         for name, spec in sorted(dict(self.filters).items()))
         return labels, out, about
 
 

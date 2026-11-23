@@ -11,7 +11,6 @@ import reflex as rx
 from lex.lex_app.reflex.ui.pages import links
 from lex.lex_app.reflex.ui.pages.parts import Build, Part, called, say
 
-#: What a column's kind is called in RFDS's column spec; the last four are drawn by lex-app.
 #: What a column's kind is called in RFDS's column spec; status, tag and tags are drawn by lex-app.
 _RFDS_KIND = {"text": "text", "number": "number", "money": "money", "percent": "percent", "date": "date",
               "datetime": "instant", "status": "text", "tag": "text", "tags": "text"}
@@ -133,13 +132,14 @@ class Table(Part):
     def _columns(self) -> list[Column]:
         return [c if isinstance(c, Column) else Column(str(c)) for c in self.columns]
 
-    def _check(self, ctx: Build, cols: list[Column]) -> None:
+    def _check(self, ctx: Build, cols: list[Column], first_kind: str | None = None) -> None:
         keys = [c.key for c in cols]
         if not cols:
             raise ctx.fail("the table has no columns.", "Name them: `columns=[\"name\", ui.column(\"amount\", kind=\"money\")]`.")
         first = cols[0]
-        if first.kind in _DRAWN or first.show is not None or first.open is not None:
-            what = "a `show=` column" if first.show else "an `open=` column" if first.open else f"a `{first.kind}` column"
+        if first.kind in _DRAWN or first.show is not None or first.open is not None or first_kind in ("status",):
+            what = ("a `show=` column" if first.show else "an `open=` column" if first.open
+                    else f"a `{first.kind or first_kind}` column")
             raise ctx.fail(f"the first column, `{first.key}`, is {what}.",
                            "The first column names the row and is the row's link, so it is shown as plain text. "
                            "Put a plain column first, such as the name.")
@@ -289,8 +289,8 @@ class Table(Part):
             if field is not None and not (field.choices or field.get_internal_type() == "BooleanField"):
                 raise ctx.fail(f"`filters=` names {name}, whose values are not a fixed set.",
                                "A model table filters on fields with choices, or yes/no fields; search the others.")
-        self._check(ctx, cols)
         base = {c["field"]: dict(c) for c in data.lex_columns(model, [c.key for c in cols])}
+        self._check(ctx, cols, first_kind=base.get(cols[0].key, {}).get("kind") if cols else None)
         specs = self._specs(ctx, cols, base)
         key = model._meta.pk.name
         props: dict[str, Any] = {"row_key": key, "row_fields": (key,)}     # the key stays in each row, shown or not
@@ -305,7 +305,12 @@ class Table(Part):
         actions = self._row_actions(ctx)
         if actions is not None:
             props["row_actions"] = actions
-        search_field = "" if not self.search else data._default_search_field(model)
+        texts = [c.key for c in cols if c.kind in (None, "text") and c.show is None
+                 and known[c.key].get_internal_type() in ("CharField", "TextField") and not known[c.key].choices]
+        if self.search and not texts:
+            raise ctx.fail("`search=True`, and the table has no text column to search.",
+                           "Add a text column, or leave search out.")
+        search_field = texts[0] if self.search else ""     # a shown column: the browser never searches a hidden one
         used: set[str] = {key}
         for c in cols:
             if c.show is not None:
@@ -313,7 +318,8 @@ class Table(Part):
         if self.row_actions is not None:
             used |= _record(self.row_actions)[1]
         state = data.table_state(model, columns=specs, search_field=search_field, filters=self.where,
-                                 row_fields=tuple(sorted(used)), choice_fields=tuple(self.filters))
+                                 row_fields=tuple(sorted(used)), choice_fields=tuple(self.filters),
+                                 scope_fields=tuple(dict(self.where or {})))
         from lex.lex_app.reflex.ui.pages import rows_table
 
         options = {}
@@ -372,6 +378,7 @@ class Table(Part):
             fields |= _record(self.row_actions)[1]
         fields |= set(open_fields)
         money = [c for c in cols if c.kind == "money" and c.currency and not _CODE.fullmatch(c.currency)]
+        kinds_by_key = {c.key: c.kind for c in cols}
         totals_spec = tuple({**spec, "aggregate": dict(self.totals or {}).get(spec["field"], "none")}
                             for spec in specs) if self.totals else ()
         state = rows_table.state_for(
@@ -381,8 +388,8 @@ class Table(Part):
             search_fields=tuple(c.key for c in cols if c.kind in ("text", None, "status", "tag") and c.show is None),
             totals_spec=totals_spec, totals_currency=money[0].currency if money and self.totals else "",
             export_columns=_export_columns(cols),
-            export_kinds={label: _EXPORT_KIND[c.kind] for c, label in zip(cols, (lbl for _, lbl in _export_columns(cols)))
-                          if c.kind in _EXPORT_KIND},
+            export_kinds={label: _EXPORT_KIND[kinds_by_key[field]] for field, label in _export_columns(cols)
+                          if kinds_by_key.get(field) in _EXPORT_KIND},
             query_param="q" if (self.search and ctx.page_search and ctx.route) else "",
             searchable=bool(self.search), exportable=bool(self.export),
             entity=self.source.fn.__name__.replace("_", " "))
@@ -485,7 +492,7 @@ def table(source: Any, *, columns: Any = (), key: str | None = None, where: dict
     if isinstance(filters, str):
         raise TypeError(f"ui.table(filters=) takes a list of column names: filters=[{filters!r}]")
     if totals is not None and not isinstance(totals, dict):
-        raise TypeError("ui.table(totals=) takes {column: \"sum\" or \"count\"}: totals={\"amount\": \"sum\"}")
+        raise TypeError("ui.table(totals=) takes {column: \"sum\"}: totals={\"amount\": \"sum\"}")
     if where is not None and not isinstance(where, dict):
         raise TypeError("ui.table(where=) takes {field: value}: where={\"fund\": FundState.id}")
     if row_actions is not None and not callable(row_actions):

@@ -352,9 +352,15 @@ def rows(handler: Any, *, user: str = "tester", grants: Any = (), params: dict |
         from lex.lex_app.reflex.ui.pages import rows_table
         from lex.lex_app.reflex.ui.pages.parts import Build
 
+        if table.source is not handler:
+            raise ValueError("ui.testing.rows(handler, table=...): the table must read that handler")
         table.build(Build(page="test", caption="Rows"))
         cls = rows_table._CACHE_BY_TABLE[id(table)]
         wired = cls._wire(handler.fn.__ui_key__, found)
+        refused = [name for name in (filters or {}) if name not in cls.choice_fields]
+        if refused:
+            raise ValueError(f"the table has no filter {', '.join(refused)}: its filters are "
+                             f"{', '.join(cls.choice_fields) or 'none'}")
         picked = {name: {"op": "eq", "value": value} for name, value in (filters or {}).items()}
         return cls._matching(wired, sort=[], filters=picked, query=search)
     text = "" if rows_mod.takes_search(handler) else search
