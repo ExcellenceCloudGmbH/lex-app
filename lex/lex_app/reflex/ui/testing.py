@@ -212,22 +212,32 @@ class Harness:
             return
         await (await self.send(rx.State, "set_is_hydrated", _router_data=_router_data(url), value=True))
 
-    async def mount(self, state_cls: Any, handler: str, *, url: str = "/", route: str | None = None,
-                    **arguments: Any) -> Any:
+    async def mount(self, state_cls: Any, handler: str, *, url: str = "/", sent_from: str | None = None,
+                    route: str | None = None, **arguments: Any) -> Any:
         """The browser opens ``url``, where a component mounts with ``on_mount=state_cls.handler``.
 
         Reflex sends a component's mount events before the page's ``on_load`` events, so the
-        handler's event goes first and the page's opener (``ui_open`` with ``route``, by default
-        the path of ``url``) after it, once the handler has started. Returns the handler's
-        future; the opener has run when this returns.
+        load's event goes first; once its run has started, the browser's events from ``url``
+        follow and then the page's opener (``ui_open`` with ``route``, by default the path of
+        ``url``). On a navigation the mount event still carries the page the browser left: pass
+        it as ``sent_from``. Returns the load's future; the opener has run when this returns.
         """
         from urllib.parse import urlsplit
 
         from lex.lex_app.reflex.ui.state import State
 
+        origin = sent_from or url
+        if not self._opened:
+            await self.open_tab(origin)
+        load = handlers.load_id(getattr(state_cls, handler))
+        before = dict((await self._state(State))._ui_load_runs).get(load)
+        future = await self.send(state_cls, handler, _router_data=_router_data(origin), **arguments)
+        deadline = time.monotonic() + 5
+        while dict((await self._state(State))._ui_load_runs).get(load) == before:
+            if future.done() or time.monotonic() > deadline:
+                raise AssertionError(f"{load} sent on mount never started a run")
+            await asyncio.sleep(0.001)
         await self.navigate(url)
-        future = await self.send(state_cls, handler, **arguments)
-        await asyncio.sleep(0.05)                 # the mount event is handled before the opener arrives
         page = route if route is not None else (urlsplit(url).path or "/")
         await (await self.send(State, "ui_open", page=page))
         return future

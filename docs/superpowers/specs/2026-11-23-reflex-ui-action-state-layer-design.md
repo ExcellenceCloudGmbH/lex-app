@@ -281,13 +281,14 @@ the handler when the class is created.
 | The user's other clicks meanwhile | Keep working | Wait until it finishes | Keep working |
 | What `self` is | A working copy | The live state | A working copy |
 | When the browser updates | At each `yield` and at the end | At each `yield` and at the end | At each `yield` and at the end |
-| A repeat while it runs | A newer visit replaces it | Queued, runs afterwards | Ignored |
-| The user leaves the page | Result discarded | — | Keeps running; stops with `stop_on_leave=True` |
+| A repeat while it runs | Declared on the page: a newer visit replaces it. Started on mount: a newer run replaces it | Queued, runs afterwards | Ignored |
+| The user leaves the page | Declared on the page: result discarded. Started on mount: kept | — | Keeps running; stops with `stop_on_leave=True` |
 | Options | `requires=`, `optional=`, `keep=` | `requires=` | `requires=`, `stop_on_leave=` |
 | Thread pool | Interactive | Interactive | Jobs |
 
 **A visit** is one opening of a page in one browser tab. `lex_page` starts a new visit on every page
-open; loads and jobs compare the visit they started in with the current one.
+open; jobs, and the loads the page declares, compare the visit they started in with the current
+one. A load started on a component's `on_mount` is not tied to the visit (below).
 
 **`@ui.load`**
 
@@ -295,26 +296,29 @@ open; loads and jobs compare the visit they started in with the current one.
   `lex_page` does not list the load in Reflex's `on_load` itself: Reflex starts background handlers
   at once, ahead of the sign-in and grant events, so `lex_page` appends an opener event that starts
   the page's loads after them.
-- A dashboard has no `lex_page`, so it starts its load with a component's `on_mount`. Reflex sends
-  mount events before the page's `on_load` events, so such a load is not tied to the page's visit:
-  it is discarded only when a newer run of the same load has started in the tab or the browser has
-  left the location (path and query) it started on, and it resets its own state every time it
-  starts. It takes no part in the page's required and optional bookkeeping. Loads that fill one
-  state together are therefore declared on the page, or written as one load.
+- A dashboard has no `lex_page`, so it starts its load with a component's `on_mount`. Reflex
+  delivers mount events before the page's `on_load` events, and on a navigation with the previous
+  page's address, so such a load is tied to its component, not to the page view: it is dropped only
+  when a newer run of the same load has started in the tab, it resets its state each time it
+  starts, and its failure is shown in place (`ui.failed`), never on the error page, whatever
+  `optional=` says. It takes no part in the page's required and optional bookkeeping. Loads that
+  fill one state together are therefore declared on the page, or written as one load.
 - The opener carries only the page's route. The page's loads and the permission it needs are looked
   up on the server, in a registry `lex_page` fills; an unknown route starts no loads. The opener
   starts the loads only when the user holds the page's permission. A load is still an ordinary event
   the browser can send, so the page's permission decides only whether the opener *starts* it: what a
   load may read is enforced by its own `requires=` and by the API acting as the user.
-- A state is reset to its class defaults once per visit, by the first load of that state in the
-  visit, so a revisit never shows the previous visit's data. `keep=("filters",)` exempts fields;
+- For the loads the page declares, a state is reset to its class defaults once per visit, by the
+  first of them on that state in the visit, so a revisit never shows the previous visit's data. A
+  load started on mount resets its state every time it starts. `keep=("filters",)` exempts fields;
   `keep=` is taken from that first load. Several loads on one state therefore add to each other
   within a visit, and a revisit starts clean.
 - A load without `optional=True` must succeed for the page to show (section 6.5). It counts as
   finished only when its body ran to the end; a cancelled one stays pending. Loads marked
   `optional=True` fill secondary regions: they start once every required load has finished, run
   independently of each other, and a failure affects only their region.
-- If the user has left the page by the time a load merges, its result is discarded.
+- If the user has left the page by the time a load the page declared merges, its result is
+  discarded.
 - A load sees only its own state's fields, as a job does (below).
 
 **`@ui.action`**
@@ -607,6 +611,7 @@ only a job can do that.
 | Every field of a state used by a job or load must be deep-copyable | A lock, a client or an open file in such a state is refused with an error naming the field (6.4) |
 | A run cleared because its process is gone | It disappears without a message to the user |
 | A "Try again" return path under a frontend path prefix | Untested |
+| A load started on mount that finishes after the user has left | It still fills its own state and may still toast |
 
 ---
 

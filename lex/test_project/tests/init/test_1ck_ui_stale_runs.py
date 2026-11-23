@@ -7,7 +7,7 @@ gone, and with Redis each process keeps a heartbeat another worker can check. A 
 button that stays disabled until the user opens a new tab.
 
 Cluster 1ck -- scenarios 1.779-1.780. Type: U.
-Covers: lex/lex_app/reflex/ui/runs.py (sweep, alive, heartbeat), ui/state.py (ui_open).
+Covers: lex/lex_app/reflex/ui/runs.py (sweep, mark_finished, alive, heartbeat), ui/state.py (ui_open).
 Run: python -m lex pytest lex/test_project/tests/init/test_1ck_ui_stale_runs.py -v
 """
 
@@ -74,8 +74,9 @@ class TestCluster01ck_StaleRuns(TestCase):
         Then:  the dead process's run is cleared, with its progress; this process's run stays;
                a process another worker reports alive keeps its run; an argument containing
                "|" is cleared completely; a dead process is asked about once however many
-               runs it had; a liveness check that hangs ends the sweep within its budget and
-               leaves the marks; opening a page sweeps.
+               runs it had; two runs under one key and argument keep their process record until
+               the last finishes, and a sweep clears them all; a liveness check that hangs ends
+               the sweep within its budget and leaves the marks; opening a page sweeps.
         """
         s = _status()
         runs.mark_started(s, "A.mine", "1")
@@ -105,6 +106,23 @@ class TestCluster01ck_StaleRuns(TestCase):
         self.assertEqual(asyncio.run(runs.sweep(s3, alive=nobody)), 1, "the run with a '|' argument is swept")
         self.assertEqual(s3.ui_running, {}, "the run is not left running with its record gone")
         self.assertEqual(s3._ui_boots, {}, "its process record is gone too")
+
+        # two runs with the same key and argument: the first to finish keeps the other's record
+        s6 = _status()
+        runs.mark_started(s6, "B.theirs", "5")
+        runs.mark_started(s6, "B.theirs", "5")
+        runs.mark_finished(s6, "B.theirs", "5")
+        self.assertEqual((s6.ui_running, s6._ui_boots), ({"B.theirs": ["5"]}, {"B.theirs|5": runs.BOOT}),
+                         "the run still in flight keeps its mark and its process record")
+        runs.mark_finished(s6, "B.theirs", "5")
+        self.assertEqual((s6.ui_running, s6._ui_boots), ({}, {}), "the last run to finish removes both")
+        s7 = _status()
+        runs.mark_started(s7, "B.theirs", "5")
+        runs.mark_started(s7, "B.theirs", "5")
+        s7._ui_boots = {"B.theirs|5": "dead-process"}
+        asyncio.run(runs.sweep(s7, alive=nobody))
+        self.assertEqual((s7.ui_running, s7._ui_boots), ({}, {}),
+                         "a sweep clears every run of a dead process under one record")
 
         # one question per dead process
         s4 = _status()

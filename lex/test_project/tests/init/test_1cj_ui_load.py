@@ -6,6 +6,8 @@ visit's data; a result that arrives after the user has left is discarded; a requ
 fails shows an error page with a reference, an optional one fails only its own region. A
 regression is a page flashing another record's data, loading before sign-in, one broken region
 taking the page down, or the browser choosing which loads run and under which permission.
+A load started by a component's on_mount (a dashboard) belongs to its component: only a newer
+run of it is stale, and its failure stays in place.
 
 Cluster 1cj -- scenarios 1.774-1.778. Type: I.
 Covers: lex/lex_app/reflex/ui/handlers.py (load, page_loads, register_page, page_of, load_id),
@@ -20,6 +22,7 @@ import asyncio
 import inspect
 import subprocess
 import sys
+import threading
 import time
 from unittest import TestCase
 from unittest.mock import patch
@@ -91,6 +94,15 @@ class Twin(State):
         self.filled = "here"
 
 
+#: Gate name -> the event a Dash.fill run waits on; the test releases it.
+GATES: dict[str, threading.Event] = {}
+
+
+def _gate(name: str) -> str:
+    GATES[name] = threading.Event()
+    return name
+
+
 class Dash(State):
     """A dashboard's state: no lex_page, its load is started by a component's on_mount."""
 
@@ -98,15 +110,42 @@ class Dash(State):
     extra: str = ""
 
     @handlers.load
-    def fill(self, tag: str = "", delay: float = 0.2):
-        time.sleep(delay)
+    def fill(self, tag: str = "", gate: str = ""):
+        if gate and not GATES[gate].wait(5):
+            raise RuntimeError(f"gate {gate} was never released")
         self.rows = [tag]
         if tag == "first":
             self.extra = "first"
 
+    @handlers.load
+    def fill_broken(self, gate: str = ""):
+        if gate and not GATES[gate].wait(5):
+            raise RuntimeError(f"gate {gate} was never released")
+        raise RuntimeError("dashboard source down")
+
 
 def _gotos(harness: testing.Harness) -> list[str]:
     return [r.path for r in harness.results if isinstance(r, results.Goto)]
+
+
+async def _until(condition, failure: str) -> None:
+    """Wait until ``condition()`` holds; fails loudly after 5 s."""
+    deadline = time.monotonic() + 5
+    while not condition():
+        if time.monotonic() > deadline:
+            raise AssertionError(failure)
+        await asyncio.sleep(0.001)
+
+
+async def _running_mark(harness: testing.Harness, handler) -> dict:
+    """Wait until ``handler`` is marked running; fails loudly after 5 s."""
+    key = runs.key_of(handler)
+    deadline = time.monotonic() + 5
+    while key not in (fields := await harness.fields(State))["ui_running"]:
+        if time.monotonic() > deadline:
+            raise AssertionError(f"{key} was never marked running")
+        await asyncio.sleep(0.001)
+    return fields["ui_running"]
 
 
 class TestCluster01cj_Load(TestCase):
@@ -170,14 +209,14 @@ class TestCluster01cj_Load(TestCase):
         """
         async def scenario():
             async with testing.Harness() as h:
-                first = await h.mount(Dash, "fill", url="/", tag="first")
+                first = await h.mount(Dash, "fill", url="/", tag="first", gate=_gate("first"))
+                GATES["first"].set()                   # the body finishes after the opener has run
                 await first
-                await asyncio.sleep(0.1)
                 after_first = await h.fields(Dash)
-                second = await h.mount(Dash, "fill", url="/", tag="second")
-                at_start = await h.fields(Dash)
+                second = await h.mount(Dash, "fill", url="/", tag="second", gate=_gate("second"))
+                at_start = await h.fields(Dash)        # the second run is held at its gate
+                GATES["second"].set()
                 await second
-                await asyncio.sleep(0.1)
                 return after_first, at_start, await h.fields(Dash)
 
         after_first, at_start, after_second = asyncio.run(scenario())
@@ -188,6 +227,27 @@ class TestCluster01cj_Load(TestCase):
                          "the second view's run reset the state when it started")
         self.assertEqual((after_second["rows"], after_second["extra"]), (["second"], ""),
                          "the second run's data lands; the field it does not set stays at its default")
+
+    def test_1_774_a_load_started_on_mount_lands_after_a_navigation(self) -> None:
+        """
+        Scenario 1.774: a dashboard reached by a link from another page.
+        Given: a tab on /tickets; the user follows a link to the dashboard on /.
+        When:  the dashboard's load is started on mount -- its event still carries /tickets, as
+               Reflex's client sends it on a navigation -- then the browser's events from / and
+               the page's opener follow, and the load finishes after them.
+        Then:  the load's data lands and nothing is left running.
+        """
+        async def scenario():
+            async with testing.Harness() as h:
+                await h.navigate("/tickets")
+                load = await h.mount(Dash, "fill", url="/", sent_from="/tickets", tag="home", gate=_gate("home"))
+                GATES["home"].set()
+                await load
+                return await h.fields(Dash)
+
+        fields = asyncio.run(scenario())
+        self.assertEqual((fields["rows"], fields["ui_running"]), (["home"], {}),
+                         "a load started on mount whose event carried the previous page still lands")
 
     # -- 1.775 ---------------------------------------------------------
     def test_1_775_the_opener_starts_required_loads_then_optional_ones(self) -> None:
@@ -289,12 +349,15 @@ class TestCluster01cj_Load(TestCase):
         async def scenario():
             async with testing.Harness() as h:
                 await (await h.send(State, "ui_open", page="/t776-slow"))
-                await asyncio.sleep(0.15)
+                in_flight = await _running_mark(h, Page.open_slowly)
                 await (await h.send(State, "ui_open", page=""))
                 await asyncio.sleep(0.5)
-                return (await h.fields(Page))["rows"]
+                return in_flight, (await h.fields(Page))["rows"]
 
-        self.assertEqual(asyncio.run(scenario()), [], "a stale visit's result is discarded")
+        in_flight, rows = asyncio.run(scenario())
+        self.assertIn(runs.key_of(Page.open_slowly), in_flight,
+                      "the opener started the load, and it was running when the visit changed")
+        self.assertEqual(rows, [], "a stale visit's result is discarded")
 
         handlers.register_page("/t776", [Page.open_slowly], [Page.open_region], "")
 
@@ -313,59 +376,75 @@ class TestCluster01cj_Load(TestCase):
         self.assertEqual(fields["ui_running"], {}, "a cancelled load is not left running")
         self.assertEqual(pending, [handlers.load_id(Page.open_slowly)], "a cancelled required load stays pending")
 
-    def test_1_776_a_load_started_on_mount_is_dropped_when_a_newer_run_starts_or_the_browser_leaves(self) -> None:
+    def test_1_776_a_load_started_on_mount_is_dropped_only_when_a_newer_run_starts(self) -> None:
         """
         Scenario 1.776: when a load started on mount is stale.
         Given: a dashboard load started on mount (no opener lists it).
-        When:  a newer run of the same load starts while it runs -- the newer one finishing first,
-               and the newer one finishing last; and, separately, the browser moves to another
-               location while it runs.
-        Then:  the older run's data never lands and the newer run's data stays; the run whose
-               browser moved on is dropped; nothing is left running.
+        When:  a newer run of the same load starts while it runs -- the older one finishing
+               last, and the older one finishing first; two runs with the same argument overlap;
+               and, separately, the browser moves to another location while a run is in flight.
+        Then:  the older run's data never lands and the newer run's data stays; while the newer
+               run is in flight its running mark keeps its process record, whatever the older
+               one did; a run whose browser moved on still fills its own state (it belongs to
+               its component, not to the page view); nothing is left running.
         """
-        async def newer(older_delay, newer_delay):
+        async def newer(older_first):
             async with testing.Harness() as h:
-                await h.navigate("/")
-                older = await h.send(Dash, "fill", tag="older", delay=older_delay)
-                await asyncio.sleep(0.1)
-                recent = await h.send(Dash, "fill", tag="newer", delay=newer_delay)
+                older = await h.mount(Dash, "fill", tag="older", gate=_gate("older"))
+                recent = await h.mount(Dash, "fill", tag="newer", gate=_gate("newer"))
                 seen = []
-                for _ in range(6):
-                    await asyncio.sleep(0.1)
+                for name, future in ((("older", older), ("newer", recent)) if older_first
+                                     else (("newer", recent), ("older", older))):
+                    GATES[name].set()
+                    await future
                     seen.append(list((await h.fields(Dash))["rows"]))
-                await older
-                await recent
                 return seen, await h.fields(Dash)
 
-        seen, fields = asyncio.run(newer(0.4, 0.05))
-        self.assertNotIn(["older"], seen, "the older run, finishing last, never lands")
-        self.assertEqual(fields["rows"], ["newer"], "the newer run's data stays when the older one finishes last")
-        seen, fields = asyncio.run(newer(0.2, 0.4))
-        self.assertNotIn(["older"], seen, "the older run, finishing while the newer one runs, never lands")
-        self.assertEqual(fields["rows"], ["newer"], "the newer run's data lands when it finishes last")
+        seen, fields = asyncio.run(newer(older_first=False))
+        self.assertEqual(seen, [["newer"], ["newer"]], "the older run, finishing last, never lands")
+        seen, fields = asyncio.run(newer(older_first=True))
+        self.assertEqual(seen, [[], ["newer"]],
+                         "the older run, finishing while the newer one runs, never lands; the newer one does")
         self.assertEqual(fields["ui_running"], {}, "neither run is left running")
+
+        async def same_argument():
+            async with testing.Harness() as h:
+                older = await h.mount(Dash, "fill", tag="same", gate=_gate("same-older"))
+                recent = await h.mount(Dash, "fill", tag="same", gate=_gate("same-newer"))
+                GATES["same-older"].set()
+                await older
+                mid = (await h.fields(Dash))["ui_running"], dict((await h._state(State))._ui_boots)
+                GATES["same-newer"].set()
+                await recent
+                return mid, (await h.fields(Dash))["ui_running"], dict((await h._state(State))._ui_boots)
+
+        (mid_running, mid_boots), running, boots = asyncio.run(same_argument())
+        key = runs.key_of(Dash.fill)
+        self.assertEqual(mid_running, {key: ["same"]}, "the newer run is still marked running")
+        self.assertIn(f"{key}|same", mid_boots,
+                      "the newer run keeps its process record, so a sweep can still clear it")
+        self.assertEqual((running, boots), ({}, {}), "once both have finished, neither mark nor record is left")
 
         async def moved():
             async with testing.Harness() as h:
-                await h.navigate("/a")
-                load = await h.send(Dash, "fill", tag="left", delay=0.3)
-                await asyncio.sleep(0.1)
+                load = await h.mount(Dash, "fill", url="/a", tag="left", gate=_gate("left"))
                 await h.navigate("/b")
+                GATES["left"].set()
                 await load
-                await asyncio.sleep(0.1)
                 return await h.fields(Dash)
 
         fields = asyncio.run(moved())
-        self.assertEqual((fields["rows"], fields["ui_running"]), ([], {}),
-                         "a run whose browser moved to another location is dropped and not left running")
+        self.assertEqual((fields["rows"], fields["ui_running"]), (["left"], {}),
+                         "a run whose browser moved on still fills its own state and is not left running")
 
     # -- 1.777 ---------------------------------------------------------
     def test_1_777_a_failed_required_load_shows_the_error_page_an_optional_one_its_region(self) -> None:
         """
         Scenario 1.777: failures of loads.
-        Given: a required load that raises, and an optional one that refuses.
-        When:  each runs; the required one on a page with a query string, on the error page
-               itself, beside a second failing required load, and after the browser moved on.
+        Given: a required load that raises, declared on a page, and an optional one that refuses.
+        When:  each runs; the required one, started by its page's opener, on a page with a query
+               string, on the error page itself, beside a second failing required load, and after
+               the browser moved on.
         Then:  the required one records a reference and the page to retry (with its query
                string, never the error page), and sends the browser to the error page, without
                the exception's text; the first failure ends the visit, so a second one changes
@@ -373,10 +452,21 @@ class TestCluster01cj_Load(TestCase):
                records an error nor redirects; the optional one sends nobody anywhere and leaves
                its message for ui.failed.
         """
+        handlers.register_page("/t777-broken", [Page.open_broken], [], "")
+        handlers.register_page("/orders", [Page.open_broken], [], "")
+        handlers.register_page(ui_state.ERROR_ROUTE, [Page.open_broken], [], "")
+
+        async def failing_on(url, route):
+            async with testing.Harness() as h:
+                await h.navigate(url)
+                await (await h.send(State, "ui_open", page=route))
+                await asyncio.sleep(0.1)
+                return _gotos(h), await h.fields(Page)
+
         with self.assertLogs("lex.lex_app.reflex.ui.handlers", level="ERROR"):
-            broken = testing.run(Page, "open_broken")
-        self.assertEqual(broken.goto, ui_state.ERROR_ROUTE, "a failed required load shows the error page")
-        error = broken.fields["ui_error"]
+            gotos, fields = asyncio.run(failing_on("/t777-broken", "/t777-broken"))
+        self.assertEqual(gotos, [ui_state.ERROR_ROUTE], "a failed required load shows the error page")
+        error = fields["ui_error"]
         self.assertEqual(error["kind"], "error", "the error page explains a failure, not a refusal")
         self.assertIn("Reference", error["message"], "the user gets a reference to quote")
         self.assertNotIn("database down", error["message"], "the exception's text stays in the log")
@@ -385,17 +475,12 @@ class TestCluster01cj_Load(TestCase):
         self.assertEqual(region.failed[runs.key_of(Page.region_broken)], "No figures for this period.",
                          "the optional load's message is left for ui.failed")
 
-        async def failing_on(url):
-            async with testing.Harness() as h:
-                await h.navigate(url)
-                await (await h.send(Page, "open_broken"))
-                await asyncio.sleep(0.05)
-                return (await h.fields(Page))["ui_error"].get("path")
-
         with self.assertLogs("lex.lex_app.reflex.ui.handlers", level="ERROR"):
-            self.assertEqual(asyncio.run(failing_on("/orders?id=7")), "/orders?id=7",
+            _, fields = asyncio.run(failing_on("/orders?id=7", "/orders"))
+            self.assertEqual(fields["ui_error"].get("path"), "/orders?id=7",
                              "Try again returns to the page with its query string")
-            self.assertNotEqual(asyncio.run(failing_on(ui_state.ERROR_ROUTE)), ui_state.ERROR_ROUTE,
+            _, fields = asyncio.run(failing_on(ui_state.ERROR_ROUTE, ui_state.ERROR_ROUTE))
+            self.assertNotEqual(fields["ui_error"].get("path"), ui_state.ERROR_ROUTE,
                                 "the error page is never the page to return to")
 
         handlers.register_page("/t777", [Page.open_broken, Page.open_broken_too], [], "")
@@ -414,14 +499,15 @@ class TestCluster01cj_Load(TestCase):
         self.assertNotIn(runs.key_of(Page.open_broken_too), fields["ui_failed"],
                          "the second failure of an ended visit records nothing")
 
+        handlers.register_page("/a", [Page.open_late_broken], [], "")
+
         async def moved_on():
             async with testing.Harness() as h:
                 await h.navigate("/a")
-                load = await h.send(Page, "open_late_broken")
-                await asyncio.sleep(0.1)
+                await (await h.send(State, "ui_open", page="/a"))
+                await _running_mark(h, Page.open_late_broken)
                 await h.navigate("/b")
-                await load
-                await asyncio.sleep(0.4)
+                await asyncio.sleep(0.5)
                 return _gotos(h), await h.fields(Page)
 
         with self.assertLogs("lex.lex_app.reflex.ui.handlers", level="ERROR"):
@@ -429,27 +515,49 @@ class TestCluster01cj_Load(TestCase):
         self.assertEqual((gotos, fields["ui_error"]), ([], {}),
                          "a failure after the browser moved on neither redirects nor records an error")
 
-    def test_1_777_a_load_started_on_mount_that_fails_before_the_opener_keeps_its_error(self) -> None:
+    def test_1_777_a_load_started_on_mount_reports_its_failure_in_place(self) -> None:
         """
-        Scenario 1.777: a dashboard's required load fails before the page's opener arrives.
-        Given: a required load started on mount on /, which fails at once.
-        When:  its event is handled, then the page's opener runs.
-        Then:  the error page was sent once, and after the opener the failure is still recorded
-               for the error page to show.
+        Scenario 1.777: a dashboard's load fails.
+        Given: a load without optional=True, started on mount on /, and the page's opener.
+        When:  it fails before the opener arrives; and, on another view, after it.
+        Then:  neither failure sends the browser to the error page, records an error for it or
+               ends the visit; each leaves its message, with a reference, for ui.failed. An error
+               an earlier page recorded for the error page survives the next page's opener.
         """
         async def scenario():
             async with testing.Harness() as h:
-                load = await h.mount(Page, "open_broken", url="/")
-                await load
-                await asyncio.sleep(0.1)
-                return _gotos(h), await h.fields(Page)
+                early = await h.mount(Dash, "fill_broken", url="/")
+                await early
+                early_fields = await h.fields(Dash)
+                late = await h.mount(Dash, "fill_broken", url="/", gate=_gate("broken"))
+                GATES["broken"].set()
+                await late
+                return _gotos(h), early_fields, await h.fields(Dash)
 
         with self.assertLogs("lex.lex_app.reflex.ui.handlers", level="ERROR"):
-            gotos, fields = asyncio.run(scenario())
-        self.assertEqual(gotos, [ui_state.ERROR_ROUTE], "the failure sends the browser to the error page once")
-        self.assertEqual(fields["ui_error"].get("kind"), "error",
-                         "the opener that arrives after the failure leaves the error for the error page")
-        self.assertIn("Reference", fields["ui_error"].get("message", ""), "the error page has a reference to show")
+            gotos, early, late = asyncio.run(scenario())
+        key = runs.key_of(Dash.fill_broken)
+        self.assertEqual(gotos, [], "a load started on mount never sends the browser to the error page")
+        for when, fields, visit in (("before", early, 1), ("after", late, 2)):
+            self.assertEqual(fields["ui_error"], {}, f"a failure {when} the opener records nothing for the error page")
+            self.assertEqual(fields["ui_visit"], visit, f"a failure {when} the opener does not end the visit")
+            self.assertIn("Reference", fields["ui_failed"].get(key, ""),
+                          f"a failure {when} the opener leaves its message for ui.failed")
+
+        handlers.register_page("/t777-kept", [Page.open_broken], [], "")
+
+        async def error_survives():
+            async with testing.Harness() as h:
+                await h.navigate("/t777-kept")
+                await (await h.send(State, "ui_open", page="/t777-kept"))
+                await _until(lambda: _gotos(h), "the failed load never sent the browser to the error page")
+                await h.navigate(ui_state.ERROR_ROUTE)
+                await (await h.send(State, "ui_open", page=ui_state.ERROR_ROUTE))
+                return (await h.fields(State))["ui_error"]
+
+        with self.assertLogs("lex.lex_app.reflex.ui.handlers", level="ERROR"):
+            error = asyncio.run(error_survives())
+        self.assertEqual(error.get("kind"), "error", "the error page's own opener leaves the error it shows")
 
     # -- 1.778 ---------------------------------------------------------
     def test_1_778_lex_page_adds_the_opener_and_the_error_page_exists(self) -> None:

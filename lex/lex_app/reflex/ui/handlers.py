@@ -451,12 +451,18 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
     after the user left is discarded.
 
     A page without ``lex_page`` (a dashboard) starts its load with a component's
-    ``on_mount=State.handler`` instead. Reflex sends mount events before the page's ``on_load``,
-    so such a load is not tied to the visit: it is discarded only when a newer run of the same
-    load starts or the browser leaves the location it started on, and it resets its state's own
-    fields (except ``keep``) every time it starts. So loads started on mount that share one state
-    reset it each time either starts: a state filled by several loads declares them on the page
-    (``lex_page(on_load=[...])``) or uses one load.
+    ``on_mount=State.handler`` instead. Reflex sends mount events before the page's ``on_load``
+    (and, on a navigation, with the address of the page the browser left), so such a load belongs
+    to its component, not to the page view:
+
+    - it is replaced by a newer run of the same load, and by nothing else: the same load mounted
+      twice, even with different arguments, keeps only the newer run's data;
+    - it resets its state's own fields (except ``keep``) every time it starts, so loads started on
+      mount that share one state reset it each time either starts -- a state filled by several
+      loads declares them on the page (``lex_page(on_load=[...])``) or uses one load;
+    - it reports a failure in place (``ui.failed(State.handler)``), whatever ``optional=`` says:
+      the error page is only for loads the page declared;
+    - it starts no optional load of the page.
     """
 
     def decorate(fn: Callable[..., Any]) -> Any:
@@ -472,7 +478,7 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
 
             arg = runs.arg_key(args, kwargs)
             visit: int | None = None
-            where = ""                                    # the page the load started on, with its query
+            where = ""                                    # the page the load started on (opener-started only)
             run_token = uuid.uuid4().hex                  # this run; the latest run of each load is kept
             by_opener = False                             # started by the page's opener, not on mount
             started = False
@@ -486,21 +492,26 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                     return False
                 if by_opener:
                     return self.ui_visit == visit
-                # On mount: not tied to the visit (the opener may arrive after it started).
-                return self._ui_load_runs.get(ident) == run_token and _location(self) == where
+                # On mount: tied to its component, not to the page view. The visit may change after it
+                # started (the opener arrives later), and on a navigation the router it started with is
+                # the page the browser left; only a newer run of the same load makes it stale.
+                return self._ui_load_runs.get(ident) == run_token
 
             try:
                 try:
                     async with self:                      # who is acting, a clean state, the first copy
                         visit = self.ui_visit
                         where = _location(self)
+                        # Opener-started if the opener listed this load, else started on mount. One known
+                        # mix-up: a load both declared on the page and mounted in a component can have its
+                        # mount run take the opener's listing; the data still lands, at the cost of a
+                        # second run.
                         listed = list(self._ui_started)
                         by_opener = ident in listed
                         if by_opener:
                             listed.remove(ident)
                             self._ui_started = listed
                         self._ui_load_runs = {**dict(self._ui_load_runs), ident: run_token}
-                        session = await context.resolve(self)
                         own = type(workcopy.raw(self))
                         name = own.get_full_name()
                         done = list(self._ui_reset)
@@ -509,6 +520,7 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                         elif name not in done:            # once per visit: a sibling load's data stays
                             workcopy.reset(self, keep=kept)
                             self._ui_reset = [*done, name]
+                        session = await context.resolve(self)
                         if await _denied(session, requirements):
                             raise _NotPermitted()
                         inv = context.Invocation(handler=key, kind="load", session=session,
@@ -527,7 +539,7 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                                     if report is not None:
                                         runs.mark_progress(self, key, report)
                                 elif isinstance(step, _Step):
-                                    step.stop = True      # the user left: the rest is discarded
+                                    step.stop = True      # stale (the user left, or a newer run): the rest is discarded
                             if current:
                                 for event in results.to_events(found):
                                     yield event
@@ -542,7 +554,8 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                         runs.mark_finished(self, key, arg, error=message)
                     elif message:
                         self.ui_failed = {**dict(self.ui_failed), key: message}
-                    if current and outcome is not None and not optional:
+                    # Started on mount, or optional: the failure stays in place, in ui_failed.
+                    if current and outcome is not None and not optional and by_opener:
                         if _location(self) == where:      # the browser is still on the page it failed for
                             self.ui_error = {"kind": "denied" if outcome.kind == "denied" else "error",
                                              "title": outcome.title, "message": outcome.message,

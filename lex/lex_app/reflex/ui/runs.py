@@ -63,9 +63,10 @@ def mark_finished(s: Any, key: str, arg: str, error: str = "") -> None:
     s.ui_running = running
     if error:
         s.ui_failed = {**dict(s.ui_failed), key: error}
-    boots = dict(s._ui_boots)
-    boots.pop(f"{key}|{arg}", None)
-    s._ui_boots = boots
+    if arg not in left:                     # another run with this key and argument keeps the record
+        boots = dict(s._ui_boots)
+        boots.pop(f"{key}|{arg}", None)
+        s._ui_boots = boots
 
 
 # -- the registry of jobs in this process ----------------------------------------------
@@ -226,6 +227,8 @@ async def sweep(s: Any, alive: Any = None) -> int:
         if gone.get(boot):
             key, _, arg = entry.partition("|")
             mark_finished(s, key, arg)
+            while arg in dict(s.ui_running).get(key, []):   # every run under this record
+                mark_finished(s, key, arg)
             cleared += 1
     return cleared
 
