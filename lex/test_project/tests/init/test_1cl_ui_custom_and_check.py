@@ -120,3 +120,75 @@ class TestCluster01cl_CustomAndCheck(TestCase):
             self.assertEqual(checks.report([f for f in found if f.level != "error"]), 0, "notes and warnings pass")
             with patch("rfds.cli.main", return_value=0):
                 self.assertNotEqual(scaffold.run_check(Path(folder)), 0, "the lex.ui error fails lex reflex check")
+
+            # -- undecorated public methods, helpers and non-handlers ----------
+            bare = Path(folder) / "bare.py"
+            bare.write_text(
+                "import functools\n"
+                "import reflex as rx\n"
+                "from lex import ui\n\n\n"
+                "class Bare(ui.State):\n"
+                "    def refresh(self):\n        pass\n\n"
+                "    async def refresh_async(self):\n        pass\n\n"
+                "    def _helper(self):\n        pass\n\n"
+                "    def __init_subclass__(cls, **kw):\n        pass\n\n"
+                "    @property\n    def prop(self):\n        return 1\n\n"
+                "    @staticmethod\n    def static():\n        pass\n\n"
+                "    @classmethod\n    def klass(cls):\n        pass\n\n"
+                "    @rx.var\n    def computed(self) -> int:\n        return 1\n\n"
+                "    @rx.var(cache=True)\n    def computed2(self) -> int:\n        return 1\n\n"
+                "    @functools.cached_property\n    def cached(self):\n        return 1\n\n\n"
+                "class NotUi(rx.State):\n    def public(self):\n        pass\n\n\n"
+                "class Helper:\n    def public(self):\n        pass\n"
+            )
+            found = checks.find([str(bare)])
+            self.assertEqual(sorted(f.message.split(":")[0] for f in found if f.level == "error"),
+                             ["Bare.refresh", "Bare.refresh_async"],
+                             "only undecorated public methods of a ui.State are errors")
+            self.assertEqual([f for f in found if f.level != "error"], [], "helpers and non-handlers raise nothing")
+
+            # -- aliases ------------------------------------------------------
+            alias = Path(folder) / "alias.py"
+            alias.write_text(
+                "import reflex\n"
+                "from reflex import event\n"
+                "from lex import ui as u\n"
+                "from lex.ui import State, action, signed_in\n\n\n"
+                "class A(u.State):\n"
+                "    @event\n    def one(self):\n        pass\n\n"
+                "    @reflex.event(background=True)\n    async def two(self):\n        pass\n\n\n"
+                "class B(State):\n"
+                "    @action\n    def clean(self):\n        pass\n\n"
+                "    @action(requires=signed_in)\n    def anyone(self):\n        pass\n\n"
+                "    @reflex.event\n    def raw(self):\n        pass\n"
+            )
+            found = checks.find([str(alias)])
+            self.assertEqual(sorted(f.message.split(":")[0] for f in found if f.level == "error"),
+                             ["A.one", "A.two", "B.raw"], "raw handlers are found through import aliases")
+            self.assertEqual(sorted(f.message.split(":")[0] for f in found if f.level == "note"),
+                             ["B.anyone"], "requires=signed_in is recognised through an imported name")
+            self.assertEqual([f for f in found if f.level == "warning"], [], "a clean @action raises nothing")
+
+            # -- inheritance across files, and a file that does not parse ----
+            base = Path(folder) / "base.py"
+            base.write_text("from lex import ui\n\n\nclass Base(ui.State):\n    pass\n")
+            child = Path(folder) / "child.py"
+            child.write_text("import reflex as rx\nfrom pages import base\n\n\nclass Orders(base.Base):\n"
+                             "    @rx.event\n    def raw(self):\n        pass\n")
+            broken = Path(folder) / "broken.py"
+            broken.write_text("def oops(:\n")
+            found = checks.find([str(base), str(child), str(broken)])
+            self.assertEqual([f.message.split(":")[0] for f in found if f.path == str(child) and f.level == "error"],
+                             ["Orders.raw"], "a state inheriting a ui state from another file is checked")
+            broken_findings = [f for f in found if f.path == str(broken)]
+            self.assertEqual([f.level for f in broken_findings], ["error"], "a file that does not parse is one error")
+            self.assertIn("broken.py", broken_findings[0].message, "the finding names the file")
+
+        # -- run_check is clean when only warnings and notes are found ----
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "_reflex_structure.py").write_text(
+                "from lex import ui\n\n\nclass S(ui.State):\n"
+                "    @ui.action(requires=ui.signed_in)\n    def anyone(self):\n        pass\n\n"
+                "    @ui.job\n    def totals(self):\n        return list(Ticket.objects.all())\n")
+            with patch("rfds.cli.main", return_value=0):
+                self.assertEqual(scaffold.run_check(Path(folder)), 0, "notes and warnings do not fail the check")
