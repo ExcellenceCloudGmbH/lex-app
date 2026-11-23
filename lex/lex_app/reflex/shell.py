@@ -220,13 +220,15 @@ def lex_page(
         page.__name__ = page_fn.__name__
         page.__qualname__ = page_fn.__qualname__
         page.__doc__ = page_fn.__doc__
-        from lex.lex_app.reflex.ui.handlers import page_loads
+        from lex.lex_app.reflex.ui.handlers import page_loads, register_page
         from lex.lex_app.reflex.ui.state import State as UiState
 
         # lex.ui loads are background handlers, which Reflex starts at once -- before the
-        # grants are loaded. So they are started by the opener, the page's last load event.
+        # grants are loaded. So they are started by the opener, the page's last load event,
+        # which names only the route; the loads and the permission stay on the server.
         required, optional, others = page_loads(on_load)
-        loads: list[Any] = [LexAccessState.load, *others, UiState.ui_open(required, optional, requires or "")]
+        register_page(route, required, optional, requires or "")
+        loads: list[Any] = [LexAccessState.load, *others, UiState.ui_open(route)]
         rx.page(route=route, title=title, on_load=loads, **page_kwargs)(page)
         return page_fn
 

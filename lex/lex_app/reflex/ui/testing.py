@@ -35,6 +35,14 @@ def _grants(grants: Any) -> list[dict]:
     return out
 
 
+def _router_data(url: str) -> dict:
+    """What a browser on ``url`` sends with its events: the path, the full path, the query."""
+    from urllib.parse import parse_qsl, urlsplit
+
+    parts = urlsplit(url)
+    return {"pathname": parts.path or "/", "asPath": url, "query": dict(parse_qsl(parts.query))}
+
+
 class _Sink:
     """Stands in for the browser socket: records every update with its time."""
 
@@ -67,8 +75,12 @@ def _load_app_states() -> None:
     ``rfds.toast`` is loaded lazily and brings in RFDS's shared feed, which defines Reflex's
     shared states. Loaded halfway through a test, they would register in that harness's fork
     only, after the user's state tree was built without them, and every later event would fail.
+    ``lex.lex_app.reflex.data`` (a failure's classification imports it) defines a state whose
+    computed vars follow the router, so it must exist before a test moves the browser.
     """
     import rfds
+
+    import lex.lex_app.reflex.data  # noqa: F401 - defines LexRecordState
 
     rfds.toast  # noqa: B018 - the lazy import is the point
 
@@ -100,6 +112,7 @@ class Harness:
         self.token = token
         self._session_args = (user, _grants(grants), dict(params or {}), api)
         self._sink = _Sink()
+        self._opened = False
         self.results: list = []
         self.outcomes: list = []
 
@@ -157,11 +170,13 @@ class Harness:
         root = (await manager.get_state(BaseStateToken(ident=self.token, cls=state_cls)))._get_root_state()
         return await root.get_state(state_cls)
 
-    async def send(self, state_cls: Any, handler: str, **arguments: Any) -> Any:
+    async def send(self, state_cls: Any, handler: str, *, _router_data: dict | None = None,
+                   **arguments: Any) -> Any:
         """Send one event, as the browser would; returns a future that resolves when it has run."""
         from reflex_base.event import Event
 
         return await self._processor.enqueue(self.token, Event(name=f"{state_cls.get_full_name()}.{handler}",
+                                                               router_data=_router_data or {},
                                                                payload=arguments))
 
     async def fields(self, state_cls: Any) -> dict:
@@ -174,17 +189,28 @@ class Harness:
             values[name] = workcopy._plain(getattr(state, name))
         return values
 
-    async def open_tab(self) -> None:
-        """Connect the tab as a browser would, and forget the whole-state sync Reflex sends a new tab.
+    async def open_tab(self, url: str = "/") -> None:
+        """Connect the tab on ``url`` as a browser would, and forget the whole-state sync of a new tab.
 
         ``run`` calls it before seeding ``fields=``: the seed is what the browser already shows,
         so the updates recorded afterwards are only what the handler sent.
         """
         import reflex as rx
 
-        await (await self.send(rx.State, "set_is_hydrated", value=True))
+        await (await self.send(rx.State, "hydrate", _router_data=_router_data(url)))
+        await (await self.send(rx.State, "set_is_hydrated", _router_data=_router_data(url), value=True))
+        self._opened = True
         self._sink.updates.clear()
         self._sink.times.clear()
+
+    async def navigate(self, url: str) -> None:
+        """The browser is now on ``url`` (a path, with a query string or not); no page load runs."""
+        import reflex as rx
+
+        if not self._opened:
+            await self.open_tab(url)
+            return
+        await (await self.send(rx.State, "set_is_hydrated", _router_data=_router_data(url), value=True))
 
     async def set_fields(self, state_cls: Any, **values: Any) -> None:
         state = await self._state(state_cls)

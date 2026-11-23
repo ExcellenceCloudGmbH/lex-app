@@ -83,14 +83,16 @@ def create_app():
     app.add_middleware(DjangoConnectionMiddleware())
     app.add_middleware(GrantsRefreshMiddleware())
     devproxy.install(app)
+    from lex.lex_app.reflex.ui.handlers import register_page
     from lex.lex_app.reflex.ui.state import ERROR_ROUTE, error_page
     from lex.lex_app.reflex.ui.state import State as UiState
 
     _load_lazy_states()  # rfds.toast defines states; imported mid-event, they would register too late
+    register_page("/", [], [], "")
     app.add_page(
         dashboard_page(load_structure()),
         route="/",
-        on_load=[LexAccessState.load, LexDashboardState.resolve, UiState.ui_open([], [], "")],
+        on_load=[LexAccessState.load, LexDashboardState.resolve, UiState.ui_open("/")],
     )
     app.add_page(error_page, route=ERROR_ROUTE, title="This page could not be opened", on_load=[LexAccessState.load])
     app.add_page(_signing_out, route="/logout", title="Signing out", on_load=LexUser.sign_out)

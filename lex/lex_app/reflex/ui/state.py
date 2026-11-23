@@ -44,6 +44,9 @@ class State(rx.State):
     _ui_boots: dict[str, str] = {}
     _ui_pending_loads: list[str] = []
     _ui_optional_loads: list[str] = []
+    #: The route of this visit, and the states a load of this visit has already reset.
+    _ui_page: str = ""
+    _ui_reset: list[str] = []
 
     user = property(lambda self: context.current().session.user)
     api = property(lambda self: context.api_of(context.current()))
@@ -52,23 +55,28 @@ class State(rx.State):
     state = property(lambda self: context.current().state_of)
 
     @rx.event
-    async def ui_open(self, required: list[str], optional: list[str], requires: str):
-        """A page opened: a new visit, then the page's loads.
+    async def ui_open(self, page: str):
+        """A page opened: a new visit, then the loads registered for ``page``.
 
         ``lex_page`` puts this last in ``on_load``, after the user's grants are loaded. Reflex
         starts background handlers at once, so the loads are started from here, not listed in
-        ``on_load`` themselves. Optional loads start when the required ones have succeeded.
+        ``on_load`` themselves. Only the route comes from the browser: the loads and the
+        permission they need are looked up in the server's page registry. Optional loads start
+        when the required ones have succeeded.
         """
         from lex.lex_app.reflex.ui import handlers
 
         self.ui_visit += 1
         self.ui_error = {}
-        if not _page_permitted(self, requires):
+        self._ui_page = page
+        self._ui_reset = []
+        entry = handlers.page_of(page)
+        if entry is None or not _page_permitted(self, entry.requires):
             self._ui_pending_loads, self._ui_optional_loads = [], []
             return None
-        self._ui_pending_loads = list(required)
-        self._ui_optional_loads = list(optional) if required else []
-        return [handlers.registered(name) for name in (required or optional)]
+        self._ui_pending_loads = [handlers.load_id(h) for h in entry.required]
+        self._ui_optional_loads = [handlers.load_id(h) for h in entry.optional] if entry.required else []
+        return list(entry.required or entry.optional)
 
     @rx.event
     def ui_cancel(self, key: str):

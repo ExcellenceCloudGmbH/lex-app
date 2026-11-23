@@ -374,45 +374,86 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
     return decorate(fn) if fn is not None else decorate
 
 
-#: Load handlers by key, filled by :func:`page_loads`; the opener starts them by name.
-_LOADS: dict[str, Any] = {}
+def load_id(handler: Any) -> str:
+    """A load's module-qualified id, as the page bookkeeping counts it (two states may share a name)."""
+    fn = getattr(handler, "fn", handler)
+    body = getattr(fn, "__ui_fn__", fn)
+    return f"{body.__module__}.{body.__qualname__}"
 
 
-def page_loads(on_load: Any) -> tuple[list[str], list[str], list]:
-    """Split a page's ``on_load`` into (required load names, optional load names, other handlers)."""
+@dataclasses.dataclass(frozen=True)
+class PageLoads:
+    """What the opener starts for one page: its required loads, its optional ones, its permission."""
+
+    required: tuple = ()
+    optional: tuple = ()
+    requires: str = ""
+
+
+#: Route -> the page's loads and permission, filled by ``lex_page`` on the server. The opener
+#: receives only the route from the browser and looks everything else up here.
+_PAGES: dict[str, PageLoads] = {}
+
+
+def register_page(route: str, required: Any, optional: Any, requires: str) -> None:
+    """Record which loads ``route`` starts, and the permission its user must hold for them to start."""
+    _PAGES[route] = PageLoads(tuple(required), tuple(optional), requires or "")
+
+
+def page_of(route: str) -> PageLoads | None:
+    """The loads registered for ``route``; ``None`` for an unknown or empty route."""
+    return _PAGES.get(route) if route else None
+
+
+def page_loads(on_load: Any) -> tuple[list, list, list]:
+    """Split a page's ``on_load`` into (required loads, optional loads, other handlers)."""
     items = [] if on_load is None else list(on_load) if isinstance(on_load, (list, tuple)) else [on_load]
-    required: list[str] = []
-    optional: list[str] = []
+    required: list = []
+    optional: list = []
     others: list = []
     for item in items:
         fn = getattr(item, "fn", None)
         if getattr(fn, "__ui_kind__", "") != "load":
             others.append(item)
             continue
-        key = fn.__ui_key__
-        _LOADS[key] = item
-        (optional if fn.__ui_options__.get("optional") else required).append(key)
+        (optional if fn.__ui_options__.get("optional") else required).append(item)
     return required, optional, others
 
 
-def registered(name: str) -> Any:
-    """The load handler registered under ``name``."""
-    return _LOADS[name]
+def _location(state: Any) -> str:
+    """The browser's page for ``state``'s tab: the path with its query string."""
+    url = workcopy.raw(state).router.url
+    path = str(getattr(url, "path", "") or "")
+    query = str(getattr(url, "query", "") or "")
+    return f"{path}?{query}" if query else path
+
+
+def _return_path(location: str) -> str:
+    """Where "Try again" goes: the page the load started on, never the error page itself."""
+    from lex.lex_app.reflex.ui.state import ERROR_ROUTE
+
+    if not location or location.split("?", 1)[0].rstrip("/") == ERROR_ROUTE:
+        return "/"
+    return location
 
 
 def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional: bool = False,
          keep: tuple[str, ...] = ()) -> Any:
     """Fill the page when it opens, written as a plain function.
 
-    Pass it to ``lex_page(on_load=...)``; lex-app starts it after sign-in and the page's
-    permission check. It first resets the state's own fields (except ``keep``). A required
-    load that fails shows the error page; one with ``optional=True`` fails only its own region
-    (read ``ui.failed(State.handler)``). A result that arrives after the user left is discarded.
+    Pass it to ``lex_page(on_load=...)``; lex-app starts it after sign-in, when the user holds
+    the page's permission. That permission only decides whether the load is *started*: what the
+    load may read is enforced by its own ``requires=`` and by lex-app's API. The first load of a
+    state in a visit resets the state's own fields (except that load's ``keep``). A required
+    load that fails shows the error page and ends the visit; one with ``optional=True`` fails
+    only its own region (read ``ui.failed(State.handler)``). A result or a failure that arrives
+    after the user left is discarded.
     """
 
     def decorate(fn: Callable[..., Any]) -> Any:
         _check_plain(fn, "load")
         key = fn.__qualname__
+        ident = f"{fn.__module__}.{fn.__qualname__}"
         requirements = guard.normalise(requires)
         kept = tuple(keep)
 
@@ -422,16 +463,23 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
 
             arg = runs.arg_key(args, kwargs)
             visit: int | None = None
+            where = ""                                    # the page the load started on, with its query
             started = False
+            succeeded = False                             # the body ran to its end: no error, no cancellation
             outcome: Outcome | None = None
             follow: list = []                             # what to send once the run is wound up
             try:
                 try:
                     async with self:                      # who is acting, a clean state, the first copy
                         visit = self.ui_visit
+                        where = _location(self)
                         session = await context.resolve(self)
                         own = type(workcopy.raw(self))
-                        workcopy.reset(self, keep=kept)
+                        name = own.get_full_name()
+                        done = list(self._ui_reset)
+                        if name not in done:              # once per visit: a sibling load's data stays
+                            workcopy.reset(self, keep=kept)
+                            self._ui_reset = [*done, name]
                         if await _denied(session, requirements):
                             raise _NotPermitted()
                         inv = context.Invocation(handler=key, kind="load", session=session,
@@ -454,26 +502,31 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                             if current:
                                 for event in results.to_events(found):
                                     yield event
+                    succeeded = True
                 except Exception as exc:  # noqa: BLE001 - the body has finished here; reported below
-                    outcome = _classify(key, exc)
+                    outcome = _classify(key, exc)         # logged even when the user has moved on
             finally:                                      # the one place a run is wound up; also on cancellation
                 async with self:
-                    message = outcome.message if outcome is not None else ""
+                    current = visit is not None and self.ui_visit == visit
+                    message = outcome.message if outcome is not None and current else ""
                     if started:
                         runs.mark_finished(self, key, arg, error=message)
                     elif message:
                         self.ui_failed = {**dict(self.ui_failed), key: message}
-                    current = visit is not None and self.ui_visit == visit
                     if current and outcome is not None and not optional:
-                        self.ui_error = {"kind": "denied" if outcome.kind == "denied" else "error",
-                                         "title": outcome.title, "message": outcome.message,
-                                         "path": str(getattr(workcopy.raw(self).router.url, "path", "") or "/")}
-                        follow = [results.Goto(ERROR_ROUTE, True)]
-                    elif current and outcome is None and started and not optional:
-                        pending = [name for name in self._ui_pending_loads if name != key]
+                        if _location(self) == where:      # the browser is still on the page it failed for
+                            self.ui_error = {"kind": "denied" if outcome.kind == "denied" else "error",
+                                             "title": outcome.title, "message": outcome.message,
+                                             "path": _return_path(where)}
+                            self.ui_visit += 1            # the visit is over: its later outcomes are stale
+                            follow = [results.Goto(ERROR_ROUTE, True)]
+                    elif current and succeeded and not optional:
+                        pending = [other for other in self._ui_pending_loads if other != ident]
                         self._ui_pending_loads = pending
                         if not pending and self._ui_optional_loads:
-                            follow = [registered(name) for name in self._ui_optional_loads]
+                            entry = page_of(self._ui_page)
+                            waiting = set(self._ui_optional_loads)
+                            follow = [h for h in (entry.optional if entry else ()) if load_id(h) in waiting]
                             self._ui_optional_loads = []
             for item in follow:                           # not reached when cancelled: nothing is shown
                 if isinstance(item, results.Goto):

@@ -211,7 +211,7 @@ class TestCluster01ci_Job(TestCase):
             async with testing.Harness() as h:
                 job = await h.send(Export, "stoppable")
                 await asyncio.sleep(0.25)
-                await (await h.send(State, "ui_open", required=[], optional=[], requires=""))
+                await (await h.send(State, "ui_open", page=""))
                 await job
                 await asyncio.sleep(0.1)
                 return await h.fields(Export)
