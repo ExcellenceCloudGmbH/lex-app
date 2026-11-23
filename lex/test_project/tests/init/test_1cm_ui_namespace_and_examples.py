@@ -172,7 +172,8 @@ class TestCluster01cm_Namespace(TestCase):
                ui.State with @ui.load; neither the lex.ui check nor RFDS's strict lint (what
                `lex reflex check` runs) reports an error or a warning on any of them; the object
                page shows its load's failure, else the loaded record, else a spinner -- so
-               nothing is framed before the record has arrived.
+               nothing is framed before the record has arrived -- and its load, started on
+               mount, reports a refusal in place (in ui.failed, no redirect).
         """
         for block in ("list_report", "object_page", "overview"):
             _, source = scaffold.render(block, "Ticket", package="demo")
@@ -199,6 +200,12 @@ class TestCluster01cm_Namespace(TestCase):
         self.assertNotIn(-1, order, f"the object page shows a failure, the loaded record and a spinner: {order}")
         self.assertEqual(order, sorted(order),
                          "the object page shows its failure first, then the loaded record, otherwise a spinner")
+        record_state = next(obj for obj in vars(rendered).values()
+                            if isinstance(obj, type) and issubclass(obj, state.State) and obj is not state.State)
+        missing = testing.run(record_state, "open")
+        self.assertTrue(missing.refused, "the object page's load refuses a link that names no record")
+        self.assertEqual((missing.failed.get(runs.key_of(record_state.open)), missing.goto), (missing.refused, None),
+                         "its load, started on mount, reports the refusal in place: in ui.failed, no redirect")
 
     # -- 1.785 ---------------------------------------------------------
     def test_1_785_the_reference_example_is_written_on_the_layer(self) -> None:
@@ -209,13 +216,14 @@ class TestCluster01cm_Namespace(TestCase):
         Then:  outside RFDS's own async export hook it contains no async, await, run_orm or
                lex_api; every state with handlers is a ui.State; the lex.ui check reports no
                error, and neither it nor RFDS's strict lint reports a warning. The overview's
-               load is optional and its refusal shows in place on `/`, where the export menu
-               is offered only while the load has not failed;
+               load, started on mount, reports its refusal in place on `/` (in ui.failed, no
+               redirect), where the export menu is offered only while the load has not failed;
                a viewer who may not read the featured model is refused by the load (no
                redirect) and by the export; a viewer who may read some models sees the same
                counts on screen and in the export, only for those models. The record
                dashboard reads the model `?model=` names and refuses a missing or unknown
-               one, and shows failure, else the loaded record, else a spinner. The edit page
+               one -- in ui.failed, with no redirect -- and shows failure, else the loaded
+               record, else a spinner. The edit page
                is a form submitted to one action: no per-keystroke handler, and `save` writes
                the submitted values.
         """
@@ -238,9 +246,7 @@ class TestCluster01cm_Namespace(TestCase):
 
         with patch.object(example, "featured", lambda: Group), \
                 patch.object(example, "_project_models", lambda: [Group, Permission]):
-            # -- the overview: optional, refused in place, the export agreeing with the screen
-            self.assertTrue(example.OverviewState.open.fn.__ui_options__["optional"],
-                            "the overview's load is optional: a refusal must not take the home page away")
+            # -- the overview: started on mount, refused in place, the export agreeing with the screen
             home = str(example.main())
             failure = home.find("ui_failed")
             self.assertGreater(failure, -1, "main() reads the overview load's failure")
@@ -255,6 +261,8 @@ class TestCluster01cm_Namespace(TestCase):
             self.assertTrue(refused.refused, "a viewer who may not read the featured model is refused")
             self.assertIsNone(refused.goto, "the refusal stays on the page")
             self.assertEqual(refused.fields["ui_error"], {}, "no error page is set up")
+            self.assertEqual(refused.failed.get(runs.key_of(example.OverviewState.open)), refused.refused,
+                             "the refusal is in ui.failed: a refusal must not take the home page away")
             with self.assertRaises(ui.Refuse, msg="the export refuses exactly when the load refuses"):
                 _export_rows(example, [])
 
@@ -278,8 +286,10 @@ class TestCluster01cm_Namespace(TestCase):
                 self.assertEqual(api.calls, [("get", fund, "7")], "from the model ?model= names, not the featured one")
                 for params in ({"pk": "7"}, {"model": "nosuchmodel", "pk": "7"}, {"model": fund._meta.model_name}):
                     with self.subTest(params=params):
-                        self.assertTrue(testing.run(example.RecordState, "open", api=_Api(), params=params).refused,
-                                        "a missing or unknown model, or no pk, is refused")
+                        missing = testing.run(example.RecordState, "open", api=_Api(), params=params)
+                        self.assertTrue(missing.refused, "a missing or unknown model, or no pk, is refused")
+                        self.assertEqual((missing.failed.get(runs.key_of(example.RecordState.open)), missing.goto),
+                                         (missing.refused, None), "in place, in ui.failed, with no redirect")
             order = _branch_order(str(example.record_dashboard()), "record_state", "rfds-key-value")
             self.assertNotIn(-1, order, f"the record dashboard shows a failure, the record and a spinner: {order}")
             self.assertEqual(order, sorted(order),

@@ -186,7 +186,11 @@ Fact 3 on Redis is from source reading only: no Redis was available for the prob
 | `ui.Refuse`, `ui.ApiError` | Exceptions |
 | `ui.read`, `ui.create`, `ui.edit`, `ui.delete`, `ui.permission`, `ui.signed_in` | Values for `requires=` |
 | `ui.running`, `ui.failed`, `ui.progress_of`, `ui.cancel` | For views: status of a handler, and the cancel event |
-| `ui.testing` | Test helper for projects |
+| `ui.testing` | Test helper for projects: `run`, and the `Harness` it is built on (section 6.6) |
+
+Beside the layer, `lex.lex_app.reflex.record_model(name)` gives the project model a record
+dashboard's `?model=` names (case-insensitively), or `None`; the reference example's record
+dashboard uses it in its load.
 
 `lex/ui.py` is a thin module that re-exports from `lex/lex_app/reflex/`, where the code lives. It must
 only be imported in the Reflex process (it defines Reflex states), like `lex.lex_app.reflex` today.
@@ -214,6 +218,17 @@ nothing.
 | `self.params` | The page's route and query values: `self.params.section`, `self.params.get("w")` |
 | `self.can(Model, "edit")` | Whether Keycloak grants the user that scope on the model (model-wide grants only, as `has_permission` today) |
 | `self.state(Other)` | Another state of the same user, to read or change. In an action it is the live state; in a load or job it is a working copy merged like `self`. |
+
+These five names are reserved. A `ui.State` subclass that declares a field (with or without a
+default), a computed var or a method named `user`, `api`, `params`, `can` or `state` is refused
+with a `TypeError` when the class is defined. A page route whose dynamic argument has one of these
+names (`/users/[user]`) is refused too: Reflex makes a route argument a field of every state, which
+it reads before the helper, so `self.user` would be the route's text in every handler. `lex_page`
+refuses such a route with a `ValueError`, and `create_app`, once the project's pages are declared,
+refuses any page route that has one, including a page added with plain `rx.page`. `lex reflex
+check` reports the field and method case as an error without starting the app (6.7). Each message
+names the state or the route, the name, and says to rename it. Outside a handler body the helpers
+raise a `RuntimeError` saying where they work.
 
 ### 6.3 Data access
 
@@ -264,8 +279,9 @@ ORM needs a *declared* permission, so declaring none is a mistake, not the same 
 When a handler writes through the ORM, lex-app sets the operation context's acting user for that
 thread, so `created_by` and `edited_by` name the signed-in user instead of the fallback actor.
 
-This is enforcement at run time, in development and production: an unguarded query cannot run. It
-surfaces the first time the handler runs, not when the app is built; `lex reflex check` flags the
+This is enforcement at run time, in development and production: an unguarded query cannot run on
+the handler's thread. A thread the body starts itself is outside the layer, and the block does not
+follow it there. It surfaces the first time the handler runs, not when the app is built; `lex reflex check` flags the
 obvious cases earlier (section 6.7). In conversation this was first described as "fails the build";
 detecting ORM use by reading code is not reliable, so the run-time block replaces that.
 
@@ -308,12 +324,16 @@ one. A load started on a component's `on_mount` is not tied to the visit (below)
   starts the loads only when the user holds the page's permission. A load is still an ordinary event
   the browser can send, so the page's permission decides only whether the opener *starts* it: what a
   load may read is enforced by its own `requires=` and by the API acting as the user.
+- A load declared on a page takes no arguments: it reads the page's route and query values from
+  `self.params`. `lex_page(on_load=State.open(arg))` is refused with a `TypeError`. A load started
+  on mount reads query parameters, not route arguments: after a navigation in the browser, its
+  event carries the previous page's route arguments (section 7).
 - For the loads the page declares, a state is reset to its class defaults once per visit, by the
-  first of them on that state in the visit, so a revisit never shows the previous visit's data. A
+  first page-declared load on that state in the visit, so a revisit never shows the previous visit's data. A
   load started on mount resets its state every time it starts. `keep=("filters",)` exempts fields;
   `keep=` is taken from that first load. Several loads on one state therefore add to each other
   within a visit, and a revisit starts clean.
-- A load without `optional=True` must succeed for the page to show (section 6.5). It counts as
+- A load the page declares without `optional=True` must succeed for the page to show (section 6.5). It counts as
   finished only when its body ran to the end; a cancelled one stays pending. Loads marked
   `optional=True` fill secondary regions: they start once every required load has finished, run
   independently of each other, and a failure affects only their region.
@@ -330,6 +350,11 @@ one. A load started on a component's `on_mount` is not tied to the visit (below)
   button's job: the lex button will disable itself in the browser the moment it is clicked
   (components spec). A handler that must never run twice checks its own precondition, or is written
   as a job.
+- A body cannot run another handler of its state. Reflex turns every public method into an event
+  handler, and calling one from a body only builds it: in an action, `self.reload()` fails the action
+  with an error that says so (in a load or a job, reaching a handler through `self` already raises).
+  Work that two handlers share goes into a method whose name starts with `_` (`self._reload()`),
+  which both call; `lex reflex check` reports `self.<handler>(...)` in a state's methods (6.7).
 
 **`@ui.job`**
 
@@ -350,8 +375,11 @@ one. A load started on a component's `on_mount` is not tied to the visit (below)
   cancelled.
 - `yield ui.progress(0.4, "Reading files")` records a fraction and a message for a standard progress
   display. A job may also yield `ui.toast(...)`.
-- One run per user, per job, per set of arguments at a time; a repeat while it runs is ignored.
-- Jobs run on their own thread pool; when it is full a new job waits its turn. Jobs run inside the
+- One run per tab, per job, per set of arguments at a time; a repeat while it runs is ignored. The
+  arguments are compared as a whole: `export(2025, 2)` runs beside `export(2025, 1)`.
+- `stop_on_leave=True` stops a job when the page's opener starts a new visit in the tab. A page
+  added with plain `rx.page` has no opener, so leaving it does not stop the job.
+- Jobs run on their own thread pool; when it is full a new job waits its turn, and does not fail. Jobs run inside the
   Reflex backend process, so a restart ends them. Work that must survive a restart belongs on Celery,
   as lex-app already says for calculations; the job API is shaped so a Celery-backed variant can be
   added later.
@@ -370,7 +398,7 @@ view can ask:
 | In a view | Is |
 | --- | --- |
 | `ui.running(State.handler)` | True while it runs |
-| `ui.running(State.handler, row["id"])` | True only for the call whose first argument is that value, compared as text |
+| `ui.running(State.handler, row["id"])` | True only for the calls whose first argument is that value, compared as text |
 | `ui.failed(State.handler)` | The failure message of its last run, or empty; a run refused for lack of permission records its message like any other failed run |
 | `ui.progress_of(State.handler)` | The fraction and message last yielded |
 | `ui.cancel(State.handler)` | The event a Cancel button sends |
@@ -399,13 +427,14 @@ values at the start, or at its last `yield`.
 | Kind | How it happens | What the user sees | What is logged |
 | --- | --- | --- | --- |
 | Refusal | The handler raises `ui.Refuse("This request is closed.")`, or lex-app's API rejects a write (validation) | That message | Nothing; it is expected |
-| Not permitted | `requires=` is not met (the body never runs), or the API denies access | The standard "not permitted" message | A warning naming handler and user |
+| Not permitted | `requires=` is not met (the body never runs), or the API denies access | The standard "not permitted" message | A warning naming the handler and the user's id (never the name or e-mail) |
 | Unexpected error | Any other exception | A generic message with a reference | The full traceback under that reference |
 
 | Decorator | Where the message appears |
 | --- | --- |
-| `@ui.load` | The page `/ui-error`, with the reference and a "Try again" that reopens the page; "not permitted" shows the same page as an access-denied message |
-| `@ui.load(optional=True)` | Inside that region only, through `ui.failed` |
+| `@ui.load` declared on a page | The page `/ui-error`, with the reference and a "Try again" that reopens the page; "not permitted" shows the same page as an access-denied message |
+| `@ui.load(optional=True)` declared on a page | Inside that region only, through `ui.failed` |
+| `@ui.load` started on mount | In place, through `ui.failed` |
 | `@ui.action` | A toast |
 | `@ui.job` | A toast, and `ui.failed` for showing it in place |
 
@@ -422,9 +451,20 @@ def approve(self, request_id: int):
 Details:
 
 - **The error page of a required load.** The page's path, with its query string, is noted when the
-  load starts; "Try again" returns there, never to the error page itself. The first required failure
-  ends the visit, so later outcomes of that visit are ignored. A failure that arrives after the
-  browser has moved to another page is logged, and neither recorded nor redirected.
+  load starts; "Try again" returns there, never to the error page itself and never to another site
+  (only a path with one leading `/` and no backslash is kept; anything else returns to `/`). The
+  first required failure ends the visit, so later outcomes of that visit are ignored. A failure that
+  arrives after the browser has moved to another page shows no error page and sends nobody anywhere;
+  it is logged, and its message is still recorded for `ui.failed`.
+- **Who is acting is settled before the user's lock is taken.** A load or a job resolves the
+  session and checks `requires=` first; inside its `async with self` blocks nothing raises. (Under
+  Reflex's Redis state manager a block that raises is not stored, while the browser may already
+  have seen its changes.) Its wind-up, which clears the "running" mark and records the failure, runs
+  to its end even when Reflex cancels the handler meanwhile (as it cancels the previous page's loads
+  at every navigation); the cancellation takes effect after it.
+- **lex-app's API refusals** are shown in their own words: the body's `detail` alone when it has a
+  text one, otherwise its fields as `name: message` pairs, without the program-facing `code`,
+  `error` and `traceback`.
 - **Database writes are not rolled back.** The discard covers the page's state. A handler that needs
   all-or-nothing database writes uses Django's `transaction.atomic()`. Handlers are not wrapped in a
   transaction by default, because a job would hold one open for minutes.
@@ -440,25 +480,33 @@ in-process event processor, so they exercise the real lock and the real browser 
 
 - Actions: changes from the worker thread, `yield` flushing, discard on failure, the slow-action warning.
 - Loads: reset and `keep=`, a result discarded after the user left, an optional load failing alone.
-- Jobs: the merge, the user's fields surviving, the same-field rule, repeats ignored, cancel,
-  `stop_on_leave`, the pool queueing when full.
+- Jobs: the merge, the user's fields surviving, the same-field rule, repeats ignored (and a call with
+  other arguments not ignored), cancel, `stop_on_leave`, the pool queueing when full, a cancellation
+  during the wind-up, `requires=` not met.
 - Data: `self.api` applying lex-app's rules, a query blocked without `requires=`, allowed with it,
   refused without the grant, audit fields naming the user.
 - Failures: the three kinds and where each shows, `ui.running` / `ui.failed` / `ui.progress_of`, and a
-  run whose process is gone no longer counting as running.
-- The Redis lock expiry gets a test that runs where Redis is available and is skipped elsewhere.
+  run whose process is gone no longer counting as running; a refusal under a state manager that,
+  like Redis, does not store a block that raised.
 
 **A test helper for projects**, exposing the same harness:
 
 ```python
-result = ui.testing.run(Tickets, "open_ticket", code="X", user="anna", grants=["Ticket:read"])
+result = ui.testing.run(Tickets, "open_ticket", code="X", user="anna", grants=["tickets.Ticket:read"])
 assert result.goto == "/tickets/X"
 ```
 
 `run(State, handler, *, user=, grants=, params=, fields=, api=, **arguments)` returns the final field
 values, the updates the browser received in order, and any `goto`, toasts, downloads, refusal or
-error. `api=` takes a stand-in for `self.api`. A handler that uses `self.api` needs one: test tokens
-are not Keycloak-signed, so the real API cannot answer in a unit test.
+error. `grants` are `(Model, "read")` pairs or `"app_label.Model:scope"` strings. `api=` takes a
+stand-in for `self.api`. A handler that uses `self.api` needs one: test tokens are not
+Keycloak-signed, so the real API cannot answer in a unit test.
+
+`run` is built on `ui.testing.Harness`, which a test uses directly when it needs more than one event:
+`async with Harness(user=, grants=, params=, api=) as h`, then `h.send(State, "handler", **arguments)`
+(it returns the event's future), `h.fields(State)`, `h.open_tab(url)`, `h.navigate(url)` (the browser
+is now on `url`; no page load runs) and `h.mount(State, "handler", url=, sent_from=, route=)` (a
+component's `on_mount` on `url`, followed by the page's opener, in Reflex's real order).
 
 **Proof on real code.**
 
@@ -481,12 +529,15 @@ identically; the marker makes it visible. Chunked uploads use it until an upload
 | A public method on a `ui.State` that is not `@ui.action`, `@ui.job`, `@ui.load` or `@ui.custom` — a raw `@rx.event` handler, or a method with no decorator, which Reflex also exposes to the browser | Fails the strict check |
 | An `@ui.custom` handler | Listed for review; passes |
 | `requires=ui.signed_in` | Listed for review; passes |
+| A field, computed var or method of a `ui.State` named `user`, `api`, `params`, `can` or `state` (6.2) | Fails the strict check |
+| `self.<handler>(...)` in a method of a `ui.State`, where `<handler>` is a lex.ui handler of that state or of a base the check follows (6.4) | Fails the strict check |
 | A handler body that names a model manager (`.objects`) with no `requires=` | Warning (best effort; the run-time block is the guarantee) |
 
 Helpers on a state are named with a leading underscore; properties, computed vars, static and class
 methods are not handlers. The check reads source only. It recognises `lex.ui` and `reflex` under any
 import alias, and follows inheritance across the project's files by class name, so it may
-over-report on a name clash and does not under-report. A file it cannot analyse is itself an error.
+over-report on a name clash. A file it cannot analyse is itself an error. It does not see a public
+attribute assigned a function (`refresh = lambda self: ...`), nor the methods a mixin brings in.
 
 ### 6.8 Migration, page by page
 
@@ -501,8 +552,8 @@ over-report on a name clash and does not under-report. A file it cannot analyse 
 | Busy flags, stale-visit counters, `try`/`except` with a toast | Removed |
 
 So that consultants and AI copy the new style, lex-app's reference example and the three
-`lex reflex add` templates are converted to the layer in the same PR, and the published docs get a
-page for it.
+`lex reflex add` templates are converted to the layer in the same PR. The published docs page for the
+layer is still to be written.
 
 ### 6.9 Before and after
 
@@ -600,9 +651,9 @@ only a job can do that.
 
 | Risk | Where it stands |
 | --- | --- |
-| The 10-second lock expiry under Redis | From Reflex's source; not run. A test covers it where Redis is available. |
+| The 10-second lock expiry under Redis | Read from Reflex's source only; no Redis in the test environment, so no test runs it |
 | A slow handler written as an action freezes that user's screen and fails under Redis after 10 s | The development warning at one second |
-| Copying a state's fields at the start of every handler (for the discard and for working copies) | Measure with a state holding thousands of rows during implementation; switch to copying on first write if it costs too much |
+| Copying a state's fields at the start of every handler (for the discard and for working copies) | Not measured yet (below); switch to copying on first write if it costs too much |
 | Thread capacity | Two sized pools; a polling loop written as a job holds a thread, so a `ui.poll` helper may follow |
 | Jobs end when the backend restarts | Unchanged from today; Celery-backed jobs are a later piece |
 | A repeat click on a short action runs twice | Cannot be prevented server-side (5.3). The lex button disables itself on click (components spec); handlers that must not repeat check their own precondition or are written as jobs. |
@@ -612,6 +663,10 @@ only a job can do that.
 | A run cleared because its process is gone | It disappears without a message to the user |
 | A "Try again" return path under a frontend path prefix | Untested |
 | A load started on mount that finishes after the user has left | It still fills its own state and may still toast |
+| Route arguments in a load started on mount | After a client-side navigation its event carries the previous page's pathname and route arguments (the query string is read live), so such a load reads query parameters. Read from Reflex's client code; not verified in a browser |
+| Jobs with distinct arguments | Any signed-in user can queue any number of jobs with distinct arguments, as with any Reflex handler |
+| One process record per handler and first argument | Overlapping runs started by different worker processes can clear a spinner early, or keep a dead one until that worker restarts; data is unaffected |
+| The copy cost on thousands of rows | Not measured |
 
 ---
 
@@ -634,5 +689,5 @@ only a job can do that.
 1. A handler written as a plain function under each decorator behaves as sections 6.4 and 6.5 say, shown by the tests of 6.6.
 2. No handler in lex-app's reference example or scaffold templates contains `await`, `async with self`, `run_orm`, a busy flag or a `try`/`except` around a toast. RFDS's own async hooks, such as `ExportMixin._export_rows`, are excepted.
 3. A database query in a handler without `requires=` raises; with it, the permission is enforced.
-4. The live proof and the side-by-side proof of 6.6 are done, with line counts.
+4. The live proof and the side-by-side proof of 6.6 are done, with line counts. (Open.)
 5. Every existing Reflex test batch still passes.

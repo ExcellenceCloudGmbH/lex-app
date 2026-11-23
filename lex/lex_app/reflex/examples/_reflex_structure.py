@@ -130,8 +130,9 @@ class OverviewState(ExportMixin, ui.State):
 
     # Counting rows reads the database directly, so the load says what it requires. The featured
     # model is known only once Django has loaded the project, so the read access that matters is
-    # checked in the body. Optional: a refusal shows in place, and the rest of the page stays.
-    @ui.load(requires=ui.signed_in, optional=True)
+    # checked in the body. main() starts it on mount, so a refusal shows in place (ui.failed) and
+    # the rest of the page stays: a dashboard's load never sends the browser to the error page.
+    @ui.load(requires=ui.signed_in)
     def open(self):
         """Count the rows of the models the viewer may read -- per viewer, when the page opens."""
         readable = [model for model in _project_models() if self.can(model, "read")]
@@ -353,7 +354,8 @@ class RecordState(ui.State):
     record: dict[str, rfds.types.WireValue] = {}
     facts: list[dict[str, str]] = []
 
-    @ui.load(optional=True)
+    # Started on mount by record_dashboard(): a failure shows in place, through ui.failed.
+    @ui.load
     def open(self):
         model = record_model(self.params.get("model"))
         pk = str(self.params.get("pk") or "")

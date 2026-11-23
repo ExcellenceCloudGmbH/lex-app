@@ -83,7 +83,8 @@ class ${state}(ui.State):
     pk: str = ""
     record: dict[str, rfds.types.WireValue] = {}
 
-    @ui.load(optional=True)
+    # Started on mount by the page below: a failure shows in place, through ui.failed.
+    @ui.load
     def open(self):
         self.pk = str(self.params.get("pk") or "")
         if not self.pk:
