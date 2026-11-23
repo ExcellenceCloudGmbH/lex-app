@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 746
+max_scenario: 785
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2020,3 +2020,178 @@ letters:
       the stack dashboard_page puts in the shell's main region now stretch their children.
       Reproduced and confirmed in a sandboxed headless render (synthetic rows). Removing either
       align="stretch" fails 1.746.
+  cc:
+    title: 'lex.ui results and thread pools'
+    scenarios: 1.747-1.749
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      Turns what a lex.ui handler returns or yields (goto, toast, download, progress) into
+      Reflex events and runs handler bodies on two sized thread pools, one for actions and
+      loads and one for jobs, copying the caller's context into the worker (spec 6.4). A
+      dropped or misread result, a raw Reflex event slipping through, a pool that ignores
+      its size setting, or a body that runs on the event loop fails these tests.
+  cd:
+    title: 'lex.ui guard: requires values, the query block, the acting user'
+    scenarios: 1.750-1.752
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      Decides what a handler's `requires=` means and keeps the ORM behind it: a query inside
+      a handler that declared nothing is refused with a message naming the handler and the
+      two ways out, and ORM writes record the signed-in user as `created_by` / `edited_by`
+      (spec 6.3). An empty `requires=` is refused when the handler is declared. These tests
+      fail if a dashboard can read rows the grid would hide, if a record-scoped grant opens
+      a whole model, or if audit fields name nobody.
+  ce:
+    title: 'lex.ui working copy: snapshot, restore, draft, merge'
+    scenarios: 1.753-1.755
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      Copies a state's own fields for the snapshot a failed handler goes back to, and gives
+      a job a draft to work on so it holds no lock; only what the draft changed is merged
+      back, so what the user typed meanwhile survives (spec 6.4). Inherited fields are read
+      through `self.state(Parent)`; a field that cannot be copied is refused by name;
+      "changed" is decided by value, with a pickle fallback. These tests fail if a job
+      overwrites the user's input with stale values, if an error leaves half-finished values
+      on screen, or if a NaN or an array comparison reads as a change.
+  cf:
+    title: 'lex.ui context: user, params, grants, the API as the user'
+    scenarios: 1.756-1.758
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      Makes everything a plain synchronous handler body needs reachable without `await`: the
+      signed-in user, the page's parameters, the user's grants and `self.api`, lex-app's API
+      called with the user's bearer token, fetched anew for every call so a long job never
+      uses an expired one (spec 6.2, 6.3). A call onto the event loop is cancelled when its
+      wait times out, so a retry cannot repeat a write. These tests fail if a handler acts
+      as nobody, uses a stale token, or if a refusal is not an API error.
+  cg:
+    title: 'ui.State and handler status'
+    scenarios: 1.759-1.761
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.State` is the base class of every page state: it carries the status fields a view
+      reads (which handler runs, for which row, how far, what failed) and gives a body
+      `self.user`, `self.api`, `self.params`, `self.can` and `self.state` as properties, not
+      event handlers (spec 6.2). The status helpers turn those fields into view expressions
+      so a project never writes its own busy flags. These tests fail if a spinner never
+      stops, if a run is not cleared when it finishes, or if the helpers become event
+      handlers.
+  ch:
+    title: '@ui.action: plain synchronous handlers and their failures'
+    scenarios: 1.762-1.767
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      Runs a short handler written as a plain function: the body runs off the event loop on
+      the live state, each yield flushes what changed, the handler is marked running for the
+      view, and on failure whatever the browser was not yet shown is discarded and the user
+      is told in the handler's own words, "not permitted", or a generic message with a
+      reference (spec 6.4, 6.5). An `async def` under `@ui.action` is refused when it is
+      declared. These tests fail if a slow click stalls every user, if values stay
+      half-applied after an error, or if an exception's text reaches the browser.
+  ci:
+    title: '@ui.job: long work on a working copy'
+    scenarios: 1.768-1.773
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      Runs work that takes longer than a second as a job: the body works on a copy of the
+      state, lex-app merges only what the job changed at each yield and at the end, so the
+      user keeps working and what they typed meanwhile survives; one run per user and
+      argument at a time, cancel at the next yield, optional stop when the user leaves the
+      page (spec 6.4). These tests fail if the screen freezes during an export, if a job
+      overwrites the user's input, or if the same export runs twice.
+  cj:
+    title: '@ui.load: page loads, the opener, the error page'
+    scenarios: 1.774-1.778
+    status: complete
+    tests:
+      pass: 10
+      skip: 0
+      xfail: 0
+    note: >-
+      Fills a page when it opens, in two kinds. A load declared on a page
+      (`lex_page(on_load=...)`) is started by the opener, which carries only the route,
+      since the loads and the permission come from a server-side registry; it is bound to
+      the page's visit, its state is reset once per visit, and a required failure goes to
+      the error page with a reference. A load started by a component's `on_mount` (a
+      dashboard) belongs to its component: only a newer run of itself replaces it, it resets
+      the state at every start, and its failure is reported in place (spec 6.4, 6.5). These
+      tests fail if a page flashes another record's data, loads before sign-in, lets the
+      browser pick which loads run or under which permission, or lets one broken region take
+      the page down.
+  ck:
+    title: 'lex.ui clears runs whose process is gone'
+    scenarios: 1.779-1.780
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      Each running mark records the process that set it, and every page open sweeps the
+      marks whose process is gone, so a spinner does not outlive a restart when state is
+      kept on disk or in Redis; with Redis each process keeps a heartbeat another worker can
+      check (spec 7). The Redis calls are bounded and fail open, a sweep has one time
+      budget, one client is cached, a forked child gets its own process id, and a mark's
+      process record is kept while a sibling run is in flight. These tests fail if a button
+      stays disabled until the user opens a new tab, or if a slow or broken Redis can stall
+      a page open.
+  cl:
+    title: '@ui.custom and the lex.ui findings of lex reflex check'
+    scenarios: 1.781-1.782
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      Keeps raw Reflex possible only where it is marked with `@ui.custom`, and has `lex
+      reflex check` report what leaves the default path (spec 6.7). Every public method on a
+      `ui.State` must be one of the four lex.ui decorators (an undecorated method is an
+      error too); import aliases and inheritance across files are followed; a file that
+      cannot be analysed is an error. These tests fail if raw Reflex handlers creep back
+      into project code unnoticed, or if the check passes when RFDS's own checks do but
+      lex.ui's do not.
+  cm:
+    title: 'The lex.ui namespace; templates and the reference example on the layer'
+    scenarios: 1.783-1.785
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      `from lex import ui` gives a project every name of the layer, and lex-app's own
+      scaffold templates and reference example are written on it, because consultants and AI
+      copy what they see (spec 6.8). The example and the rendered templates pass RFDS's
+      strict lint and the lex.ui check with nothing to report; the example's edit page is a
+      form submitted to one action; its home dashboard reports a refusal in place and its
+      export gives out only what the viewer may read. These tests fail if a template teaches
+      async, `run_orm` or `lex_api` plumbing again.
