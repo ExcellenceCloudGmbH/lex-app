@@ -56,6 +56,11 @@ def normalise(requires: Any) -> tuple | None:
     if requires is None:
         return None
     items = tuple(requires) if isinstance(requires, (list, tuple)) else (requires,)
+    if not items:
+        raise ValueError(
+            "requires= must name at least one requirement: ui.read(Model), ui.create(), ui.edit(), "
+            "ui.delete(), ui.permission() or ui.signed_in"
+        )
     for item in items:
         if not isinstance(item, (Requirement, _SignedIn)):
             raise TypeError(

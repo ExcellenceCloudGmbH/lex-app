@@ -36,7 +36,7 @@ class TestCluster01cd_Guard(TestCase):
         When:  requirements are normalised and checked against them.
         Then:  nothing declared is None; one value or a list is a tuple; ui.read(Group) holds;
                the record-scoped edit does not open the model; a list needs all; ui.signed_in
-               always holds; a named resource works like a model.
+               always holds; a named resource works like a model; an empty list is refused.
         """
         grants = [{"rsname": "auth.Group", "scopes": ["read"]},
                   {"rsname": "auth.Group", "scopes": ["edit"], "resource_set_id": "7"}]
@@ -51,6 +51,10 @@ class TestCluster01cd_Guard(TestCase):
         self.assertEqual({guard.create(Group).scope, guard.delete(Group).scope}, {"create", "delete"})
         with self.assertRaises(TypeError, msg="anything else is refused"):
             guard.normalise("auth.Group:read")
+        with self.assertRaises(ValueError, msg="an empty list would grant everything, so it is refused"):
+            guard.normalise([])
+        with self.assertRaises(ValueError, msg="an empty tuple would grant everything, so it is refused"):
+            guard.normalise(())
 
     # -- 1.751 ---------------------------------------------------------
     def test_1_751_queries_are_refused_inside_the_block_and_work_after_it(self) -> None:
