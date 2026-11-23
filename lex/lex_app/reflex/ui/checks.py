@@ -31,7 +31,7 @@ import dataclasses
 from pathlib import Path
 
 _UI_PACKAGES = ("lex.ui", "lex.lex_app.reflex.ui")
-_UI_HANDLERS = {"ui.action", "ui.job", "ui.load", "ui.custom"}
+_UI_HANDLERS = {"ui.action", "ui.job", "ui.load", "ui.rows", "ui.custom"}
 _NOT_HANDLERS = {"property", "staticmethod", "classmethod", "reflex.var", "cached_property",
                  "functools.cached_property"}
 

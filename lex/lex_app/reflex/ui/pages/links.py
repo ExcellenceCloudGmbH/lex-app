@@ -99,3 +99,40 @@ def piece(ctx: Build, name: str, value: Any, instead: str | None = None) -> Any:
     if value is None or isinstance(value, bool) or str(value) in ("", ".", ".."):
         raise ctx.fail(f"the value for `{name}` in a link is {value!r}.", instead)
     return quote(str(value), safe="")
+
+
+class Address(str):
+    """A page's address made by :func:`address`. A table follows only these: a plain string from data
+    never becomes a link."""
+
+    __slots__ = ()
+
+
+def address(page: Callable[..., Any], **values: Any) -> Address:
+    """The address of ``page`` (a function declared with ``@ui.page``), with its values, built in Python.
+
+    For rows that lead to different pages: a ``@ui.rows`` handler puts ``ui.address(...)`` in a field
+    of each row, and the table's ``open=`` (or a column's) names that field. A value that is ``None``
+    or empty leaves the row without a link: ``ui.address`` then returns ``""``.
+    """
+    info = page_info(page)
+    if info is None:
+        raise TypeError(f"ui.address() takes a page declared with @ui.page; got {getattr(page, '__name__', page)!r}")
+    missing = [name for name in info.arguments if name not in values]
+    unknown = [name for name in values if name not in info.arguments and name not in info.params]
+    if missing or unknown:
+        accepted = ", ".join([*info.arguments, *info.params]) or "none"
+        raise TypeError(f"ui.address({info.name}, ...): page `{info.name}` ({info.route}) takes {accepted}; "
+                        f"got {', '.join(values) or 'nothing'}.")
+    path, rest = "", info.route
+    for name in info.arguments:
+        value = values[name]
+        if value is None or isinstance(value, bool) or str(value) in ("", ".", ".."):
+            return Address("")
+        before, _, rest = rest.partition(f"[{name}]")
+        path += before + quote(str(value), safe="")
+    path += rest
+    query = [(name, values[name]) for name in info.params if values.get(name) not in (None, "")]
+    for index, (name, value) in enumerate(query):
+        path += ("?" if index == 0 else "&") + name + "=" + quote(str(value), safe="")
+    return Address(path)

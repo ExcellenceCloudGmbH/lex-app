@@ -120,9 +120,12 @@ class State(rx.State):
         self._ui_page = page
         self._ui_reset = []
         entry = handlers.page_of(page)
+        from lex.lex_app.reflex.ui.pages import rows_table
+
+        tables = rows_table.reopen_events(page)     # a table already on screen: the new record's rows
         if entry is None or not _page_permitted(self, entry.requires):
             self._ui_pending_loads, self._ui_optional_loads, self._ui_started = [], [], []
-            return None
+            return tables or None
         from lex.lex_app.reflex.ui import runs as ui_runs
 
         # A page shows its skeleton until its loads have finished in this visit.
@@ -132,7 +135,7 @@ class State(rx.State):
         self._ui_optional_loads = [handlers.load_id(h) for h in entry.optional] if entry.required else []
         starting = list(entry.required or entry.optional)
         self._ui_started = [handlers.load_id(h) for h in starting]
-        return starting
+        return [*starting, *tables]
 
     @rx.event
     def ui_cancel(self, key: str):

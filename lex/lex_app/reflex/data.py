@@ -378,6 +378,16 @@ class LexTableState(DataTableMixin, mixin=True):
     search_field: ClassVar[str] = ""
     #: The table's fixed filters, set when it mounts (``lex_table(filters=...)``).
     scope: dict[str, str] = {}
+    #: A filter dropdown's choice per field (``ui.table(filters=[...])``).
+    chosen: dict[str, str] = {}
+
+    @rx.event
+    async def set_choice(self, field: str, value: str):
+        """A filter dropdown's choice; ``""`` removes the filter."""
+        from lex.lex_app.reflex.ui.pages.rows_table import choose
+
+        async for _ in choose(self, field, value):
+            yield
 
     @rx.event
     async def open(self, scope: dict):

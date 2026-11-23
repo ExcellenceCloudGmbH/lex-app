@@ -83,6 +83,7 @@ class Section(Part):
             parts = [dataclasses.replace(part, empty=self.empty)
                      if isinstance(part, tables.Table) and part.empty is None else part for part in parts]
         shape = "table" if has_table and len(parts) == 1 else "rect"
+        ctx = dataclasses.replace(ctx, caption=self.title)
         return states(ctx, self.load, rfds.stack(*_stacked(ctx, parts)), shape)
 
     def _render(self, ctx: Build) -> rx.Component:
@@ -281,7 +282,9 @@ class List(Kind):
         if not isinstance(self.table, tables.Table):
             raise ctx.at("table").fail(f"got {called(self.table)}.",
                                        "`table=` holds one `ui.table(Model, columns=[...])`.")
-        title, actions, table = self._title(ctx), self._buttons(ctx), self.table.build(ctx.at("table"))
+        title, actions = self._title(ctx), self._buttons(ctx)
+        named = dataclasses.replace(ctx.at("table"), caption=title if isinstance(title, str) else "")
+        table = self.table.build(named)
         page = _rfds(ctx, lambda: templates.list_report(title=title, path=ctx.route or "/", table=table, actions=actions))
         return states(ctx, self.load, page, "table")
 

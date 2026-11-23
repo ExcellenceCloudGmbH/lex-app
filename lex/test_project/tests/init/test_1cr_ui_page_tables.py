@@ -43,8 +43,8 @@ class TestCluster01cr_PageTables(SimpleTestCase):
         Given: a model and the names of the columns to show.
         When:  the table is built.
         Then:  it is RFDS's data table over lex-app's paged table state for that model, showing
-               the named columns under the model's own field labels; something that is not a
-               model is refused with what to pass.
+               the named columns under the model's own field labels; something that is neither a
+               model nor a @ui.rows handler is refused with what to pass.
         """
         built = str(tables.table(Group, columns=["name"]).build(CTX))
         self.assertIn("rfds-data-table", built, "RFDS's data table")
@@ -56,9 +56,9 @@ class TestCluster01cr_PageTables(SimpleTestCase):
         with self.assertRaises(PageError) as wrong:
             tables.table([{"name": "a"}], columns=["name"]).build(CTX.at("table"))
         self.assertEqual(str(wrong.exception),
-                         "Page `groups`, slot `table`: `ui.table` takes a model class and reads its rows from the "
-                         "server; it cannot show rows you hold yourself (a list, or a state value) yet.\n"
-                         "Pass a model: `ui.table(Fund, columns=[...])`.", "the refusal says what a table can show")
+                         "Page `groups`, slot `table`: `ui.table` got `[{'name': 'a'}]` as its rows.\n"
+                         "Return the rows from a `@ui.rows` handler on the state: `ui.table(State.rows, ...)`, "
+                         "or pass a model: `ui.table(Fund, ...)`.", "the refusal says what a table can show")
         with self.assertRaises(PageError) as unknown:
             tables.table(Group, columns=["nmae"]).build(CTX.at("table"))
         self.assertEqual(str(unknown.exception),
@@ -87,7 +87,7 @@ class TestCluster01cr_PageTables(SimpleTestCase):
         self.assertIn('rfdsI18n.t("Team", "Team"', built,
                       "the column's own label is used, and translated like every other sentence")
         self.assertNotIn('"Name"', built, "in place of the field's label")
-        for bad in (dict(kind="colour"), dict(label=""), dict(currency="EUR"), dict(kind="money", currency="euro")):
+        for bad in (dict(kind="colour"), dict(label=""), dict(currency="EUR"), dict(kind="money", currency="E-R")):
             with self.subTest(bad=bad), self.assertRaises(ValueError, msg="a column is checked when it is declared"):
                 tables.column("name", **bad)
         self.assertEqual(tables._RFDS_KIND["datetime"], "instant", "datetime is RFDS's instant")

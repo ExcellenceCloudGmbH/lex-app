@@ -274,6 +274,13 @@ async def _drive(inv: context.Invocation, pool: str, fn: Callable[..., Any], tar
     yield _Return(None if value is _STOPPED else value)
 
 
+def _tables_of(state: Any) -> list:
+    """The events that make the tables reading this state's ``@ui.rows`` handlers read again."""
+    from lex.lex_app.reflex.ui.pages import rows_table
+
+    return rows_table.reread_events(owner=type(workcopy.raw(state)))
+
+
 def _mark(wrapper: Callable[..., Any], fn: Callable[..., Any], kind: str, **options: Any) -> None:
     wrapper.__ui_kind__ = kind
     wrapper.__ui_key__ = fn.__qualname__
@@ -350,6 +357,9 @@ def action(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any
                     outcome = _classify(key, failure, user=_user_id(session))
                     message = outcome.message
                     for event in results.to_events([_toast(outcome)]):
+                        yield event
+                else:
+                    for event in _tables_of(self):        # its state's tables read again
                         yield event
             finally:
                 runs.mark_finished(self, key, arg, error=message)
@@ -457,6 +467,8 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                             if not discard:
                                 for event in results.to_events(found):
                                     yield event
+                    for event in _tables_of(self):            # its state's tables read again
+                        yield event
                 except Exception as exc:  # noqa: BLE001 - the body has finished here; reported to the user
                     outcome = _classify(key, exc, user=_user_id(session))
                     message = outcome.message

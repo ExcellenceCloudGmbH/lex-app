@@ -211,9 +211,12 @@ class Button(Part):
     icon: str | None = None
     visible: Any = None
     primary: bool = False               # set by the kind: the first action of a page
+    args: tuple = ()                    # values passed to the handler (a row's key)
 
     def click(self, ctx: Build) -> Any:
-        return rx.redirect(links.href(ctx, self.to, self.values)) if self.to is not None else self.handler
+        if self.to is not None:
+            return rx.redirect(links.href(ctx, self.to, self.values))
+        return self.handler(*self.args) if self.args else self.handler
 
     def menu_entry(self, ctx: Build) -> rx.Component:
         return menu_entry(ctx, self.label, self.click(ctx), self.visible, tone=self.tone, icon=self.icon)
@@ -225,18 +228,29 @@ class Button(Part):
         import rfds
 
         intent = "danger" if self.tone == "danger" else "primary" if self.primary else "secondary"
-        return rfds.button(say(self.label), intent=intent, icon=self.icon, on_click=self.click(ctx))
+        extra: dict[str, Any] = {}
+        if self.args and getattr(getattr(self.handler, "fn", None), "__ui_key__", None):
+            from lex.lex_app.reflex.ui import runs
+
+            extra["loading"] = runs.running(self.handler, self.args[0])     # this row's run, not another's
+        return rfds.button(say(self.label), intent=intent, icon=self.icon, on_click=self.click(ctx), **extra)
 
 
-def button(label: Any, handler: Any = None, *, to: Any = None, tone: str = "neutral", icon: str | None = None,
-           visible: Any = None, **values: Any) -> Button:
-    """Runs a handler, or opens a page (``to=``, with the page's parameters by name)."""
+def button(label: Any, handler: Any = None, *args: Any, to: Any = None, tone: str = "neutral",
+           icon: str | None = None, visible: Any = None, **values: Any) -> Button:
+    """Runs a handler, or opens a page (``to=``, with the page's parameters by name).
+
+    Values after the handler are passed to it: in a table's ``row_actions``,
+    ``ui.button("Approve", State.approve, row["id"])``; the button then shows that row's run.
+    """
+    if args and handler is None:
+        raise ValueError("ui.button(): values after the label go to a handler; give the handler first.")
     if (handler is None) == (to is None):
         raise ValueError("ui.button() takes a handler or to=, one of them: `ui.button(\"Close fund\", State.close)` "
                          "or `ui.button(\"New fund\", to=new_fund)`.")
     if values and to is None:
         raise ValueError(f"ui.button(): {', '.join(values)} can only be given with to=, as the page's parameters.")
-    return Button(label, handler, to, values, _tone(tone), icon, visible)
+    return Button(label, handler, to, values, _tone(tone), icon, visible, False, tuple(args))
 
 
 def menu_entry(ctx: Build, label: Any, click: Any, visible: Any, *, tone: str = "neutral",

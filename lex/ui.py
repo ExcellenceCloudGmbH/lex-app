@@ -36,8 +36,10 @@
 ``@ui.load``                fills the page when it opens
 ``@ui.action``              a short handler, under about a second
 ``@ui.job``                 long work with progress; the user keeps working
+``@ui.rows``                a table's rows, as a list of dicts; read-only, read as the user
 ``@ui.custom``              a raw Reflex handler, marked for review
-``ui.goto/toast/download``  what a handler returns
+``ui.goto/toast/download``  what a handler returns; ``ui.refresh(State.rows)`` makes the
+                            tables of another state read again
 ``ui.progress``             what a job yields
 ``ui.Refuse``               an expected refusal, shown in its own words
 ``ui.ApiError``             lex-app's API refused a call (``.status``, ``.denied``,
@@ -54,10 +56,13 @@ progress_of/cancel``        event of a Cancel button
                             left out of ``import *``, which would hide Python's ``list``)
 ``ui.section``              a titled part of a page; ``load=`` makes it load on its own
 ``ui.text/fact/status/      what fills the slots; none takes a styling argument
-message/table/column/
+message/column/
 button/link``
 ``ui.each/switch``          repetition and choice; ``visible=`` on every component
                             decides what is shown, never what is allowed
+``ui.table``                rows from a model (``where=``) or a ``@ui.rows`` handler; ``search=``,
+                            ``filters=``, ``export=``, ``totals=``, ``row_actions=``
+``ui.address``              a page's address, for a row that leads to a page of its own
 ``ui.custom_block``         a raw component, marked for review with its reason
 ``ui.PageError``            a page declared wrongly: says the page, the slot, what to write
 ==========================  =====================================================
@@ -70,18 +75,21 @@ from lex.lex_app.reflex.ui import testing
 from lex.lex_app.reflex.ui.guard import create, delete, edit, permission, read, signed_in
 from lex.lex_app.reflex.ui.handlers import action, custom, job, load
 from lex.lex_app.reflex.ui.pages.declare import dashboard, page
+from lex.lex_app.reflex.ui.pages.links import address
 from lex.lex_app.reflex.ui.pages.kinds import list_ as list  # noqa: A001 - ui.list is the page kind
 from lex.lex_app.reflex.ui.pages.kinds import record, section
 from lex.lex_app.reflex.ui.pages.parts import PageError
 from lex.lex_app.reflex.ui.pages.tables import column, table
 from lex.lex_app.reflex.ui.pages.vocab import button, custom_block, each, fact, link, message, status, switch, text
-from lex.lex_app.reflex.ui.results import Refuse, download, goto, progress, toast
+from lex.lex_app.reflex.ui.results import Refuse, download, goto, progress, refresh, toast
+from lex.lex_app.reflex.ui.rows import rows
 from lex.lex_app.reflex.ui.runs import cancel, failed, loaded, progress_of, running
 from lex.lex_app.reflex.ui.state import State
 
 __all__ = [
-    "ApiError", "PageError", "Refuse", "State", "action", "button", "cancel", "column", "create", "custom",
+    "ApiError", "PageError", "Refuse", "State", "action", "address", "button", "cancel", "column", "create", "custom",
     "custom_block", "dashboard", "delete", "download", "each", "edit", "fact", "failed", "goto", "job",
     "link", "load", "loaded", "message", "page", "permission", "progress", "progress_of", "read",
-    "record", "running", "section", "signed_in", "status", "switch", "table", "testing", "text", "toast",
+    "record", "refresh", "rows", "running", "section", "signed_in", "status", "switch", "table", "testing", "text",
+    "toast",
 ]

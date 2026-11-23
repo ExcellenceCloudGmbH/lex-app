@@ -23,6 +23,7 @@ class Build:
     slot: str = ""                      # the slot being filled, for messages
     place: str = "body"                 # "body" or "actions": a link in actions is a button
     mounts: bool = False                # a dashboard: a load starts when its part mounts
+    caption: str = ""                   # the title a table in this part is named by (its section's)
 
     def at(self, slot: str, place: str | None = None) -> "Build":
         return dataclasses.replace(self, slot=slot, place=place or self.place)

@@ -80,6 +80,7 @@ def _load_app_states() -> None:
     """
     import rfds
 
+    import lex.lex_app.reflex.auth  # noqa: F401 - defines the signed-in user's state (a grant check imports it)
     import lex.lex_app.reflex.data  # noqa: F401 - defines LexRecordState
 
     rfds.toast  # noqa: B018 - the lazy import is the point
@@ -314,3 +315,36 @@ def run(state_cls: Any, handler: str, *, user: str = "tester", grants: Any = (),
                           outcomes=list(harness.outcomes))
 
     return asyncio.run(scenario())
+
+
+def rows(handler: Any, *, user: str = "tester", grants: Any = (), params: dict | None = None, api: Any = None,
+         fields: dict | None = None, search: str = "", filters: dict | None = None) -> list[dict]:
+    """The rows a table over the ``@ui.rows`` ``handler`` would get, after its search and filters.
+
+    Run as ``user`` with ``grants`` and the page's ``params``; ``fields`` seeds the state. A
+    broken handler raises here (a list that is not of dicts, a write to the state) instead of
+    showing the table's error, so a project's test fails on it.
+    """
+    from rfds.state.table import query_rows
+
+    from lex.lex_app.reflex.ui import rows as rows_mod
+
+    async def scenario() -> list[dict]:
+        async with Harness(user=user, grants=grants, params=params, api=api) as harness:
+            await harness.open_tab()
+            if fields:
+                await harness.set_fields(handler.state, **fields)
+            owner = await harness._state(handler.state)
+            got = await rows_mod.read(handler, owner, search=search)
+            for outcome in harness.outcomes:
+                if outcome.kind != "ok":
+                    raise AssertionError(outcome.message)
+            return got
+
+    found = asyncio.run(scenario())
+    text = "" if rows_mod.takes_search(handler) else search
+    picked = {name: {"op": "eq", "value": value} for name, value in (filters or {}).items()}
+    if not text and not picked:
+        return found
+    matched, _ = query_rows(found, filters=picked, query=text, offset=0, limit=max(len(found), 1))
+    return matched
