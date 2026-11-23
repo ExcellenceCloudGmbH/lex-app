@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import functools
 import inspect
@@ -145,13 +146,24 @@ async def _drive(inv: context.Invocation, pool: str, fn: Callable[..., Any], tar
     """Run the body on ONE pool thread; yield a ``_Step`` for each of its yields, then a ``_Return``.
 
     The body's thread waits at each yield until the consumer has handled the step (and may have
-    set ``step.stop``, which closes the generator so its ``finally`` blocks run).
+    set ``step.stop``, which closes the generator so its ``finally`` blocks run). When the
+    consumer stops early (closes this generator, fails, or is cancelled), the body is told to
+    stop at its yield, and this generator returns only once the body's thread has finished, so
+    the body's own cleanup never runs after the consumer has moved on.
     """
     loop = inv.loop
     queue: asyncio.Queue = asyncio.Queue()
+    lock = threading.Lock()
+    closed = False
+    outstanding: _Step | None = None     # the step the body's thread is waiting on, if any
 
     def emit(value: Any) -> bool:
+        nonlocal outstanding
         step = _Step(value)
+        with lock:
+            if closed:
+                return True
+            outstanding = step
         loop.call_soon_threadsafe(queue.put_nowait, step)
         step.done.wait()
         return step.stop
@@ -176,20 +188,25 @@ async def _drive(inv: context.Invocation, pool: str, fn: Callable[..., Any], tar
 
     task = asyncio.ensure_future(pools.run(pool, body))
     task.add_done_callback(lambda _: queue.put_nowait(_END))
-    pending: _Step | None = None
     try:
         while True:
             item = await queue.get()
             if item is _END:
                 break
-            pending = item
             yield item
-            pending = None
             item.done.set()
     finally:
-        if pending is not None:          # the consumer stopped early: let the body's thread go
-            pending.stop = True
-            pending.done.set()
+        with lock:
+            closed = True
+            waiting = outstanding
+        if waiting is not None and not waiting.done.is_set():   # stopped early: let the body's thread go
+            waiting.stop = True
+            waiting.done.set()
+        if not task.done():
+            try:
+                await asyncio.shield(task)                      # the body's cleanup completes first
+            except Exception:  # noqa: BLE001 - surfaced below on the normal path; the consumer is leaving otherwise
+                pass
     value = await task
     yield _Return(None if value is _STOPPED else value)
 
@@ -227,35 +244,41 @@ def action(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any
                 inv.saved[id(self)] = (self, workcopy.snapshot(self))
             except Exception as exc:  # noqa: BLE001 - reported below, like a failure of the body
                 failure = exc
-            if failure is None:
-                runs.mark_started(self, key, arg)
-                yield                                # the browser sees "running" before the body starts
-                started = time.monotonic()
-                try:
-                    async for step in _drive(inv, "interactive", fn, self, args, kwargs):
-                        found, report = results.split(step.value, handler=key)
-                        if report is not None:
-                            runs.mark_progress(self, key, report)
-                        for event in results.to_events(found):
-                            yield event
-                        if isinstance(step, _Step):
-                            inv.saved = {ident: (state, workcopy.snapshot(state)) for ident, (state, _) in inv.saved.items()}
-                            yield                    # flush what the body changed so far
-                except Exception as exc:  # noqa: BLE001 - every failure is reported to the user below
-                    failure = exc
-                    for state, snap in inv.saved.values():
-                        workcopy.restore(state, snap)
-                elapsed = time.monotonic() - started
-                if elapsed > SLOW_ACTION_SECONDS and _is_development():
-                    logger.warning("%s took %.1f s as @ui.action; the user's other clicks waited. "
-                                   "Make it a @ui.job.", key, elapsed)
             message = ""
-            if failure is not None:
-                outcome = _classify(key, failure)
-                message = outcome.message
-                for event in results.to_events([_toast(outcome)]):
-                    yield event
-            runs.mark_finished(self, key, arg, error=message)
+            try:
+                if failure is None:
+                    runs.mark_started(self, key, arg)
+                    yield                            # the browser sees "running" before the body starts
+                    started = time.monotonic()
+                    try:
+                        async with contextlib.aclosing(_drive(inv, "interactive", fn, self, args, kwargs)) as steps:
+                            async for step in steps:
+                                found, report = results.split(step.value, handler=key)
+                                if report is not None:
+                                    runs.mark_progress(self, key, report)
+                                for event in results.to_events(found):
+                                    yield event
+                                if isinstance(step, _Step):
+                                    inv.saved = {ident: (state, workcopy.snapshot(state))
+                                                 for ident, (state, _) in inv.saved.items()}
+                                    yield            # flush what the body changed so far
+                    except BaseException as exc:     # the body has finished here: aclosing closed the driver
+                        for state, snap in inv.saved.values():
+                            workcopy.restore(state, snap)
+                        if not isinstance(exc, Exception):
+                            raise                    # cancelled or closed: no toast
+                        failure = exc
+                    elapsed = time.monotonic() - started
+                    if elapsed > SLOW_ACTION_SECONDS and _is_development():
+                        logger.warning("%s took %.1f s as @ui.action; the user's other clicks waited. "
+                                       "Make it a @ui.job.", key, elapsed)
+                if failure is not None:
+                    outcome = _classify(key, failure)
+                    message = outcome.message
+                    for event in results.to_events([_toast(outcome)]):
+                        yield event
+            finally:
+                runs.mark_finished(self, key, arg, error=message)
 
         _mark(wrapper, fn, "action", requires=requirements)
         return rx.event(wrapper)

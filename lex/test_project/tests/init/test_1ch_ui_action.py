@@ -32,6 +32,8 @@ from lex.lex_app.reflex.ui.state import State
 pytestmark = pytest.mark.init
 
 SEEN: list = []
+#: Set by ``sleeps_then_yields`` when its body has finished, cancelled or not.
+FINISHED = threading.Event()
 
 
 class Board(State):
@@ -90,12 +92,30 @@ class Board(State):
     def sleeps(self, seconds: float):
         time.sleep(seconds)
 
+    @handlers.action
+    def yields_a_wrong_value(self):
+        try:
+            self.status = "changed"
+            yield "not a result"
+        finally:
+            self.status = "set-in-finally"
+
+    @handlers.action
+    def sleeps_then_yields(self):
+        try:
+            time.sleep(0.3)
+            yield
+            self.steps = 99
+        finally:
+            FINISHED.set()
+
 
 class TestCluster01ch_Action(TransactionTestCase):
     """1.762-1.767. Transactional: the body runs on another thread, with its own connection."""
 
     def setUp(self) -> None:
         SEEN.clear()
+        FINISHED.clear()
 
     # -- 1.762 ---------------------------------------------------------
     def test_1_762_a_plain_function_runs_off_the_loop_on_the_live_state(self) -> None:
@@ -159,7 +179,8 @@ class TestCluster01ch_Action(TransactionTestCase):
                the body never runs, the user gets the standard error toast, the log names the
                field, and nothing is left marked running. A session that cannot be resolved
                ends the same way: an unexpected error with a reference, an error toast, nothing
-               left running.
+               left running. A body that yields a wrong value is an unexpected error too, and
+               its own cleanup (a finally) runs before the restore, so the field ends restored.
         """
         with self.assertLogs("lex.lex_app.reflex.ui.handlers", level="ERROR") as logs:
             result = testing.run(Board, "breaks_after_a_yield")
@@ -211,6 +232,13 @@ class TestCluster01ch_Action(TransactionTestCase):
         self.assertEqual((fields["status"], fields["ui_running"]), ("", {}), "the body never ran and nothing is left running")
         self.assertIn("identity provider unreachable", "\n".join(unresolved.output), "the log carries the error")
 
+        with self.assertLogs("lex.lex_app.reflex.ui.handlers", level="ERROR"):
+            wrong = testing.run(Board, "yields_a_wrong_value")
+        self.assertTrue(wrong.error, "a wrongly yielded value is reported as an unexpected error")
+        self.assertEqual(wrong.fields["status"], "",
+                         "the body's finally ran before the restore, so the field ends at its restored value")
+        self.assertEqual(wrong.running, {}, "nothing is left marked running")
+
     # -- 1.765 ---------------------------------------------------------
     def test_1_765_refusals_and_api_answers_are_shown_in_their_own_words(self) -> None:
         """
@@ -238,7 +266,8 @@ class TestCluster01ch_Action(TransactionTestCase):
         When:  each runs, the second with and without the grant.
         Then:  without requires= the query is refused and reported as an unexpected error whose
                log names the handler and the way out; with the grant the count is read; without
-               the grant the body never runs and the user is told they are not permitted.
+               the grant the body never runs and the user is told they are not permitted; that
+               message is recorded as the handler's failure and nothing is left running.
         """
         Group.objects.create(name="a")
         Group.objects.create(name="b")
@@ -251,15 +280,21 @@ class TestCluster01ch_Action(TransactionTestCase):
         refused = testing.run(Board, "counts_guarded")
         self.assertTrue(refused.denied)
         self.assertEqual(refused.fields["steps"], 0, "the body never ran")
+        self.assertEqual(refused.failed.get(runs.key_of(Board.counts_guarded)), refused.toasts[-1].message,
+                         "the not-permitted message is recorded as the handler's failure")
+        self.assertEqual(refused.running, {}, "a refused run leaves nothing marked running")
 
     # -- 1.767 ---------------------------------------------------------
     def test_1_767_the_loop_stays_free_and_a_slow_action_is_called_out(self) -> None:
         """
         Scenario 1.767: one user's slow action and everyone else.
         Given: an action that sleeps.
-        When:  it sleeps 0.4 s while a ticker runs on the event loop; and 1.1 s in development.
+        When:  it sleeps 0.4 s while a ticker runs on the event loop; and 1.1 s in development;
+               and an action that sleeps then yields is cancelled while it sleeps.
         Then:  the loop keeps ticking during the sleep; the 1.1 s run logs a warning that names
-               the handler and says to make it a job.
+               the handler and says to make it a job; the cancelled body's thread finishes (it
+               is not left blocked at its yield), nothing is left marked running, and a
+               following action on the same tab still runs.
         """
         async def scenario():
             async with testing.Harness() as harness:
@@ -283,3 +318,22 @@ class TestCluster01ch_Action(TransactionTestCase):
         text = "\n".join(logs.output)
         self.assertIn("Board.sleeps", text)
         self.assertIn("@ui.job", text)
+
+        async def cancelled():
+            async with testing.Harness() as harness:
+                future = await harness.send(Board, "sleeps_then_yields")
+                await asyncio.sleep(0.1)
+                future.cancel()
+                for _ in range(200):
+                    if FINISHED.is_set():
+                        break
+                    await asyncio.sleep(0.01)
+                finished = FINISHED.is_set()
+                await asyncio.wait_for(await harness.send(Board, "approve", code="B1"), 5)
+                return finished, await harness.fields(Board)
+
+        finished, fields = asyncio.run(cancelled())
+        self.assertTrue(finished, "the cancelled body's thread finished instead of blocking at its yield")
+        self.assertEqual(fields["steps"], 0, "the cancelled body did not go on past its yield")
+        self.assertEqual(fields["status"], "approved-B1", "a following action on the same tab still runs")
+        self.assertEqual(fields["ui_running"], {}, "nothing is left marked running")
