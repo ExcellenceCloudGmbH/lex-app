@@ -252,8 +252,9 @@ def main():
 
 - **Placement.** The order of the slots on the page and the page's width are fixed per kind: a form
   is narrow, a list takes the full width.
-- **Actions.** The first action is the primary one. More than three collapse into a menu. A button
-  with `tone="danger"` must carry `confirm=`.
+- **Actions.** The first action is the primary one, unless it is dangerous. Exactly one further
+  action is a button; two or more further actions go into a "More actions" menu. This is RFDS's own
+  page-header rule, and the kinds follow it. A button with `tone="danger"` must carry `confirm=`.
 - **Sections.** Each has a heading. With more than three, the page shows in-page navigation on its
   own. `tabs=True` on a record shows one section at a time, for pages with large tables.
 - **Forms.** A form is submitted once, to one handler, which receives the values as a dictionary
@@ -271,10 +272,10 @@ overview's as-of date — lex-app supplies it (the time of the page's last load)
 
 | State | What is shown | Where it comes from |
 | --- | --- | --- |
-| The page's load is running | A skeleton in the shape of the kind | `ui.running(load)` |
+| The page's load has not finished | A skeleton in the shape of the kind | `ui.loaded(load)`, which the handler layer gains: "not running" is also true before a load has started |
 | The page's load failed, on a `ui.page` | The error page of piece 1, with "Try again" | A page-declared required load |
 | The page's load failed, on a `ui.dashboard` | The failure in place of the content | A load started on mount reports in place (piece 1) |
-| A section's own load is running | That section's skeleton; the rest of the page is usable | `ui.running` of the section's `load` |
+| A section's own load has not finished | That section's skeleton; the rest of the page is usable | `ui.loaded` of the section's `load` |
 | A section's own load failed | The failure inside that section | `ui.failed` of the section's `load` |
 | A table or a section has nothing to show | Its `empty="…"` sentence | The rows it was given |
 | The viewer lacks the page's permission | lex-app's access-denied content | `requires=` on `ui.page` |
@@ -282,8 +283,9 @@ overview's as-of date — lex-app supplies it (the time of the page's last load)
 How the loads are started follows piece 1's two kinds of load:
 
 - On a `ui.page`, the kind's `load` is registered as the page's required load and each section's
-  `load` as an optional one, when the page is built (5.3). The opener starts them after sign-in and
-  grants, with the right address.
+  `load` as an optional one, once the project's module is loaded and lex-app registers its pages
+  (6.13). The opener starts them after sign-in and grants, with the right address. Where a load is
+  registered, not the handler's own `optional=`, decides whether its failure takes over the page.
 - On a `ui.dashboard`, there is no opener: each load is started when its part of the page mounts.
 
 The author writes the same thing in both cases.
@@ -452,6 +454,23 @@ time.
 - A permission in `visible=` is written with the same values `requires=` takes, such as
   `ui.edit(Fund)`; the conversation's sketch used a separate helper.
 
+### 6.13 What a prototype of step 1 changed
+
+Step 1 was prototyped before its plan was written; its code and 22 tests ran green. It changed
+five things in this spec:
+
+- **Actions follow RFDS's page-header rule** (6.3), not "more than three collapse into a menu".
+- **A page is registered once the project's module is loaded**, not when it is built. `@ui.page`
+  only records the function; lex-app then calls it once to learn the kind's title and loads. A page
+  function cannot be called when it is decorated, because it may name a page declared below it.
+- **The handler layer gains `ui.loaded(handler)`**, and decides whether a load owns the error page
+  from where it is registered for the page (6.4).
+- **A table over rows held in a state, and filters, move to step 2.** RFDS's paged table needs a
+  table state of its own; how such a table stays fresh when a handler changes the rows is decided
+  after a real search list has been ported. In step 1 `ui.table` takes a model.
+- **`kind=` in step 1** is `text`, `number`, `money`, `percent` or `datetime`; the others arrive
+  with the form fields.
+
 ---
 
 ## 7. Order of building
@@ -461,8 +480,8 @@ and under neutral names, so that a wrong slot or a missing component is found ea
 
 | Step | Built | Ported |
 | --- | --- | --- |
-| 1 | `ui.page`, `ui.dashboard`, `ui.record`, `ui.list`; `text`, `fact`, `section`, `table`, `column`, `button`, `link`, `message`, `status`; links by page; `visible=`, `each`, `switch`, `custom_block`; the build-time errors | A detail page and a search list |
-| 2 | `ui.form`, `field`, `step`, `confirm=`, `ask=`, the button that knows its handler, `ui.goto(page)` | A page with actions on one record, and an entry form |
+| 1 | `ui.page`, `ui.dashboard`, `ui.record`, `ui.list`; `text`, `fact`, `section`, `table` over a model, `column`, `button`, `link`, `message`, `status`; links by page; `visible=`, `each`, `switch`, `custom_block`; the build-time errors; `ui.loaded` | A detail page and a search list |
+| 2 | A table over rows held in a state, and filters (both shaped by step 1's port of a search list); `ui.form`, `field`, `step`, `confirm=`, `ask=`, the button that knows its handler, `ui.goto(page)`; the kinds `date`, `year`, `bool`, `choice` | A page with actions on one record, and an entry form |
 | 3 | `ui.overview`, `figure`, `tile`, `chart`, `grid` | The home page |
 | 4 | `lex ui messages`, the new `lex reflex check` rules, `ui.testing.page`, the scaffold (`lex reflex new page --kind record`), lex-app's reference example rewritten on the kinds | — |
 
@@ -482,7 +501,8 @@ components are enough for that project, or which one is missing.
 | A page shape nobody foresaw | `ui.custom_block` for a part; a whole page stays on `lex_page` until a kind exists. A kind is added when the same shape appears twice |
 | The vocabulary is too small | Expected; each addition is a thin wrapper. The ports of section 7 are how it is found |
 | RFDS's floorplans enforce limits of their own | Kept, reworded as lex errors. If one does not suit a kind, that kind is built from RFDS's lower-level parts instead; settled per kind while building |
-| Section loads are registered when the page is built | Verified in Reflex 0.9.13 (5.3); a test asserts the registry after a dry-run compile and with compilation skipped |
+| Pages are registered once the project's module is loaded | lex-app calls each page function then, to learn its title and its loads; a page may therefore name a page declared below it. Run in a prototype; tests assert the registry |
+| RFDS 1.0.0 drops a second header button beside a primary one | Reflex components of one type compare equal and RFDS sorts actions with `not in`. The kinds wrap that button so RFDS can tell it apart; to be reported upstream |
 | Filters in the address | Not yet tried: a model table applying query parameters itself, and a page reloading on a filter change. Tried in step 1 before anything depends on it |
 | The sentence as message id | Rewording loses the translation (6.8). Two identical sentences that need different translations cannot be told apart; `ui.text(…, context="…")` is added if the case arises |
 | Collecting text by reading source | A sentence held in a variable is not found; the check fails text that is not a literal |
