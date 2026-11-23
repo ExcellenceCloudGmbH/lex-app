@@ -14,6 +14,11 @@ from lex.lex_app.reflex.ui import guard, workcopy
 #: How long a body waits for the event loop to answer (an API call, a grant lookup).
 LOOP_TIMEOUT_SECONDS = 60.0
 
+#: The body's helpers on ``self`` (``ui.State``). A field, method or computed var of a ``ui.State``
+#: may not take these names, nor may a page route's dynamic argument (Reflex makes it a field of
+#: every state, which it reads before the helper).
+RESERVED = ("user", "api", "params", "can", "state")
+
 
 @dataclasses.dataclass(frozen=True)
 class User:
@@ -170,6 +175,11 @@ def enter(inv: Invocation) -> contextvars.Token:
 
 def leave(token: contextvars.Token) -> None:
     _CURRENT.reset(token)
+
+
+def active() -> Invocation | None:
+    """The invocation whose body runs on this thread, or ``None`` outside a handler body."""
+    return _CURRENT.get(None)
 
 
 def current() -> Invocation:

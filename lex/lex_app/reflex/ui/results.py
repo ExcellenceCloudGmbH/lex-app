@@ -89,6 +89,11 @@ def split(value: Any, *, handler: str) -> tuple[list, Progress | None]:
     return out, report
 
 
+def _external(path: str) -> bool:
+    """Whether ``path`` leaves the dashboards: a full URL, or ``//host/...`` (another site to a browser)."""
+    return "://" in path or path.startswith("//")
+
+
 def to_events(items: list) -> list:
     """The Reflex events for a handler's results, in order."""
     import reflex as rx
@@ -98,7 +103,7 @@ def to_events(items: list) -> list:
     events = []
     for item in items:
         if isinstance(item, Goto):
-            if "://" in item.path:
+            if _external(item.path):
                 from lex.lex_app.reflex.session import navigate
 
                 events.append(navigate(item.path))

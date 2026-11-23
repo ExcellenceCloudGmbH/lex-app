@@ -48,6 +48,10 @@ class TestCluster01cg_State(TestCase):
         Then:  ui.State is a real Reflex state with the status fields and the visit counter;
                user, api, params, can and state are properties, not event handlers; the
                project's state inherits the status fields and keeps only its own as its own.
+               Those five names are reserved: a project state declaring a field (with or
+               without a default), a computed var or a method of one of them is refused when the
+               class is defined, with a message naming the state and the name and saying to
+               rename it.
         """
         for name in ("ui_running", "ui_failed", "ui_progress", "ui_progress_message", "ui_visit", "ui_error"):
             self.assertIn(name, State.base_vars, f"{name} is a field of ui.State")
@@ -58,6 +62,33 @@ class TestCluster01cg_State(TestCase):
             self.assertNotIn(name, State.event_handlers, f"{name} must not be callable from the browser")
         self.assertIn("ui_open", State.event_handlers)
         self.assertIn("ui_cancel", State.event_handlers)
+
+        def field_with_default():
+            class Shadow(State):
+                state: str = "open"
+
+        def field_without_default():
+            class Shadow(State):
+                user: str
+
+        def computed():
+            class Shadow(State):
+                @rx.var
+                def params(self) -> str:
+                    return ""
+
+        def method():
+            class Shadow(State):
+                def can(self):
+                    pass
+
+        for define, name in ((field_with_default, "state"), (field_without_default, "user"),
+                             (computed, "params"), (method, "can")):
+            with self.assertRaises(TypeError, msg=f"a {define.__name__} named {name} is refused") as raised:
+                define()
+            text = str(raised.exception)
+            for expected in (f"Shadow.{name}", "reserved", "Rename"):
+                self.assertIn(expected, text, f"the message for {name} says {expected}")
 
     # -- 1.760 ---------------------------------------------------------
     def test_1_760_status_marks_follow_a_runs_life(self) -> None:

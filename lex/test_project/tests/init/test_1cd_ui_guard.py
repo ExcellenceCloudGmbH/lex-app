@@ -81,7 +81,8 @@ class TestCluster01cd_Guard(TestCase):
         Given: a signed-in user with a username and an e-mail.
         When:  code runs inside acting_user.
         Then:  lex-app's operation context carries a request whose user is authenticated and
-               reads as the username (the e-mail when there is none); it is restored afterwards.
+               reads as the username (the e-mail when there is none, the user's id when there is
+               neither); it is restored afterwards.
         """
         from lex.api.utils import operation_context
 
@@ -92,4 +93,7 @@ class TestCluster01cd_Guard(TestCase):
             self.assertEqual(str(request.user), "anna")
         with guard.acting_user(SimpleNamespace(username="", email="anna@example.test")):
             self.assertEqual(str(operation_context.get()["request_obj"].user), "anna@example.test")
+        with guard.acting_user(SimpleNamespace(id="7f3c", username="", email="")):
+            self.assertEqual(str(operation_context.get()["request_obj"].user), "7f3c",
+                             "with neither, the user's id: never the anonymous actor")
         self.assertEqual(operation_context.get(), before, "the context is restored")

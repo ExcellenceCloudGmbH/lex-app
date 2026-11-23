@@ -22,9 +22,24 @@ def key_of(handler: Any) -> str:
 
 
 def arg_key(args: tuple, kwargs: dict) -> str:
-    """The first argument as text ('' without arguments): which row a run is for."""
+    """The first argument as text ('' without arguments): which row a run is for, for the view."""
     values = [*args, *kwargs.values()]
     return str(values[0]) if values else ""
+
+
+def call_key(fn: Any, args: tuple, kwargs: dict) -> str:
+    """Every argument of one call as stable text: what makes two runs of a job the same run.
+
+    The arguments are bound to ``fn``'s signature first, so ``export(2025, 1)`` and
+    ``export(year=2025, month=1)`` are the same call; keyword order never matters.
+    """
+    try:
+        bound = inspect.signature(fn).bind(None, *args, **kwargs)
+        bound.apply_defaults()
+        values = list(bound.arguments.items())[1:]          # without self
+    except (TypeError, ValueError):                         # the body will fail on these arguments anyway
+        values = [*enumerate(args), *sorted(kwargs.items(), key=lambda item: str(item[0]))]
+    return repr(values)
 
 
 # -- marks on the state (call while holding the user's lock) ---------------------------

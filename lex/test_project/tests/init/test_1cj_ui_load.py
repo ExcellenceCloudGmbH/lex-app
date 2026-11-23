@@ -32,10 +32,11 @@ import reflex as rx
 
 from lex.lex_app.reflex import app as lex_app_module
 from lex.lex_app.reflex import shell
-from lex.lex_app.reflex.ui import handlers, results, runs, testing
+from lex.lex_app.reflex.ui import guard, handlers, results, runs, testing
 from lex.lex_app.reflex.ui import state as ui_state
 from lex.lex_app.reflex.ui.state import State
 from lex.test_project.tests.init import _ui_load_twin
+from lex.test_project.tests.init._ui_harness_aids import lock_held, lock_waiters, unstored_on_error
 
 pytestmark = pytest.mark.init
 
@@ -58,8 +59,9 @@ class Page(State):
         self.region = "filled"
 
     @handlers.load
-    def open_slowly(self):
-        time.sleep(0.4)
+    def open_when_released(self):
+        if not GATES["slow"].wait(5):
+            raise RuntimeError("gate slow was never released")
         self.rows = ["late"]
 
     @handlers.load
@@ -68,21 +70,34 @@ class Page(State):
 
     @handlers.load
     def open_broken_too(self):
-        time.sleep(0.1)
+        if not GATES["second"].wait(5):
+            raise RuntimeError("gate second was never released")
         raise RuntimeError("database still down")
 
     @handlers.load
     def open_late_broken(self):
-        time.sleep(0.3)
+        if not GATES["late"].wait(5):
+            raise RuntimeError("gate late was never released")
         raise RuntimeError("database down late")
 
     @handlers.load(optional=True)
     def region_broken(self):
         raise results.Refuse("No figures for this period.")
 
+    @handlers.load
+    def open_broken_when_released(self):
+        if not GATES["body"].wait(5):
+            raise RuntimeError("gate body was never released")
+        raise RuntimeError("database down")
+
     @rx.event
     def plain(self):
         pass
+
+    @rx.event
+    async def hold(self):
+        """A foreground handler: holds the user's lock until the test releases it."""
+        await asyncio.to_thread(GATES["hold"].wait, 5)
 
 
 class Twin(State):
@@ -123,18 +138,31 @@ class Dash(State):
             raise RuntimeError(f"gate {gate} was never released")
         raise RuntimeError("dashboard source down")
 
+    @handlers.load(requires=guard.permission("app.Thing", "read"))
+    def fill_guarded(self):
+        self.rows = ["secret"]
+
 
 def _gotos(harness: testing.Harness) -> list[str]:
     return [r.path for r in harness.results if isinstance(r, results.Goto)]
 
 
 async def _until(condition, failure: str) -> None:
-    """Wait until ``condition()`` holds; fails loudly after 5 s."""
+    """Wait until ``condition()`` holds (it may be a coroutine function); fails loudly after 5 s."""
     deadline = time.monotonic() + 5
-    while not condition():
+    while True:
+        found = condition()
+        if asyncio.iscoroutine(found):
+            found = await found
+        if found:
+            return
         if time.monotonic() > deadline:
             raise AssertionError(failure)
         await asyncio.sleep(0.001)
+
+
+async def _nothing_running(harness: testing.Harness) -> bool:
+    return (await harness.fields(State))["ui_running"] == {}
 
 
 async def _running_mark(harness: testing.Harness, handler) -> dict:
@@ -183,11 +211,9 @@ class TestCluster01cj_Load(TestCase):
 
         async def scenario():
             async with testing.Harness() as h:
-                await (await h.send(State, "ui_open", page="/t774"))
-                await asyncio.sleep(0.3)
+                await (await h.send(State, "ui_open", page="/t774")).wait_all()     # the loads it started too
                 same_visit = await h.fields(Page)
-                await (await h.send(State, "ui_open", page="/t774-region"))
-                await asyncio.sleep(0.3)
+                await (await h.send(State, "ui_open", page="/t774-region")).wait_all()
                 return same_visit, await h.fields(Page)
 
         same_visit, next_visit = asyncio.run(scenario())
@@ -280,8 +306,7 @@ class TestCluster01cj_Load(TestCase):
 
             async with testing.Harness() as h:
                 with patch.object(ui_state, "_page_permitted", side_effect=check):
-                    await (await h.send(State, "ui_open", page=page))
-                    await asyncio.sleep(0.4)
+                    await (await h.send(State, "ui_open", page=page)).wait_all()   # the loads it started too
                 return await h.fields(Page)
 
         fields = asyncio.run(scenario("/t775", True))
@@ -313,24 +338,26 @@ class TestCluster01cj_Load(TestCase):
                and succeeds.
         Then:  no optional load starts, and the opener's required load is still pending.
         """
-        handlers.register_page("/t775-mount", [Page.open_slowly], [Page.open_region], "")
+        handlers.register_page("/t775-mount", [Page.open_when_released], [Page.open_region], "")
 
         async def scenario():
             async with testing.Harness() as h:
                 opener = await h.send(State, "ui_open", page="/t775-mount")
                 await opener
-                await asyncio.sleep(0.1)
+                await _running_mark(h, Page.open_when_released)
                 for child in opener.children:
                     child.cancel()
-                await asyncio.sleep(0.1)
-                await (await h.send(Page, "open_slowly"))
-                await asyncio.sleep(0.3)
+                GATES["slow"].set()
+                await _until(lambda: _nothing_running(h), "the cancelled load was left running")
+                await (await h.send(Page, "open_when_released")).wait_all()   # and whatever it started
                 return await h.fields(Page), list((await h._state(State))._ui_pending_loads)
+
+        _gate("slow")
 
         fields, pending = asyncio.run(scenario())
         self.assertEqual(fields["rows"], ["late"], "the load started on mount filled the state")
         self.assertEqual(STARTED, [], "a load started on mount starts no optional load of the page")
-        self.assertEqual(pending, [handlers.load_id(Page.open_slowly)],
+        self.assertEqual(pending, [handlers.load_id(Page.open_when_released)],
                          "a load started on mount does not settle the opener's pending load")
 
     # -- 1.776 ---------------------------------------------------------
@@ -344,37 +371,77 @@ class TestCluster01cj_Load(TestCase):
         Then:  the load's result is not written; the cancelled load is not running, stays
                pending, and starts no optional load.
         """
-        handlers.register_page("/t776-slow", [Page.open_slowly], [], "")
+        handlers.register_page("/t776-slow", [Page.open_when_released], [], "")
 
         async def scenario():
             async with testing.Harness() as h:
-                await (await h.send(State, "ui_open", page="/t776-slow"))
-                in_flight = await _running_mark(h, Page.open_slowly)
+                opener = await h.send(State, "ui_open", page="/t776-slow")
+                await opener
+                in_flight = await _running_mark(h, Page.open_when_released)
                 await (await h.send(State, "ui_open", page=""))
-                await asyncio.sleep(0.5)
+                GATES["slow"].set()                    # the body finishes after the visit changed
+                await opener.wait_all()
                 return in_flight, (await h.fields(Page))["rows"]
 
+        _gate("slow")
         in_flight, rows = asyncio.run(scenario())
-        self.assertIn(runs.key_of(Page.open_slowly), in_flight,
+        self.assertIn(runs.key_of(Page.open_when_released), in_flight,
                       "the opener started the load, and it was running when the visit changed")
         self.assertEqual(rows, [], "a stale visit's result is discarded")
 
-        handlers.register_page("/t776", [Page.open_slowly], [Page.open_region], "")
+        handlers.register_page("/t776", [Page.open_when_released], [Page.open_region], "")
 
         async def cancelled():
             async with testing.Harness() as h:
                 opener = await h.send(State, "ui_open", page="/t776")
                 await opener
-                await asyncio.sleep(0.1)
+                await _running_mark(h, Page.open_when_released)
                 for child in opener.children:
                     child.cancel()
-                await asyncio.sleep(0.6)
+                GATES["slow"].set()                    # the body ends; the wrapper winds up after it
+                await _until(lambda: _nothing_running(h), "the cancelled load was left running")
                 return await h.fields(Page), list((await h._state(State))._ui_pending_loads)
 
+        _gate("slow")
         fields, pending = asyncio.run(cancelled())
         self.assertEqual(STARTED, [], "a cancelled required load starts no optional load")
         self.assertEqual(fields["ui_running"], {}, "a cancelled load is not left running")
-        self.assertEqual(pending, [handlers.load_id(Page.open_slowly)], "a cancelled required load stays pending")
+        self.assertEqual(pending, [handlers.load_id(Page.open_when_released)], "a cancelled required load stays pending")
+
+    def test_1_776_a_load_cancelled_while_it_winds_up_is_not_left_running(self) -> None:
+        """
+        Scenario 1.776: the next navigation cancels a load at the worst moment.
+        Given: a page whose required load has failed and waits for the user's lock to wind up,
+               the lock being held by a foreground handler.
+        When:  the load's task is cancelled (Reflex cancels the previous page's loads at every
+               navigation), then the foreground handler finishes.
+        Then:  the wind-up still runs: the load is not left running.
+        """
+        handlers.register_page("/t776-wind", [Page.open_broken_when_released], [], "")
+
+        async def scenario():
+            async with testing.Harness() as h:
+                await h.navigate("/t776-wind")
+                opener = await h.send(State, "ui_open", page="/t776-wind")
+                await opener
+                await _running_mark(h, Page.open_broken_when_released)
+                holder = await h.send(Page, "hold")
+                await _until(lambda: lock_held(h), "the foreground handler never took the lock")
+                GATES["body"].set()
+                await _until(lambda: h.outcomes and lock_waiters(h),
+                             "the failed load never waited for the lock to wind up")
+                for child in opener.children:
+                    child.cancel()
+                GATES["hold"].set()
+                await holder
+                await _until(lambda: _nothing_running(h), "the cancelled load was left running")
+                return await h.fields(Page)
+
+        _gate("body")
+        _gate("hold")
+        with self.assertLogs("lex.lex_app.reflex.ui.handlers", level="ERROR"):
+            fields = asyncio.run(scenario())
+        self.assertEqual(fields["ui_running"], {}, "the cancelled load is not left running")
 
     def test_1_776_a_load_started_on_mount_is_dropped_only_when_a_newer_run_starts(self) -> None:
         """
@@ -450,7 +517,8 @@ class TestCluster01cj_Load(TestCase):
                the exception's text; the first failure ends the visit, so a second one changes
                nothing; a failure arriving after the browser moved to another path neither
                records an error nor redirects; the optional one sends nobody anywhere and leaves
-               its message for ui.failed.
+               its message for ui.failed. "Try again" only ever returns to a path of this site
+               (one leading slash, no backslash), else to /.
         """
         handlers.register_page("/t777-broken", [Page.open_broken], [], "")
         handlers.register_page("/orders", [Page.open_broken], [], "")
@@ -459,8 +527,7 @@ class TestCluster01cj_Load(TestCase):
         async def failing_on(url, route):
             async with testing.Harness() as h:
                 await h.navigate(url)
-                await (await h.send(State, "ui_open", page=route))
-                await asyncio.sleep(0.1)
+                await (await h.send(State, "ui_open", page=route)).wait_all()   # the load it started too
                 return _gotos(h), await h.fields(Page)
 
         with self.assertLogs("lex.lex_app.reflex.ui.handlers", level="ERROR"):
@@ -470,6 +537,11 @@ class TestCluster01cj_Load(TestCase):
         self.assertEqual(error["kind"], "error", "the error page explains a failure, not a refusal")
         self.assertIn("Reference", error["message"], "the user gets a reference to quote")
         self.assertNotIn("database down", error["message"], "the exception's text stays in the log")
+        for location, back in (("/orders?id=7", "/orders?id=7"), ("//evil.example/x", "/"),
+                               ("/\\evil.example", "/"), ("https://evil.example", "/"), ("", "/"),
+                               (ui_state.ERROR_ROUTE + "?x=1", "/")):
+            self.assertEqual(handlers._return_path(location), back,
+                             f"Try again from {location!r} goes to {back!r}: only a path of this site")
         region = testing.run(Page, "region_broken")
         self.assertIsNone(region.goto, "an optional load never leaves the page")
         self.assertEqual(region.failed[runs.key_of(Page.region_broken)], "No figures for this period.",
@@ -488,10 +560,14 @@ class TestCluster01cj_Load(TestCase):
         async def two_failures():
             async with testing.Harness() as h:
                 await h.navigate("/t777")
-                await (await h.send(State, "ui_open", page="/t777"))
-                await asyncio.sleep(0.4)
+                opener = await h.send(State, "ui_open", page="/t777")
+                await opener
+                await _until(lambda: _gotos(h), "the first failure never sent the browser to the error page")
+                GATES["second"].set()                  # the second load fails after the first ended the visit
+                await opener.wait_all()
                 return _gotos(h), await h.fields(Page)
 
+        _gate("second")
         with self.assertLogs("lex.lex_app.reflex.ui.handlers", level="ERROR"):
             gotos, fields = asyncio.run(two_failures())
         self.assertEqual(gotos, [ui_state.ERROR_ROUTE], "the second failure of the visit sends nobody anywhere")
@@ -504,16 +580,45 @@ class TestCluster01cj_Load(TestCase):
         async def moved_on():
             async with testing.Harness() as h:
                 await h.navigate("/a")
-                await (await h.send(State, "ui_open", page="/a"))
+                opener = await h.send(State, "ui_open", page="/a")
+                await opener
                 await _running_mark(h, Page.open_late_broken)
                 await h.navigate("/b")
-                await asyncio.sleep(0.5)
+                GATES["late"].set()                    # the load fails after the browser moved on
+                await opener.wait_all()
                 return _gotos(h), await h.fields(Page)
 
+        _gate("late")
         with self.assertLogs("lex.lex_app.reflex.ui.handlers", level="ERROR"):
             gotos, fields = asyncio.run(moved_on())
         self.assertEqual((gotos, fields["ui_error"]), ([], {}),
                          "a failure after the browser moved on neither redirects nor records an error")
+
+    def test_1_777_a_refused_load_is_reported_when_a_failed_block_is_not_stored(self) -> None:
+        """
+        Scenario 1.777: a dashboard's load the user may not run, under a store like Redis.
+        Given: a load started on mount that declares requires=, a user without the grant, and a
+               state manager that, like Reflex's Redis manager, does not store a block that raised.
+        When:  the load's event arrives.
+        Then:  the body never runs; the refusal is in ui.failed, the warning names the handler and
+               the user's id, and nothing is left running.
+        """
+        async def scenario():
+            async with testing.Harness(user="anna") as h:
+                await h.open_tab("/")
+                await (await h.send(Dash, "fill_guarded", _router_data=testing._router_data("/")))
+                return await h.fields(Dash), list(h.outcomes)
+
+        with unstored_on_error(), self.assertLogs("lex.lex_app.reflex.ui.handlers", level="WARNING") as logs:
+            fields, outcomes = asyncio.run(scenario())
+        key = runs.key_of(Dash.fill_guarded)
+        self.assertEqual(fields["rows"], [], "the body never ran")
+        self.assertEqual([o.kind for o in outcomes], ["denied"], "the user may not run the load")
+        self.assertEqual(fields["ui_failed"].get(key), outcomes[0].message, "the refusal is in ui.failed")
+        self.assertEqual(fields["ui_running"], {}, "nothing is left running")
+        text = "\n".join(logs.output)
+        self.assertIn(key, text, "the warning names the handler")
+        self.assertIn("anna", text, "the warning names the user's id")
 
     def test_1_777_a_load_started_on_mount_reports_its_failure_in_place(self) -> None:
         """
@@ -570,7 +675,10 @@ class TestCluster01cj_Load(TestCase):
                server's page registry, not in the event; the error page shows the message and
                a way to try again; create_app loads rfds.toast (whose first import defines
                Reflex states) before it adds a page, so it is never first imported in the
-               middle of an event.
+               middle of an event. lex_page refuses a route whose dynamic argument is named
+               like a ui.State helper, and a load declared with arguments; create_app, once the
+               project's pages are declared, refuses any page route (added, or declared with
+               rx.page) with such an argument.
         """
         captured = {}
 
@@ -609,3 +717,34 @@ class TestCluster01cj_Load(TestCase):
         self.assertIn("_load_lazy_states()", source, "create_app loads the lazily defined states")
         self.assertLess(source.index("_load_lazy_states()"), source.index("app.add_page("),
                         "the states are loaded before the app's pages are added")
+
+        with patch("reflex.page", fake_page), patch.object(shell, "_NAV", []):
+            for route in ("/users/[user]", "/orders/[state]/x", "/p/[[params]]"):
+                with self.assertRaises(ValueError, msg=f"{route} is refused") as raised:
+                    shell.lex_page(route, title="x")(lambda: rx.text("x"))
+                self.assertIn(route, str(raised.exception), "the message names the route")
+                self.assertIn("Rename", str(raised.exception), "the message says what to do")
+            with self.assertRaises(TypeError) as raised:
+                shell.lex_page("/t778-args", title="x", on_load=Dash.fill("x"))(lambda: rx.text("x"))
+            self.assertIn("takes no arguments", str(raised.exception),
+                          "a load declared on a page with arguments is refused")
+            self.assertIn("self.params", str(raised.exception), "the message says where the values come from")
+        self.assertIsNone(handlers.page_of("/t778-args"), "the refused page is not registered")
+
+        from reflex_base.registry import RegistrationContext
+        from types import SimpleNamespace
+
+        def check(app_routes, declared):
+            registry = SimpleNamespace(decorated_pages=[(lambda: None, {"route": r}) for r in declared])
+            with patch.object(RegistrationContext, "ensure_context", return_value=registry):
+                ui_state.check_app_routes(SimpleNamespace(_unevaluated_pages=dict.fromkeys(app_routes)))
+
+        check(["/", "/tickets/[ticket_id]"], ["/orders/[order]"])       # nothing to refuse
+        for app_routes, declared, route in ((["/users/[user]"], [], "/users/[user]"),
+                                            ([], ["/a/[api]"], "/a/[api]")):
+            with self.assertRaises(ValueError, msg=f"create_app refuses {route}") as raised:
+                check(app_routes, declared)
+            self.assertIn(route, str(raised.exception), "the message names the route")
+        self.assertIn("check_app_routes(app)", source, "create_app checks the app's routes")
+        self.assertLess(source.index("load_structure()"), source.index("check_app_routes(app)"),
+                        "it checks once the project's pages are declared")

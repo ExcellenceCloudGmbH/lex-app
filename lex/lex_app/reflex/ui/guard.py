@@ -114,7 +114,9 @@ class _Actor:
     is_authenticated = True
 
     def __init__(self, user: Any):
-        self._name = str(getattr(user, "username", "") or getattr(user, "email", "") or "")
+        # The user's id when they have neither a username nor an e-mail: an audit field never
+        # falls back to the anonymous actor for a signed-in user.
+        self._name = str(getattr(user, "username", "") or getattr(user, "email", "") or getattr(user, "id", "") or "")
 
     def __str__(self) -> str:
         return self._name

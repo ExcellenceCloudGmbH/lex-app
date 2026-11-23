@@ -11,8 +11,17 @@ The analysis is static (``ast``): project code is never imported or run.
 * A state is a ``ui.State`` when it has ``ui.State`` as a base, or a base that is a class of that
   kind anywhere in the files given. Bases are matched by their last name component, by name across
   the project: a class that shares the name of a ui state may be over-reported, never missed.
+* A field, computed var or method of a ``ui.State`` named ``user``, ``api``, ``params``, ``can`` or
+  ``state`` is an error: it would hide the body's helper of that name.
+* ``self.<handler>(...)`` in a method of a ``ui.State``, where ``<handler>`` is a lex.ui handler of
+  that state (its own, or a base's that the check follows), is an error: a handler called from
+  another handler's body does not run. Shared work belongs in a method whose name starts with ``_``.
 * A handler that reads ``.objects`` or ``._default_manager`` without ``requires=`` is a warning
   (best effort; the run-time block is the guarantee).
+
+What it does not follow: a public attribute assigned a function (``refresh = lambda self: ...``)
+is not seen as a method, and the methods a mixin brings in (a base that is not a ``ui.State``)
+are not checked, nor are its handlers known when a state calls them.
 """
 
 from __future__ import annotations
@@ -96,10 +105,57 @@ def _methods(cls: ast.ClassDef) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
     return [n for n in cls.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
 
 
-def _check_class(path: Path, cls: ast.ClassDef, names: dict[str, str]) -> list[Finding]:
+def _reserved(path: Path, cls: ast.ClassDef) -> tuple[list[Finding], set[str]]:
+    """Fields, computed vars and methods of ``cls`` named like a body helper."""
+    from lex.lex_app.reflex.ui.context import RESERVED
+
+    out: list[Finding] = []
+    found: set[str] = set()
+    for node in cls.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            targets = [node.name]
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target.id] if isinstance(node.target, ast.Name) else []
+        elif isinstance(node, ast.Assign):
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        else:
+            targets = []
+        for name in targets:
+            if name in RESERVED:
+                found.add(name)
+                out.append(Finding("error", str(path), node.lineno,
+                                   f"{cls.name}.{name}: '{name}' is reserved on a ui.State -- self.{name} is the "
+                                   f"handler's helper, and a field or method of that name hides it. Rename it."))
+    return out, found
+
+
+def _handler_names(cls: ast.ClassDef, names: dict[str, str]) -> set[str]:
+    """The methods of ``cls`` decorated with a lex.ui handler decorator."""
+    return {fn.name for fn in _methods(cls)
+            if any(_decorator(node, names)[0] in _UI_HANDLERS for node in fn.decorator_list)}
+
+
+def _sibling_calls(path: Path, cls: ast.ClassDef, handlers: set[str]) -> list[Finding]:
+    """``self.<handler>(...)`` inside a method of ``cls``."""
     out: list[Finding] = []
     for fn in _methods(cls):
-        if fn.name.startswith("_"):
+        for node in ast.walk(fn):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name) and node.func.value.id == "self"
+                    and node.func.attr in handlers):
+                attr = node.func.attr
+                out.append(Finding("error", str(path), node.lineno,
+                                   f"{cls.name}.{fn.name}: calls the handler self.{attr}(), which does not run "
+                                   f"from a handler's body. Move the shared work into a method whose name starts "
+                                   f"with '_' (self._{attr}()) and call it from both handlers."))
+    return out
+
+
+def _check_class(path: Path, cls: ast.ClassDef, names: dict[str, str], handlers: set[str] = frozenset()) -> list[Finding]:
+    out, reserved = _reserved(path, cls)
+    out.extend(_sibling_calls(path, cls, handlers))
+    for fn in _methods(cls):
+        if fn.name.startswith("_") or fn.name in reserved:
             continue
         name = f"{cls.name}.{fn.name}"
         decorators = [_decorator(node, names) for node in fn.decorator_list]
@@ -157,11 +213,33 @@ def find(paths: list[str]) -> list[Finding]:
                                                   or any(b.rsplit(".", 1)[-1] in ui_states for b in bases)):
                     ui_states.add(cls.name)
                     changed = True
+    own_handlers: dict[str, set[str]] = {}
+    bases_of: dict[str, set[str]] = {}
+    for _, names, classes in parsed:
+        for cls, bases in classes:
+            if cls.name in ui_states:
+                own_handlers.setdefault(cls.name, set()).update(_handler_names(cls, names))
+                bases_of.setdefault(cls.name, set()).update(b.rsplit(".", 1)[-1] for b in bases)
+
+    def handlers_of(name: str) -> set[str]:
+        """The handlers of ``name`` and of every ui state it inherits, by class name."""
+        seen: set[str] = set()
+        out: set[str] = set()
+        todo = [name]
+        while todo:
+            current = todo.pop()
+            if current in seen or current not in ui_states:
+                continue
+            seen.add(current)
+            out |= own_handlers.get(current, set())
+            todo.extend(bases_of.get(current, ()))
+        return out
+
     for path, names, classes in parsed:
         try:
             for cls, _ in classes:
                 if cls.name in ui_states:
-                    findings.extend(_check_class(path, cls, names))
+                    findings.extend(_check_class(path, cls, names, handlers_of(cls.name)))
         except Exception as exc:  # noqa: BLE001
             findings.append(_unreadable(path, exc))
     return findings

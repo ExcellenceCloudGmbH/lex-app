@@ -81,28 +81,47 @@ def _log_text() -> bool:
     return (os.getenv("LEX_UI_LOG_ERROR_TEXT") or "true").strip().lower() not in _FALSY
 
 
+#: Keys of lex-app's refusal body that are for programs, not for the user.
+_NOT_FOR_THE_USER = ("code", "error", "traceback")
+
+
+def _text(value: Any) -> str:
+    return ", ".join(str(v) for v in value) if isinstance(value, (list, tuple)) else str(value)
+
+
 def _detail_text(detail: Any) -> str:
-    """lex-app's API error detail as one line."""
+    """An API refusal's body as one line for the user.
+
+    lex-app refuses with ``{code, detail, error, fields}``: its ``detail`` is the message. A body
+    without a text ``detail`` (Django REST framework's ``{field: [messages]}``) is shown as
+    ``field: message`` pairs, with ``fields`` read the same way and the program-facing keys left out.
+    """
     if isinstance(detail, dict):
+        if isinstance(detail.get("detail"), str) and detail["detail"].strip():
+            return detail["detail"]
         parts = []
         for name, value in detail.items():
-            text = ", ".join(str(v) for v in value) if isinstance(value, (list, tuple)) else str(value)
-            parts.append(text if name in ("detail", "non_field_errors") else f"{name}: {text}")
+            if name in _NOT_FOR_THE_USER:
+                continue
+            if name == "fields" and isinstance(value, dict):
+                parts.extend(f"{field}: {_text(text)}" for field, text in value.items())
+            else:
+                parts.append(_text(value) if name in ("detail", "non_field_errors") else f"{name}: {_text(value)}")
         return " ".join(parts)
     if isinstance(detail, (list, tuple)):
         return " ".join(str(item) for item in detail)
     return str(detail or "")
 
 
-def _classify(key: str, exc: BaseException) -> Outcome:
-    """What to tell the user about ``exc``, and what to log."""
+def _classify(key: str, exc: BaseException, user: str = "") -> Outcome:
+    """What to tell the user about ``exc``, and what to log; ``user`` is the user's id, if known."""
     from lex.lex_app.reflex.data import LexApiError
 
     denied = results.message("lex.ui.denied", "You are not permitted to do this.")
     if isinstance(exc, results.Refuse):
         outcome = Outcome("refused", "", exc.message)
     elif isinstance(exc, _NotPermitted) or (isinstance(exc, LexApiError) and exc.denied):
-        logger.warning("lex.ui handler %s was not permitted", key)
+        logger.warning("lex.ui handler %s was not permitted for user %s", key, user or "(unknown)")
         outcome = Outcome("denied", "", denied)
     elif isinstance(exc, LexApiError) and 400 <= exc.status < 500:
         outcome = Outcome("refused", "", _detail_text(exc.detail) or denied)
@@ -140,6 +159,46 @@ async def _denied(session: context.Session, requirements: tuple | None) -> bool:
     if all(isinstance(item, type(guard.signed_in)) for item in requirements):
         return False
     return not guard.granted(requirements, await session.permissions())
+
+
+async def _session(state: Any, requirements: tuple | None) -> tuple[context.Session | None, Exception | None]:
+    """Who is acting, and the failure that stops the run (``requires=`` not met, or none).
+
+    Never raises: the wrappers call it before taking the user's lock, and a failure is reported
+    like a failure of the body. (Under Reflex's Redis manager a block that raises is not stored.)
+    """
+    try:
+        session = await context.resolve(state)
+    except Exception as exc:  # noqa: BLE001 - reported like a failure of the body
+        return None, exc
+    try:
+        return session, (_NotPermitted() if await _denied(session, requirements) else None)
+    except Exception as exc:  # noqa: BLE001
+        return session, exc
+
+
+def _user_id(session: context.Session | None) -> str:
+    return session.user.id if session is not None else ""
+
+
+async def _shielded(wind_up: Any) -> Any:
+    """Run the coroutine ``wind_up`` to its end even if the caller is cancelled meanwhile.
+
+    A cancellation that arrives while it waits for the user's lock or runs is held back until it
+    has finished, then re-raised, so a run is never left marked "running".
+    """
+    task = asyncio.ensure_future(wind_up)
+    cancelled: asyncio.CancelledError | None = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as exc:
+            if task.done():
+                break
+            cancelled = exc
+    if cancelled is not None:
+        raise cancelled
+    return task.result()
 
 
 async def _drive(inv: context.Invocation, pool: str, fn: Callable[..., Any], target: Any,
@@ -206,8 +265,13 @@ async def _drive(inv: context.Invocation, pool: str, fn: Callable[..., Any], tar
         if not task.done():
             try:
                 await asyncio.shield(task)                      # the body's cleanup completes first
-            except Exception:  # noqa: BLE001 - surfaced below on the normal path; the consumer is leaving otherwise
-                pass
+            except Exception as exc:  # noqa: BLE001 - the consumer is leaving; its own error is what it reports
+                if _log_text():
+                    logger.warning("lex.ui handler %s: the body's cleanup failed after the run was stopped",
+                                   inv.handler, exc_info=exc)
+                else:
+                    logger.warning("lex.ui handler %s: the body's cleanup failed after the run was stopped type=%s",
+                                   inv.handler, type(exc).__name__)
     value = await task
     yield _Return(None if value is _STOPPED else value)
 
@@ -219,12 +283,25 @@ def _mark(wrapper: Callable[..., Any], fn: Callable[..., Any], kind: str, **opti
     wrapper.__ui_options__ = options
 
 
+def _sibling_call(key: str, name: str) -> RuntimeError:
+    caller = context.active()
+    return RuntimeError(
+        f"{caller.handler if caller else 'a handler'} called the handler self.{name}() ({key}). A handler "
+        "called from another handler's body does not run. Move the shared work into a method whose name "
+        f"starts with '_' (self._{name}()) and call it from both handlers."
+    )
+
+
 def action(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any:
     """A short handler (under about a second), written as a plain function.
 
     Its body runs off the event loop on the live state while Reflex holds the user's lock, so
     the same user's other clicks wait. Changes reach the browser at each ``yield`` and at the
     end. On failure, what the browser was not yet shown is discarded and the user is told.
+
+    A body cannot run another handler of the state: ``self.reload()`` fails the action. Move the
+    shared work into a method whose name starts with ``_`` (``self._reload()``) and call it from
+    both handlers.
     """
 
     def decorate(fn: Callable[..., Any]) -> Any:
@@ -232,19 +309,16 @@ def action(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any
         key = fn.__qualname__
         requirements = guard.normalise(requires)
 
-        @functools.wraps(fn)
-        async def wrapper(self, *args: Any, **kwargs: Any):
+        async def run(self, *args: Any, **kwargs: Any):
             arg = runs.arg_key(args, kwargs)
-            failure: BaseException | None = None
-            try:                                     # who is acting, what they may do, the state to return to
-                session = await context.resolve(self)
-                if await _denied(session, requirements):
-                    raise _NotPermitted()
-                inv = context.Invocation(handler=key, kind="action", session=session,
-                                         loop=asyncio.get_running_loop(), live=self, orm=requirements is not None)
-                inv.saved[id(self)] = (self, workcopy.snapshot(self))
-            except Exception as exc:  # noqa: BLE001 - reported below, like a failure of the body
-                failure = exc
+            session, failure = await _session(self, requirements)   # who is acting, what they may do
+            if failure is None:
+                try:                                 # the state to return to
+                    inv = context.Invocation(handler=key, kind="action", session=session,
+                                             loop=asyncio.get_running_loop(), live=self, orm=requirements is not None)
+                    inv.saved[id(self)] = (self, workcopy.snapshot(self))
+                except Exception as exc:  # noqa: BLE001 - reported below, like a failure of the body
+                    failure = exc
             message = ""
             try:
                 if failure is None:
@@ -274,12 +348,20 @@ def action(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any
                         logger.warning("%s took %.1f s as @ui.action; the user's other clicks waited. "
                                        "Make it a @ui.job.", key, elapsed)
                 if failure is not None:
-                    outcome = _classify(key, failure)
+                    outcome = _classify(key, failure, user=_user_id(session))
                     message = outcome.message
                     for event in results.to_events([_toast(outcome)]):
                         yield event
             finally:
                 runs.mark_finished(self, key, arg, error=message)
+
+        @functools.wraps(fn)
+        def wrapper(self, *args: Any, **kwargs: Any):
+            # Reflex calls this and runs the async generator it returns. Called from a handler's
+            # body (self.<name>()), the generator would be dropped unrun: say so instead.
+            if context.active() is not None:
+                raise _sibling_call(key, fn.__name__)
+            return run(self, *args, **kwargs)
 
         _mark(wrapper, fn, "action", requires=requirements)
         return rx.event(wrapper)
@@ -300,8 +382,9 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
 
     The body works on a copy of the state. Only what it changed is written back, at each
     ``yield`` and at the end; after a ``yield`` it sees what the user changed meanwhile. One run
-    per user and argument at a time; a repeat is ignored. ``yield ui.progress(...)`` reports
-    progress; a cancel, or leaving the page with ``stop_on_leave=True``, takes effect at a yield.
+    per tab and set of arguments at a time; a repeat is ignored. ``yield ui.progress(...)``
+    reports progress; a cancel, or leaving the page with ``stop_on_leave=True``, takes effect at
+    a yield.
     """
 
     def decorate(fn: Callable[..., Any]) -> Any:
@@ -313,29 +396,50 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
         async def wrapper(self, *args: Any, **kwargs: Any):
             from reflex_base.event.context import EventContext
 
-            arg = runs.arg_key(args, kwargs)
+            arg = runs.arg_key(args, kwargs)               # what the view sees: the first argument
+            call = runs.call_key(fn, args, kwargs)         # what makes a repeat: every argument
             token = EventContext.get().token
-            run = runs.claim(token, key, arg)
+            run = runs.claim(token, key, call)
             if run is None:
                 return                                    # already running: a repeat is ignored
             started = False
             stopped = False
             message = ""
+            session: context.Session | None = None
+
+            async def wind_up() -> None:
+                """The one place a run is wound up; runs to its end even when the job is cancelled."""
+                try:
+                    async with self:
+                        if started:
+                            runs.mark_finished(self, key, arg, error=message)
+                        elif message:
+                            self.ui_failed = {**dict(self.ui_failed), key: message}
+                finally:
+                    runs.release(token, key, call)
+
             try:
                 try:
-                    async with self:                      # who is acting, what they may do, the first copy
-                        session = await context.resolve(self)
-                        if await _denied(session, requirements):
-                            raise _NotPermitted()
-                        own = type(workcopy.raw(self))
-                        visit = self.ui_visit
-                        inv = context.Invocation(handler=key, kind="job", session=session,
-                                                 loop=asyncio.get_running_loop(), live=self,
-                                                 orm=requirements is not None)
-                        inv.drafts[own] = workcopy.Draft(own, workcopy.snapshot(self))
-                        runs.mark_started(self, key, arg)
-                        started = True
-                    async with contextlib.aclosing(_drive(inv, "jobs", fn, inv.drafts[own], args, kwargs)) as steps:
+                    # Resolved before the user's lock is taken: nothing inside a block below raises.
+                    session, failure = await _session(self, requirements)
+                    if failure is None:
+                        async with self:                  # the first copy, and the "running" mark
+                            own = type(workcopy.raw(self))
+                            visit = self.ui_visit
+                            try:
+                                draft = workcopy.Draft(own, workcopy.snapshot(self))
+                            except Exception as exc:  # noqa: BLE001 - reported below, outside the block
+                                failure = exc
+                            else:
+                                runs.mark_started(self, key, arg)
+                                started = True
+                    if failure is not None:
+                        raise failure
+                    inv = context.Invocation(handler=key, kind="job", session=session,
+                                             loop=asyncio.get_running_loop(), live=self,
+                                             orm=requirements is not None)
+                    inv.drafts[own] = draft
+                    async with contextlib.aclosing(_drive(inv, "jobs", fn, draft, args, kwargs)) as steps:
                         async for step in steps:
                             final = isinstance(step, _Return)
                             found, report = results.split(step.value, handler=key)
@@ -355,19 +459,12 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                                 for event in results.to_events(found):
                                     yield event
                 except Exception as exc:  # noqa: BLE001 - the body has finished here; reported to the user
-                    outcome = _classify(key, exc)
+                    outcome = _classify(key, exc, user=_user_id(session))
                     message = outcome.message
                     for event in results.to_events([_toast(outcome)]):
                         yield event
             finally:                                      # also on cancellation: nothing is left running
-                try:
-                    async with self:
-                        if started:
-                            runs.mark_finished(self, key, arg, error=message)
-                        elif message:
-                            self.ui_failed = {**dict(self.ui_failed), key: message}
-                finally:
-                    runs.release(token, key, arg)
+                await _shielded(wind_up())
 
         _mark(wrapper, fn, "job", requires=requirements, stop_on_leave=stop_on_leave)
         return rx.event(wrapper, background=True)
@@ -414,6 +511,12 @@ def page_loads(on_load: Any) -> tuple[list, list, list]:
     others: list = []
     for item in items:
         fn = getattr(item, "fn", None)
+        called = getattr(getattr(item, "handler", None), "fn", None)    # State.open(arg): an event with arguments
+        if getattr(called, "__ui_kind__", "") == "load":
+            raise TypeError(
+                f"on_load={called.__qualname__}(...): a load declared on a page takes no arguments. "
+                f"Pass {called.__qualname__} itself and read the page's values from self.params."
+            )
         if getattr(fn, "__ui_kind__", "") != "load":
             others.append(item)
             continue
@@ -430,10 +533,16 @@ def _location(state: Any) -> str:
 
 
 def _return_path(location: str) -> str:
-    """Where "Try again" goes: the page the load started on, never the error page itself."""
+    """Where "Try again" goes: the page the load started on, never the error page or another site.
+
+    Only a path of this site is kept: one starting with exactly one ``/`` and holding no
+    backslash (``//host`` and ``/\\host`` are other sites to a browser). Anything else is ``/``.
+    """
     from lex.lex_app.reflex.ui.state import ERROR_ROUTE
 
-    if not location or location.split("?", 1)[0].rstrip("/") == ERROR_ROUTE:
+    if not location.startswith("/") or location.startswith("//") or "\\" in location:
+        return "/"
+    if location.split("?", 1)[0].rstrip("/") == ERROR_ROUTE:
         return "/"
     return location
 
@@ -444,7 +553,9 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
 
     Pass it to ``lex_page(on_load=...)``; lex-app starts it after sign-in, when the user holds
     the page's permission. That permission only decides whether the load is *started*: what the
-    load may read is enforced by its own ``requires=`` and by lex-app's API. The first load of a
+    load may read is enforced by its own ``requires=`` and by lex-app's API. A load declared on a
+    page takes no arguments: it reads the page's route and query values from ``self.params``.
+    The first load of a
     state in a visit resets the state's own fields (except that load's ``keep``). A required
     load that fails shows the error page and ends the visit; one with ``optional=True`` fails
     only its own region (read ``ui.failed(State.handler)``). A result or a failure that arrives
@@ -460,9 +571,11 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
     - it resets its state's own fields (except ``keep``) every time it starts, so loads started on
       mount that share one state reset it each time either starts -- a state filled by several
       loads declares them on the page (``lex_page(on_load=[...])``) or uses one load;
-    - it reports a failure in place (``ui.failed(State.handler)``), whatever ``optional=`` says:
-      the error page is only for loads the page declared;
-    - it starts no optional load of the page.
+    - it reports a failure in place (``ui.failed(State.handler)``): the error page is only for
+      loads the page declared, and ``optional=`` has no effect on a load started on mount;
+    - it starts no optional load of the page;
+    - it reads query parameters (``self.params.get("w")``), not route arguments: after a
+      navigation in the browser, its event carries the previous page's route arguments.
     """
 
     def decorate(fn: Callable[..., Any]) -> Any:
@@ -477,18 +590,19 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
             from lex.lex_app.reflex.ui.state import ERROR_ROUTE
 
             arg = runs.arg_key(args, kwargs)
-            visit: int | None = None
-            where = ""                                    # the page the load started on (opener-started only)
             run_token = uuid.uuid4().hex                  # this run; the latest run of each load is kept
+            entered = False                               # the first block ran: this run is recorded
+            visit = 0
             by_opener = False                             # started by the page's opener, not on mount
+            page_bound = False                            # opener-started and required: owns the error page
+            opened_on = ""                                # opener-started runs only: the page they started on
             started = False
             succeeded = False                             # the body ran to its end: no error, no cancellation
             outcome: Outcome | None = None
-            follow: list = []                             # what to send once the run is wound up
 
             def is_current() -> bool:
                 """Whether this run's results still belong on the page. Call inside ``async with self``."""
-                if visit is None:
+                if not entered:
                     return False
                 if by_opener:
                     return self.ui_visit == visit
@@ -497,11 +611,47 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                 # the page the browser left; only a newer run of the same load makes it stale.
                 return self._ui_load_runs.get(ident) == run_token
 
+            async def wind_up() -> list:
+                """The one place a run is wound up; runs to its end even when the load is cancelled.
+
+                Returns what to send once it is wound up.
+                """
+                follow: list = []
+                async with self:
+                    current = is_current()
+                    message = outcome.message if outcome is not None and current else ""
+                    if started:
+                        runs.mark_finished(self, key, arg, error=message)
+                    elif message:
+                        self.ui_failed = {**dict(self.ui_failed), key: message}
+                    # Started on mount, or optional: the failure stays in place, in ui_failed.
+                    if current and outcome is not None and page_bound:
+                        if _location(self) == opened_on:  # the browser is still on the page it failed for
+                            self.ui_error = {"kind": "denied" if outcome.kind == "denied" else "error",
+                                             "title": outcome.title, "message": outcome.message,
+                                             "path": _return_path(opened_on)}
+                            self.ui_visit += 1            # the visit is over: its later outcomes are stale
+                            follow = [results.Goto(ERROR_ROUTE, True)]
+                    elif current and succeeded and page_bound:
+                        pending = [other for other in self._ui_pending_loads if other != ident]
+                        self._ui_pending_loads = pending
+                        if not pending and self._ui_optional_loads:
+                            entry = page_of(self._ui_page)
+                            waiting = set(self._ui_optional_loads)
+                            follow = [h for h in (entry.optional if entry else ()) if load_id(h) in waiting]
+                            self._ui_optional_loads = []
+                            self._ui_started = [*self._ui_started, *(load_id(h) for h in follow)]
+                return follow
+
+            follow: list = []
+            session: context.Session | None = None
             try:
                 try:
-                    async with self:                      # who is acting, a clean state, the first copy
+                    # Resolved before the user's lock is taken: nothing inside a block below raises.
+                    session, failure = await _session(self, requirements)
+                    async with self:                      # the bookkeeping and a clean state, then the first copy
+                        entered = True
                         visit = self.ui_visit
-                        where = _location(self)
                         # Opener-started if the opener listed this load, else started on mount. One known
                         # mix-up: a load both declared on the page and mounted in a component can have its
                         # mount run take the opener's listing; the data still lands, at the cost of a
@@ -511,6 +661,7 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                         if by_opener:
                             listed.remove(ident)
                             self._ui_started = listed
+                            opened_on = _location(self)
                         self._ui_load_runs = {**dict(self._ui_load_runs), ident: run_token}
                         own = type(workcopy.raw(self))
                         name = own.get_full_name()
@@ -520,16 +671,22 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                         elif name not in done:            # once per visit: a sibling load's data stays
                             workcopy.reset(self, keep=kept)
                             self._ui_reset = [*done, name]
-                        session = await context.resolve(self)
-                        if await _denied(session, requirements):
-                            raise _NotPermitted()
-                        inv = context.Invocation(handler=key, kind="load", session=session,
-                                                 loop=asyncio.get_running_loop(), live=self,
-                                                 orm=requirements is not None)
-                        inv.drafts[own] = workcopy.Draft(own, workcopy.snapshot(self))
-                        runs.mark_started(self, key, arg)
-                        started = True
-                    async with contextlib.aclosing(_drive(inv, "interactive", fn, inv.drafts[own], args, kwargs)) as steps:
+                        if failure is None:
+                            try:
+                                draft = workcopy.Draft(own, workcopy.snapshot(self))
+                            except Exception as exc:  # noqa: BLE001 - reported below, outside the block
+                                failure = exc
+                            else:
+                                runs.mark_started(self, key, arg)
+                                started = True
+                    page_bound = by_opener and not optional
+                    if failure is not None:
+                        raise failure
+                    inv = context.Invocation(handler=key, kind="load", session=session,
+                                             loop=asyncio.get_running_loop(), live=self,
+                                             orm=requirements is not None)
+                    inv.drafts[own] = draft
+                    async with contextlib.aclosing(_drive(inv, "interactive", fn, draft, args, kwargs)) as steps:
                         async for step in steps:
                             found, report = results.split(step.value, handler=key)
                             async with self:
@@ -545,32 +702,9 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                                     yield event
                     succeeded = True
                 except Exception as exc:  # noqa: BLE001 - the body has finished here; reported below
-                    outcome = _classify(key, exc)         # logged even when the user has moved on
-            finally:                                      # the one place a run is wound up; also on cancellation
-                async with self:
-                    current = is_current()
-                    message = outcome.message if outcome is not None and current else ""
-                    if started:
-                        runs.mark_finished(self, key, arg, error=message)
-                    elif message:
-                        self.ui_failed = {**dict(self.ui_failed), key: message}
-                    # Started on mount, or optional: the failure stays in place, in ui_failed.
-                    if current and outcome is not None and not optional and by_opener:
-                        if _location(self) == where:      # the browser is still on the page it failed for
-                            self.ui_error = {"kind": "denied" if outcome.kind == "denied" else "error",
-                                             "title": outcome.title, "message": outcome.message,
-                                             "path": _return_path(where)}
-                            self.ui_visit += 1            # the visit is over: its later outcomes are stale
-                            follow = [results.Goto(ERROR_ROUTE, True)]
-                    elif current and succeeded and not optional and by_opener:
-                        pending = [other for other in self._ui_pending_loads if other != ident]
-                        self._ui_pending_loads = pending
-                        if not pending and self._ui_optional_loads:
-                            entry = page_of(self._ui_page)
-                            waiting = set(self._ui_optional_loads)
-                            follow = [h for h in (entry.optional if entry else ()) if load_id(h) in waiting]
-                            self._ui_optional_loads = []
-                            self._ui_started = [*self._ui_started, *(load_id(h) for h in follow)]
+                    outcome = _classify(key, exc, user=_user_id(session))   # logged even when the user has moved on
+            finally:
+                follow = await _shielded(wind_up())
             for item in follow:                           # not reached when cancelled: nothing is shown
                 if isinstance(item, results.Goto):
                     for event in results.to_events([item]):

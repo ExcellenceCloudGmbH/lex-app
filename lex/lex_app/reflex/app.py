@@ -41,7 +41,9 @@ def create_app():
 
     Further pages come from the project itself: any ``@lex_page`` or
     ``@rx.page`` in ``_reflex_structure.py``, or in a module it imports, is
-    added when the app compiles.
+    added when the app compiles. Once they are declared, no page route may have
+    a dynamic argument named like a ``ui.State`` helper (``[user]``, ``[state]``...):
+    Reflex would make it a field of every state and hide the helper.
     """
     import reflex as rx
     import rfds
@@ -99,6 +101,9 @@ def create_app():
     )
     app.add_page(error_page, route=ERROR_ROUTE, title="This page could not be opened", on_load=[LexAccessState.load])
     app.add_page(_signing_out, route="/logout", title="Signing out", on_load=LexUser.sign_out)
+    from lex.lex_app.reflex.ui.state import check_app_routes
+
+    check_app_routes(app)  # after the project's pages: a route argument named like a ui.State helper hides it
     return app
 
 

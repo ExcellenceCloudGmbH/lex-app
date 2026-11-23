@@ -34,6 +34,9 @@ pytestmark = pytest.mark.init
 SEEN: list = []
 #: Set by ``sleeps_then_yields`` when its body has finished, cancelled or not.
 FINISHED = threading.Event()
+#: ``cleanup_breaks``: set when its body has started; the test sets RELEASE to let it go on.
+BODY_STARTED = threading.Event()
+RELEASE = threading.Event()
 
 
 class Board(State):
@@ -81,6 +84,34 @@ class Board(State):
         raise LexApiError(400, {"name": ["Too long."]})
 
     @handlers.action
+    def api_refused_by_lex(self):
+        raise LexApiError(400, {"code": "EDIT_NOT_ALLOWED", "detail": "You may not edit: amount.",
+                                "error": "You may not edit: amount.", "fields": {"amount": "Not editable."}})
+
+    @handlers.action
+    def api_refused_with_fields(self):
+        raise LexApiError(400, {"code": "INVALID", "error": "Invalid.", "traceback": "Traceback (most recent call",
+                                "fields": {"amount": "Not editable.", "name": ["Too long."]}})
+
+    @handlers.action
+    def reload(self):
+        self.status = "reloaded"
+
+    @handlers.action
+    def save_and_reload(self):
+        self.status = "saved"
+        self.reload()                        # a sibling handler: it would not run
+
+    @handlers.action
+    def cleanup_breaks(self):
+        try:
+            BODY_STARTED.set()
+            RELEASE.wait(5)
+            yield
+        finally:
+            raise ValueError("cleanup broke")
+
+    @handlers.action
     def counts_unguarded(self):
         self.steps = Group.objects.count()
 
@@ -116,6 +147,8 @@ class TestCluster01ch_Action(TransactionTestCase):
     def setUp(self) -> None:
         SEEN.clear()
         FINISHED.clear()
+        BODY_STARTED.clear()
+        RELEASE.clear()
 
     # -- 1.762 ---------------------------------------------------------
     def test_1_762_a_plain_function_runs_off_the_loop_on_the_live_state(self) -> None:
@@ -239,6 +272,24 @@ class TestCluster01ch_Action(TransactionTestCase):
                          "the body's finally ran before the restore, so the field ends at its restored value")
         self.assertEqual(wrong.running, {}, "nothing is left marked running")
 
+    def test_1_764_an_action_that_calls_another_handler_fails_and_says_why(self) -> None:
+        """
+        Scenario 1.764: a body calls a sibling handler (self.reload()).
+        Given: an action that sets a field, then calls another @ui.action of its state.
+        When:  it runs.
+        Then:  it fails like an unexpected error (the field is restored, the user gets the error
+               toast) instead of silently doing nothing; the log names both handlers and says to
+               move the shared work into an underscore method; the sibling did not run.
+        """
+        with self.assertLogs("lex.lex_app.reflex.ui.handlers", level="ERROR") as logs:
+            result = testing.run(Board, "save_and_reload")
+        self.assertTrue(result.error, "calling a sibling handler fails the action")
+        self.assertEqual(result.fields["status"], "", "the action's change is discarded and the sibling never ran")
+        self.assertEqual(result.running, {}, "nothing is left marked running")
+        text = "\n".join(logs.output)
+        for expected in ("Board.save_and_reload", "self.reload()", "self._reload()"):
+            self.assertIn(expected, text, f"the log says {expected}")
+
     # -- 1.765 ---------------------------------------------------------
     def test_1_765_refusals_and_api_answers_are_shown_in_their_own_words(self) -> None:
         """
@@ -247,7 +298,9 @@ class TestCluster01ch_Action(TransactionTestCase):
         When:  each runs.
         Then:  the refusal's message is shown as written, as a warning, and its changes are
                discarded; the 403 is the standard "not permitted" message; the validation error
-               is shown with the API's detail; none is reported as an unexpected error.
+               is shown with the API's detail -- lex-app's own refusal body by its detail alone,
+               and a body without one as its fields' name: text pairs, never its code, error or
+               traceback; none is reported as an unexpected error.
         """
         refused = testing.run(Board, "refuses")
         self.assertEqual((refused.refused, refused.fields["status"]), ("This request is closed.", ""))
@@ -257,6 +310,12 @@ class TestCluster01ch_Action(TransactionTestCase):
         self.assertIn("not permitted", denied.toasts[-1].message.lower())
         invalid = testing.run(Board, "api_invalid")
         self.assertIn("Too long.", invalid.refused, "the API's detail is the message")
+        lex_body = testing.run(Board, "api_refused_by_lex")
+        self.assertEqual(lex_body.refused, "You may not edit: amount.",
+                         "lex-app's refusal shows its detail alone, without code, error or fields")
+        fields_only = testing.run(Board, "api_refused_with_fields")
+        self.assertEqual(fields_only.refused, "amount: Not editable. name: Too long.",
+                         "without a detail, the fields are shown as name: text, without code, error or traceback")
 
     # -- 1.766 ---------------------------------------------------------
     def test_1_766_the_database_is_reachable_only_with_requires(self) -> None:
@@ -290,11 +349,13 @@ class TestCluster01ch_Action(TransactionTestCase):
         Scenario 1.767: one user's slow action and everyone else.
         Given: an action that sleeps.
         When:  it sleeps 0.4 s while a ticker runs on the event loop; and 1.1 s in development;
-               and an action that sleeps then yields is cancelled while it sleeps.
+               and an action that sleeps then yields is cancelled while it sleeps; and one whose
+               cleanup (a finally) raises is cancelled.
         Then:  the loop keeps ticking during the sleep; the 1.1 s run logs a warning that names
                the handler and says to make it a job; the cancelled body's thread finishes (it
                is not left blocked at its yield), nothing is left marked running, and a
-               following action on the same tab still runs.
+               following action on the same tab still runs; the failing cleanup is logged as
+               a warning, not swallowed.
         """
         async def scenario():
             async with testing.Harness() as harness:
@@ -334,6 +395,24 @@ class TestCluster01ch_Action(TransactionTestCase):
 
         finished, fields = asyncio.run(cancelled())
         self.assertTrue(finished, "the cancelled body's thread finished instead of blocking at its yield")
+
+        async def broken_cleanup(logs):
+            async with testing.Harness() as harness:
+                future = await harness.send(Board, "cleanup_breaks")
+                deadline = time.monotonic() + 5
+                while not BODY_STARTED.is_set():
+                    self.assertLess(time.monotonic(), deadline, "the body never started")
+                    await asyncio.sleep(0.001)
+                future.cancel()
+                RELEASE.set()                        # the body reaches its yield, is stopped, and its finally raises
+                while not any("cleanup" in record.getMessage() for record in logs.records):
+                    self.assertLess(time.monotonic(), deadline, "the failed cleanup was never logged")
+                    await asyncio.sleep(0.001)
+
+        with self.assertLogs("lex.lex_app.reflex.ui.handlers", level="WARNING") as cleanup_logs:
+            asyncio.run(broken_cleanup(cleanup_logs))
+        self.assertIn("cleanup broke", "\n".join(cleanup_logs.output),
+                      "a stopped body whose cleanup fails is logged as a warning, not swallowed")
         self.assertEqual(fields["steps"], 0, "the cancelled body did not go on past its yield")
         self.assertEqual(fields["status"], "approved-B1", "a following action on the same tab still runs")
         self.assertEqual(fields["ui_running"], {}, "nothing is left marked running")

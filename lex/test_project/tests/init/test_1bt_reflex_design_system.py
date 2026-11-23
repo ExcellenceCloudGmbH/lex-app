@@ -337,7 +337,10 @@ class TestCluster01bt_Chrome(SimpleTestCase):
         def cash():
             return "body"
 
-        with patch("reflex.page", fake_page):
+        from lex.lex_app.reflex.ui import handlers as ui_handlers
+
+        # lex_page records the page in lex.ui's process-wide page registry: keep it out of later tests.
+        with patch("reflex.page", fake_page), patch.dict(ui_handlers._PAGES):
             returned = shell.lex_page("/cash", title="Cash overview", nav="Finance", icon="money",
                                       requires="lex_app.Fund:read", on_load=own_load)(cash)
         self.assertIs(returned, cash)

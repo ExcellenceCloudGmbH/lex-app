@@ -59,21 +59,24 @@ class TestCluster01cc_Results(TestCase):
         Scenario 1.748: results turn into Reflex events.
         Given: a goto inside the app, a goto to another site, a toast and a download.
         When:  they are converted.
-        Then:  an in-app path is Reflex's redirect, another site a whole-page navigation, the
+        Then:  an in-app path is Reflex's redirect, another site (a full URL, or //host) a
+               whole-page navigation, the
                toast RFDS's toast of that tone, the download Reflex's download; with the test
                recorder on, the values themselves are recorded in order.
         """
         with patch.object(results, "RECORDER", []) as recorded:
             events = results.to_events([results.goto("/tickets/1"), results.goto("https://example.org/x"),
                                         results.toast("Saved", tone="success", description="All good"),
-                                        results.download(url="/files/a.csv", filename="a.csv")])
-            self.assertEqual(len(events), 4, "one event per result")
+                                        results.download(url="/files/a.csv", filename="a.csv"),
+                                        results.goto("//example.org/y")])
+            self.assertEqual(len(events), 5, "one event per result")
             rendered = [str(event) for event in events]
             self.assertIn("/tickets/1", rendered[0])
             self.assertIn("window.location.assign", rendered[1], "another site is a whole-page load")
             self.assertIn("Saved", rendered[2])
             self.assertIn("a.csv", rendered[3])
-            self.assertEqual([type(r).__name__ for r in recorded], ["Goto", "Goto", "Toast", "Download"])
+            self.assertIn("window.location.assign", rendered[4], "//host is another site too")
+            self.assertEqual([type(r).__name__ for r in recorded], ["Goto", "Goto", "Toast", "Download", "Goto"])
         self.assertEqual(results.message("lex.ui.x", "Reference: {incident}", incident="AB12"), "Reference: AB12")
 
 
@@ -95,15 +98,30 @@ class TestCluster01cc_Pools(TestCase):
         """
         marker = contextvars.ContextVar("marker", default="unset")
 
+        counts = {"now": 0, "most": 0}
+        lock = threading.Lock()
+
+        def counted():
+            with lock:
+                counts["now"] += 1
+                counts["most"] = max(counts["most"], counts["now"])
+            threading.Event().wait(0.05)        # long enough to overlap if the pool ran both at once
+            with lock:
+                counts["now"] -= 1
+            return "done"
+
         async def scenario():
             marker.set("from-caller")
             name, seen = await pools.run("interactive", lambda: (threading.current_thread().name, marker.get()))
             job_name = await pools.run("jobs", lambda: threading.current_thread().name)
-            return name, seen, job_name
+            queued = await asyncio.gather(pools.run("jobs", counted), pools.run("jobs", counted))
+            return name, seen, job_name, queued
 
         with patch.dict(os.environ, {"LEX_UI_ACTION_THREADS": "3", "LEX_UI_JOB_THREADS": "0"}):
             self.assertEqual((pools.size("interactive"), pools.size("jobs")), (3, 1), "sizes from the environment, at least 1")
-            name, seen, job_name = asyncio.run(scenario())
+            name, seen, job_name, queued = asyncio.run(scenario())
+        self.assertEqual((queued, counts["most"]), (["done", "done"], 1),
+                         "on a full one-thread pool the second call waits its turn and does not fail")
         self.assertTrue(name.startswith("lex-ui-interactive"), name)
         self.assertTrue(job_name.startswith("lex-ui-jobs"), job_name)
         self.assertEqual(seen, "from-caller", "the body sees the caller's context variables")

@@ -7,9 +7,37 @@ from typing import Any
 import reflex as rx
 
 from lex.lex_app.reflex.ui import context
+from lex.lex_app.reflex.ui.context import RESERVED
 
 #: The page a failed required load sends the browser to.
 ERROR_ROUTE = "/ui-error"
+
+
+def check_route(route: str) -> None:
+    """Refuse a route whose dynamic argument is named like a ``ui.State`` helper (``ValueError``)."""
+    from reflex.route import get_route_args
+
+    for name in sorted(set(get_route_args(route)) & set(RESERVED)):
+        raise ValueError(
+            f"route {route!r}: the dynamic argument [{name}] has the name of the ui.State helper "
+            f"self.{name}. Reflex makes a route argument a field of every state, which hides the helper "
+            f"in every handler. Rename the argument, e.g. [{name}_id]."
+        )
+
+
+def check_app_routes(app: Any) -> None:
+    """Refuse an app that has a page route with a dynamic argument named like a ``ui.State`` helper.
+
+    ``create_app`` calls it once the project's pages are registered: it sees the pages added to
+    the app and those declared with ``@rx.page`` or ``@lex_page`` that the app adds when it compiles.
+    """
+    from reflex_base.registry import RegistrationContext
+
+    routes = list(getattr(app, "_unevaluated_pages", {}) or {})
+    routes += [kwargs["route"] for _, kwargs in RegistrationContext.ensure_context().decorated_pages
+               if kwargs.get("route")]
+    for route in routes:
+        check_route(route)
 
 
 def _page_permitted(state: Any, requires: str) -> bool:
@@ -27,8 +55,20 @@ class State(rx.State):
     """The base class of a page state: handler status for views, and the body's helpers.
 
     Inside a handler body: ``self.user``, ``self.api``, ``self.params``, ``self.can(Model, scope)``
-    and ``self.state(Other)``. They are properties, so the browser cannot call them.
+    and ``self.state(Other)``. They are properties, so the browser cannot call them. Their names are
+    reserved: a subclass declaring a field, computed var or method with one of them is refused
+    when the class is defined.
     """
+
+    def __init_subclass__(cls, **kwargs: Any):
+        own = {*cls.__dict__, *cls.__dict__.get("__annotations__", {})}
+        for name in sorted(own & set(RESERVED)):
+            raise TypeError(
+                f"{cls.__name__}.{name}: '{name}' is reserved on a ui.State -- self.{name} is the "
+                f"handler's helper, and a field, computed var or method of that name would hide it. "
+                f"Rename it, e.g. {name}_value or _{name}."
+            )
+        super().__init_subclass__(**kwargs)
 
     #: Handler key -> the first argument of each run in flight ('' without arguments).
     ui_running: dict[str, list[str]] = {}

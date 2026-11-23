@@ -192,6 +192,9 @@ def lex_page(
     """
     if not route.startswith("/"):
         raise ValueError(f"lex_page() routes start with '/', got {route!r}")
+    from lex.lex_app.reflex.ui.state import check_route
+
+    check_route(route)              # a route argument named like a ui.State helper would hide it
 
     def decorator(page_fn: Callable[[], Any]) -> Callable[[], Any]:
         import reflex as rx
