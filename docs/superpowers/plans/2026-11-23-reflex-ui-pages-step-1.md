@@ -43,7 +43,7 @@ Every code block in this plan was run before the plan was written: the 22 tests 
 
 ## Changed by review while executing
 
-Tasks 2 to 8 were reviewed and then fixed in four commits; the code and tests shown for them below are the fixed ones, and the later tasks are written against them:
+Tasks 2 to 8 were reviewed and then fixed in five commits; the code and tests shown for them below are the fixed ones, and the later tasks are written against them:
 
 - A value joined into an address is encoded (`links.piece`; a state value with `String(value ?? '')`); `links.info_of` refuses optional and catch-all route forms and parameter names that `ui.link` takes itself.
 - `shown(ctx, component, visible)` takes the build context and accepts a permission, a non-empty list of them, `ui.signed_in`, a state value or a bool.
@@ -59,6 +59,7 @@ Tasks 2 to 8 were reviewed and then fixed in four commits; the code and tests sh
 - `@ui.page` checks `requires=`, `params=` and a route taken twice when the page is declared; `finalize()` checks that every `load=` is a `@ui.load` handler given once, and wraps an error from a page function in a `PageError`. `@ui.dashboard` passes its arguments through, so it works under `@classmethod`.
 - Task 7's test names `tables.table`, because `ui.table` is exported in Task 8. Task 8 was written by the controller while checking the plan's code against the fixed tree.
 - Task 8's review: the example page's section load reads what the page load wrote, so the end-to-end test proves their order; `ui.list` is left out of `__all__`; an RFDS refusal keeps its cause and lex's checks of title and actions run first.
+- The whole-branch review: `finalize()` builds each page once, so every slot is checked when the pages are registered; a dashboard refuses two loads on one state (each clears its state as it starts); a component refusing its arguments keeps its own sentence; one part without brackets is a list of one, `status=` holds one badge, `columns="name"` is refused; `self.params["key"]` works (`ui/context.py`); docstrings say `visible=`/`requires=` decide what is shown, never what is allowed.
 
 ## Not in this step
 
@@ -754,7 +755,8 @@ def shape(value: Any, kind: str, currency: Any = None) -> Any:
         return rfds.percent(value)
     if kind == "datetime":
         return rfds.timestamp(value)
-    raise ValueError(f"kind= must be one of {', '.join(KINDS)}; got {kind!r}")
+    raise ValueError(f"kind= must be one of {', '.join(KINDS)}; got {kind!r}. "
+                         "`date`, `year`, `bool` and `choice` come with forms.")
 
 
 @dataclasses.dataclass(eq=False)
@@ -800,7 +802,8 @@ def fact(label: Any, value: Any, *, kind: str = "text", currency: Any = None, vi
     in the user's), or ``"text"``.
     """
     if kind not in KINDS:
-        raise ValueError(f"kind= must be one of {', '.join(KINDS)}; got {kind!r}")
+        raise ValueError(f"kind= must be one of {', '.join(KINDS)}; got {kind!r}. "
+                         "`date`, `year`, `bool` and `choice` come with forms.")
     if currency is not None and kind != "money":
         raise ValueError(f"ui.fact(currency=) goes with kind=\"money\"; got kind={kind!r}")
     return Fact(label, value, kind, visible, currency)
@@ -819,7 +822,8 @@ class Status(Part):
 
 
 def status(word: Any, *, tone: str = "neutral", visible: Any = None) -> Status:
-    """A small badge."""
+    """A small badge: one word about the thing's state. ``tone`` is one of the tones:
+    neutral, info, success, warning, danger."""
     return Status(word, _tone(tone), visible)
 
 
@@ -1174,7 +1178,7 @@ def row_href(ctx: Build, target: Callable[..., Any], row_key: str) -> str:
     return info.route.replace(f"[{info.arguments[0]}]", "{" + row_key + "}")
 
 
-def piece(ctx: Build, name: str, value: Any) -> Any:
+def piece(ctx: Build, name: str, value: Any, instead: str | None = None) -> Any:
     """``value`` as one piece of an address, encoded so that it stays one piece.
 
     A value from data must not be able to change the page or add a parameter: a fixed value is
@@ -1182,7 +1186,7 @@ def piece(ctx: Build, name: str, value: Any) -> Any:
     """
     import reflex as rx
 
-    instead = f"Pass text or a number: `{name}=row.id`, `{name}=7`."
+    instead = instead or f"Pass text or a number: `{name}=row.id`, `{name}=7`."
     if isinstance(value, rx.Var):
         kind = typing.get_origin(value._var_type) or value._var_type
         if kind in (bool, list, dict, tuple, set):
@@ -1215,7 +1219,7 @@ class Link(Part):
 
             model, pk = self.record
             return (lex_app_base_url().rstrip("/") + "/" + model._meta.model_name + "/"
-                    + links.piece(ctx, "pk", pk) + "/show"), True
+                    + links.piece(ctx, "pk", pk, instead="Write `record=(Model, row.id)`.") + "/show"), True
         return self.href, True
 
     def click(self, ctx: Build) -> Any:
@@ -1431,6 +1435,9 @@ class TestCluster01cr_PageTables(SimpleTestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError, msg="a column is checked when it is declared"):
                 tables.column("name", **bad)
         self.assertEqual(tables._RFDS_KIND["datetime"], "instant", "datetime is RFDS's instant")
+        with self.assertRaises(TypeError) as one_string:
+            tables.table(Group, columns="name")
+        self.assertIn("columns=['name']", str(one_string.exception), "one name is not read letter by letter")
 
         def no_argument():
             """A page without a route argument."""
@@ -1556,10 +1563,12 @@ def table(source: Any, *, columns: Any = (), open: Any = None, empty: Any = None
 
     ``columns`` names the fields to show (``ui.column`` for one that needs its own label or kind);
     ``open=`` a page makes each row a link to it; ``empty=`` is the sentence shown when the model
-    has no rows at all. The table is shown only to users who may read the model, unless
-    ``visible=`` says otherwise.
+    has no rows at all. The table is shown only to users who may read the model; ``visible=True``
+    shows it to everyone, and the rows are still read as the user.
     """
-    return Table(source, tuple(columns), open, empty, visible)
+    if isinstance(columns, str):
+        raise TypeError(f"ui.table(columns=) takes a list of names: columns=[{columns!r}]")
+    return Table(source, tuple(columns) if isinstance(columns, (list, tuple)) else (columns,), open, empty, visible)
 ```
 
 - [ ] **Step 4: Run it and see it pass**
@@ -1863,6 +1872,11 @@ from lex.lex_app.reflex.ui.pages import tables, vocab
 from lex.lex_app.reflex.ui.pages.parts import Build, NotASentence, Part, called, say, slug, take
 
 
+def _many(value: Any) -> tuple:
+    """A list slot as given: a list, one part, or nothing. The kind checks what is in it."""
+    return () if value is None else tuple(value) if isinstance(value, (list, tuple)) else (value,)
+
+
 def states(ctx: Build, load: Any, content: rx.Component, shape: str) -> rx.Component:
     """``content`` once ``load`` has finished; before that its skeleton, or its failure in place."""
     import rfds
@@ -2096,7 +2110,8 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         When:  each is built.
         Then:  each is a PageError naming the page and the slot and saying what to write --
                also two sections with one title, a section hidden by a state value, a blank
-               title, a title that is not words, and an action called Save; a limit of RFDS's
+               title, a title that is not words, two badges, and an action called Save (one
+               fact or one section given without brackets is a list of one); a limit of RFDS's
                own (five tables on one page) names the page and quotes RFDS's sentence.
         """
         cases = {
@@ -2113,6 +2128,8 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
             "sections": (dict(sections=[vocab.text("loose")]),
                          "Page `fund`, slot `sections`: got `ui.text`.\n`sections=` holds `ui.section(title, ...)`."),
         }
+        cases["two badges"] = (dict(status=[vocab.status("Open"), vocab.status("Late")]),
+                               "Page `fund`, slot `status`: got 2 badges.\n`status=` holds one `ui.status(word, tone=)`.")
         cases["same title"] = (dict(sections=[kinds.section("Notes", vocab.text("a")), kinds.section("Notes", vocab.text("b"))]),
                                "Page `fund`, slot `sections`: two sections are both called `Notes`.\n"
                                "Give each section its own title.")
@@ -2133,6 +2150,9 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
             with self.subTest(case=name), self.assertRaises(PageError) as raised:
                 _record(**slots).build(CTX)
             self.assertEqual(str(raised.exception), message, f"{name}: the message says what to write")
+        one = str(kinds.record(title="Fund", facts=vocab.fact("Vintage", "2020"),
+                               sections=kinds.section("Notes", vocab.text("a"))).build(CTX))
+        self.assertIn('rfdsI18n.t("Vintage", "Vintage"', one, "one fact without brackets is taken as a list of one")
         crowded = [kinds.section(f"Table {n}", tables.table(Group, columns=["name"])) for n in "abcde"]
         with self.assertRaises(PageError) as limit:
             _record(sections=crowded).build(CTX)
@@ -2310,7 +2330,8 @@ class Record(Kind):
     actions: tuple = ()
 
     def loads(self) -> tuple[list, list]:
-        return ([self.load] if self.load is not None else []), [s.load for s in self.sections if s.load is not None]
+        parts = [s for s in self.sections if isinstance(s, Section)]     # anything else is refused when built
+        return ([self.load] if self.load is not None else []), [s.load for s in parts if s.load is not None]
 
     def _sections(self, ctx: Build) -> list:
         """The sections as RFDS's object page takes them, each checked first."""
@@ -2350,7 +2371,10 @@ class Record(Kind):
 
         head: list = []
         if self.status is not None:
-            (badge,) = take(ctx.at("status"), self.status, (vocab.Status,), "`status=` holds one `ui.status(word, tone=)`.")
+            given = take(ctx.at("status"), self.status, (vocab.Status,), "`status=` holds one `ui.status(word, tone=)`.")
+            if len(given) != 1:
+                raise ctx.at("status").fail(f"got {len(given)} badges.", "`status=` holds one `ui.status(word, tone=)`.")
+            (badge,) = given
             head.append(badge.build(ctx.at("status")))
         facts = take(ctx.at("facts"), list(self.facts), (vocab.Fact,), "Use `ui.fact(label, value)`.")
         if facts:
@@ -2367,11 +2391,16 @@ def record(*, title: Any, load: Any = None, status: Any = None, facts: Any = (),
            tabs: bool = False, actions: Any = ()) -> Record:
     """One thing: its key facts, then its parts.
 
+    ``title`` is a sentence or a state value. ``load=`` is the ``@ui.load`` that fills the page;
+    until it has finished the page shows a skeleton, and its failure in place. ``status=`` is one
+    ``ui.status``; ``facts=`` a list of ``ui.fact``; ``sections=`` a list of ``ui.section``.
+
     The first of ``actions`` is the primary one, unless it is dangerous or a link; one further
-    action is a button, and two or more further actions go into a "More actions" menu.
-    ``tabs=True`` shows one section at a time.
+    action is a button, and two or more further actions go into a "More actions" menu. To open a
+    page from ``actions=``, use ``ui.button(label, to=page)``. ``tabs=True`` shows one section at
+    a time.
     """
-    return Record(title, load, status, tuple(facts), tuple(sections), bool(tabs), tuple(actions))
+    return Record(title, load, status, _many(facts), _many(sections), bool(tabs), _many(actions))
 
 
 @dataclasses.dataclass(eq=False)
@@ -2394,7 +2423,7 @@ class List(Kind):
 
 def list_(*, title: Any, load: Any = None, table: Any = None, actions: Any = ()) -> List:
     """Finding things: a table to search, sort and open from. ``actions`` are placed as on a record page."""
-    return List(title, load, table, tuple(actions))
+    return List(title, load, table, _many(actions))
 ```
 
 - [ ] **Step 4: Run it and see it pass**
@@ -2563,8 +2592,10 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
         Then:  the navigation entry carries the kind's title; the kind's load is registered as
                the page's required load and the section's load as an optional one; registering
                twice adds nothing; a navigation page without a fixed title, a load= that is not
-               a @ui.load handler, one load given twice, a page function that raises, and a
-               function that does not return a kind, are each refused with the page named.
+               a @ui.load handler, one load given twice, a page function that raises, a
+               component refusing its arguments, something that is not a section in sections=,
+               a function without return, and a function that does not return a kind, are
+               each refused with the page named.
         """
         @declare.page("/funds", nav="Funds", icon="list")
         def funds():
@@ -2601,8 +2632,9 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
 
         with self.assertRaises(PageError) as not_a_load:
             declare.finalize()
-        self.assertTrue(str(not_a_load.exception).startswith("Page `acting`: `load=` got "),
-                        f"a handler that is not a load is refused as the page's load: {not_a_load.exception}")
+        self.assertTrue(str(not_a_load.exception).startswith(
+            "Page `acting`: `load=` got `DeclareDesk.touch`, which is an `@ui.action`.\n"),
+            f"a handler that is not a load is refused, named as the author wrote it: {not_a_load.exception}")
         self.assertIn("Pass a handler declared with `@ui.load`, without arguments", str(not_a_load.exception),
                       "with what to pass")
         declare._DECLARED.pop("/acting")
@@ -2619,13 +2651,46 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
 
         @declare.page("/broken")
         def broken():
-            return kinds.record(title="Broken", sections=[kinds.section(5)])
+            return kinds.record(title="Broken", sections=[kinds.section("A", vocab.text("a"))], tabs=1 / 0)
 
         with self.assertRaises(PageError) as raised:
             declare.finalize()
-        self.assertTrue(str(raised.exception).startswith("Page `broken`: its function raised TypeError:"),
+        self.assertTrue(str(raised.exception).startswith("Page `broken`: its function raised ZeroDivisionError:"),
                         f"an error inside a page function is given the page's name: {raised.exception}")
         declare._DECLARED.pop("/broken")
+
+        @declare.page("/toned")
+        def toned():
+            return kinds.record(title="Toned", status=vocab.status("Open", tone="red"),
+                                sections=[kinds.section("A", vocab.text("a"))])
+
+        with self.assertRaises(PageError) as wrong_argument:
+            declare.finalize()
+        self.assertEqual(str(wrong_argument.exception),
+                         "Page `toned`: tone= must be one of neutral, info, success, warning, danger; got 'red'",
+                         "a component refusing its arguments keeps its own sentence, with the page named")
+        declare._DECLARED.pop("/toned")
+
+        @declare.page("/loose")
+        def loose():
+            return kinds.record(title="Loose", sections=[tables.table(Group, columns=["name"])])
+
+        with self.assertRaises(PageError) as not_a_section:
+            declare.finalize()
+        self.assertEqual(str(not_a_section.exception),
+                         "Page `loose`, slot `sections`: got `ui.table`.\n`sections=` holds `ui.section(title, ...)`.",
+                         "every slot is checked when the pages are registered")
+        declare._DECLARED.pop("/loose")
+
+        @declare.page("/forgotten")
+        def forgotten():
+            kinds.record(title="Forgotten", sections=[kinds.section("A", vocab.text("a"))])
+
+        with self.assertRaises(PageError) as no_return:
+            declare.finalize()
+        self.assertTrue(str(no_return.exception).startswith("Page `forgotten`: it returned nothing. Did you forget"),
+                        f"a page function without return is told so: {no_return.exception}")
+        declare._DECLARED.pop("/forgotten")
 
         @declare.page("/raw")
         def raw():
@@ -2645,7 +2710,8 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
         When:  the dashboard is called, and create_app's source is read.
         Then:  the dashboard returns the built page, a component, whose load starts when it
                mounts (a dashboard has no opener); it is not a link target; on a model it sits
-               under @classmethod and receives the model; create_app loads the project's
+               under @classmethod and receives the model; two of its loads on one state are
+               refused, since each clears its state as it starts; create_app loads the project's
                module, then registers the declared pages, before it adds the home page.
         """
         @declare.dashboard
@@ -2667,6 +2733,17 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
                 return kinds.record(title=cls.__name__, sections=[kinds.section("A", vocab.text("a"))])
 
         self.assertIsInstance(Model.reflex_main(), rx.Component, "a model's hook is a class method above @ui.dashboard")
+
+        @declare.dashboard
+        def shared():
+            return kinds.record(title="Shared", load=DeclareDesk.open,
+                                sections=[kinds.section("A", vocab.text("a"), load=DeclareDesk.load_documents)])
+
+        with self.assertRaises(PageError) as one_state:
+            shared()
+        self.assertTrue(str(one_state.exception).startswith(
+            "Page `shared`: `DeclareDesk.open` and `DeclareDesk.load_documents` both load into `DeclareDesk`."),
+            f"two loads of one dashboard on one state are refused: each would clear the other: {one_state.exception}")
         self.assertIn('rfdsI18n.t("Model", "Model"', str(Model.reflex_main()), "and the function receives the model")
         source = inspect.getsource(lex_app_module.create_app)
         self.assertLess(source.index("load_structure()"), source.index("declare.finalize()"),
@@ -2690,6 +2767,7 @@ Expected: `ImportError: cannot import name 'declare' from 'lex.lex_app.reflex.ui
 from __future__ import annotations
 
 import dataclasses
+import os
 from typing import Any, Callable
 
 from lex.lex_app.reflex.ui.pages import kinds, links
@@ -2710,20 +2788,52 @@ class Declared:
 _DECLARED: dict[str, Declared] = {}
 
 
+_PAGES_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _raised_by_lex(error: BaseException) -> bool:
+    """Whether ``error`` comes from a ``ui.*`` component refusing its arguments (its message says what to write)."""
+    tb = error.__traceback__
+    while tb is not None and tb.tb_next is not None:
+        tb = tb.tb_next
+    return tb is not None and os.path.dirname(os.path.abspath(tb.tb_frame.f_code.co_filename)) == _PAGES_DIR
+
+
 def _kind_of(fn: Callable[..., Any], *args: Any) -> kinds.Kind:
     """What the page function returns, checked; an error of its own is given the page's name."""
     try:
         kind = fn(*args)
     except PageError:
         raise
+    except (ValueError, TypeError) as wrong:
+        if _raised_by_lex(wrong):
+            raise PageError(f"Page `{fn.__name__}`: {wrong}") from wrong
+        raise _raised(fn, wrong) from wrong
     except Exception as wrong:
-        raise PageError(f"Page `{fn.__name__}`: its function raised {type(wrong).__name__}: {wrong}\n"
-                        "A page function only describes the page: it returns `ui.record(...)` or "
-                        "`ui.list(...)` and does nothing else.") from wrong
+        raise _raised(fn, wrong) from wrong
+    if kind is None:
+        raise PageError(f"Page `{fn.__name__}`: it returned nothing. Did you forget `return`?\n"
+                        "Return a page kind: `ui.record(...)`, `ui.list(...)`.")
     if not isinstance(kind, kinds.Kind):
         raise PageError(f"Page `{fn.__name__}`: it returned {type(kind).__name__}.\n"
                         "Return a page kind: `ui.record(...)`, `ui.list(...)`.")
     return kind
+
+
+def _raised(fn: Callable[..., Any], wrong: Exception) -> PageError:
+    return PageError(f"Page `{fn.__name__}`: its function raised {type(wrong).__name__}: {wrong}\n"
+                     "A page function only describes the page: it returns `ui.record(...)` or "
+                     "`ui.list(...)` and does nothing else.")
+
+
+def _named(load: Any) -> str:
+    """A handler as the author wrote it: `FundState.close`, which is an `@ui.action`."""
+    fn = getattr(load, "fn", None)
+    if fn is None:
+        return called(load)
+    name = ".".join(fn.__qualname__.split(".")[-2:])
+    kind = getattr(fn, "__ui_kind__", "")
+    return f"`{name}`, which is an `@ui.{kind}`" if kind else f"`{name}`, which is not a lex.ui handler"
 
 
 def _loads(name: str, kind: kinds.Kind) -> tuple[list, list]:
@@ -2731,7 +2841,7 @@ def _loads(name: str, kind: kinds.Kind) -> tuple[list, list]:
     page_loads, part_loads = kind.loads()
     for load in (*page_loads, *part_loads):
         if getattr(getattr(load, "fn", None), "__ui_kind__", "") != "load":
-            raise PageError(f"Page `{name}`: `load=` got {called(load)}.\n"
+            raise PageError(f"Page `{name}`: `load=` got {_named(load)}.\n"
                             "Pass a handler declared with `@ui.load`, without arguments: `load=FundState.open`. "
                             "It reads the page's values from `self.params`.")
     seen: list = []
@@ -2765,6 +2875,10 @@ def page(route: str, *, nav: str | None = None, icon: str | None = None, require
     the pages -- after the whole module is loaded, so it may name pages declared further down --
     and again when the page is built. A page that is declared wrongly stops the app from starting,
     with an error that names it.
+
+    ``requires=`` and ``visible=`` decide what is shown, never what is allowed: a value a page
+    shows reaches the browser. What a user may read or change is enforced by each handler's own
+    ``requires=`` and by lex-app's API, which acts as the user.
     """
     if not route.startswith("/"):
         raise ValueError(f"ui.page() routes start with '/', got {route!r}")
@@ -2804,6 +2918,7 @@ def finalize() -> None:
             raise PageError(f"Page `{name}`: a page listed in the navigation needs a fixed title.\n"
                             "Give the kind `title=\"...\"`, or leave `nav=` out.")
         required, optional = _loads(name, kind)
+        kind.build(Build(page=name, route=route))      # every slot checked now: a wrong page stops the start
 
         def body(fn: Callable[[], Any] = declared.fn, route: str = route) -> rx.Component:
             return _kind_of(fn).build(Build(page=fn.__name__, route=route))
@@ -2820,12 +2935,24 @@ def dashboard(fn: Callable[..., Any]) -> Callable[..., Any]:
     """Mark a page that is not a route: the project's ``main()``, or a model's dashboard hook.
 
     On a model the hook is a class method; ``@classmethod`` goes above ``@ui.dashboard``. A
-    dashboard has no opener, so its loads start when their part of the page mounts.
+    dashboard has no opener, so its loads start when their part of the page mounts, and each
+    clears its state's fields as it starts: the loads of one dashboard each fill a state of their
+    own.
     """
 
     def built(*args: Any) -> Any:
         kind = _kind_of(fn, *args)
-        _loads(fn.__name__, kind)
+        page_loads, part_loads = _loads(fn.__name__, kind)
+        owners: dict[str, str] = {}
+        for load in (*page_loads, *part_loads):
+            state, _, handler = load.fn.__qualname__.rpartition(".")
+            short = state.rpartition(".")[2]
+            if state in owners:
+                raise PageError(f"Page `{fn.__name__}`: `{short}.{owners[state]}` and `{short}.{handler}` both load "
+                                f"into `{short}`.\nOn a dashboard each load clears its state when its part of the "
+                                "page appears, so one would clear what the other read. Give each load a state of "
+                                "its own, or read everything in one load.")
+            owners[state] = handler
         return kind.build(Build(page=fn.__name__, mounts=True))
 
     built.__name__ = fn.__name__
@@ -2936,7 +3063,7 @@ class ExampleFund(ui.State):
 
     @ui.load(requires=ui.read(Group))
     def open(self):
-        group = Group.objects.filter(pk=self.params.get("key", "0")).first()
+        group = Group.objects.filter(pk=self.params["key"]).first()
         if group is None:
             raise ui.Refuse("This group does not exist.")
         self.name, self.members = group.name, group.user_set.count()
@@ -3081,8 +3208,9 @@ Add to the module docstring, after the first example and before the table, a sec
             title=FundState.name,
             load=FundState.open,
             facts=[ui.fact("Vintage", FundState.vintage)],
-            sections=[ui.section("Holdings", ui.table(Holding, columns=["name"]), empty="No holdings yet.")],
-            actions=[ui.button("Close fund", FundState.close, tone="danger")],
+            sections=[ui.section("Notes", ui.each(FundState.notes, lambda note: ui.text(note)),
+                                 load=FundState.load_notes)],
+            actions=[ui.button("Export", FundState.export)],
         )
 ```
 
@@ -3098,6 +3226,7 @@ and these rows to the table:
 message/table/column/
 button/link``
 ``ui.each/switch``          repetition and choice; ``visible=`` on every component
+                            decides what is shown, never what is allowed
 ``ui.custom_block``         a raw component, marked for review with its reason
 ``ui.PageError``            a page declared wrongly: says the page, the slot, what to write
 ```
@@ -3184,7 +3313,7 @@ DJANGO_SETTINGS_MODULE=lex_app.settings DATABASE_DEPLOYMENT_TARGET=default CELER
 rm -rf assets
 ```
 
-Expected: 159 passed, 0 failed (137 before this plan + 22), 194 subtests passed. Put the real numbers into the session fragment's `suite_tally`, then run step 3 again. A failure here is a finding: report it with its output and stop.
+Expected: 159 passed, 0 failed (137 before this plan + 22), 195 subtests passed. Put the real numbers into the session fragment's `suite_tally`, then run step 3 again. A failure here is a finding: report it with its output and stop.
 
 - [ ] **Step 5: Commit**
 
