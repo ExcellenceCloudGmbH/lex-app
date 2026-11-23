@@ -131,3 +131,10 @@ def progress_of(handler: Any) -> dict[str, Any]:
 
     key = key_of(handler)
     return {"fraction": State.ui_progress.get(key, 0.0), "message": State.ui_progress_message.get(key, "")}
+
+
+def cancel(handler: Any) -> Any:
+    """In a view: the event a Cancel button sends for ``handler``."""
+    from lex.lex_app.reflex.ui.state import State
+
+    return State.ui_cancel(key_of(handler))

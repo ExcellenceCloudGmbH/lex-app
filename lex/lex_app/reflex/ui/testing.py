@@ -61,10 +61,23 @@ class _NoBrowserApp:
     event_namespace = None
 
 
+def _load_app_states() -> None:
+    """Import the states an app has defined before its first event.
+
+    ``rfds.toast`` is loaded lazily and brings in RFDS's shared feed, which defines Reflex's
+    shared states. Loaded halfway through a test, they would register in that harness's fork
+    only, after the user's state tree was built without them, and every later event would fail.
+    """
+    import rfds
+
+    rfds.toast  # noqa: B018 - the lazy import is the point
+
+
 def _registry_with_app() -> Any:
     """Reflex's registry of states and handlers, with a stand-in App (a test has no real one)."""
     from reflex_base.registry import RegistrationContext
 
+    _load_app_states()
     current = RegistrationContext.ensure_context()
     if current._app is not None:
         return current

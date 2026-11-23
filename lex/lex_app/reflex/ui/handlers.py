@@ -284,3 +284,91 @@ def action(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any
         return rx.event(wrapper)
 
     return decorate(fn) if fn is not None else decorate
+
+
+async def _merge(inv: context.Invocation, live: Any) -> None:
+    """Write every working copy's changes to its state. Call inside ``async with live``."""
+    own = type(workcopy.raw(live))
+    for state_cls, draft in list(inv.drafts.items()):
+        target = live if state_cls is own else await live.get_state(state_cls)
+        workcopy.merge(target, draft)
+
+
+def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_leave: bool = False) -> Any:
+    """Long work, written as a plain function; the user keeps working while it runs.
+
+    The body works on a copy of the state. Only what it changed is written back, at each
+    ``yield`` and at the end; after a ``yield`` it sees what the user changed meanwhile. One run
+    per user and argument at a time; a repeat is ignored. ``yield ui.progress(...)`` reports
+    progress; a cancel, or leaving the page with ``stop_on_leave=True``, takes effect at a yield.
+    """
+
+    def decorate(fn: Callable[..., Any]) -> Any:
+        _check_plain(fn, "job")
+        key = fn.__qualname__
+        requirements = guard.normalise(requires)
+
+        @functools.wraps(fn)
+        async def wrapper(self, *args: Any, **kwargs: Any):
+            from reflex_base.event.context import EventContext
+
+            arg = runs.arg_key(args, kwargs)
+            token = EventContext.get().token
+            run = runs.claim(token, key, arg)
+            if run is None:
+                return                                    # already running: a repeat is ignored
+            started = False
+            stopped = False
+            message = ""
+            try:
+                try:
+                    async with self:                      # who is acting, what they may do, the first copy
+                        session = await context.resolve(self)
+                        if await _denied(session, requirements):
+                            raise _NotPermitted()
+                        own = type(workcopy.raw(self))
+                        visit = self.ui_visit
+                        inv = context.Invocation(handler=key, kind="job", session=session,
+                                                 loop=asyncio.get_running_loop(), live=self,
+                                                 orm=requirements is not None)
+                        inv.drafts[own] = workcopy.Draft(own, workcopy.snapshot(self))
+                        runs.mark_started(self, key, arg)
+                        started = True
+                    async with contextlib.aclosing(_drive(inv, "jobs", fn, inv.drafts[own], args, kwargs)) as steps:
+                        async for step in steps:
+                            final = isinstance(step, _Return)
+                            found, report = results.split(step.value, handler=key)
+                            async with self:
+                                left = self.ui_visit != visit
+                                # Once stopped, what the body changed since its last merge is discarded for good.
+                                discard = stopped or (run.cancel and not final) or (stop_on_leave and left)
+                                if discard:
+                                    if not final:
+                                        step.stop = True
+                                        stopped = True
+                                else:
+                                    await _merge(inv, self)
+                                    if report is not None:
+                                        runs.mark_progress(self, key, report)
+                            if not discard:
+                                for event in results.to_events(found):
+                                    yield event
+                except Exception as exc:  # noqa: BLE001 - the body has finished here; reported to the user
+                    outcome = _classify(key, exc)
+                    message = outcome.message
+                    for event in results.to_events([_toast(outcome)]):
+                        yield event
+            finally:                                      # also on cancellation: nothing is left running
+                try:
+                    async with self:
+                        if started:
+                            runs.mark_finished(self, key, arg, error=message)
+                        elif message:
+                            self.ui_failed = {**dict(self.ui_failed), key: message}
+                finally:
+                    runs.release(token, key, arg)
+
+        _mark(wrapper, fn, "job", requires=requirements, stop_on_leave=stop_on_leave)
+        return rx.event(wrapper, background=True)
+
+    return decorate(fn) if fn is not None else decorate
