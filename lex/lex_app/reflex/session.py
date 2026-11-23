@@ -341,17 +341,12 @@ def _fresh_token(binding_id: int) -> str:
         return ""
 
 
-async def access_token(state: Any) -> str:
-    """The user's access token for lex-app's API, valid at least :data:`TOKEN_MIN_TTL` seconds.
-
-    ``""`` when there is no sign-in, when it has ended (the binding is then forgotten), or while
-    Keycloak cannot be reached and no valid token is left. The browser never sees it.
-    """
+async def access_token_of(digest: str) -> str:
+    """The access token of the sign-in behind a binding digest (see :func:`access_token`)."""
     from oauth2_authcodeflow.exceptions import OIDCSessionEnded
 
     from lex.lex_app.reflex.django_orm import run_orm
 
-    digest = binding_digest(state)
     known = await standing(digest) if digest else None
     if known is None or known.identity is None or known.binding_id is None:
         return ""
@@ -368,6 +363,15 @@ async def access_token(state: Any) -> str:
         with _LOCK:
             _TOKENS[known.binding_id] = (token, _token_expiry(token))
     return token
+
+
+async def access_token(state: Any) -> str:
+    """The user's access token for lex-app's API, valid at least :data:`TOKEN_MIN_TTL` seconds.
+
+    ``""`` when there is no sign-in, when it has ended (the binding is then forgotten), or while
+    Keycloak cannot be reached and no valid token is left. The browser never sees it.
+    """
+    return await access_token_of(binding_digest(state))
 
 
 # -- sending a session through the hand-off ---------------------------------------------

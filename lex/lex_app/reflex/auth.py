@@ -101,16 +101,8 @@ _UMA_LOCK = threading.Lock()
 _UMA_LIMIT = 2048
 
 
-async def current_permissions(state: rx.State) -> list[dict]:
-    """The signed-in user's Keycloak UMA permissions.
-
-    The Reflex counterpart of ``st.session_state.permissions``: the list Keycloak returns, one
-    ``{"rsname": ..., "scopes": [...]}`` entry per resource, fetched once per access token. A
-    failed lookup keeps what the same user was last granted -- a Keycloak blip should not demote
-    someone mid-session -- and never lets one user's permissions stand in for another's. No
-    sign-in, no permissions.
-    """
-    token = await current_access_token(state)
+async def permissions_of(token: str) -> list[dict]:
+    """The UMA permissions Keycloak grants the holder of ``token`` (see :func:`current_permissions`)."""
     if not token:
         return []
     digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -128,6 +120,18 @@ async def current_permissions(state: rx.State) -> list[dict]:
         _UMA[digest] = (subject, fetched)
         _LAST_BY_SUBJECT[subject] = fetched
     return list(fetched)
+
+
+async def current_permissions(state: rx.State) -> list[dict]:
+    """The signed-in user's Keycloak UMA permissions.
+
+    The Reflex counterpart of ``st.session_state.permissions``: the list Keycloak returns, one
+    ``{"rsname": ..., "scopes": [...]}`` entry per resource, fetched once per access token. A
+    failed lookup keeps what the same user was last granted -- a Keycloak blip should not demote
+    someone mid-session -- and never lets one user's permissions stand in for another's. No
+    sign-in, no permissions.
+    """
+    return await permissions_of(await current_access_token(state))
 
 
 def _resource_name(target: Any) -> str:
