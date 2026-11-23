@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 807
+max_scenario: 820
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2312,3 +2312,48 @@ letters:
       page that opens a record page builds, registers and loads exactly as a project's would
       (spec 6.1, 6.5). These tests fail if a name is missing from the namespace, a styling argument
       creeps into the vocabulary, or a page builds but never loads.
+  cv:
+    title: 'lex.ui tables: @ui.rows, a handler that returns a table''s rows; ui.address; ui.refresh'
+    scenarios: 1.808-1.811
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      A table over rows that are not a lex model gets them from a plain function on the page's
+      state, read as the user on a read-only copy of the state; a row that leads to a page of its
+      own carries an address built in Python; another state's handler makes a table read again with
+      `ui.refresh` (spec 5.1, 5.4, 5.6). These tests fail on a rows handler that changes the state
+      it reads, runs without its declared permission, returns something a table cannot show without
+      saying so, or a link built from a string in the data.
+  cw:
+    title: 'lex.ui tables: a table over a @ui.rows handler, end to end'
+    scenarios: 1.812-1.817
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      lex-app generates the table's state; it reads every row as the user, searches, filters, sorts
+      and pages them on the server, keeps only the visible page of the used fields in the browser's
+      state, reads again after a handler of the same state, on `ui.refresh` and when its page opens
+      again, totals per currency and exports what it shows (spec 5.5-5.8, 5.10). These tests fail
+      on a field the table does not show reaching the browser, a link built from data, a table that
+      keeps showing what a handler has just changed, or a broken handler that breaks the page
+      instead of the table.
+  cx:
+    title: 'lex.ui tables: what a column and a table refuse; a model table narrowed with where='
+    scenarios: 1.818-1.820
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      Everything about a table that can be checked before a row is read stops the app from starting
+      with the page, the slot and what to write; a model table is narrowed with `where=` and read
+      through lex-app's API (spec 5.2, 5.3, 5.11). These tests fail on a table that breaks only in
+      the browser, a column kind drawn differently from page to page, or a model table that cannot
+      be narrowed without leaving the API.

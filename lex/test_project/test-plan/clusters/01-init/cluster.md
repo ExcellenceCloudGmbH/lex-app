@@ -1259,7 +1259,7 @@ does not remove user launch configurations.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.783 | from lex import ui has every name | each public name is the implementation's own object, ui.ApiError is lex-app's API error, and ui.testing is the test helper module; nothing else is public beside the page names, which batch 1cu covers |
+| 1.783 | from lex import ui has every name | each public name is the implementation's own object, ui.ApiError is lex-app's API error, and ui.testing is the test helper module; nothing else is public beside the page names and the table names, which batches 1cu and 1cv cover |
 | 1.784 | The scaffold templates are written on the layer | none contains async, await, run_orm or lex_api (as a name or an attribute); every state with handlers is a ui.State; the object page and the overview use ui.State with @ui.load; neither the lex.ui check nor RFDS's strict lint reports an error or a warning on any of them; the object page shows its load's failure, else the loaded record, else a spinner; its load, started on mount, reports a refusal in place (in ui.failed, no redirect) |
 | 1.785 | The reference example is written on the layer | outside RFDS's own async export hook it contains no async, await, run_orm or lex_api; every state with handlers is a ui.State; the lex.ui check reports no error and neither check a warning; the overview's load, started on mount, reports its refusal in place on `/` (in ui.failed, no redirect), with the export menu offered only while the load has not failed; a viewer who may not read the featured model is refused by the load (no redirect) and by the export; a viewer who may read some models sees the same counts on screen and in the export, only for those models; the record dashboard reads the model `?model=` names, refuses a missing or unknown one -- in ui.failed, with no redirect -- and shows failure, else the record, else a spinner; the edit page is a form submitted to one action, with no per-keystroke handler, and `save` writes the submitted values |
 
@@ -1338,7 +1338,7 @@ does not remove user launch configurations.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.797 | ui.table(Model) is the server-paged table | it is RFDS's data table over lex-app's paged table state for that model, showing the named columns under the model's own field labels; something that is not a model is refused with what to pass |
+| 1.797 | ui.table(Model) is the server-paged table | it is RFDS's data table over lex-app's paged table state for that model, showing the named columns under the model's own field labels; something that is neither a model nor a @ui.rows handler is refused with what to pass |
 | 1.798 | Rows open a page, an empty table says so, a column can be relabelled | each row links to the page's address with the row's key in place of the page's argument; the empty sentence is translated and shown by RFDS's empty state; the column carries the given label; open= a page without exactly one argument is refused |
 
 **Scenario range:** 1.797 – 1.798. **Test file:** `lex/test_project/tests/init/test_1cr_ui_page_tables.py`. **Type:** U. **Status:** ✅ Complete (2026-11-23). Batch: [1cr](batches.md).
@@ -1390,3 +1390,49 @@ does not remove user launch configurations.
 | 1.807 | A list and a record page build, register and load | both build without one raw component in the page functions; the list links its rows to the record page; opening the record page runs the page load and then the section's load, both end loaded, and the state holds what they read |
 
 **Scenario range:** 1.806 – 1.807. **Test file:** `lex/test_project/tests/init/test_1cu_ui_pages_namespace.py`. **Type:** I. **Status:** ✅ Complete (2026-11-23). Batch: [1cu](batches.md).
+
+### 1cv. lex.ui tables: @ui.rows, a handler that returns a table's rows; ui.address; ui.refresh ✅
+
+**What it tests:** A table over rows that are not a lex model gets them from a plain function on the page's state, read as the user on a read-only copy of the state; a row that leads to a page of its own carries an address built in Python; another state's handler makes a table read again with `ui.refresh` (spec 5.1, 5.4, 5.6).
+
+**Why a regression matters:** a rows handler that changes the state it reads, runs without its declared permission, returns something a table cannot show without saying so, or a link built from a string in the data.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.808 | A rows handler is a plain function that tables read | a plain function with no argument, or with `search` alone, is a rows handler; a generator, an async function and any other argument are refused with what to write; the browser cannot send it as an event; `lex reflex check` accepts it |
+| 1.809 | Rows are read as the user on a read only copy | the rows carry the user and the field; lex-app searches and filters a handler without `search`, and a handler with `search` gets the text; writing a field fails the read and leaves the field as it was; a dict is refused with what to return; a missing permission refuses the read |
+| 1.810 | An address is built in python from a page | the argument and the query value are encoded into the page's route; an empty key gives no address; a value the page does not take, a missing argument, and something that is not a page are refused |
+| 1.811 | Refresh names rows handlers and becomes their tables events | the result is accepted beside ui.toast; it becomes the event that makes that table read again; something that is not a rows handler is refused |
+
+**Scenario range:** 1.808 – 1.811. **Test file:** `lex/test_project/tests/init/test_1cv_ui_rows_handler.py`. **Type:** I. **Status:** ✅ Complete (2026-11-23). Batch: [1cv](batches.md).
+
+### 1cw. lex.ui tables: a table over a @ui.rows handler, end to end ✅
+
+**What it tests:** lex-app generates the table's state; it reads every row as the user, searches, filters, sorts and pages them on the server, keeps only the visible page of the used fields in the browser's state, reads again after a handler of the same state, on `ui.refresh` and when its page opens again, totals per currency and exports what it shows (spec 5.5-5.8, 5.10).
+
+**Why a regression matters:** a field the table does not show reaching the browser, a link built from data, a table that keeps showing what a handler has just changed, or a broken handler that breaks the page instead of the table.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.812 | The browser gets one page of the fields the table uses | its state holds the rows with only the columns' fields, the currency field, the key and the link field; the e-mail address stays on the server; the plain string is no link; the table's state is reachable for later reads |
+| 1.813 | Search filters and sort run on the server | a search finds a row by its tag; each filter keeps the matching rows; the filter choices are the column's values after "All"; the first sort of a money column is high to low |
+| 1.814 | Totals per currency and export of what is shown | there is one totals row per currency over all matching rows; the export has the columns' labels, the matching rows only, and tags joined |
+| 1.815 | A handler of the state or ui refresh makes the table read again | after each the table shows the new rows without being asked; a table that is not on screen does not read |
+| 1.816 | Opening the page again and a list pages search in the address | the opener tells the page's table to read its first page again; the list page's table starts with the address's search, and typing a search writes it back |
+| 1.817 | A broken rows handler breaks only its table | a refusal shows its own words in the table; a failure shows a message with a reference and never its detail; a filter of more than 50 values is the table's error too (the advice to search goes to the log, with the reference) |
+
+**Scenario range:** 1.812 – 1.817. **Test file:** `lex/test_project/tests/init/test_1cw_ui_rows_table.py`. **Type:** I. **Status:** ✅ Complete (2026-11-23). Batch: [1cw](batches.md).
+
+### 1cx. lex.ui tables: what a column and a table refuse; a model table narrowed with where= ✅
+
+**What it tests:** Everything about a table that can be checked before a row is read stops the app from starting with the page, the slot and what to write; a model table is narrowed with `where=` and read through lex-app's API (spec 5.2, 5.3, 5.11).
+
+**Why a regression matters:** a table that breaks only in the browser, a column kind drawn differently from page to page, or a model table that cannot be narrowed without leaving the API.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.818 | A column says what it is and is checked when declared | each kind is accepted; a currency code and a currency field are told apart; tones go with status only; show= and kind= are not given together; a link field must be a field name; a wrong kind names the kinds |
+| 1.819 | A table declared wrongly names the page the slot and what to write | each is a PageError naming the page and the slot, saying what it got and what to write |
+| 1.820 | A model table is narrowed with where and searched through the api | the table's state receives the where= values when it appears (a state value included); the toolbar has a search box; a filter offers the field's choices after "All"; two tables narrowed differently never share a state |
+
+**Scenario range:** 1.818 – 1.820. **Test file:** `lex/test_project/tests/init/test_1cx_ui_table_checks.py`. **Type:** U. **Status:** ✅ Complete (2026-11-23). Batch: [1cx](batches.md).
