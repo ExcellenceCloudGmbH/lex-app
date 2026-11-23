@@ -217,17 +217,15 @@ def action(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any
         @functools.wraps(fn)
         async def wrapper(self, *args: Any, **kwargs: Any):
             arg = runs.arg_key(args, kwargs)
-            session = await context.resolve(self)
-            if await _denied(session, requirements):
-                for event in results.to_events([_toast(_classify(key, _NotPermitted()))]):
-                    yield event
-                return
-            inv = context.Invocation(handler=key, kind="action", session=session,
-                                     loop=asyncio.get_running_loop(), live=self, orm=requirements is not None)
             failure: BaseException | None = None
-            try:
+            try:                                     # who is acting, what they may do, the state to return to
+                session = await context.resolve(self)
+                if await _denied(session, requirements):
+                    raise _NotPermitted()
+                inv = context.Invocation(handler=key, kind="action", session=session,
+                                         loop=asyncio.get_running_loop(), live=self, orm=requirements is not None)
                 inv.saved[id(self)] = (self, workcopy.snapshot(self))
-            except Exception as exc:  # noqa: BLE001 - a field that cannot be copied is reported below
+            except Exception as exc:  # noqa: BLE001 - reported below, like a failure of the body
                 failure = exc
             if failure is None:
                 runs.mark_started(self, key, arg)

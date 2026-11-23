@@ -225,10 +225,7 @@ def run(state_cls: Any, handler: str, *, user: str = "tester", grants: Any = (),
             if fields:
                 await harness.set_fields(state_cls, **fields)
             future = await harness.send(state_cls, handler, **arguments)
-            try:
-                await future
-            except Exception:  # noqa: BLE001 - a handler's own failure is in the outcomes
-                pass
+            await future             # a handler's own failure is in the outcomes; anything else is a bug
             await asyncio.sleep(0.05)
             return Result(fields=await harness.fields(state_cls), updates=list(harness.updates),
                           update_times=list(harness.update_times), results=list(harness.results),

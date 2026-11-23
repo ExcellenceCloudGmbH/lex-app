@@ -26,7 +26,7 @@ from django.contrib.auth.models import Group
 from django.test import TransactionTestCase
 
 from lex.lex_app.reflex.data import LexApiError
-from lex.lex_app.reflex.ui import guard, handlers, results, runs, testing
+from lex.lex_app.reflex.ui import context, guard, handlers, results, runs, testing
 from lex.lex_app.reflex.ui.state import State
 
 pytestmark = pytest.mark.init
@@ -157,7 +157,9 @@ class TestCluster01ch_Action(TransactionTestCase):
                the view; the log holds the traceback by default and only the type when limited.
                A state field holding an object that cannot be copied (a lock) ends the same way:
                the body never runs, the user gets the standard error toast, the log names the
-               field, and nothing is left marked running.
+               field, and nothing is left marked running. A session that cannot be resolved
+               ends the same way: an unexpected error with a reference, an error toast, nothing
+               left running.
         """
         with self.assertLogs("lex.lex_app.reflex.ui.handlers", level="ERROR") as logs:
             result = testing.run(Board, "breaks_after_a_yield")
@@ -191,6 +193,23 @@ class TestCluster01ch_Action(TransactionTestCase):
         self.assertEqual(fields["status"], "", "the body never ran")
         self.assertEqual(fields["ui_running"], {}, "nothing is left marked running")
         self.assertIn("Board._holder cannot be copied", "\n".join(locked.output), "the log names the field")
+
+        async def unresolvable():
+            async def broken(state):
+                raise ConnectionError("identity provider unreachable")
+
+            async with testing.Harness() as harness:
+                context.set_resolver(broken)
+                await (await harness.send(Board, "approve", code="A1"))
+                return await harness.fields(Board), list(harness.results), list(harness.outcomes)
+
+        with self.assertLogs("lex.lex_app.reflex.ui.handlers", level="ERROR") as unresolved:
+            fields, shown, outcomes = asyncio.run(unresolvable())
+        self.assertEqual([o.kind for o in outcomes], ["error"], "a session that cannot be resolved is an unexpected error")
+        self.assertIn("Reference", outcomes[0].message, "the user gets the standard error message with a reference")
+        self.assertEqual(shown[-1].tone, "error", "the user is shown an error toast")
+        self.assertEqual((fields["status"], fields["ui_running"]), ("", {}), "the body never ran and nothing is left running")
+        self.assertIn("identity provider unreachable", "\n".join(unresolved.output), "the log carries the error")
 
     # -- 1.765 ---------------------------------------------------------
     def test_1_765_refusals_and_api_answers_are_shown_in_their_own_words(self) -> None:
