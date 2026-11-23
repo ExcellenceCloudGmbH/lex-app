@@ -41,6 +41,19 @@ Every code block in this plan was run before the plan was written: the 22 tests 
 10. **A test cannot see `on_mount` in the compiled text**; it reads `component.event_triggers`.
 11. **A page with `requires=` starts no loads in the harness** unless the test answers the page-permission question (`patch.object(ui_state, "_page_permitted", return_value=True)`), because the harness's grants do not reach RFDS's identity.
 
+## Changed by review while executing
+
+Tasks 2, 3 and 4 were reviewed and then fixed in one commit; the code and tests shown for them below are the fixed ones, and the later tasks are written against them:
+
+- A value joined into an address is encoded (`links.piece`); `links.info_of` refuses optional and catch-all route forms and parameter names that `ui.link` takes itself.
+- `shown(ctx, component, visible)` takes the build context and accepts a permission, a list of them, `ui.signed_in`, a state value or a bool.
+- `say()` raises `parts.NotASentence`, which `Part.build` turns into a `PageError`.
+- `ui.fact` and `ui.column` take `currency=`; a whole number is shown without decimals, any other with two.
+- `ui.column` checks its kind and its label is translated; `ui.table` is shown only to users who may read the model.
+- `Button.menu_entry(ctx)` and `Link.menu_entry(ctx)` build the action's entry in the page header's menu, keeping tone and icon.
+- A part class may carry `ui_name` when its public name differs from its class name (`CustomBlock`).
+- A section hands `empty=` to a copy of a table, never to the part itself.
+
 ## Not in this step
 
 - **A table over rows held in a state**, and **filters**. RFDS's paged table needs a table state of its own, and how such a table stays fresh when a handler changes the rows is a design question the port of a search list (Task 10) will inform. `ui.table` takes a model in this step. Both move to step 2.
@@ -396,6 +409,7 @@ pytestmark = pytest.mark.init
 class PartsDesk(ui.State):
     name: str = ""
     amount: float = 0.0
+    count: int = 0
     stamp: str = ""
     open_now: bool = False
 
@@ -429,6 +443,14 @@ class TestCluster01co_PageParts(SimpleTestCase):
         self.assertNotIn("rfdsI18n", shown, "and never translated")
         with self.assertRaises(ValueError, msg="a tone outside the five is refused"):
             vocab.status("Open", tone="blue")
+        with self.assertRaises(PageError) as no_words:
+            vocab.text(3).build(CTX)
+        self.assertEqual(str(no_words.exception),
+                         "Page `fund`: `ui.text` got `3` where its words belong.\n"
+                         "Write the sentence the user reads, in English: `ui.text(\"3 open requests\")`. "
+                         "A state value is shown as it is.", "something that is not a sentence is named, with what to write")
+        with self.assertRaises(PageError, msg="an empty label is not a sentence either"):
+            vocab.fact("", 1).build(CTX)
 
     # -- 1.789 ---------------------------------------------------------
     def test_1_789_a_value_says_what_it_is_and_who_sees_it(self) -> None:
@@ -436,30 +458,53 @@ class TestCluster01co_PageParts(SimpleTestCase):
         Scenario 1.789: kind= and visible=.
         Given: facts of each kind, and parts with visible= a permission and a state value.
         When:  they are built.
-        Then:  money, number, percent and datetime go through RFDS's formatters (formatted for
-               the user's locale); an unknown kind is refused when the fact is declared;
-               visible=ui.edit(Model) shows the part only to a user holding that permission
-               (RFDS's permission check, the same string a page's requires= gives);
-               visible=<state value> shows it while the value holds; no component of the
-               vocabulary takes a styling argument.
+        Then:  each kind goes through RFDS's own formatter for it; a whole number is shown
+               without decimals and any other with two; money takes a currency; an unknown
+               kind, and a currency without kind="money", are refused when the fact is
+               declared. visible= takes a permission (RFDS's check, with the string a page's
+               requires= gives), a list of them (all must hold), ui.signed_in (always shown),
+               or a state value; anything else, and an empty list, is refused with what to
+               write. No component of the vocabulary takes a styling argument.
         """
-        money = str(vocab.fact("Net asset value", PartsDesk.amount, kind="money").build(CTX))
-        plain = str(vocab.fact("Name", PartsDesk.name).build(CTX))
+        money = str(vocab.fact("Net asset value", PartsDesk.amount, kind="money", currency="EUR").build(CTX))
         self.assertIn('rfdsI18n.t("Net asset value"', money, "the label is a sentence")
-        self.assertNotEqual(money.replace("Net asset value", "Name").replace("amount", "name"), plain,
-                            "a money value is rendered through a formatter, not as the bare value")
-        for kind, value, name in (("number", PartsDesk.amount, "amount"), ("percent", PartsDesk.amount, "amount"),
-                                  ("datetime", PartsDesk.stamp, "stamp")):
+        self.assertIn('"data-slot":"rfds-money"', money, "money goes through RFDS's money formatter")
+        self.assertIn("EUR", money, "in the currency given")
+        for kind, value, mark in (("number", PartsDesk.amount, "rfds-number"), ("percent", PartsDesk.amount, "rfds-percent"),
+                                  ("datetime", PartsDesk.stamp, "rfds-timestamp"), ("money", PartsDesk.amount, "rfds-money")):
             with self.subTest(kind=kind):
-                self.assertIn(f"{name}_rx_state_", str(vocab.fact("X", value, kind=kind).build(CTX)), f"kind={kind} builds")
+                self.assertIn(f'"data-slot":"{mark}"', str(vocab.fact("X", value, kind=kind).build(CTX)),
+                              f"kind={kind} uses RFDS's formatter for it")
+        self.assertNotIn("data-slot\":\"rfds-number", str(vocab.fact("Name", PartsDesk.name).build(CTX)),
+                         "text is shown as it is")
+        self.assertEqual((vocab._whole(3), vocab._whole(PartsDesk.count), vocab._whole(2.5), vocab._whole(PartsDesk.amount),
+                          vocab._whole(True)), (True, True, False, False, False),
+                         "a whole number is an int or a state value typed int")
+        whole, decimal = (str(vocab.shape(value, "number")) for value in (PartsDesk.count, PartsDesk.amount))
+        self.assertNotEqual(whole.replace("count", "amount"), decimal, "whole numbers and decimals are formatted differently")
         with self.assertRaises(ValueError, msg="an unknown kind is refused"):
             vocab.fact("X", 1, kind="colour")
+        with self.assertRaises(ValueError, msg="a currency goes with money only"):
+            vocab.fact("X", 1, kind="number", currency="EUR")
 
         guarded = str(vocab.text("Editors only", visible=ui.edit(Group)).build(CTX))
         self.assertIn("auth.Group:edit", guarded, "a permission in visible= is checked with the page's permission string")
         stateful = str(vocab.text("While open", visible=PartsDesk.open_now).build(CTX))
         self.assertIn("open_now_rx_state_", stateful, "a state value in visible= conditions the part")
-        self.assertNotIn("open_now_rx_state_", str(vocab.text("While open").build(CTX)), "and only when given")
+        plain_text = str(vocab.text("While open").build(CTX))
+        self.assertNotIn("open_now_rx_state_", plain_text, "and only when given")
+        both = str(vocab.text("While open", visible=[ui.read(Group), ui.edit(Group)]).build(CTX))
+        self.assertIn("auth.Group:read", both, "a list of permissions: the first must hold")
+        self.assertIn("auth.Group:edit", both, "and the second")
+        self.assertEqual(str(vocab.text("While open", visible=ui.signed_in).build(CTX)), plain_text,
+                         "every user of the dashboards is signed in: always shown")
+        with self.assertRaises(PageError) as wrong:
+            vocab.text("While open", visible="editors").build(CTX)
+        self.assertEqual(str(wrong.exception),
+                         "Page `fund`: `visible=` got `'editors'`.\nGive a permission -- `visible=ui.edit(Model)` -- "
+                         "or a state value: `visible=State.is_open`.", "anything else is refused with what to write")
+        with self.assertRaises(PageError, msg="an empty list is refused, not shown to everyone"):
+            vocab.text("While open", visible=[]).build(CTX)
 
         for factory in (vocab.text, vocab.fact, vocab.status, vocab.message):
             with self.subTest(component=factory.__name__):
@@ -486,6 +531,10 @@ class TestCluster01co_PageParts(SimpleTestCase):
         with self.assertRaises(PageError) as other:
             parts.take(ctx, [vocab.status("Open")], (vocab.Fact,), instead)
         self.assertIn("got `ui.status`", str(other.exception), "another lex component is named by its ui name")
+        with self.assertRaises(PageError) as nothing:
+            parts.take(ctx, [None], (vocab.Fact,), instead)
+        self.assertIn("got nothing (`None`).", str(nothing.exception), "a None inside the list is named as nothing")
+        self.assertTrue(parts.called("x" * 200).endswith("...`"), "a long value is cut before its closing mark")
         one = vocab.fact("A", 1)
         self.assertEqual((parts.take(ctx, one, (vocab.Fact,), instead), parts.take(ctx, [one], (vocab.Fact,), instead),
                           parts.take(ctx, None, (vocab.Fact,), instead)), ([one], [one], []),
@@ -518,7 +567,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 import reflex as rx
 
@@ -545,39 +594,71 @@ class Build:
         return PageError(f"{where}: {problem}\n{instead}")
 
 
+class NotASentence(TypeError):
+    """A text argument is not a sentence. :meth:`Part.build` turns it into a :class:`PageError` for its page."""
+
+    def __init__(self, value: Any):
+        super().__init__(f"expected a sentence, got {value!r}")
+        self.value = value
+
+
 class Part:
     """Something a slot accepts. A part only describes; :meth:`build` makes the component."""
 
+    #: The public name, when it is not the class name in lower case (``custom_block``).
+    ui_name: ClassVar[str] = ""
     visible: Any = None
 
     def build(self, ctx: Build) -> rx.Component:
-        return shown(self._render(ctx), self.visible)
+        try:
+            component = self._render(ctx)
+        except NotASentence as wrong:
+            raise ctx.fail(f"{called(self)} got {called(wrong.value)} where its words belong.",
+                           "Write the sentence the user reads, in English: `ui.text(\"3 open requests\")`. "
+                           "A state value is shown as it is.") from None
+        return shown(ctx, component, self.visible)
 
     def _render(self, ctx: Build) -> rx.Component:
         raise NotImplementedError
 
 
-def shown(component: rx.Component, visible: Any) -> rx.Component:
-    """``component``, shown only when ``visible`` holds: a permission, or a state value."""
-    if visible is None:
-        return component
+def shown(ctx: Build, component: rx.Component, visible: Any) -> rx.Component:
+    """``component``, shown only when ``visible`` holds.
+
+    ``visible`` is a permission (what ``requires=`` takes: ``ui.read(Model)``...), a list of
+    them (all must hold), a state value, or a plain ``True``/``False``. It decides what is
+    shown, never what is allowed: the handler still enforces.
+    """
     from lex.lex_app.reflex.ui import guard
 
+    if visible is None or visible is guard.signed_in:      # every user of the dashboards is signed in
+        return component
     if isinstance(visible, guard.Requirement):
         from rfds.auth import can
 
         from lex.lex_app.reflex.access import permission
 
         return can(permission(visible.target, visible.scope), component)
-    return rx.cond(visible, component)
+    if isinstance(visible, (list, tuple)) and visible:
+        for one in visible:
+            component = shown(ctx, component, one)
+        return component
+    if isinstance(visible, (bool, rx.Var)):
+        return rx.cond(visible, component)
+    raise ctx.fail(f"`visible=` got {called(visible)}.",
+                   "Give a permission -- `visible=ui.edit(Model)` -- or a state value: `visible=State.is_open`.")
 
 
 def say(sentence: Any, **values: Any) -> Any:
-    """A sentence the user reads, translated in the browser. A state value is shown as it is."""
+    """A sentence the user reads, translated in the browser. A state value is shown as it is.
+
+    The sentence is the message: it is passed to RFDS's translation as the id and as the English
+    text. ``{name}`` in it is filled from ``values``; a literal brace is written ``'{'``.
+    """
     if isinstance(sentence, rx.Var):
         return sentence
     if not isinstance(sentence, str) or not sentence:
-        raise TypeError(f"expected a sentence, got {sentence!r}")
+        raise NotASentence(sentence)
     import rfds
 
     return rfds.t(sentence, sentence, **values)
@@ -592,8 +673,11 @@ def called(value: Any) -> str:
     if isinstance(value, rx.Component):
         return f"a raw component (`{type(value).__name__}`)"
     if isinstance(value, Part):
-        return f"`ui.{type(value).__name__.lower()}`"
-    return f"`{value!r}`"[:80]
+        return f"`ui.{type(value).ui_name or type(value).__name__.lower()}`"
+    if value is None:
+        return "nothing (`None`)"
+    text = repr(value)
+    return f"`{text[:60]}...`" if len(text) > 60 else f"`{text}`"
 
 
 def take(ctx: Build, value: Any, kinds: tuple[type, ...], instead: str) -> list:
@@ -629,16 +713,23 @@ def _tone(tone: str) -> str:
     return tone
 
 
-def shape(value: Any, kind: str) -> Any:
+def _whole(value: Any) -> bool:
+    """Whether ``value`` is a whole number: an int, or a state value typed int."""
+    if isinstance(value, rx.Var):
+        return value._var_type is int
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def shape(value: Any, kind: str, currency: Any = None) -> Any:
     """``value`` shown as its ``kind``, formatted for the user's locale."""
     import rfds
 
     if kind == "text":
         return value
     if kind == "number":
-        return rfds.number(value, digits=0)
+        return rfds.number(value, digits=0 if _whole(value) else 2)
     if kind == "money":
-        return rfds.money(value)
+        return rfds.money(value, currency)
     if kind == "percent":
         return rfds.percent(value)
     if kind == "datetime":
@@ -657,7 +748,11 @@ class Text(Part):
 
 
 def text(sentence: Any, *, visible: Any = None, **values: Any) -> Text:
-    """A sentence or a paragraph. ``{name}`` in it is filled from ``values``."""
+    """A sentence or a paragraph, written in English; it is translated for the user.
+
+    ``{name}`` in it is filled from ``values`` (a value cannot be called ``visible``). A state
+    value is shown as it is.
+    """
     return Text(sentence, values, visible)
 
 
@@ -667,18 +762,28 @@ class Fact(Part):
     value: Any
     kind: str = "text"
     visible: Any = None
+    currency: Any = None
 
     def _render(self, ctx: Build) -> rx.Component:
         import rfds
 
-        return rfds.kv_item(say(self.label), shape(self.value, self.kind))
+        return rfds.kv_item(say(self.label), shape(self.value, self.kind, self.currency))
 
 
-def fact(label: Any, value: Any, *, kind: str = "text", visible: Any = None) -> Fact:
-    """A label and its value."""
+def fact(label: Any, value: Any, *, kind: str = "text", currency: Any = None, visible: Any = None) -> Fact:
+    """A label and its value.
+
+    ``kind`` says what the value is, and lex-app formats it for the user's locale:
+    ``"number"`` (a whole number without decimals, any other with two), ``"money"`` (in
+    ``currency=``, a code such as ``"EUR"`` or a state value; else the home currency),
+    ``"percent"`` (a ratio: 0.6 shows 60%), ``"datetime"`` (an instant with its time zone, shown
+    in the user's), or ``"text"``.
+    """
     if kind not in KINDS:
         raise ValueError(f"kind= must be one of {', '.join(KINDS)}; got {kind!r}")
-    return Fact(label, value, kind, visible)
+    if currency is not None and kind != "money":
+        raise ValueError(f"ui.fact(currency=) goes with kind=\"money\"; got kind={kind!r}")
+    return Fact(label, value, kind, visible, currency)
 
 
 @dataclasses.dataclass(eq=False)
@@ -712,7 +817,7 @@ class Message(Part):
 
 
 def message(sentence: Any, *, tone: str = "info", visible: Any = None, **values: Any) -> Message:
-    """A notice in place."""
+    """A notice in place. ``{name}`` in the sentence is filled from ``values`` (not ``tone`` or ``visible``)."""
     return Message(sentence, values, _tone(tone), visible)
 ```
 
@@ -778,6 +883,7 @@ pytestmark = pytest.mark.init
 class LinksDesk(ui.State):
     fund: str = ""
     count: int = 0
+    tags: list[str] = []
 
     @ui.action
     def close(self):
@@ -822,17 +928,35 @@ class TestCluster01cp_PageLinks(SimpleTestCase):
         self.assertEqual(links.href(CTX, funds_page, {}), "/funds", "a page without arguments needs none")
         joined = str(links.href(CTX, fund_page, {"key": LinksDesk.fund}))
         self.assertIn('"/funds/"+', joined, "a state value is joined into the address")
-        self.assertIn("fund_rx_state_", joined)
+        self.assertIn("fund_rx_state_", joined, "the state value is in the address")
+        self.assertIn("encodeURIComponent(", joined, "and the browser encodes it, so it stays one piece")
+        self.assertEqual(links.href(CTX, fund_page, {"key": "a/b", "tab": "x&y=1"}), "/funds/a%2Fb?tab=x%26y%3D1",
+                         "a fixed value is encoded: it cannot change the page or add a parameter")
+        for bad in (None, True, "", ".."):
+            with self.subTest(value=bad), self.assertRaises(PageError) as refused:
+                links.href(CTX, fund_page, {"key": bad})
+            self.assertEqual(str(refused.exception),
+                             f"Page `home`: the value for `key` in a link is {bad!r}.\n"
+                             "Pass text or a number: `key=row.id`, `key=7`.", "a value that cannot be an address piece is refused")
+        with self.assertRaises(PageError, msg="a list from the state cannot be an address piece"):
+            links.href(CTX, fund_page, {"key": LinksDesk.tags})
+        for route in ("/docs/[[...slug]]", "/docs/[...slug]", "/posts/[[v]]"):
+            with self.subTest(route=route), self.assertRaises(ValueError, msg="only plain route arguments"):
+                links.info_of(route, "docs")
+        with self.assertRaises(ValueError) as reserved:
+            links.info_of("/funds/[to]", "fund", ["label"])
+        self.assertIn("cannot be named to, label", str(reserved.exception), "a parameter named like a link's own word is refused")
         self.assertIn("count_rx_state_", str(links.href(CTX, fund_page, {"key": LinksDesk.count})),
                       "a number from the state is accepted")
         with self.assertRaises(PageError) as wrong:
             links.href(CTX, fund_page, {"tab": "x", "page": 2})
         self.assertEqual(str(wrong.exception),
                          "Page `home`: a link to page `fund_page` (/funds/[key]) is missing key and does not accept "
-                         "page.\nPage `fund_page` takes: key, tab.", "the error names both pages and what the target takes")
+                         "page.\nPage `fund_page` takes: key, tab. Write `to=fund_page, key=...`.",
+                         "the error names both pages, what the target takes and what to write")
         with self.assertRaises(PageError) as not_a_page:
             links.href(CTX, lambda: None, {})
-        self.assertIn("Pass a function declared with `@ui.page`", str(not_a_page.exception))
+        self.assertIn("Pass a function declared with `@ui.page`", str(not_a_page.exception), "what to pass instead")
         self.assertEqual(links.row_href(CTX, fund_page, "id"), "/funds/{id}", "a row link fills the page's one argument")
         with self.assertRaises(PageError, msg="a page without exactly one argument cannot be opened from a row"):
             links.row_href(CTX, funds_page, "id")
@@ -852,7 +976,18 @@ class TestCluster01cp_PageLinks(SimpleTestCase):
         self.assertIn('rfdsI18n.t("Open", "Open"', inside, "the label is a sentence")
         record = vocab.link("Open in lex-app", record=(Group, 5))
         where, outside = record.target(CTX)
-        self.assertTrue(str(where).endswith("/group/5/show") and outside, f"record= leads to lex-app's record page: {where}")
+        self.assertTrue(str(where).endswith("/group/5/show"), f"record= leads to lex-app's record page: {where}")
+        self.assertTrue(outside, "which opens outside the dashboards")
+        self.assertIn("_blank", str(record.build(CTX)), "an outside link opens a new tab")
+        self.assertNotIn("_blank", inside, "a link to a page stays in the app")
+        for bad_record in (Group, (Group,), (Group, None), ("group", 5)):
+            with self.subTest(record=str(bad_record)[:20]), self.assertRaises(ValueError, msg="record= takes (Model, pk)"):
+                vocab.link("X", record=bad_record)
+        with self.assertRaises(ValueError, msg="parameters belong to to="):
+            vocab.link("Docs", href="https://example.org", key="7")
+        with self.assertRaises(ValueError) as mail:
+            vocab.link("Mail", href="mailto:a@example.org")
+        self.assertIn("Mail and phone links are not supported yet", str(mail.exception), "the refusal says so")
         docs = vocab.link("Docs", href="https://example.org/docs")
         self.assertEqual(docs.target(CTX), ("https://example.org/docs", True), "href= is an outside site")
         for bad in ({}, {"to": fund_page, "href": "https://example.org"}):
@@ -878,19 +1013,33 @@ class TestCluster01cp_PageLinks(SimpleTestCase):
         """
         run = vocab.button("Close fund", LinksDesk.close)
         built = run.build(CTX)
-        self.assertIn('rfdsI18n.t("Close fund", "Close fund"', str(built))
+        self.assertIn('rfdsI18n.t("Close fund", "Close fund"', str(built), "the label is a sentence")
+        self.assertNotIn('"data-rfds-intent":"primary"', str(built), "a button is not primary unless the kind says so")
         self.assertIs(run.click(CTX), LinksDesk.close, "a handler button calls the handler")
         go = vocab.button("New fund", to=fund_page, key="new")
         self.assertIn("/funds/new", str(go.click(CTX)), "a to= button goes to the page")
         for bad in ((LinksDesk.close, {"to": funds_page}), (None, {})):
             with self.subTest(bad=str(bad)[:30]), self.assertRaises(ValueError, msg="a handler or to=, one of them"):
                 vocab.button("X", bad[0], **bad[1])
-        self.assertIn("danger", str(vocab.button("Delete", LinksDesk.close, tone="danger").build(CTX)), "danger intent")
+        danger = vocab.button("Delete", LinksDesk.close, tone="danger")
+        self.assertIn('"data-rfds-intent":"danger"', str(danger.build(CTX)), "danger intent")
         first = vocab.button("Save", LinksDesk.close)
         first.primary = True
-        self.assertIn("primary", str(first.build(CTX)), "the kind marks the first action primary")
-        entry = str(vocab.menu_entry(CTX, "Close fund", run.click(CTX), None))
-        self.assertIn('rfdsI18n.t("Close fund", "Close fund"', entry, "a menu entry is translated too")
+        self.assertIn('"data-rfds-intent":"primary"', str(first.build(CTX)), "the kind marks the first action primary")
+        with self.assertRaises(ValueError, msg="parameters belong to to="):
+            vocab.button("X", LinksDesk.close, key="7")
+        with self.assertRaises(PageError, msg="a to= button checks the page's parameters like a link"):
+            vocab.button("New", to=fund_page).click(CTX)
+        from rfds.components.actions._common import get_meta
+
+        entry = run.menu_entry(CTX)
+        self.assertIn('rfdsI18n.t("Close fund", "Close fund"', str(entry), "a menu entry is translated too")
+        self.assertEqual(get_meta(entry).get("kind"), "menu_item", "RFDS recognises it as a menu entry")
+        hidden = vocab.button("Close fund", LinksDesk.close, visible=LinksDesk.fund != "").menu_entry(CTX)
+        self.assertEqual(get_meta(hidden).get("kind"), "menu_item", "and still does when visible= wraps it")
+        self.assertIn("fund_rx_state_", str(hidden), "the wrapper carries the condition")
+        self.assertNotEqual(str(danger.menu_entry(CTX)).replace("Delete", "Close fund"), str(entry),
+                            "a dangerous action keeps its tone in the menu")
 ```
 
 - [ ] **Step 2: Run it and see it fail**
@@ -909,7 +1058,9 @@ from __future__ import annotations
 
 import dataclasses
 import re
+import typing
 from typing import Any, Callable
+from urllib.parse import quote
 
 from lex.lex_app.reflex.ui.pages.parts import Build
 
@@ -926,8 +1077,21 @@ class PageInfo:
     params: tuple[str, ...] = ()        # further query parameters the page accepts
 
 
+#: Words ``ui.link`` and ``ui.button`` take themselves: a page parameter of that name could not be passed.
+RESERVED = ("to", "record", "href", "visible", "label", "handler", "tone", "icon")
+
+
 def info_of(route: str, name: str, params: Any = ()) -> PageInfo:
-    return PageInfo(name, route, tuple(_ARGUMENT.findall(route)), tuple(params))
+    """What a link needs to know about the page at ``route``; refuses what a link could not address."""
+    if "[[" in route or "[..." in route:
+        raise ValueError(f"ui.page({route!r}): only plain route arguments are supported, such as "
+                         "\"/things/[key]\"; optional and catch-all arguments are not.")
+    arguments, params = tuple(_ARGUMENT.findall(route)), tuple(params)
+    taken = [word for word in (*arguments, *params) if word in RESERVED]
+    if taken:
+        raise ValueError(f"ui.page({route!r}): a page parameter cannot be named {', '.join(taken)}; "
+                         "`ui.link` and `ui.button` use that word themselves. Rename it.")
+    return PageInfo(name, route, arguments, params)
 
 
 def page_info(target: Any) -> PageInfo | None:
@@ -947,17 +1111,18 @@ def href(ctx: Build, target: Callable[..., Any], values: dict) -> Any:
         problem = " and ".join(part for part in (
             f"is missing {', '.join(missing)}" if missing else "",
             f"does not accept {', '.join(unknown)}" if unknown else "") if part)
+        example = "".join(f", {name}=..." for name in info.arguments)
         raise ctx.fail(f"a link to page `{info.name}` ({info.route}) {problem}.",
-                       f"Page `{info.name}` takes: {accepted}.")
+                       f"Page `{info.name}` takes: {accepted}. Write `to={info.name}{example}`.")
     path: Any = ""
     rest = info.route
     for name in info.arguments:
         before, _, rest = rest.partition(f"[{name}]")
-        path = path + before + as_text(values[name])
+        path = path + before + piece(ctx, name, values[name])
     path = path + rest
     query = [(name, values[name]) for name in info.params if name in values]
     for index, (name, value) in enumerate(query):
-        path = path + ("?" if index == 0 else "&") + name + "=" + as_text(value)
+        path = path + ("?" if index == 0 else "&") + name + "=" + piece(ctx, name, value)
     return path
 
 
@@ -970,12 +1135,24 @@ def row_href(ctx: Build, target: Callable[..., Any], row_key: str) -> str:
     return info.route.replace(f"[{info.arguments[0]}]", "{" + row_key + "}")
 
 
-def as_text(value: Any) -> Any:
-    """``value`` as a piece of an address: text, or a Var that gives text."""
+def piece(ctx: Build, name: str, value: Any) -> Any:
+    """``value`` as one piece of an address, encoded so that it stays one piece.
+
+    A value from data must not be able to change the page or add a parameter: a fixed value is
+    quoted here, a state value by the browser.
+    """
     import reflex as rx
 
-    return value.to_string(use_json=False) if isinstance(value, rx.Var) and value._var_type is not str else (
-        value if isinstance(value, rx.Var) else str(value))
+    instead = "Pass text or a number: `key=row.id`, `key=7`."
+    if isinstance(value, rx.Var):
+        kind = typing.get_origin(value._var_type) or value._var_type
+        if kind in (bool, list, dict, tuple, set):
+            raise ctx.fail(f"the value for `{name}` in a link is a {getattr(kind, '__name__', kind)} from the state.", instead)
+        text = value if kind is str else value.to_string(use_json=False)
+        return rx.Var(f"encodeURIComponent({text!s})", _var_data=text._get_all_var_data()).to(str)
+    if value is None or isinstance(value, bool) or str(value) in ("", ".", ".."):
+        raise ctx.fail(f"the value for `{name}` in a link is {value!r}.", instead)
+    return quote(str(value), safe="")
 ```
 
 In `vocab.py`, add `from lex.lex_app.reflex.ui.pages import links` above the import from `parts`, then append:
@@ -998,12 +1175,16 @@ class Link(Part):
             from lex.lex_app.reflex.embed import lex_app_base_url
 
             model, pk = self.record
-            return lex_app_base_url().rstrip("/") + "/" + model._meta.model_name + "/" + links.as_text(pk) + "/show", True
+            return (lex_app_base_url().rstrip("/") + "/" + model._meta.model_name + "/"
+                    + links.piece(ctx, "pk", pk) + "/show"), True
         return self.href, True
 
     def click(self, ctx: Build) -> Any:
         where, outside = self.target(ctx)
         return rx.redirect(where, is_external=outside)
+
+    def menu_entry(self, ctx: Build) -> rx.Component:
+        return menu_entry(ctx, self.label, self.click(ctx), self.visible)
 
     def _render(self, ctx: Build) -> rx.Component:
         import rfds
@@ -1019,9 +1200,16 @@ def link(label: Any, *, to: Any = None, record: Any = None, href: str | None = N
     """Goes somewhere: ``to=`` a page (with its parameters by name), ``record=(Model, pk)``, or ``href=`` an outside site."""
     given = [name for name, value in (("to", to), ("record", record), ("href", href)) if value is not None]
     if len(given) != 1:
-        raise ValueError("ui.link() takes exactly one of to=, record= or href=; got " + (", ".join(given) or "none"))
-    if href is not None and "://" not in href:
-        raise ValueError(f"ui.link(href=) is for an outside site (https://...); got {href!r}. Use to= for a page.")
+        raise ValueError("ui.link() takes exactly one of to=, record= or href=; got " + (", ".join(given) or "none")
+                         + ". Write `ui.link(\"Open\", to=some_page, key=...)`.")
+    if values and to is None:
+        raise ValueError(f"ui.link(): {', '.join(values)} can only be given with to=, as the page's parameters.")
+    if href is not None and not (isinstance(href, str) and href.startswith(("http://", "https://"))):
+        raise ValueError(f"ui.link(href=) is for an outside site and takes a fixed address starting with https://; "
+                         f"got {href!r}. For a page of the dashboards use to=. Mail and phone links are not supported yet.")
+    if record is not None and not (isinstance(record, tuple) and len(record) == 2 and hasattr(record[0], "_meta")
+                                   and record[1] is not None):
+        raise ValueError("ui.link(record=) takes (Model, pk): `record=(Fund, row.id)`.")
     return Link(label, to, values, record, href, visible)
 
 
@@ -1039,6 +1227,9 @@ class Button(Part):
     def click(self, ctx: Build) -> Any:
         return rx.redirect(links.href(ctx, self.to, self.values)) if self.to is not None else self.handler
 
+    def menu_entry(self, ctx: Build) -> rx.Component:
+        return menu_entry(ctx, self.label, self.click(ctx), self.visible, tone=self.tone, icon=self.icon)
+
     def _render(self, ctx: Build) -> rx.Component:
         import rfds
 
@@ -1048,23 +1239,27 @@ class Button(Part):
 
 def button(label: Any, handler: Any = None, *, to: Any = None, tone: str = "neutral", icon: str | None = None,
            visible: Any = None, **values: Any) -> Button:
-    """Runs a handler, or opens a page (``to=``)."""
+    """Runs a handler, or opens a page (``to=``, with the page's parameters by name)."""
     if (handler is None) == (to is None):
-        raise ValueError("ui.button() takes a handler or to=, one of them")
+        raise ValueError("ui.button() takes a handler or to=, one of them: `ui.button(\"Save\", State.save)` or "
+                         "`ui.button(\"New\", to=new_page)`.")
+    if values and to is None:
+        raise ValueError(f"ui.button(): {', '.join(values)} can only be given with to=, as the page's parameters.")
     return Button(label, handler, to, values, _tone(tone), icon, visible)
 
 
-def menu_entry(ctx: Build, label: Any, click: Any, visible: Any) -> rx.Component:
+def menu_entry(ctx: Build, label: Any, click: Any, visible: Any, *, tone: str = "neutral",
+               icon: str | None = None) -> rx.Component:
     """An action as an entry of the page header's "More actions" menu."""
-    import rfds
+    # The one place lex-app reaches into RFDS's private metadata: RFDS's page header keeps what it
+    # recognises as a menu entry by that metadata, and a ``visible=`` wrapper would otherwise hide it.
     from rfds.components.actions._common import get_meta, set_meta
+    from rfds.components.actions.menu import menu_item
 
     from lex.lex_app.reflex.ui.pages.parts import shown
 
-    from rfds.components.actions.menu import menu_item
-
-    entry = menu_item(say(label), on_select=click)
-    return set_meta(shown(entry, visible), **get_meta(entry))     # RFDS keeps what it recognises as a menu entry
+    entry = menu_item(say(label), on_select=click, icon=icon, tone="danger" if tone == "danger" else "neutral")
+    return set_meta(shown(ctx, entry, visible), **get_meta(entry))
 ```
 
 - [ ] **Step 4: Run it and see it pass**
@@ -1148,12 +1343,22 @@ class TestCluster01cr_PageTables(SimpleTestCase):
         built = str(tables.table(Group, columns=["name"]).build(CTX))
         self.assertIn("rfds-data-table", built, "RFDS's data table")
         self.assertIn("page_rows", built, "rows come a page at a time from the table's state")
-        self.assertIn("name", built, "the named column is shown")
+        self.assertIn('"Name"', built, "the named column is shown under the field's own label")
+        self.assertIn("auth.Group:read", built, "the table is shown only to users who may read the model")
+        self.assertNotIn("auth.Group:read", str(tables.table(Group, columns=["name"], visible=True).build(CTX)),
+                         "unless visible= says otherwise")
         with self.assertRaises(PageError) as wrong:
             tables.table([{"name": "a"}], columns=["name"]).build(CTX.at("table"))
         self.assertEqual(str(wrong.exception),
-                         "Page `groups`, slot `table`: `ui.table` got list, not a model.\n"
-                         "Pass a model class: `ui.table(Fund, columns=[...])`.")
+                         "Page `groups`, slot `table`: `ui.table` takes a model class and reads its rows from the "
+                         "server; it cannot show rows you hold yourself (a list, or a state value) yet.\n"
+                         "Pass a model: `ui.table(Fund, columns=[...])`.", "the refusal says what a table can show")
+        with self.assertRaises(PageError) as unknown:
+            tables.table(Group, columns=["nmae"]).build(CTX.at("table"))
+        self.assertEqual(str(unknown.exception),
+                         "Page `groups`, slot `table`: Group has no column nmae.\n"
+                         "Its columns are: id, name. A many-to-many field cannot be a column.",
+                         "a wrong column name lists the model's columns")
 
     # -- 1.798 ---------------------------------------------------------
     def test_1_798_rows_open_a_page_an_empty_table_says_so_and_a_column_can_be_relabelled(self) -> None:
@@ -1166,18 +1371,28 @@ class TestCluster01cr_PageTables(SimpleTestCase):
                column carries the given label; open= a page without exactly one argument is
                refused.
         """
-        built = str(tables.table(Group, columns=[tables.column("name", label="Group")], open=group_page,
+        built = str(tables.table(Group, columns=[tables.column("name", label="Team", kind="text")], open=group_page,
                                  empty="No groups yet.").build(CTX))
-        self.assertIn("/groups/", built, "rows link to the page")
+        self.assertIn('"/groups/"', built, "rows link to the page")
+        self.assertIn("encodeURIComponent", built, "with the row's key encoded into the address")
         self.assertIn('rfdsI18n.t("No groups yet.", "No groups yet."', built, "the empty sentence is a message")
-        self.assertIn("Group", built, "the column's own label is used")
+        self.assertIn('rfdsI18n.t("Team", "Team"', built,
+                      "the column's own label is used, and translated like every other sentence")
+        self.assertNotIn('"Name"', built, "in place of the field's label")
+        for bad in (dict(kind="colour"), dict(label=""), dict(currency="EUR")):
+            with self.subTest(bad=bad), self.assertRaises(ValueError, msg="a column is checked when it is declared"):
+                tables.column("name", **bad)
+        self.assertEqual(tables._RFDS_KIND["datetime"], "instant", "datetime is RFDS's instant")
 
         def no_argument():
             """A page without a route argument."""
 
         no_argument.__ui_page__ = links.info_of("/groups", "no_argument")
-        with self.assertRaises(PageError, msg="open= needs a page with exactly one argument"):
+        with self.assertRaises(PageError) as no_key:
             tables.table(Group, columns=["name"], open=no_argument).build(CTX)
+        self.assertEqual(str(no_key.exception),
+                         "Page `groups`: `open=` needs a page with exactly one route argument, got 'no_argument'.\n"
+                         "Declare the page as `@ui.page(\"/things/[key]\")`.", "open= needs a page with one argument")
 ```
 
 - [ ] **Step 2: Run it and see it fail**
@@ -1203,16 +1418,31 @@ from lex.lex_app.reflex.ui.pages import links
 from lex.lex_app.reflex.ui.pages.parts import Build, Part, say
 
 
+#: What a column's kind is called in RFDS's column spec.
+_RFDS_KIND = {"text": "text", "number": "number", "money": "money", "percent": "percent", "datetime": "instant"}
+
+
 @dataclasses.dataclass(frozen=True)
 class Column:
     key: str
     label: str | None = None
     kind: str | None = None
+    currency: str | None = None
 
 
-def column(key: str, *, label: str | None = None, kind: str | None = None) -> Column:
-    """A table column that needs more than its name."""
-    return Column(key, label, kind)
+def column(key: str, *, label: str | None = None, kind: str | None = None, currency: str | None = None) -> Column:
+    """A table column that needs more than its name: its own label, or what its values are.
+
+    ``kind`` is one of the words ``ui.fact`` takes; ``currency`` (a code such as ``"EUR"``) goes
+    with ``kind="money"``.
+    """
+    if kind is not None and kind not in _RFDS_KIND:
+        raise ValueError(f"ui.column({key!r}, kind=) must be one of {', '.join(_RFDS_KIND)}; got {kind!r}")
+    if label is not None and not (isinstance(label, str) and label):
+        raise ValueError(f"ui.column({key!r}, label=) takes a sentence; got {label!r}")
+    if currency is not None and kind != "money":
+        raise ValueError(f"ui.column({key!r}, currency=) goes with kind=\"money\"")
+    return Column(key, label, kind, currency)
 
 
 @dataclasses.dataclass(eq=False)
@@ -1223,28 +1453,61 @@ class Table(Part):
     empty: Any = None
     visible: Any = None
 
+    def build(self, ctx: Build) -> rx.Component:
+        # A table reads through the API as the user; without the grant it could only show an error.
+        from lex.lex_app.reflex.ui import guard
+
+        if self.visible is None and isinstance(self.source, type) and hasattr(self.source, "_meta"):
+            return dataclasses.replace(self, visible=guard.read(self.source)).build(ctx)
+        return super().build(ctx)
+
     def _render(self, ctx: Build) -> rx.Component:
         import rfds
 
         from lex.lex_app.reflex import data
 
         model = self.source
-        if not hasattr(model, "_meta"):
-            raise ctx.fail(f"`ui.table` got {type(model).__name__}, not a model.",
-                           "Pass a model class: `ui.table(Fund, columns=[...])`.")
-        keys = [c.key if isinstance(c, Column) else str(c) for c in self.columns] or None
-        overrides = {c.key: {k: v for k, v in (("header", c.label), ("kind", c.kind)) if v is not None}
-                     for c in self.columns if isinstance(c, Column) and (c.label or c.kind)}
-        props: dict[str, Any] = {}
+        if not (isinstance(model, type) and hasattr(model, "_meta")):
+            raise ctx.fail("`ui.table` takes a model class and reads its rows from the server; it cannot show rows "
+                           "you hold yourself (a list, or a state value) yet.",
+                           "Pass a model: `ui.table(Fund, columns=[...])`.")
+        known = {field.name for field in model._meta.concrete_fields}
+        keys = [c.key if isinstance(c, Column) else str(c) for c in self.columns]
+        unknown = [key for key in keys if key not in known]
+        if unknown:
+            raise ctx.fail(f"{model.__name__} has no column {', '.join(unknown)}.",
+                           f"Its columns are: {', '.join(sorted(known))}. A many-to-many field cannot be a column.")
+        overrides: dict[str, dict] = {}
+        for c in self.columns:
+            if not isinstance(c, Column):
+                continue
+            options: dict[str, Any] = {}
+            if c.label is not None:
+                options.update(header=c.label, header_id=c.label)      # the label is the message, as everywhere
+            if c.kind is not None:
+                options["kind"] = _RFDS_KIND[c.kind]
+            if c.currency is not None:
+                options["ccy"] = c.currency
+            if options:
+                overrides[c.key] = options
+        key = model._meta.pk.name
+        props: dict[str, Any] = {"row_key": key}
         if self.open is not None:
-            props["row_href"] = links.row_href(ctx, self.open, "id")
+            props["row_href"] = links.row_href(ctx, self.open, key)
         if self.empty is not None:
-            props["empty"] = rfds.empty_state(kind="no_data", title=say(self.empty), description="")
-        return data.lex_table(model, columns=data.lex_columns(model, keys, **overrides), **props)
+            props["empty"] = rfds.empty_state(kind="no_data", title=say(self.empty),
+                                              description=say("Nothing has been added here yet."))
+        return data.lex_table(model, columns=data.lex_columns(model, keys or None, **overrides), **props)
 
 
 def table(source: Any, *, columns: Any = (), open: Any = None, empty: Any = None, visible: Any = None) -> Table:
-    """A model's rows, paged on the server. ``open=`` a page makes each row a link to it."""
+    """A model's rows, paged on the server and read as the user.
+
+    ``columns`` names the fields to show (``ui.column`` for one that needs its own label or kind);
+    ``open=`` a page makes each row a link to it; ``empty=`` is the sentence shown when the model
+    has no rows at all. The table is shown only to users who may read the model, unless
+    ``visible=`` says otherwise.
+    """
     return Table(source, tuple(columns), open, empty, visible)
 ```
 
@@ -1395,6 +1658,14 @@ class TestCluster01cq_PageSections(SimpleTestCase):
         self.assertIn("ui.custom_block", str(direct.exception), "and the way out is named")
         marked = kinds.section("Notes", vocab.custom_block(rx.text("raw"), reason="A chart type the vocabulary lacks."))
         self.assertIn("raw", str(marked.build(CTX)), "a marked block is built as it is")
+        from lex.lex_app.reflex.ui.pages import parts, tables
+        from django.contrib.auth.models import Group
+
+        block = vocab.custom_block(rx.text("raw"), reason="A chart type the vocabulary lacks.")
+        self.assertEqual(parts.called(block), "`ui.custom_block`", "an error names it by its public name")
+        shared = tables.table(Group, columns=["name"])
+        kinds.section("First", shared, empty="No groups yet.").build(CTX)
+        self.assertIsNone(shared.empty, "a section hands its empty sentence to a copy of the table, not to the part")
         with self.assertRaises(ValueError, msg="a custom block must say why"):
             vocab.custom_block(rx.text("raw"), reason=" ")
         with self.assertRaises(TypeError, msg="a custom block holds a component"):
@@ -1413,6 +1684,8 @@ In `vocab.py`, change the typing import to `from typing import Any, Callable`, t
 ```python
 @dataclasses.dataclass(eq=False)
 class CustomBlock(Part):
+    ui_name = "custom_block"
+
     component: Any
     reason: str
     visible: Any = None
@@ -1522,9 +1795,9 @@ class Section(Part):
         parts = take(ctx, list(self.content), (*vocab.CONTENT, tables.Table),
                      "A section holds `ui.text`, `ui.table`, `ui.message`, `ui.link` and the other `ui.*` "
                      "components, or `ui.custom_block(..., reason=\"...\")`.")
-        for part in parts:
-            if isinstance(part, tables.Table) and part.empty is None:
-                part.empty = self.empty
+        if self.empty is not None:              # a table without its own sentence takes the section's; a copy, not the part
+            parts = [dataclasses.replace(part, empty=self.empty)
+                     if isinstance(part, tables.Table) and part.empty is None else part for part in parts]
         return states(ctx, self.load, rfds.stack(*vocab.build_all(ctx, parts)), "rect")
 
     def _render(self, ctx: Build) -> rx.Component:
@@ -1720,7 +1993,10 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
                                      vocab.link("All groups", to=group_page, key="1")]).build(CTX))
         self.assertIn('"rfds-menu-item-label"},rfdsI18n.t("Close fund", "Close fund"', three,
                       "two or more further actions are menu entries, translated")
-        self.assertIn('"rfds-menu-item-label"},rfdsI18n.t("All groups", "All groups"', three)
+        self.assertIn('"rfds-menu-item-label"},rfdsI18n.t("All groups", "All groups"', three, "the link is an entry too")
+        calm = str(_record(actions=[vocab.button("Edit", KindDesk.close), vocab.button("Close fund", KindDesk.close),
+                                    vocab.link("All groups", to=group_page, key="1")]).build(CTX))
+        self.assertNotEqual(calm, three, "a dangerous action keeps its tone in the menu")
         danger_first = str(_record(actions=[vocab.button("Close fund", KindDesk.close, tone="danger")]).build(CTX))
         self.assertNotIn('"data-rfds-intent":"primary"', danger_first, "a dangerous action is never the primary one")
         with self.assertRaises(PageError) as wrong:
@@ -1799,7 +2075,7 @@ class Kind:
         if len(rest) == 1:
             built.append(_apart(rest[0].build(ctx)))
         else:
-            built.extend(vocab.menu_entry(ctx, part.label, part.click(ctx), part.visible) for part in rest)
+            built.extend(part.menu_entry(ctx) for part in rest)
         return built
 
     def _title(self, ctx: Build) -> Any:
