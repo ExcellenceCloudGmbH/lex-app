@@ -15,8 +15,9 @@
 
         @ui.job
         def export(self):
-            for index, part in enumerate(parts(self.user)):
-                yield ui.progress(index / 10, "Building")
+            for done, part in enumerate(parts(self.user), start=1):
+                build(part)
+                yield ui.progress(done / 10, "Building")
 
 ==========================  =====================================================
 ``ui.State``                base class of a page state: ``self.user``, ``self.api``,
@@ -28,6 +29,8 @@
 ``ui.goto/toast/download``  what a handler returns
 ``ui.progress``             what a job yields
 ``ui.Refuse``               an expected refusal, shown in its own words
+``ui.ApiError``             lex-app's API refused a call (``.status``, ``.denied``,
+                            ``.detail``); uncaught, it is shown to the user
 ``requires=``               ``ui.read/create/edit/delete(Model)``, ``ui.permission()``,
                             ``ui.signed_in`` -- needed to query the database directly
 ``ui.running/failed/        a handler's status, for views; ``ui.cancel`` is the

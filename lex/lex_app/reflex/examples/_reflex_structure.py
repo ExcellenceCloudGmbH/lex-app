@@ -27,8 +27,8 @@ the page at ``/``. Then the whole app compiles.
 =====================  ================================================  ============================
 Page                   What it shows                                     Features
 =====================  ================================================  ============================
-``/``                  KPIs and a chart over every model, an export,     ``main()``, ``@ui.load``,
-                       and what the user may do                          ``self.can``, RFDS
+``/``                  KPIs and a chart over the models the viewer may   ``main()``, ``@ui.load``,
+                       read, an export, and what the user may do         ``self.can``, RFDS
                                                                          charts, ``ExportMixin``,
                                                                          ``can``, ``permission``
 ``/records``           the featured model's records, paged on the        ``lex_page``, ``lex_table``
@@ -39,12 +39,13 @@ Page                   What it shows                                     Feature
 ``/calculations``      a selected record's calculation and its log       ``lex_widgets``,
                                                                          ``calculation``,
                                                                          ``calculation_log``
-``/edit``              change one field of a record through lex-app      ``self.api``, ``ui.Refuse``
-(record dashboard)     one record, for the model's ``reflex_main``       ``ui.State``, ``ui.failed``
+``/edit``              change one field of a record through lex-app,     ``rfds.form``, ``self.api``,
+                       a form submitted to one action                    ``ui.Refuse``
+(record dashboard)     the record ``?model=&pk=`` names, for the         ``ui.State``,
+                       model's ``reflex_main``                           ``ui.failed``,
+                                                                         ``record_model``
 =====================  ================================================  ============================
 """
-
-from __future__ import annotations
 
 from typing import Any, ClassVar
 
@@ -52,6 +53,7 @@ import reflex as rx
 import rfds
 from rfds.auth import can
 from rfds.patterns.exports import ExportMixin, export_menu
+from rfds.types import WireRow
 
 from lex import ui
 from lex.lex_app.reflex import (
@@ -65,6 +67,7 @@ from lex.lex_app.reflex import (
     lex_view,
     lex_widgets,
     permission,
+    record_model,
 )
 
 #: The model the pages are about: one of your models' class names, e.g. "Fund".
@@ -103,11 +106,17 @@ def _resource(model: Any) -> str:
 # -- / : the overview ------------------------------------------------------------
 
 
-def _row_counts() -> list[dict]:
-    """Every model and how many rows it holds -- plain Django, called from a load that declares ``requires=``."""
+def _row_counts(readable: list) -> list[WireRow]:
+    """What one viewer may see: how many rows each model in ``readable`` holds -- plain Django.
+
+    The screen and the export both call it, so they always agree. A viewer who may not read the
+    featured model is refused.
+    """
+    if featured() not in readable:
+        raise ui.Refuse("You may not read the featured model, so no figures are shown.")
     return [
         {"model": str(model._meta.verbose_name_plural).capitalize(), "rows": model._default_manager.count()}
-        for model in _project_models()
+        for model in readable
     ]
 
 
@@ -115,38 +124,40 @@ class OverviewState(ExportMixin, ui.State):
     """The overview's figures, per viewer; the counts are also its CSV export."""
 
     export_entity: ClassVar[str] = "row-counts"
-    counts: list[dict] = []
+    counts: list[WireRow] = []
     total: int = 0
     readable: list[str] = []
 
     # Counting rows reads the database directly, so the load says what it requires. The featured
-    # model is known only once Django has loaded the project, so the load checks read access to it
-    # itself, before it counts anything.
-    @ui.load(requires=ui.signed_in)
+    # model is known only once Django has loaded the project, so the read access that matters is
+    # checked in the body. Optional: a refusal shows in place, and the rest of the page stays.
+    @ui.load(requires=ui.signed_in, optional=True)
     def open(self):
-        """Read the counts and which models the viewer may read -- per viewer, when the page opens."""
-        if not self.can(featured(), "read"):
-            raise ui.Refuse("You may not read the featured model, so no figures are shown.")
-        self.counts = _row_counts()
+        """Count the rows of the models the viewer may read -- per viewer, when the page opens."""
+        readable = [model for model in _project_models() if self.can(model, "read")]
+        self.counts = _row_counts(readable)
         self.total = sum(int(row["rows"]) for row in self.counts)
-        self.readable = sorted(model.__name__ for model in _project_models() if self.can(model, "read"))
+        self.readable = sorted(model.__name__ for model in readable)
 
     async def _export_rows(self, kind: str):
-        # RFDS's ExportMixin calls this hook and awaits it: it is RFDS's contract, not a lex.ui handler.
-        from lex.lex_app.reflex import run_orm
+        # RFDS's ExportMixin awaits this hook outside lex.ui, so it asks has_permission, not self.can.
+        from lex.lex_app.reflex import has_permission, run_orm
 
-        rows = await run_orm(_row_counts)
+        readable = [model for model in _project_models() if await has_permission(model, "read")(self)]
+        rows = await run_orm(_row_counts, readable)
         return ["model", "rows"], rows, {"user": "", "entity": "row counts"}
 
 
 def main() -> rx.Component:
     """The dashboard ``/`` shows when the URL names no model."""
     model = featured()
+    problem = ui.failed(OverviewState.open)
     return rfds.page(
         rfds.page_header(title="Overview", path="/", subtitle=LexUser.display_name,
                          secondary_actions=[export_menu(on_export=OverviewState.export, kinds=("csv",))]),
+        rx.cond(problem != "", rfds.inline_message(problem, tone="warning")),
         rfds.grid(
-            rfds.kpi_tile(label="Rows, all models", value=OverviewState.total, kind="count"),
+            rfds.kpi_tile(label="Rows you may read", value=OverviewState.total, kind="count"),
             rfds.kpi_tile(label="Models", value=OverviewState.counts.length(), kind="count"),
             columns=3,
         ),
@@ -156,7 +167,7 @@ def main() -> rx.Component:
                 x="model",
                 series=[{"key": "rows", "label": "Rows"}],
                 title="Rows per model",
-                description="How many rows each of the project's models holds.",
+                description="How many rows each model you may read holds.",
                 x_kind="category",
             ),
             title="Rows per model",
@@ -290,45 +301,31 @@ def calculations() -> rx.Component:
 class EditState(ui.State):
     """One field of one record, changed as the user -- lex-app validates, audits and recalculates."""
 
-    pk: str = ""
-    field_name: str = ""
-    value: str = ""
-    outcome: str = ""
-
     @ui.action
-    def set_pk(self, value: str):
-        self.pk = value
-
-    @ui.action
-    def set_field_name(self, value: str):
-        self.field_name = value
-
-    @ui.action
-    def set_value(self, value: str):
-        self.value = value
-
-    @ui.action
-    def save(self):
-        if not (self.pk and self.field_name):
+    def save(self, form: dict):
+        """The submitted form: ``{pk, field_name, value}``."""
+        pk = str(form.get("pk") or "").strip()
+        field_name = str(form.get("field_name") or "").strip()
+        if not (pk and field_name):
             raise ui.Refuse("Name a record and a field.")
         # A refusal by lex-app (not allowed, or a validation error) is shown to the user as it is.
-        self.api.update(featured(), self.pk, {self.field_name: self.value})
-        self.outcome = "Saved."
+        self.api.update(featured(), pk, {field_name: form.get("value", "")})
+        return ui.toast("Saved.", tone="success")
 
 
 @lex_page("/edit", title="Edit a record", nav=NAV)
 def edit() -> rx.Component:
-    """The write goes through lex-app's API, so a user without the grant is refused there."""
+    """A form: the browser keeps what is typed, and Save sends it to one action."""
     return rfds.page(
         rfds.page_header(title="Edit a record", path="/edit"),
         rfds.card(
-            rx.vstack(
-                rx.input(placeholder="Record id", value=EditState.pk, on_change=EditState.set_pk),
-                rx.input(placeholder="Field", value=EditState.field_name, on_change=EditState.set_field_name),
-                rx.input(placeholder="New value", value=EditState.value, on_change=EditState.set_value),
-                rfds.button("Save", intent="primary", on_click=EditState.save),
-                rx.text(EditState.outcome),
-                spacing="3",
+            rfds.form(
+                rfds.text_input(name="pk", label="Record id", required=True),
+                rfds.text_input(name="field_name", label="Field", required=True),
+                rfds.text_input(name="value", label="New value"),
+                rfds.form_actions(rfds.button("Save", intent="primary", type="submit")),
+                id="edit-record",
+                on_submit=EditState.save,
             ),
             title="Change one field",
         ),
@@ -338,18 +335,28 @@ def edit() -> rx.Component:
 # -- a record dashboard, for the model's reflex_main ----------------------------------------
 
 
+def _facts(record: WireRow, limit: int = 6) -> list[dict[str, str]]:
+    """The first few of a record's own fields, as label and text."""
+    own = [(name, value) for name, value in record.items()
+           if name not in ("id_field", "short_description") and not name.startswith("lex_reserved")
+           and "__" not in name]
+    return [{"label": name.replace("_", " ").capitalize(), "value": str(value)} for name, value in own[:limit]]
+
+
 class RecordState(ui.State):
     """The record ``?model=&pk=`` names, read through lex-app's API as the user."""
 
-    pk: str = ""
-    record: dict = {}
+    record: WireRow = {}
+    facts: list[dict[str, str]] = []
 
     @ui.load(optional=True)
     def open(self):
-        self.pk = str(self.params.get("pk", ""))
-        if not self.pk:
-            raise ui.Refuse("This record does not exist.")
-        self.record = self.api.get(featured(), self.pk)
+        model = record_model(self.params.get("model"))
+        pk = str(self.params.get("pk") or "")
+        if model is None or not pk:
+            raise ui.Refuse("This link does not name a record of this project.")
+        self.record = self.api.get(model, pk)
+        self.facts = _facts(self.record)
 
 
 def record_dashboard() -> rx.Component:
@@ -369,12 +376,14 @@ def record_dashboard() -> rx.Component:
             problem != "",
             rfds.inline_message(problem, tone="warning"),
             rx.cond(
-                ui.running(RecordState.open),
-                rfds.spinner(label="Loading"),
+                RecordState.record,
                 rx.vstack(
-                    rx.heading("Record " + RecordState.pk, size="5"),
-                    rx.text("Read through lex-app's API as you."),
+                    rx.heading(RecordState.record["short_description"], size="5"),
+                    rfds.key_value(
+                        rx.foreach(RecordState.facts, lambda fact: rfds.kv_item(fact["label"], fact["value"])),
+                    ),
                 ),
+                rfds.spinner(label="Loading"),
             ),
         ),
         on_mount=RecordState.open,

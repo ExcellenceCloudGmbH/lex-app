@@ -160,8 +160,8 @@ def has_permission(target: Any, scope: str = "read") -> Callable[[Any], Awaitabl
 
     async def check(ctx: Any) -> bool:
         # RFDS hands a check its AuthContext, whose `state` is the event's root state; a caller
-        # may also pass a state directly.
-        state = getattr(ctx, "state", None) or ctx
+        # may also pass a state directly (a ui.State's own ``state`` is a handler helper, not this).
+        state = ctx if isinstance(ctx, rx.State) else getattr(ctx, "state", None) or ctx
         for permission in await current_permissions(state):
             if (
                 isinstance(permission, dict)

@@ -22,6 +22,7 @@ Everything a dashboard author needs is importable from here::
 ``lex_grid``              RFDS's AG Grid over a model's rows, via the API
 ``lex_columns``           RFDS column specs for a model's fields
 ``LexRecordState``        the record ``?model=&pk=`` names, checked against the API
+``record_model``          the project model a record dashboard's ``?model=`` names
 ``lex_rows``              a queryset as wire rows for charts (inside ``run_orm``)
 ``lex_view``              one lex-app page (table, form, record) in the dashboard
 ``lex_widgets``           lex-app's controls in one frame: ``calculation``, ``calculation_log``
@@ -64,6 +65,7 @@ if TYPE_CHECKING:
         lex_grid_columns,
         lex_rows,
         lex_table,
+        record_model,
     )
     from lex.lex_app.reflex.django_orm import orm, run_orm
     from lex.lex_app.embed.core import STAY, Flow, ref
@@ -100,6 +102,7 @@ _EXPORTS = {
     "lex_grid_columns": "lex.lex_app.reflex.data",
     "lex_rows": "lex.lex_app.reflex.data",
     "lex_table": "lex.lex_app.reflex.data",
+    "record_model": "lex.lex_app.reflex.data",
     "calculation": "lex.lex_app.reflex.embed",
     "calculation_log": "lex.lex_app.reflex.embed",
     "lex_calculation": "lex.lex_app.reflex.embed",
@@ -149,6 +152,7 @@ __all__ = [
     "lex_widgets",
     "orm",
     "permission",
+    "record_model",
     "ref",
     "run_orm",
 ]

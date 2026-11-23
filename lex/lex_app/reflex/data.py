@@ -591,6 +591,14 @@ def lex_grid(
 # -- the record a dashboard is about ------------------------------------------
 
 
+def record_model(name: Any) -> Any:
+    """The project model a record dashboard's ``?model=`` names (case-insensitively), or ``None``."""
+    from lex.lex_app.reflex.dashboards import _lookup_model, _project_app_label
+
+    name = str(name or "").strip()
+    return _lookup_model(name, _project_app_label()) if name else None
+
+
 class LexRecordState(rx.State):
     """The record ``?model=&pk=`` names -- or ``model``'s, for a shared dashboard -- checked against the API.
 
@@ -625,10 +633,7 @@ class LexRecordState(rx.State):
     def _record_model(self):
         if type(self).model is not None:
             return type(self).model
-        from lex.lex_app.reflex.dashboards import _lookup_model, _project_app_label
-
-        name = str(self.router.url.query_parameters.get("model") or "").strip()
-        return _lookup_model(name, _project_app_label()) if name else None
+        return record_model(self.router.url.query_parameters.get("model"))
 
     async def record(self):
         """The model instance, or ``None`` when there is none or the user may not see it.

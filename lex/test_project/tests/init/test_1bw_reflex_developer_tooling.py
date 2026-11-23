@@ -129,8 +129,8 @@ class TestCluster01bw_Add(_Project):
         self.assertIn("from crm._dashboards.cash_position_object_page import", record,
                       "the hook imports the project's package by name, never relatively")
         self.assertNotIn("Imported by _reflex_structure.py", record, "an object page is never registered")
-        for outcome in ("ui.failed(CashPositionRecordState.open)", "ui.running(CashPositionRecordState.open)",
-                        "lex_view("):
+        for outcome in ("ui.failed(CashPositionRecordState.open)", "CashPositionRecordState.record,",
+                        'rfds.spinner(label="Loading")', "lex_view("):
             self.assertIn(outcome, record, f"the record page handles its load's outcome with {outcome}")
         self.assertIn("@ui.load(requires=ui.permission(", scaffold.render("overview", "CashPosition")[1],
                       "the overview's count declares what it requires")
@@ -201,10 +201,10 @@ class TestCluster01bw_TheExample(SimpleTestCase):
                     if isinstance(node, ast.ImportFrom) and node.module == "lex.lex_app.reflex"
                     for alias in node.names}
         for feature in ("lex_page", "lex_table", "lex_grid", "lex_view", "Flow", "lex_widgets", "calculation",
-                        "calculation_log", "permission", "run_orm", "LexUser"):
+                        "calculation_log", "permission", "run_orm", "has_permission", "record_model", "LexUser"):
             self.assertIn(feature, imported, f"the example shows {feature}")
         for used in ("from lex import ui", "ui.State", "@ui.load", "@ui.action", "ui.Refuse", "ui.failed(",
-                     "ui.running(", "self.api.", "self.can("):
+                     "rfds.form(", "self.api.", "self.can("):
             self.assertIn(used, source, f"the example shows lex.ui's {used}")
         for used in ("ExportMixin", "export_menu", "rfds.bar_chart", "rfds.kpi_tile", "can("):
             self.assertIn(used, source, f"the example shows {used}")

@@ -14,9 +14,8 @@ so the page is part of the app the next time it compiles:
 Every template uses lex-app's surface (``lex_page``, ``lex_table``,
 ``lex_view``) and ``lex.ui`` (``ui.State``, ``@ui.load``), so what it writes
 is signed-in, in lex-app's chrome, and reads its data through lex-app's API as
-the user. The
-folder starts with ``_`` so Django's model discovery never imports a dashboard
--- and with it Reflex -- into the Django process.
+the user. The folder starts with ``_`` so Django's model discovery never
+imports a dashboard -- and with it Reflex -- into the Django process.
 
 ``lex reflex check`` runs RFDS's ``lint --strict`` over the project's
 dashboards and ``doctor`` over the project, as CI does.
@@ -67,6 +66,7 @@ def ${func}():
 _OBJECT_PAGE = _HEADER + '''import reflex as rx
 import rfds
 from django.apps import apps
+from rfds.types import WireRow
 
 from lex import ui
 from lex.lex_app.reflex import lex_view
@@ -81,13 +81,13 @@ class ${state}(ui.State):
     """The ${model} the URL names, read through lex-app's API as the user."""
 
     pk: str = ""
-    record: dict = {}
+    record: WireRow = {}
 
     @ui.load(optional=True)
     def open(self):
-        self.pk = str(self.params.get("pk", ""))
+        self.pk = str(self.params.get("pk") or "")
         if not self.pk:
-            raise ui.Refuse("This record does not exist.")
+            raise ui.Refuse("This link does not name a ${model}.")
         # A record the user may not see, or that is gone, shows itself as a message in place.
         self.record = self.api.get(_model(), self.pk)
 
@@ -107,10 +107,10 @@ def ${func}() -> rx.Component:
             problem != "",
             rfds.inline_message(problem, tone="warning"),
             rx.cond(
-                ui.running(${state}.open),
-                rfds.spinner(label="Loading"),
+                ${state}.record,
                 # lex-app's own record page: its fields, actions and history, as the user may see them.
                 lex_view(f"${model_lower}/{${state}.pk}/show", height=600),
+                rfds.spinner(label="Loading"),
             ),
         ),
         on_mount=${state}.open,
