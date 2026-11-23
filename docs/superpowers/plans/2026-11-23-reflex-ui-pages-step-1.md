@@ -43,7 +43,7 @@ Every code block in this plan was run before the plan was written: the 22 tests 
 
 ## Changed by review while executing
 
-Tasks 2 to 7 were reviewed and then fixed in three commits; the code and tests shown for them below are the fixed ones, and the later tasks are written against them:
+Tasks 2 to 8 were reviewed and then fixed in four commits; the code and tests shown for them below are the fixed ones, and the later tasks are written against them:
 
 - A value joined into an address is encoded (`links.piece`; a state value with `String(value ?? '')`); `links.info_of` refuses optional and catch-all route forms and parameter names that `ui.link` takes itself.
 - `shown(ctx, component, visible)` takes the build context and accepts a permission, a non-empty list of them, `ui.signed_in`, a state value or a bool.
@@ -58,6 +58,7 @@ Tasks 2 to 7 were reviewed and then fixed in three commits; the code and tests s
 - A link or button keeps RFDS's marks when `visible=` wraps it (`Part._wrap`), so a primary action with `visible=` stays primary; the kind marks the first action primary on a copy.
 - `@ui.page` checks `requires=`, `params=` and a route taken twice when the page is declared; `finalize()` checks that every `load=` is a `@ui.load` handler given once, and wraps an error from a page function in a `PageError`. `@ui.dashboard` passes its arguments through, so it works under `@classmethod`.
 - Task 7's test names `tables.table`, because `ui.table` is exported in Task 8. Task 8 was written by the controller while checking the plan's code against the fixed tree.
+- Task 8's review: the example page's section load reads what the page load wrote, so the end-to-end test proves their order; `ui.list` is left out of `__all__`; an RFDS refusal keeps its cause and lex's checks of title and actions run first.
 
 ## Not in this step
 
@@ -843,7 +844,7 @@ def message(sentence: Any, *, tone: str = "info", visible: Any = None, **values:
 def _marked(inner: rx.Component, wrapper: rx.Component) -> rx.Component:
     """``wrapper`` carrying the RFDS metadata of the control it wraps.
 
-    The one place lex-app reaches into RFDS's private metadata. RFDS's page header reads a
+    The one place lex.ui reaches into RFDS's private metadata. RFDS's page header reads a
     control's kind and intent from it -- which action is the primary one, what is a menu entry --
     and a ``visible=`` wrapper has none of its own, so the control would lose its role.
     """
@@ -2221,18 +2222,19 @@ def _apart(button: rx.Component) -> rx.Component:
     type compare equal, so a second button beside a primary one was dropped. A fragment is another
     type; RFDS reads the button's kind and intent from the wrapper.
     """
-    from rfds.components.actions._common import get_meta, set_meta
-
-    return set_meta(rx.fragment(button), **get_meta(button))
+    return vocab._marked(button, rx.fragment(button))
 
 
 def _rfds(ctx: Build, build: Callable[[], Any]) -> Any:
-    """Call one of RFDS's floorplans; a limit of its own becomes a ``PageError`` naming the page."""
+    """Call one of RFDS's floorplans; a limit of its own becomes a ``PageError`` naming the page.
+
+    ``build`` calls RFDS and nothing else: whatever it raises is reported as RFDS's refusal.
+    """
     try:
         return build()
     except (ValueError, TypeError) as wrong:
         raise ctx.fail(f"RFDS's page layout refuses this page: {wrong}",
-                       "The sentence above is RFDS's own: it names the limit the page goes over.") from None
+                       "The sentence above is RFDS's own: it names the limit the page goes over.") from wrong
 
 
 def _section_ids(titles: list) -> list:
@@ -2353,10 +2355,11 @@ class Record(Kind):
         facts = take(ctx.at("facts"), list(self.facts), (vocab.Fact,), "Use `ui.fact(label, value)`.")
         if facts:
             head.append(rfds.key_value(*vocab.build_all(ctx.at("facts"), facts), columns=min(3, len(facts))))
-        sections, actions, title = self._sections(ctx), self._buttons(ctx), self._title(ctx)
+        title, actions, sections = self._title(ctx), self._buttons(ctx), self._sections(ctx)   # lex's checks first
+        header = rfds.stack(*head) if head else rx.fragment()
         page = _rfds(ctx, lambda: templates.object_page(
-            title=title, path=ctx.route or "/", header=rfds.stack(*head) if head else rx.fragment(),
-            sections=sections, navigation="tabs" if self.tabs and len(sections) > 1 else "anchor", actions=actions))
+            title=title, path=ctx.route or "/", header=header, sections=sections,
+            navigation="tabs" if self.tabs and len(sections) > 1 else "anchor", actions=actions))
         return states(ctx, self.load, page, "rect")
 
 
@@ -2384,7 +2387,7 @@ class List(Kind):
         if not isinstance(self.table, tables.Table):
             raise ctx.at("table").fail(f"got {called(self.table)}.",
                                        "`table=` holds one `ui.table(Model, columns=[...])`.")
-        table, actions, title = self.table.build(ctx.at("table")), self._buttons(ctx), self._title(ctx)
+        title, actions, table = self._title(ctx), self._buttons(ctx), self.table.build(ctx.at("table"))
         page = _rfds(ctx, lambda: templates.list_report(title=title, path=ctx.route or "/", table=table, actions=actions))
         return states(ctx, self.load, page, "table")
 
@@ -2940,7 +2943,7 @@ class ExampleFund(ui.State):
 
     @ui.load
     def load_notes(self):
-        self.notes = [f"Opened by {self.user.name}"]
+        self.notes = [f"{self.name} was opened by {self.user.name}"]     # reads what the page load wrote
 
 
 class TestCluster01cu_PagesNamespace(SimpleTestCase):
@@ -2954,15 +2957,17 @@ class TestCluster01cu_PagesNamespace(SimpleTestCase):
         Scenario 1.806: lex.ui.
         Given: `from lex import ui`.
         When:  the names of this piece are looked up.
-        Then:  each exists and is listed in __all__; ui.list is the page kind (the built-in is
-               untouched elsewhere); no component or kind takes a styling argument.
+        Then:  each exists and is listed in __all__ -- except ui.list, the page kind, which a
+               star import must not put in place of Python's list; no component or kind takes
+               a styling argument.
         """
         for name in PAGE_NAMES:
             with self.subTest(name=name):
                 self.assertTrue(hasattr(ui, name), f"ui.{name} exists")
-                self.assertIn(name, ui.__all__, f"ui.{name} is listed")
+                if name != "list":
+                    self.assertIn(name, ui.__all__, f"ui.{name} is listed")
         self.assertEqual(ui.list.__name__, "list_", "ui.list is the page kind")
-        self.assertEqual(list("ab"), ["a", "b"], "the built-in list is untouched here")
+        self.assertNotIn("list", ui.__all__, "`from lex.ui import *` does not hide Python's list")
         styling = {"class_name", "style", "props", "gap", "width", "padding", "margin", "align", "justify"}
         for name in ("record", "list", "section", "text", "fact", "status", "message", "table", "column", "button",
                      "link", "each", "switch", "custom_block"):
@@ -3015,7 +3020,7 @@ class TestCluster01cu_PagesNamespace(SimpleTestCase):
             self.assertNotIn("rx.", source, f"{function.__name__} uses no raw Reflex component")
             self.assertNotIn("rfds.", source, f"{function.__name__} uses no raw RFDS component")
 
-        made = Group.objects.create(name="Example group")
+        made, created = Group.objects.get_or_create(name="Example group")
         self.addCleanup(made.delete)
 
         async def scenario():
@@ -3033,8 +3038,9 @@ class TestCluster01cu_PagesNamespace(SimpleTestCase):
         self.assertEqual(status["ui_loaded"], {"ExampleFund.open": True, "ExampleFund.load_notes": True},
                          "the page load and then the section's load both finished")
         self.assertEqual(status["ui_failed"], {}, "nothing failed")
-        self.assertEqual((fields["name"], fields["members"], fields["notes"]), ("Example group", 0, ["Opened by ada"]),
-                         "the state holds what the loads read")
+        self.assertEqual((fields["name"], fields["members"]), ("Example group", 0), "the state holds what the page read")
+        self.assertEqual(fields["notes"], ["Example group was opened by ada"],
+                         "the section's load ran after the page's: it read the name the page load wrote")
 ```
 
 - [ ] **Step 2: Run it and see it fail**
@@ -3061,7 +3067,7 @@ Replace `__all__` with:
 __all__ = [
     "ApiError", "PageError", "Refuse", "State", "action", "button", "cancel", "column", "create", "custom",
     "custom_block", "dashboard", "delete", "download", "each", "edit", "fact", "failed", "goto", "job",
-    "link", "list", "load", "loaded", "message", "page", "permission", "progress", "progress_of", "read",
+    "link", "load", "loaded", "message", "page", "permission", "progress", "progress_of", "read",
     "record", "running", "section", "signed_in", "status", "switch", "table", "testing", "text", "toast",
 ]
 ```
@@ -3085,7 +3091,8 @@ and these rows to the table:
 ```text
 ``@ui.page``                where a page lives: its route, navigation, who may see it
 ``@ui.dashboard``           a page that is not a route (the project's ``main()``)
-``ui.record/list``          the page kinds: named slots, placed by lex-app
+``ui.record/list``          the page kinds: named slots, placed by lex-app (``ui.list`` is
+                            left out of ``import *``, which would hide Python's ``list``)
 ``ui.section``              a titled part of a page; ``load=`` makes it load on its own
 ``ui.text/fact/status/      what fills the slots; none takes a styling argument
 message/table/column/
@@ -3177,7 +3184,7 @@ DJANGO_SETTINGS_MODULE=lex_app.settings DATABASE_DEPLOYMENT_TARGET=default CELER
 rm -rf assets
 ```
 
-Expected: 159 passed, 0 failed (137 before this plan + 22). Put the real numbers into the session fragment's `suite_tally`, then run step 3 again. A failure here is a finding: report it with its output and stop.
+Expected: 159 passed, 0 failed (137 before this plan + 22), 194 subtests passed. Put the real numbers into the session fragment's `suite_tally`, then run step 3 again. A failure here is a finding: report it with its output and stop.
 
 - [ ] **Step 5: Commit**
 
