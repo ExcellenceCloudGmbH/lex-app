@@ -43,16 +43,16 @@ Every code block in this plan was run before the plan was written: the 22 tests 
 
 ## Changed by review while executing
 
-Tasks 2, 3 and 4 were reviewed and then fixed in one commit; the code and tests shown for them below are the fixed ones, and the later tasks are written against them:
+Tasks 2 to 6 were reviewed and then fixed in two commits; the code and tests shown for them below are the fixed ones, and the later tasks are written against them:
 
-- A value joined into an address is encoded (`links.piece`); `links.info_of` refuses optional and catch-all route forms and parameter names that `ui.link` takes itself.
-- `shown(ctx, component, visible)` takes the build context and accepts a permission, a list of them, `ui.signed_in`, a state value or a bool.
+- A value joined into an address is encoded (`links.piece`; a state value with `String(value ?? '')`); `links.info_of` refuses optional and catch-all route forms and parameter names that `ui.link` takes itself.
+- `shown(ctx, component, visible)` takes the build context and accepts a permission, a non-empty list of them, `ui.signed_in`, a state value or a bool.
 - `say()` raises `parts.NotASentence`, which `Part.build` turns into a `PageError`.
 - `ui.fact` and `ui.column` take `currency=`; a whole number is shown without decimals, any other with two.
-- `ui.column` checks its kind and its label is translated; `ui.table` is shown only to users who may read the model.
+- `ui.column` checks its kind and its label is translated; `ui.table` is shown only to users who may read the model, and keeps the model's primary key in its rows (`lex_table(row_fields=)`).
 - `Button.menu_entry(ctx)` and `Link.menu_entry(ctx)` build the action's entry in the page header's menu, keeping tone and icon.
-- A part class may carry `ui_name` when its public name differs from its class name (`CustomBlock`).
-- A section hands `empty=` to a copy of a table, never to the part itself.
+- A part class may carry `ui_name` (its public name) and `nests` (whether it may sit inside a section).
+- Facts that follow one another in a section become one key-value list; a section inside a section and `empty=` without a table are refused; a section hands `empty=` to a copy of a table.
 
 ## Not in this step
 
@@ -503,8 +503,11 @@ class TestCluster01co_PageParts(SimpleTestCase):
         self.assertEqual(str(wrong.exception),
                          "Page `fund`: `visible=` got `'editors'`.\nGive a permission -- `visible=ui.edit(Model)` -- "
                          "or a state value: `visible=State.is_open`.", "anything else is refused with what to write")
-        with self.assertRaises(PageError, msg="an empty list is refused, not shown to everyone"):
+        with self.assertRaises(PageError) as empty:
             vocab.text("While open", visible=[]).build(CTX)
+        self.assertEqual(str(empty.exception),
+                         "Page `fund`: `visible=` got an empty list.\nList at least one permission: "
+                         "`visible=[ui.read(Model)]`.", "an empty list is refused, not shown to everyone")
 
         for factory in (vocab.text, vocab.fact, vocab.status, vocab.message):
             with self.subTest(component=factory.__name__):
@@ -607,6 +610,8 @@ class Part:
 
     #: The public name, when it is not the class name in lower case (``custom_block``).
     ui_name: ClassVar[str] = ""
+    #: Whether the part may sit inside a section. A section may not: sections do not nest.
+    nests: ClassVar[bool] = True
     visible: Any = None
 
     def build(self, ctx: Build) -> rx.Component:
@@ -639,7 +644,9 @@ def shown(ctx: Build, component: rx.Component, visible: Any) -> rx.Component:
         from lex.lex_app.reflex.access import permission
 
         return can(permission(visible.target, visible.scope), component)
-    if isinstance(visible, (list, tuple)) and visible:
+    if isinstance(visible, (list, tuple)):
+        if not visible:
+            raise ctx.fail("`visible=` got an empty list.", "List at least one permission: `visible=[ui.read(Model)]`.")
         for one in visible:
             component = shown(ctx, component, one)
         return component
@@ -701,7 +708,7 @@ from typing import Any
 
 import reflex as rx
 
-from lex.lex_app.reflex.ui.pages.parts import Build, Part, say
+from lex.lex_app.reflex.ui.pages.parts import Build, NotASentence, Part, called, say
 
 TONES = ("neutral", "info", "success", "warning", "danger")
 KINDS = ("text", "number", "money", "percent", "datetime")
@@ -929,7 +936,9 @@ class TestCluster01cp_PageLinks(SimpleTestCase):
         joined = str(links.href(CTX, fund_page, {"key": LinksDesk.fund}))
         self.assertIn('"/funds/"+', joined, "a state value is joined into the address")
         self.assertIn("fund_rx_state_", joined, "the state value is in the address")
-        self.assertIn("encodeURIComponent(", joined, "and the browser encodes it, so it stays one piece")
+        self.assertIn("encodeURIComponent(String(", joined, "and the browser encodes it, so it stays one piece")
+        self.assertIn("?? ''", str(links.href(CTX, fund_page, {"key": LinksDesk.count})),
+                      "a 0 from the state stays a 0 in the address (only a missing value is empty)")
         self.assertEqual(links.href(CTX, fund_page, {"key": "a/b", "tab": "x&y=1"}), "/funds/a%2Fb?tab=x%26y%3D1",
                          "a fixed value is encoded: it cannot change the page or add a parameter")
         for bad in (None, True, "", ".."):
@@ -1032,6 +1041,11 @@ class TestCluster01cp_PageLinks(SimpleTestCase):
             vocab.button("New", to=fund_page).click(CTX)
         from rfds.components.actions._common import get_meta
 
+        with self.assertRaises(PageError) as no_words:
+            vocab.button(3, LinksDesk.close).menu_entry(CTX.at("actions", "actions"))
+        self.assertEqual(str(no_words.exception),
+                         "Page `home`, slot `actions`: an action's label is `3`.\n"
+                         "Write the words: `ui.button(\"Close fund\", ...)`.", "a menu entry without words names its page")
         entry = run.menu_entry(CTX)
         self.assertIn('rfdsI18n.t("Close fund", "Close fund"', str(entry), "a menu entry is translated too")
         self.assertEqual(get_meta(entry).get("kind"), "menu_item", "RFDS recognises it as a menu entry")
@@ -1143,13 +1157,13 @@ def piece(ctx: Build, name: str, value: Any) -> Any:
     """
     import reflex as rx
 
-    instead = "Pass text or a number: `key=row.id`, `key=7`."
+    instead = f"Pass text or a number: `{name}=row.id`, `{name}=7`."
     if isinstance(value, rx.Var):
         kind = typing.get_origin(value._var_type) or value._var_type
         if kind in (bool, list, dict, tuple, set):
             raise ctx.fail(f"the value for `{name}` in a link is a {getattr(kind, '__name__', kind)} from the state.", instead)
-        text = value if kind is str else value.to_string(use_json=False)
-        return rx.Var(f"encodeURIComponent({text!s})", _var_data=text._get_all_var_data()).to(str)
+        # String(x ?? '') keeps a 0 as "0"; Reflex's own to-text turns it into nothing.
+        return rx.Var(f"encodeURIComponent(String({value!s} ?? ''))", _var_data=value._get_all_var_data()).to(str)
     if value is None or isinstance(value, bool) or str(value) in ("", ".", ".."):
         raise ctx.fail(f"the value for `{name}` in a link is {value!r}.", instead)
     return quote(str(value), safe="")
@@ -1258,7 +1272,12 @@ def menu_entry(ctx: Build, label: Any, click: Any, visible: Any, *, tone: str = 
 
     from lex.lex_app.reflex.ui.pages.parts import shown
 
-    entry = menu_item(say(label), on_select=click, icon=icon, tone="danger" if tone == "danger" else "neutral")
+    try:
+        words = say(label)
+    except NotASentence:
+        raise ctx.fail(f"an action's label is {called(label)}.",
+                       "Write the words: `ui.button(\"Close fund\", ...)`.") from None
+    entry = menu_item(words, on_select=click, icon=icon, tone="danger" if tone == "danger" else "neutral")
     return set_meta(shown(ctx, entry, visible), **get_meta(entry))
 ```
 
@@ -1310,6 +1329,7 @@ from __future__ import annotations
 
 import pytest
 from django.contrib.auth.models import Group
+from django.contrib.sessions.models import Session
 from django.test import SimpleTestCase
 
 from lex.lex_app.reflex.ui.pages import links, tables
@@ -1374,12 +1394,14 @@ class TestCluster01cr_PageTables(SimpleTestCase):
         built = str(tables.table(Group, columns=[tables.column("name", label="Team", kind="text")], open=group_page,
                                  empty="No groups yet.").build(CTX))
         self.assertIn('"/groups/"', built, "rows link to the page")
-        self.assertIn("encodeURIComponent", built, "with the row's key encoded into the address")
+        keyed = str(tables.table(Session, columns=["expire_date"], open=group_page, visible=True).build(CTX))
+        self.assertIn("session_key", keyed,
+                      "a model whose primary key is not `id` builds, and its rows are keyed and linked by that key")
         self.assertIn('rfdsI18n.t("No groups yet.", "No groups yet."', built, "the empty sentence is a message")
         self.assertIn('rfdsI18n.t("Team", "Team"', built,
                       "the column's own label is used, and translated like every other sentence")
         self.assertNotIn('"Name"', built, "in place of the field's label")
-        for bad in (dict(kind="colour"), dict(label=""), dict(currency="EUR")):
+        for bad in (dict(kind="colour"), dict(label=""), dict(currency="EUR"), dict(kind="money", currency="euro")):
             with self.subTest(bad=bad), self.assertRaises(ValueError, msg="a column is checked when it is declared"):
                 tables.column("name", **bad)
         self.assertEqual(tables._RFDS_KIND["datetime"], "instant", "datetime is RFDS's instant")
@@ -1410,6 +1432,7 @@ Expected: `ImportError: cannot import name 'tables' from 'lex.lex_app.reflex.ui.
 from __future__ import annotations
 
 import dataclasses
+import re
 from typing import Any
 
 import reflex as rx
@@ -1442,6 +1465,8 @@ def column(key: str, *, label: str | None = None, kind: str | None = None, curre
         raise ValueError(f"ui.column({key!r}, label=) takes a sentence; got {label!r}")
     if currency is not None and kind != "money":
         raise ValueError(f"ui.column({key!r}, currency=) goes with kind=\"money\"")
+    if currency is not None and not (isinstance(currency, str) and re.fullmatch(r"[A-Za-z]{3}", currency)):
+        raise ValueError(f"ui.column({key!r}, currency=) takes a three-letter code such as \"EUR\"; got {currency!r}")
     return Column(key, label, kind, currency)
 
 
@@ -1491,7 +1516,7 @@ class Table(Part):
             if options:
                 overrides[c.key] = options
         key = model._meta.pk.name
-        props: dict[str, Any] = {"row_key": key}
+        props: dict[str, Any] = {"row_key": key, "row_fields": (key,)}     # the key stays in each row, shown or not
         if self.open is not None:
             props["row_href"] = links.row_href(ctx, self.open, key)
         if self.empty is not None:
@@ -1562,10 +1587,11 @@ from __future__ import annotations
 
 import pytest
 import reflex as rx
+from django.contrib.auth.models import Group
 from django.test import SimpleTestCase
 
 from lex import ui
-from lex.lex_app.reflex.ui.pages import kinds, vocab
+from lex.lex_app.reflex.ui.pages import kinds, parts, tables, vocab
 from lex.lex_app.reflex.ui.pages.parts import Build, PageError
 
 pytestmark = pytest.mark.init
@@ -1594,9 +1620,11 @@ class TestCluster01cq_PageSections(SimpleTestCase):
         When:  they are built.
         Then:  without a load the section is its content; with one, the content is shown only
                once ui.loaded says so, before that the failure message when there is one, else
-               a skeleton; on a page nothing is mounted (the opener starts the load); on a
-               dashboard the load starts when the section mounts; a section's title is a
-               sentence and comes first.
+               a skeleton (a table's, when the section is one table); on a page nothing is
+               mounted (the opener starts the load); on a dashboard the load starts when the
+               section mounts; a section's title is a sentence and comes first. Facts that
+               follow one another form one key-value list; a section inside a section, and
+               empty= without a table, are refused.
         """
         plain = str(kinds.section("Notes", vocab.text("Hello")).build(CTX))
         self.assertIn('rfdsI18n.t("Hello", "Hello"', plain, "the content is built")
@@ -1614,6 +1642,24 @@ class TestCluster01cq_PageSections(SimpleTestCase):
         self.assertIn("on_mount", on_dashboard.event_triggers, "on a dashboard the load starts when the section mounts")
         with self.assertRaises(TypeError, msg="a section's title comes first and is a sentence"):
             kinds.section(vocab.text("Hello"))
+        facts = str(kinds.section("Key facts", vocab.fact("A", 1), vocab.fact("B", 2), vocab.text("Hello")).build(CTX))
+        self.assertEqual(facts.count('"data-slot":"rfds-key-value"'), 1,
+                         "facts that follow one another are one key-value list, which is what RFDS's items need")
+        only_table = kinds.section("Groups", tables.table(Group, columns=["name"]), load=SectionDesk.load_documents)
+        self.assertIn("rfds-skeleton-row", str(only_table.build(CTX)), "a section that is one table waits as a table")
+        self.assertNotIn("rfds-skeleton-row", text, "any other section waits as a block")
+        with self.assertRaises(PageError) as nested:
+            kinds.section("Outer", kinds.section("Inner", vocab.text("x"))).build(CTX.at("sections[0]"))
+        self.assertEqual(str(nested.exception),
+                         "Page `fund`, slot `sections[0]`: a section inside a section.\n"
+                         "Sections do not nest: give the page each of them, in `sections=[...]`.",
+                         "a nested section is refused in its own words")
+        with self.assertRaises(PageError) as no_table:
+            kinds.section("Notes", vocab.text("x"), empty="Nothing yet.").build(CTX.at("sections[0]"))
+        self.assertEqual(str(no_table.exception),
+                         "Page `fund`, slot `sections[0]`: `empty=` is the sentence for a table without rows, and this "
+                         "section has no table.\nRemove `empty=`, or put a `ui.table(...)` in the section.",
+                         "empty= without a table is refused")
 
     # -- 1.795 ---------------------------------------------------------
     def test_1_795_each_repeats_and_switch_chooses(self) -> None:
@@ -1631,11 +1677,20 @@ class TestCluster01cq_PageSections(SimpleTestCase):
         self.assertIn("RadixThemesText", repeated, "each item is the part the function returned")
         with self.assertRaises(PageError) as raw:
             vocab.each(SectionDesk.documents, lambda name: rx.text(name)).build(CTX)
-        self.assertIn("did not return a lex component", str(raw.exception))
+        self.assertIn("did not return a lex component", str(raw.exception), "the refusal says what was wrong")
+        with self.assertRaises(PageError) as sectioned:
+            vocab.each(SectionDesk.documents, lambda name: kinds.section("One", vocab.text(name))).build(CTX)
+        self.assertEqual(str(sectioned.exception),
+                         "Page `fund`: `ui.each` produced `ui.section`, and sections do not nest.\n"
+                         "Give the page each section itself, in `sections=[...]`.", "each cannot produce sections")
+        with self.assertRaises(TypeError, msg="each takes a function"):
+            vocab.each(SectionDesk.documents, vocab.text("x"))
+        with self.assertRaises(ValueError, msg="switch needs a case"):
+            vocab.switch(SectionDesk.mode, {})
         chosen = str(vocab.switch(SectionDesk.mode, {"a": vocab.text("First"), "b": vocab.text("Second")}).build(CTX))
         self.assertIn("mode_rx_state_", chosen, "the value decides")
-        self.assertIn('rfdsI18n.t("First"', chosen)
-        self.assertIn('rfdsI18n.t("Second"', chosen)
+        self.assertIn('rfdsI18n.t("First"', chosen, "the first case is built")
+        self.assertIn('rfdsI18n.t("Second"', chosen, "and the second")
         with self.assertRaises(PageError, msg="a case must be a lex component"):
             vocab.switch(SectionDesk.mode, {"a": rx.text("raw")}).build(CTX)
 
@@ -1647,8 +1702,10 @@ class TestCluster01cq_PageSections(SimpleTestCase):
         When:  it is put into a section directly, and through ui.custom_block with and without
                a reason.
         Then:  directly it is refused, with the page, the slot and what to write; through
-               ui.custom_block with a reason it is accepted and built as it is; without a
-               reason, or with something that is not a component, custom_block is refused.
+               ui.custom_block with a reason it is accepted and built as it is, and an error
+               names it by its public name; without a reason, or with something that is not a
+               component, custom_block is refused. A section hands its empty= sentence to a
+               copy of its table, never to the author's part.
         """
         with self.assertRaises(PageError) as direct:
             kinds.section("Notes", rx.text("raw")).build(CTX.at("sections[0]"))
@@ -1658,9 +1715,6 @@ class TestCluster01cq_PageSections(SimpleTestCase):
         self.assertIn("ui.custom_block", str(direct.exception), "and the way out is named")
         marked = kinds.section("Notes", vocab.custom_block(rx.text("raw"), reason="A chart type the vocabulary lacks."))
         self.assertIn("raw", str(marked.build(CTX)), "a marked block is built as it is")
-        from lex.lex_app.reflex.ui.pages import parts, tables
-        from django.contrib.auth.models import Group
-
         block = vocab.custom_block(rx.text("raw"), reason="A chart type the vocabulary lacks.")
         self.assertEqual(parts.called(block), "`ui.custom_block`", "an error names it by its public name")
         shared = tables.table(Group, columns=["name"])
@@ -1715,13 +1769,17 @@ class Each(Part):
             if not isinstance(part, Part):
                 raise ctx.fail("the function given to `ui.each` did not return a lex component.",
                                "Return one of the `ui.*` components, or `ui.custom_block(...)`.")
+            _fits(ctx, part, "ui.each")
             return part.build(ctx)
 
         return rx.foreach(self.items, one)
 
 
 def each(items: Any, render: Callable[[Any], Part], *, visible: Any = None) -> Each:
-    """Repeats ``render`` for every item."""
+    """Repeats ``render`` for every item: a function of one item that returns a ``ui.*`` component."""
+    if not callable(render):
+        raise TypeError("ui.each(items, render) takes a function that returns a `ui.*` component for one item; "
+                        f"got {type(render).__name__}")
     return Each(items, render, visible)
 
 
@@ -1736,12 +1794,22 @@ class Switch(Part):
             if not isinstance(part, Part):
                 raise ctx.fail("a case of `ui.switch` is not a lex component.",
                                "Give each case one of the `ui.*` components, or `ui.custom_block(...)`.")
+            _fits(ctx, part, "ui.switch")
         return rx.match(self.value, *[(key, part.build(ctx)) for key, part in self.cases.items()], rx.fragment())
 
 
 def switch(value: Any, cases: dict, *, visible: Any = None) -> Switch:
-    """Shows the case whose key equals ``value``; nothing when none does."""
+    """Shows the case whose key equals ``value``; nothing when none does. The keys are fixed values."""
+    if not cases:
+        raise ValueError("ui.switch(value, cases) needs at least one case: `{\"open\": ui.text(...)}`")
     return Switch(value, dict(cases), visible)
+
+
+def _fits(ctx: Build, part: Part, where: str) -> None:
+    """Refuse a part that cannot sit inside a section, when `ui.each` or `ui.switch` produced it."""
+    if not type(part).nests:
+        raise ctx.fail(f"`{where}` produced {called(part)}, and sections do not nest.",
+                       "Give the page each section itself, in `sections=[...]`.")
 
 
 CONTENT = (Text, Fact, Status, Message, Link, Button, CustomBlock, Each, Switch)
@@ -1759,7 +1827,7 @@ def build_all(ctx: Build, parts: list) -> list:
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Any, ClassVar
 
 import reflex as rx
 
@@ -1781,8 +1849,32 @@ def states(ctx: Build, load: Any, content: rx.Component, shape: str) -> rx.Compo
     return rx.box(whole, on_mount=load, width="100%") if ctx.mounts else whole
 
 
+def _stacked(ctx: Build, parts: list) -> list:
+    """The parts built in order; facts that follow one another become one key-value list."""
+    import rfds
+
+    built: list = []
+    run: list = []
+
+    def close() -> None:
+        if run:
+            built.append(rfds.key_value(*vocab.build_all(ctx, run), columns=min(3, len(run))))
+            run.clear()
+
+    for part in parts:
+        if isinstance(part, vocab.Fact):
+            run.append(part)
+            continue
+        close()
+        built.append(part.build(ctx))
+    close()
+    return built
+
+
 @dataclasses.dataclass(eq=False)
 class Section(Part):
+    nests: ClassVar[bool] = False
+
     title: str
     content: tuple = ()
     load: Any = None
@@ -1792,13 +1884,22 @@ class Section(Part):
     def body(self, ctx: Build) -> rx.Component:
         import rfds
 
+        if any(isinstance(part, Section) for part in self.content):
+            raise ctx.fail("a section inside a section.",
+                           "Sections do not nest: give the page each of them, in `sections=[...]`.")
         parts = take(ctx, list(self.content), (*vocab.CONTENT, tables.Table),
                      "A section holds `ui.text`, `ui.table`, `ui.message`, `ui.link` and the other `ui.*` "
                      "components, or `ui.custom_block(..., reason=\"...\")`.")
-        if self.empty is not None:              # a table without its own sentence takes the section's; a copy, not the part
+        has_table = any(isinstance(part, tables.Table) for part in parts)
+        if self.empty is not None:
+            if not has_table:
+                raise ctx.fail("`empty=` is the sentence for a table without rows, and this section has no table.",
+                               "Remove `empty=`, or put a `ui.table(...)` in the section.")
+            # A table without its own sentence takes the section's: a copy, never the author's part.
             parts = [dataclasses.replace(part, empty=self.empty)
                      if isinstance(part, tables.Table) and part.empty is None else part for part in parts]
-        return states(ctx, self.load, rfds.stack(*vocab.build_all(ctx, parts)), "rect")
+        shape = "table" if has_table and len(parts) == 1 else "rect"
+        return states(ctx, self.load, rfds.stack(*_stacked(ctx, parts)), shape)
 
     def _render(self, ctx: Build) -> rx.Component:
         return self.body(ctx)
@@ -1954,7 +2055,7 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         cases = {
             "facts": (dict(facts=[rx.text("raw")]),
                       "Page `fund`, slot `facts`: got a raw component (`Text`).\n"
-                      "Use `ui.fact(label, value)`, or wrap it in `ui.custom_block(..., reason=\"...\")`."),
+                      "Use `ui.fact(label, value)`."),
             "no section": (dict(sections=[]),
                            "Page `fund`, slot `sections`: a record page needs at least one section.\n"
                            "Add `sections=[ui.section(\"Details\", ...)]`."),
@@ -2106,7 +2207,7 @@ class Record(Kind):
             (badge,) = take(ctx.at("status"), self.status, (vocab.Status,), "`status=` holds one `ui.status(word, tone=)`.")
             head.append(badge.build(ctx.at("status")))
         facts = take(ctx.at("facts"), list(self.facts), (vocab.Fact,),
-                     "Use `ui.fact(label, value)`, or wrap it in `ui.custom_block(..., reason=\"...\")`.")
+                     "Use `ui.fact(label, value)`.")
         if facts:
             head.append(rfds.key_value(*vocab.build_all(ctx.at("facts"), facts), columns=min(3, len(facts))))
         parts = take(ctx.at("sections"), list(self.sections), (Section,), "`sections=` holds `ui.section(title, ...)`.")
