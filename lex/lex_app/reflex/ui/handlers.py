@@ -539,3 +539,17 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
         return rx.event(wrapper, background=True)
 
     return decorate(fn) if fn is not None else decorate
+
+
+def custom(fn: Callable[..., Any] | None = None, **event_kwargs: Any) -> Any:
+    """A raw Reflex handler on a ``ui.State``: the custom region, marked so reviews can see it.
+
+    It behaves exactly like ``@rx.event`` (``background=True`` and the rest are passed on).
+    ``lex reflex check`` lists every one; an unmarked ``@rx.event`` on a ``ui.State`` fails it.
+    """
+
+    def decorate(fn: Callable[..., Any]) -> Any:
+        _mark(fn, fn, "custom", **event_kwargs)
+        return rx.event(fn, **event_kwargs) if event_kwargs else rx.event(fn)
+
+    return decorate(fn) if fn is not None else decorate

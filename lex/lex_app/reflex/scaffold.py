@@ -232,11 +232,14 @@ def check_paths(project_root: Path) -> list[str]:
 
 
 def run_check(project_root: Path) -> int:
-    """RFDS's ``lint --strict`` over the dashboards, then ``doctor`` over the project; 0 = clean."""
+    """lex.ui's findings, RFDS's ``lint --strict`` over the dashboards, then ``doctor``; 0 = clean."""
     from rfds.cli import main as rfds_main
+
+    from lex.lex_app.reflex.ui import checks
 
     paths = check_paths(project_root)
     status = 0
     if paths:
+        status = checks.report(checks.find(paths)) or status
         status = rfds_main(["lint", "--strict", *paths]) or status
     return rfds_main(["doctor", "--app-root", str(project_root)]) or status
