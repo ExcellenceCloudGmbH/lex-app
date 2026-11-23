@@ -314,7 +314,8 @@ The author writes the same thing in both cases.
   `date`, `datetime`, `year`, `bool`, `choice`. lex-app formats it for the user's locale.
 - `tone=` — one of `neutral`, `info`, `success`, `warning`, `danger`.
 - `to=` — a page function, with its parameters by name (`to=fund, key=row.id`).
-- `visible=` — a permission or a state value. Display only; the handler still enforces.
+- `visible=` — a permission, written with the same values `requires=` takes (`visible=ui.edit(Fund)`),
+  or a state value (`visible=FundState.phase == "open"`). Display only; the handler still enforces.
 - `icon=` — a name from the icon set. There is no icon component.
 
 **Three behaviours are built in:**
