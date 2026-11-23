@@ -174,6 +174,18 @@ class Harness:
             values[name] = workcopy._plain(getattr(state, name))
         return values
 
+    async def open_tab(self) -> None:
+        """Connect the tab as a browser would, and forget the whole-state sync Reflex sends a new tab.
+
+        ``run`` calls it before seeding ``fields=``: the seed is what the browser already shows,
+        so the updates recorded afterwards are only what the handler sent.
+        """
+        import reflex as rx
+
+        await (await self.send(rx.State, "set_is_hydrated", value=True))
+        self._sink.updates.clear()
+        self._sink.times.clear()
+
     async def set_fields(self, state_cls: Any, **values: Any) -> None:
         state = await self._state(state_cls)
         for name, value in values.items():
@@ -235,6 +247,7 @@ def run(state_cls: Any, handler: str, *, user: str = "tester", grants: Any = (),
 
     async def scenario() -> Result:
         async with Harness(user=user, grants=grants, params=params, api=api) as harness:
+            await harness.open_tab()
             if fields:
                 await harness.set_fields(state_cls, **fields)
             future = await harness.send(state_cls, handler, **arguments)

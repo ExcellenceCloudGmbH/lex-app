@@ -35,7 +35,8 @@ def create_app():
       permission checks answer from grants at most a minute old.
     * lex-app's single-port proxy, when ``REFLEX_USE_SINGLE_PORT`` asks for it
       (decision E7).
-    * ``/``, which shows whichever dashboard the query string asks for, and
+    * ``/``, which shows whichever dashboard the query string asks for,
+      ``/ui-error``, where a failed ``@ui.load`` sends the browser, and
       ``/logout``, where RFDS's user menu signs out.
 
     Further pages come from the project itself: any ``@lex_page`` or
@@ -82,13 +83,29 @@ def create_app():
     app.add_middleware(DjangoConnectionMiddleware())
     app.add_middleware(GrantsRefreshMiddleware())
     devproxy.install(app)
+    from lex.lex_app.reflex.ui.state import ERROR_ROUTE, error_page
+    from lex.lex_app.reflex.ui.state import State as UiState
+
+    _load_lazy_states()  # rfds.toast defines states; imported mid-event, they would register too late
     app.add_page(
         dashboard_page(load_structure()),
         route="/",
-        on_load=[LexAccessState.load, LexDashboardState.resolve],
+        on_load=[LexAccessState.load, LexDashboardState.resolve, UiState.ui_open([], [], "")],
     )
+    app.add_page(error_page, route=ERROR_ROUTE, title="This page could not be opened", on_load=[LexAccessState.load])
     app.add_page(_signing_out, route="/logout", title="Signing out", on_load=LexUser.sign_out)
     return app
+
+
+def _load_lazy_states() -> None:
+    """Import the RFDS modules that define Reflex states on first use, before any page is added.
+
+    ``rfds.toast`` is imported lazily (a lex.ui toast reaches for it); first imported in the
+    middle of an event, it would register its states after the user's state tree was built.
+    """
+    import rfds
+
+    rfds.toast  # noqa: B018 - loading it is the point
 
 
 def _signing_out():

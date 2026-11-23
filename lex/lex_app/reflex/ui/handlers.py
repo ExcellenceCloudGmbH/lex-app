@@ -372,3 +372,117 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
         return rx.event(wrapper, background=True)
 
     return decorate(fn) if fn is not None else decorate
+
+
+#: Load handlers by key, filled by :func:`page_loads`; the opener starts them by name.
+_LOADS: dict[str, Any] = {}
+
+
+def page_loads(on_load: Any) -> tuple[list[str], list[str], list]:
+    """Split a page's ``on_load`` into (required load names, optional load names, other handlers)."""
+    items = [] if on_load is None else list(on_load) if isinstance(on_load, (list, tuple)) else [on_load]
+    required: list[str] = []
+    optional: list[str] = []
+    others: list = []
+    for item in items:
+        fn = getattr(item, "fn", None)
+        if getattr(fn, "__ui_kind__", "") != "load":
+            others.append(item)
+            continue
+        key = fn.__ui_key__
+        _LOADS[key] = item
+        (optional if fn.__ui_options__.get("optional") else required).append(key)
+    return required, optional, others
+
+
+def registered(name: str) -> Any:
+    """The load handler registered under ``name``."""
+    return _LOADS[name]
+
+
+def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional: bool = False,
+         keep: tuple[str, ...] = ()) -> Any:
+    """Fill the page when it opens, written as a plain function.
+
+    Pass it to ``lex_page(on_load=...)``; lex-app starts it after sign-in and the page's
+    permission check. It first resets the state's own fields (except ``keep``). A required
+    load that fails shows the error page; one with ``optional=True`` fails only its own region
+    (read ``ui.failed(State.handler)``). A result that arrives after the user left is discarded.
+    """
+
+    def decorate(fn: Callable[..., Any]) -> Any:
+        _check_plain(fn, "load")
+        key = fn.__qualname__
+        requirements = guard.normalise(requires)
+        kept = tuple(keep)
+
+        @functools.wraps(fn)
+        async def wrapper(self, *args: Any, **kwargs: Any):
+            from lex.lex_app.reflex.ui.state import ERROR_ROUTE
+
+            arg = runs.arg_key(args, kwargs)
+            visit: int | None = None
+            started = False
+            outcome: Outcome | None = None
+            follow: list = []                             # what to send once the run is wound up
+            try:
+                try:
+                    async with self:                      # who is acting, a clean state, the first copy
+                        visit = self.ui_visit
+                        session = await context.resolve(self)
+                        own = type(workcopy.raw(self))
+                        workcopy.reset(self, keep=kept)
+                        if await _denied(session, requirements):
+                            raise _NotPermitted()
+                        inv = context.Invocation(handler=key, kind="load", session=session,
+                                                 loop=asyncio.get_running_loop(), live=self,
+                                                 orm=requirements is not None)
+                        inv.drafts[own] = workcopy.Draft(own, workcopy.snapshot(self))
+                        runs.mark_started(self, key, arg)
+                        started = True
+                    async with contextlib.aclosing(_drive(inv, "interactive", fn, inv.drafts[own], args, kwargs)) as steps:
+                        async for step in steps:
+                            found, report = results.split(step.value, handler=key)
+                            async with self:
+                                current = self.ui_visit == visit
+                                if current:
+                                    await _merge(inv, self)
+                                    if report is not None:
+                                        runs.mark_progress(self, key, report)
+                                elif isinstance(step, _Step):
+                                    step.stop = True      # the user left: the rest is discarded
+                            if current:
+                                for event in results.to_events(found):
+                                    yield event
+                except Exception as exc:  # noqa: BLE001 - the body has finished here; reported below
+                    outcome = _classify(key, exc)
+            finally:                                      # the one place a run is wound up; also on cancellation
+                async with self:
+                    message = outcome.message if outcome is not None else ""
+                    if started:
+                        runs.mark_finished(self, key, arg, error=message)
+                    elif message:
+                        self.ui_failed = {**dict(self.ui_failed), key: message}
+                    current = visit is not None and self.ui_visit == visit
+                    if current and outcome is not None and not optional:
+                        self.ui_error = {"kind": "denied" if outcome.kind == "denied" else "error",
+                                         "title": outcome.title, "message": outcome.message,
+                                         "path": str(getattr(workcopy.raw(self).router.url, "path", "") or "/")}
+                        follow = [results.Goto(ERROR_ROUTE, True)]
+                    elif current and outcome is None and started and not optional:
+                        pending = [name for name in self._ui_pending_loads if name != key]
+                        self._ui_pending_loads = pending
+                        if not pending and self._ui_optional_loads:
+                            follow = [registered(name) for name in self._ui_optional_loads]
+                            self._ui_optional_loads = []
+            for item in follow:                           # not reached when cancelled: nothing is shown
+                if isinstance(item, results.Goto):
+                    for event in results.to_events([item]):
+                        yield event
+                else:
+                    yield item
+
+        _mark(wrapper, fn, "load", requires=requirements, optional=optional, keep=kept)
+        return rx.event(wrapper, background=True)
+
+    return decorate(fn) if fn is not None else decorate

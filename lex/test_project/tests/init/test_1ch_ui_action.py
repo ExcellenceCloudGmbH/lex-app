@@ -157,7 +157,7 @@ class TestCluster01ch_Action(TransactionTestCase):
         marks = [u["ui_running"] for u in result.updates if "ui_running" in u]
         self.assertIn({key: [""]}, marks, "the browser is told the handler is running")
         self.assertEqual(marks[-1], {}, "the last update says it is not")
-        # A new tab's first update carries the whole state (steps=0), so only real steps count.
+        # Only real steps count (an update carrying steps=0 is not one).
         steps = [(t, u["steps"]) for t, u in zip(result.update_times, result.updates) if u.get("steps")]
         self.assertEqual([value for _, value in steps], [1, 2])
         first_running = next(i for i, u in enumerate(result.updates) if u.get("ui_running") == {key: [""]})

@@ -183,7 +183,8 @@ def lex_page(
             shows RFDS's access-denied content and its navigation entry is
             hidden. This is what the user sees, not access control: the data
             the page loads must be checked by the handlers that load it.
-        on_load: Load events, run after the user's grants are loaded.
+        on_load: Load events, run after the user's grants are loaded. A lex.ui load
+            (``@ui.load``) is started after them, by the opener.
         **page_kwargs: Anything else ``rx.page`` takes (``meta``, ``image``...).
 
     Returns:
@@ -219,9 +220,13 @@ def lex_page(
         page.__name__ = page_fn.__name__
         page.__qualname__ = page_fn.__qualname__
         page.__doc__ = page_fn.__doc__
-        loads: list[Any] = [LexAccessState.load]
-        if on_load is not None:
-            loads.extend(on_load if isinstance(on_load, (list, tuple)) else [on_load])
+        from lex.lex_app.reflex.ui.handlers import page_loads
+        from lex.lex_app.reflex.ui.state import State as UiState
+
+        # lex.ui loads are background handlers, which Reflex starts at once -- before the
+        # grants are loaded. So they are started by the opener, the page's last load event.
+        required, optional, others = page_loads(on_load)
+        loads: list[Any] = [LexAccessState.load, *others, UiState.ui_open(required, optional, requires or "")]
         rx.page(route=route, title=title, on_load=loads, **page_kwargs)(page)
         return page_fn
 
