@@ -47,6 +47,11 @@ class State(rx.State):
     #: The route of this visit, and the states a load of this visit has already reset.
     _ui_page: str = ""
     _ui_reset: list[str] = []
+    #: The ids of the loads the opener started that have not begun yet: a load not listed here
+    #: was started on mount.
+    _ui_started: list[str] = []
+    #: Load id -> the token of its latest run in this tab; an older run on mount is stale.
+    _ui_load_runs: dict[str, str] = {}
 
     user = property(lambda self: context.current().session.user)
     api = property(lambda self: context.api_of(context.current()))
@@ -67,7 +72,6 @@ class State(rx.State):
         from lex.lex_app.reflex.ui import handlers
 
         self.ui_visit += 1
-        self.ui_error = {}
         from lex.lex_app.reflex.ui import runs
 
         await runs.sweep(self)
@@ -75,11 +79,13 @@ class State(rx.State):
         self._ui_reset = []
         entry = handlers.page_of(page)
         if entry is None or not _page_permitted(self, entry.requires):
-            self._ui_pending_loads, self._ui_optional_loads = [], []
+            self._ui_pending_loads, self._ui_optional_loads, self._ui_started = [], [], []
             return None
         self._ui_pending_loads = [handlers.load_id(h) for h in entry.required]
         self._ui_optional_loads = [handlers.load_id(h) for h in entry.optional] if entry.required else []
-        return list(entry.required or entry.optional)
+        starting = list(entry.required or entry.optional)
+        self._ui_started = [handlers.load_id(h) for h in starting]
+        return starting
 
     @rx.event
     def ui_cancel(self, key: str):

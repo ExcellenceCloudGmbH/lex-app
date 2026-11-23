@@ -294,7 +294,13 @@ open; loads and jobs compare the visit they started in with the current one.
 - Bound to a page with `lex_page(..., on_load=State.open)`, which accepts one handler or a list.
   `lex_page` does not list the load in Reflex's `on_load` itself: Reflex starts background handlers
   at once, ahead of the sign-in and grant events, so `lex_page` appends an opener event that starts
-  the page's loads after them. A load can also be started with a component's `on_mount`.
+  the page's loads after them.
+- A dashboard has no `lex_page`, so it starts its load with a component's `on_mount`. Reflex sends
+  mount events before the page's `on_load` events, so such a load is not tied to the page's visit:
+  it is discarded only when a newer run of the same load has started in the tab or the browser has
+  left the location (path and query) it started on, and it resets its own state every time it
+  starts. It takes no part in the page's required and optional bookkeeping. Loads that fill one
+  state together are therefore declared on the page, or written as one load.
 - The opener carries only the page's route. The page's loads and the permission it needs are looked
   up on the server, in a registry `lex_page` fills; an unknown route starts no loads. The opener
   starts the loads only when the user holds the page's permission. A load is still an ordinary event

@@ -212,6 +212,26 @@ class Harness:
             return
         await (await self.send(rx.State, "set_is_hydrated", _router_data=_router_data(url), value=True))
 
+    async def mount(self, state_cls: Any, handler: str, *, url: str = "/", route: str | None = None,
+                    **arguments: Any) -> Any:
+        """The browser opens ``url``, where a component mounts with ``on_mount=state_cls.handler``.
+
+        Reflex sends a component's mount events before the page's ``on_load`` events, so the
+        handler's event goes first and the page's opener (``ui_open`` with ``route``, by default
+        the path of ``url``) after it, once the handler has started. Returns the handler's
+        future; the opener has run when this returns.
+        """
+        from urllib.parse import urlsplit
+
+        from lex.lex_app.reflex.ui.state import State
+
+        await self.navigate(url)
+        future = await self.send(state_cls, handler, **arguments)
+        await asyncio.sleep(0.05)                 # the mount event is handled before the opener arrives
+        page = route if route is not None else (urlsplit(url).path or "/")
+        await (await self.send(State, "ui_open", page=page))
+        return future
+
     async def set_fields(self, state_cls: Any, **values: Any) -> None:
         state = await self._state(state_cls)
         for name, value in values.items():

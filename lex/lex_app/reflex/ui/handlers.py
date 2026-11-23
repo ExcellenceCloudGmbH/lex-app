@@ -11,6 +11,7 @@ import logging
 import os
 import threading
 import time
+import uuid
 from typing import Any, AsyncIterator, Callable
 
 import reflex as rx
@@ -448,6 +449,14 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
     load that fails shows the error page and ends the visit; one with ``optional=True`` fails
     only its own region (read ``ui.failed(State.handler)``). A result or a failure that arrives
     after the user left is discarded.
+
+    A page without ``lex_page`` (a dashboard) starts its load with a component's
+    ``on_mount=State.handler`` instead. Reflex sends mount events before the page's ``on_load``,
+    so such a load is not tied to the visit: it is discarded only when a newer run of the same
+    load starts or the browser leaves the location it started on, and it resets its state's own
+    fields (except ``keep``) every time it starts. So loads started on mount that share one state
+    reset it each time either starts: a state filled by several loads declares them on the page
+    (``lex_page(on_load=[...])``) or uses one load.
     """
 
     def decorate(fn: Callable[..., Any]) -> Any:
@@ -464,20 +473,40 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
             arg = runs.arg_key(args, kwargs)
             visit: int | None = None
             where = ""                                    # the page the load started on, with its query
+            run_token = uuid.uuid4().hex                  # this run; the latest run of each load is kept
+            by_opener = False                             # started by the page's opener, not on mount
             started = False
             succeeded = False                             # the body ran to its end: no error, no cancellation
             outcome: Outcome | None = None
             follow: list = []                             # what to send once the run is wound up
+
+            def is_current() -> bool:
+                """Whether this run's results still belong on the page. Call inside ``async with self``."""
+                if visit is None:
+                    return False
+                if by_opener:
+                    return self.ui_visit == visit
+                # On mount: not tied to the visit (the opener may arrive after it started).
+                return self._ui_load_runs.get(ident) == run_token and _location(self) == where
+
             try:
                 try:
                     async with self:                      # who is acting, a clean state, the first copy
                         visit = self.ui_visit
                         where = _location(self)
+                        listed = list(self._ui_started)
+                        by_opener = ident in listed
+                        if by_opener:
+                            listed.remove(ident)
+                            self._ui_started = listed
+                        self._ui_load_runs = {**dict(self._ui_load_runs), ident: run_token}
                         session = await context.resolve(self)
                         own = type(workcopy.raw(self))
                         name = own.get_full_name()
                         done = list(self._ui_reset)
-                        if name not in done:              # once per visit: a sibling load's data stays
+                        if not by_opener:                 # on mount: every run starts from a clean state
+                            workcopy.reset(self, keep=kept)
+                        elif name not in done:            # once per visit: a sibling load's data stays
                             workcopy.reset(self, keep=kept)
                             self._ui_reset = [*done, name]
                         if await _denied(session, requirements):
@@ -492,7 +521,7 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                         async for step in steps:
                             found, report = results.split(step.value, handler=key)
                             async with self:
-                                current = self.ui_visit == visit
+                                current = is_current()
                                 if current:
                                     await _merge(inv, self)
                                     if report is not None:
@@ -507,7 +536,7 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                     outcome = _classify(key, exc)         # logged even when the user has moved on
             finally:                                      # the one place a run is wound up; also on cancellation
                 async with self:
-                    current = visit is not None and self.ui_visit == visit
+                    current = is_current()
                     message = outcome.message if outcome is not None and current else ""
                     if started:
                         runs.mark_finished(self, key, arg, error=message)
@@ -520,7 +549,7 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                                              "path": _return_path(where)}
                             self.ui_visit += 1            # the visit is over: its later outcomes are stale
                             follow = [results.Goto(ERROR_ROUTE, True)]
-                    elif current and succeeded and not optional:
+                    elif current and succeeded and not optional and by_opener:
                         pending = [other for other in self._ui_pending_loads if other != ident]
                         self._ui_pending_loads = pending
                         if not pending and self._ui_optional_loads:
@@ -528,6 +557,7 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                             waiting = set(self._ui_optional_loads)
                             follow = [h for h in (entry.optional if entry else ()) if load_id(h) in waiting]
                             self._ui_optional_loads = []
+                            self._ui_started = [*self._ui_started, *(load_id(h) for h in follow)]
             for item in follow:                           # not reached when cancelled: nothing is shown
                 if isinstance(item, results.Goto):
                     for event in results.to_events([item]):
