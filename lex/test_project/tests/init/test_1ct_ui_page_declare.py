@@ -44,6 +44,10 @@ class DeclareDesk(ui.State):
     def load_documents(self):
         self.name = self.name
 
+    @ui.action
+    def touch(self):
+        self.name = "touched"
+
 
 class TestCluster01ct_PageDeclare(SimpleTestCase):
     """1.803-1.805: declaring pages; what finalize hands to lex-app; dashboards."""
@@ -67,8 +71,10 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
         Then:  decorating calls neither function and returns it unchanged, with what a link
                needs (route, its arguments, its declared query parameters); registration builds
                each page in lex-app's chrome under its route, with the permission from
-               requires= as RFDS's permission string and the opener last in its load events; a
-               route that does not start with "/" is refused.
+               requires= as RFDS's permission string and the opener last in its load events. A
+               route that does not start with "/", a requires= that is not one permission, a
+               params= given as one string, and a second function at a route are refused when
+               the page is declared.
         """
         calls: list = []
 
@@ -98,6 +104,22 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
                          "requires= becomes the page's permission string")
         with self.assertRaises(ValueError, msg="a route starts with /"):
             declare.page("funds")
+        with self.assertRaises(TypeError) as wrong_requires:
+            declare.page("/open", requires=[ui.read(Group)])
+        self.assertIn("Leave it out for a page any signed-in user may see", str(wrong_requires.exception),
+                      "a wrong requires= is refused when the page is declared, with the route and what to write")
+        self.assertIn("'/open'", str(wrong_requires.exception), "the route is named")
+        declare.page("/anyone", requires=ui.signed_in)(lambda: None)
+        self.assertIsNone(declare._DECLARED["/anyone"].permission, "ui.signed_in is a page for any signed-in user")
+        declare._DECLARED.pop("/anyone")
+        with self.assertRaises(TypeError, msg="params= is a list of names, not one string"):
+            declare.page("/funds", params="tab")
+        with self.assertRaises(ValueError) as twice:
+            @declare.page("/funds")
+            def other_funds():
+                return None
+        self.assertIn("`other_funds` needs a route of its own", str(twice.exception),
+                      "two functions cannot be the page at one route")
 
     # -- 1.804 ---------------------------------------------------------
     def test_1_804_registration_hands_over_the_navigation_entry_and_the_loads(self) -> None:
@@ -109,8 +131,9 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
         When:  lex-app registers the declared pages.
         Then:  the navigation entry carries the kind's title; the kind's load is registered as
                the page's required load and the section's load as an optional one; registering
-               twice adds nothing; a navigation page without a fixed title, and a function that
-               does not return a kind, are refused with what to write.
+               twice adds nothing; a navigation page without a fixed title, a load= that is not
+               a @ui.load handler, one load given twice, a page function that raises, and a
+               function that does not return a kind, are each refused with the page named.
         """
         @declare.page("/funds", nav="Funds", icon="list")
         def funds():
@@ -138,8 +161,40 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
             declare.finalize()
         self.assertEqual(str(no_title.exception),
                          "Page `moving`: a page listed in the navigation needs a fixed title.\n"
-                         "Give the kind `title=\"...\"`, or leave `nav=` out.")
+                         "Give the kind `title=\"...\"`, or leave `nav=` out.", "a navigation page needs fixed words")
         declare._DECLARED.pop("/moving")
+
+        @declare.page("/acting")
+        def acting():
+            return kinds.record(title="Acting", load=DeclareDesk.touch, sections=[kinds.section("A", vocab.text("a"))])
+
+        with self.assertRaises(PageError) as not_a_load:
+            declare.finalize()
+        self.assertTrue(str(not_a_load.exception).startswith("Page `acting`: `load=` got "),
+                        f"a handler that is not a load is refused as the page's load: {not_a_load.exception}")
+        self.assertIn("Pass a handler declared with `@ui.load`, without arguments", str(not_a_load.exception),
+                      "with what to pass")
+        declare._DECLARED.pop("/acting")
+
+        @declare.page("/doubled")
+        def doubled():
+            return kinds.record(title="Doubled", load=DeclareDesk.open,
+                                sections=[kinds.section("A", vocab.text("a"), load=DeclareDesk.open)])
+
+        with self.assertRaises(PageError) as same_load:
+            declare.finalize()
+        self.assertIn("is given as a load twice", str(same_load.exception), "one load is the page's or a section's")
+        declare._DECLARED.pop("/doubled")
+
+        @declare.page("/broken")
+        def broken():
+            return kinds.record(title="Broken", sections=[kinds.section(5)])
+
+        with self.assertRaises(PageError) as raised:
+            declare.finalize()
+        self.assertTrue(str(raised.exception).startswith("Page `broken`: its function raised TypeError:"),
+                        f"an error inside a page function is given the page's name: {raised.exception}")
+        declare._DECLARED.pop("/broken")
 
         @declare.page("/raw")
         def raw():
@@ -148,7 +203,8 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
         with self.assertRaises(PageError) as not_a_kind:
             declare.finalize()
         self.assertEqual(str(not_a_kind.exception),
-                         "Page `raw`: it returned Text.\nReturn a page kind: `ui.record(...)`, `ui.list(...)`.")
+                         "Page `raw`: it returned Text.\nReturn a page kind: `ui.record(...)`, `ui.list(...)`.",
+                         "a function that does not return a kind is told what to return")
 
     # -- 1.805 ---------------------------------------------------------
     def test_1_805_a_dashboard_starts_its_loads_on_mount_and_create_app_registers_the_pages(self) -> None:
@@ -157,9 +213,9 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
         Given: a dashboard function returning a record with a load, and lex-app's create_app.
         When:  the dashboard is called, and create_app's source is read.
         Then:  the dashboard returns the built page, a component, whose load starts when it
-               mounts (a dashboard has no opener); it is not a link target; create_app loads the
-               project's module, then registers the declared pages, before it adds the home
-               page.
+               mounts (a dashboard has no opener); it is not a link target; on a model it sits
+               under @classmethod and receives the model; create_app loads the project's
+               module, then registers the declared pages, before it adds the home page.
         """
         @declare.dashboard
         def main():
@@ -170,6 +226,17 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
         self.assertIn("on_mount", built.event_triggers, "its load starts when it mounts")
         self.assertIsNone(links.page_info(main), "a dashboard is not a page to link to")
         self.assertEqual(main.__name__, "main", "it keeps its name, for lex-app's structure module")
+
+        class Model:
+            """Stands for a project model with a dashboard hook."""
+
+            @classmethod
+            @declare.dashboard
+            def reflex_main(cls):
+                return kinds.record(title=cls.__name__, sections=[kinds.section("A", vocab.text("a"))])
+
+        self.assertIsInstance(Model.reflex_main(), rx.Component, "a model's hook is a class method above @ui.dashboard")
+        self.assertIn('rfdsI18n.t("Model", "Model"', str(Model.reflex_main()), "and the function receives the model")
         source = inspect.getsource(lex_app_module.create_app)
         self.assertLess(source.index("load_structure()"), source.index("declare.finalize()"),
                         "the project's module is loaded before its pages are registered")

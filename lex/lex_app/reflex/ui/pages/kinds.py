@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, ClassVar
+import re
+from typing import Any, Callable, ClassVar
 
 import reflex as rx
 
 from lex.lex_app.reflex.ui import runs
 from lex.lex_app.reflex.ui.pages import tables, vocab
-from lex.lex_app.reflex.ui.pages.parts import Build, Part, say, slug, take
+from lex.lex_app.reflex.ui.pages.parts import Build, NotASentence, Part, called, say, slug, take
 
 
 def states(ctx: Build, load: Any, content: rx.Component, shape: str) -> rx.Component:
     """``content`` once ``load`` has finished; before that its skeleton, or its failure in place."""
     import rfds
 
+    # The page waits as a whole: keeping its header while the body loads would show an empty
+    # title and actions that can be clicked before the data they act on has arrived.
     if load is None:
         return content
     problem = runs.failed(load)
@@ -87,6 +90,11 @@ def section(title: str, *content: Any, load: Any = None, empty: Any = None, visi
         raise TypeError(f"ui.section() takes its title first, a sentence; got {title!r}")
     return Section(title, tuple(content), load, empty, visible)
 
+
+#: An action RFDS treats as a Save: it wants a "last saved" time beside it, which a page header cannot give.
+_SAVE = re.compile(r"\b(save|speichern|sichern)\b", re.IGNORECASE)
+
+
 def _apart(button: rx.Component) -> rx.Component:
     """``button`` in a wrapper RFDS can tell from the primary action.
 
@@ -97,6 +105,31 @@ def _apart(button: rx.Component) -> rx.Component:
     from rfds.components.actions._common import get_meta, set_meta
 
     return set_meta(rx.fragment(button), **get_meta(button))
+
+
+def _rfds(ctx: Build, build: Callable[[], Any]) -> Any:
+    """Call one of RFDS's floorplans; a limit of its own becomes a ``PageError`` naming the page."""
+    try:
+        return build()
+    except (ValueError, TypeError) as wrong:
+        raise ctx.fail(f"RFDS's page layout refuses this page: {wrong}",
+                       "The sentence above is RFDS's own: it names the limit the page goes over.") from None
+
+
+def _section_ids(titles: list) -> list:
+    """An id for each section: an anchor in the page's address, so letter-led and unlike the others."""
+    ids: list = []
+    for index, title in enumerate(titles):
+        base = slug(title)
+        if base == "part":
+            base = f"section-{index + 1}"
+        elif not base[0].isalpha():
+            base = f"section-{base}"
+        candidate, number = base, 2
+        while candidate in ids:
+            candidate, number = f"{base}-{number}", number + 1
+        ids.append(candidate)
+    return ids
 
 
 class Kind:
@@ -118,12 +151,16 @@ class Kind:
         ctx = ctx.at("actions", "actions")
         parts = take(ctx, list(self.actions), (vocab.Button, vocab.Link),
                      "`actions=` holds `ui.button(...)` (or `ui.link(...)`, shown as a button).")
+        for part in parts:
+            if isinstance(part.label, str) and _SAVE.search(part.label):
+                raise ctx.fail(f"an action is called `{part.label}`.",
+                               "RFDS shows a last-saved time beside a Save action, which a page header cannot give "
+                               "yet. Name the action for what it does (`\"Apply changes\"`); saving belongs to a form.")
         first = parts[0] if parts and isinstance(parts[0], vocab.Button) and parts[0].tone != "danger" else None
         rest = [part for part in parts if part is not first]
         built: list = []
         if first is not None:
-            first.primary = True
-            built.append(first.build(ctx))
+            built.append(dataclasses.replace(first, primary=True).build(ctx))     # a copy: the part is the author's
         if len(rest) == 1:
             built.append(_apart(rest[0].build(ctx)))
         else:
@@ -131,9 +168,14 @@ class Kind:
         return built
 
     def _title(self, ctx: Build) -> Any:
-        if self.title is None or (isinstance(self.title, str) and not self.title):
+        title = self.title
+        if title is None or (isinstance(title, str) and not title.strip()):
             raise ctx.fail("the page has no title.", "Give the kind `title=\"...\"`, or a state value.")
-        return say(self.title)
+        try:
+            return say(title)
+        except NotASentence:
+            raise ctx.fail(f"the page's title is {called(title)}.",
+                           "Give the kind `title=\"...\"`, or a state value.") from None
 
 
 @dataclasses.dataclass(eq=False)
@@ -149,6 +191,38 @@ class Record(Kind):
     def loads(self) -> tuple[list, list]:
         return ([self.load] if self.load is not None else []), [s.load for s in self.sections if s.load is not None]
 
+    def _sections(self, ctx: Build) -> list:
+        """The sections as RFDS's object page takes them, each checked first."""
+        from rfds import templates
+
+        from lex.lex_app.reflex.access import permission
+        from lex.lex_app.reflex.ui import guard
+
+        parts = take(ctx.at("sections"), list(self.sections), (Section,), "`sections=` holds `ui.section(title, ...)`.")
+        if not parts:
+            raise ctx.at("sections").fail("a record page needs at least one section.",
+                                          "Add `sections=[ui.section(\"Details\", ...)]`.")
+        titles = [part.title for part in parts]
+        twice = sorted({title for title in titles if titles.count(title) > 1})
+        if twice:
+            raise ctx.at("sections").fail(f"two sections are both called `{twice[0]}`.",
+                                          "Give each section its own title.")
+        built: list = []
+        for index, (part, ident) in enumerate(zip(parts, _section_ids(titles))):
+            at = ctx.at(f"sections[{index}]")
+            needs = None
+            if isinstance(part.visible, guard.Requirement):
+                needs = permission(part.visible.target, part.visible.scope)     # RFDS keeps the heading and says why
+            elif not (part.visible is None or part.visible is guard.signed_in):
+                raise at.fail("`visible=` on a section of a record page takes a permission.",
+                              "A section's heading always shows. To hide the section from some users write "
+                              "`visible=ui.read(Model)`; to show different content by state, put `ui.switch(...)` "
+                              "inside the section.")
+            content = part.body(at)
+            built.append(_rfds(at, lambda part=part, ident=ident, content=content, needs=needs: templates.ObjectSection(
+                id=ident, title_id=part.title, title_default=part.title, content=content, permission=needs)))
+        return built
+
     def build(self, ctx: Build) -> rx.Component:
         import rfds
         from rfds import templates
@@ -157,27 +231,24 @@ class Record(Kind):
         if self.status is not None:
             (badge,) = take(ctx.at("status"), self.status, (vocab.Status,), "`status=` holds one `ui.status(word, tone=)`.")
             head.append(badge.build(ctx.at("status")))
-        facts = take(ctx.at("facts"), list(self.facts), (vocab.Fact,),
-                     "Use `ui.fact(label, value)`.")
+        facts = take(ctx.at("facts"), list(self.facts), (vocab.Fact,), "Use `ui.fact(label, value)`.")
         if facts:
             head.append(rfds.key_value(*vocab.build_all(ctx.at("facts"), facts), columns=min(3, len(facts))))
-        parts = take(ctx.at("sections"), list(self.sections), (Section,), "`sections=` holds `ui.section(title, ...)`.")
-        if not parts:
-            raise ctx.at("sections").fail("a record page needs at least one section.",
-                                          "Add `sections=[ui.section(\"Details\", ...)]`.")
-        built = [templates.ObjectSection(id=slug(part.title), title_id=part.title, title_default=part.title,
-                                         content=part.build(ctx.at(f"sections[{index}]")))
-                 for index, part in enumerate(parts)]
-        page = templates.object_page(
-            title=self._title(ctx), path=ctx.route or "/", header=rfds.stack(*head) if head else rx.fragment(),
-            sections=built, navigation="tabs" if self.tabs and len(built) > 1 else "anchor",
-            actions=self._buttons(ctx))
+        sections, actions, title = self._sections(ctx), self._buttons(ctx), self._title(ctx)
+        page = _rfds(ctx, lambda: templates.object_page(
+            title=title, path=ctx.route or "/", header=rfds.stack(*head) if head else rx.fragment(),
+            sections=sections, navigation="tabs" if self.tabs and len(sections) > 1 else "anchor", actions=actions))
         return states(ctx, self.load, page, "rect")
 
 
 def record(*, title: Any, load: Any = None, status: Any = None, facts: Any = (), sections: Any = (),
            tabs: bool = False, actions: Any = ()) -> Record:
-    """One thing: its key facts, then its parts."""
+    """One thing: its key facts, then its parts.
+
+    The first of ``actions`` is the primary one, unless it is dangerous or a link; one further
+    action is a button, and two or more further actions go into a "More actions" menu.
+    ``tabs=True`` shows one section at a time.
+    """
     return Record(title, load, status, tuple(facts), tuple(sections), bool(tabs), tuple(actions))
 
 
@@ -192,12 +263,13 @@ class List(Kind):
         from rfds import templates
 
         if not isinstance(self.table, tables.Table):
-            raise ctx.at("table").fail(f"got {type(self.table).__name__}.", "`table=` holds one `ui.table(Model, columns=[...])`.")
-        page = templates.list_report(title=self._title(ctx), path=ctx.route or "/",
-                                     table=self.table.build(ctx.at("table")), actions=self._buttons(ctx))
+            raise ctx.at("table").fail(f"got {called(self.table)}.",
+                                       "`table=` holds one `ui.table(Model, columns=[...])`.")
+        table, actions, title = self.table.build(ctx.at("table")), self._buttons(ctx), self._title(ctx)
+        page = _rfds(ctx, lambda: templates.list_report(title=title, path=ctx.route or "/", table=table, actions=actions))
         return states(ctx, self.load, page, "table")
 
 
 def list_(*, title: Any, load: Any = None, table: Any = None, actions: Any = ()) -> List:
-    """Finding things: a table to search, sort and open from."""
+    """Finding things: a table to search, sort and open from. ``actions`` are placed as on a record page."""
     return List(title, load, table, tuple(actions))

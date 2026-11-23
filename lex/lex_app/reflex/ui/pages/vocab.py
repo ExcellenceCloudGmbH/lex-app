@@ -8,7 +8,7 @@ from typing import Any, Callable
 import reflex as rx
 
 from lex.lex_app.reflex.ui.pages import links
-from lex.lex_app.reflex.ui.pages.parts import Build, NotASentence, Part, called, say
+from lex.lex_app.reflex.ui.pages.parts import Build, NotASentence, Part, called, say, shown
 
 TONES = ("neutral", "info", "success", "warning", "danger")
 KINDS = ("text", "number", "money", "percent", "datetime")
@@ -128,6 +128,18 @@ def message(sentence: Any, *, tone: str = "info", visible: Any = None, **values:
     return Message(sentence, values, _tone(tone), visible)
 
 
+def _marked(inner: rx.Component, wrapper: rx.Component) -> rx.Component:
+    """``wrapper`` carrying the RFDS metadata of the control it wraps.
+
+    The one place lex-app reaches into RFDS's private metadata. RFDS's page header reads a
+    control's kind and intent from it -- which action is the primary one, what is a menu entry --
+    and a ``visible=`` wrapper has none of its own, so the control would lose its role.
+    """
+    from rfds.components.actions._common import get_meta, set_meta
+
+    return wrapper if wrapper is inner else set_meta(wrapper, **get_meta(inner))
+
+
 @dataclasses.dataclass(eq=False)
 class Link(Part):
     label: Any
@@ -155,6 +167,9 @@ class Link(Part):
 
     def menu_entry(self, ctx: Build) -> rx.Component:
         return menu_entry(ctx, self.label, self.click(ctx), self.visible)
+
+    def _wrap(self, ctx: Build, component: rx.Component) -> rx.Component:
+        return _marked(component, shown(ctx, component, self.visible))
 
     def _render(self, ctx: Build) -> rx.Component:
         import rfds
@@ -200,6 +215,9 @@ class Button(Part):
     def menu_entry(self, ctx: Build) -> rx.Component:
         return menu_entry(ctx, self.label, self.click(ctx), self.visible, tone=self.tone, icon=self.icon)
 
+    def _wrap(self, ctx: Build, component: rx.Component) -> rx.Component:
+        return _marked(component, shown(ctx, component, self.visible))
+
     def _render(self, ctx: Build) -> rx.Component:
         import rfds
 
@@ -211,8 +229,8 @@ def button(label: Any, handler: Any = None, *, to: Any = None, tone: str = "neut
            visible: Any = None, **values: Any) -> Button:
     """Runs a handler, or opens a page (``to=``, with the page's parameters by name)."""
     if (handler is None) == (to is None):
-        raise ValueError("ui.button() takes a handler or to=, one of them: `ui.button(\"Save\", State.save)` or "
-                         "`ui.button(\"New\", to=new_page)`.")
+        raise ValueError("ui.button() takes a handler or to=, one of them: `ui.button(\"Close fund\", State.close)` "
+                         "or `ui.button(\"New fund\", to=new_fund)`.")
     if values and to is None:
         raise ValueError(f"ui.button(): {', '.join(values)} can only be given with to=, as the page's parameters.")
     return Button(label, handler, to, values, _tone(tone), icon, visible)
@@ -221,12 +239,7 @@ def button(label: Any, handler: Any = None, *, to: Any = None, tone: str = "neut
 def menu_entry(ctx: Build, label: Any, click: Any, visible: Any, *, tone: str = "neutral",
                icon: str | None = None) -> rx.Component:
     """An action as an entry of the page header's "More actions" menu."""
-    # The one place lex-app reaches into RFDS's private metadata: RFDS's page header keeps what it
-    # recognises as a menu entry by that metadata, and a ``visible=`` wrapper would otherwise hide it.
-    from rfds.components.actions._common import get_meta, set_meta
     from rfds.components.actions.menu import menu_item
-
-    from lex.lex_app.reflex.ui.pages.parts import shown
 
     try:
         words = say(label)
@@ -234,7 +247,7 @@ def menu_entry(ctx: Build, label: Any, click: Any, visible: Any, *, tone: str = 
         raise ctx.fail(f"an action's label is {called(label)}.",
                        "Write the words: `ui.button(\"Close fund\", ...)`.") from None
     entry = menu_item(words, on_select=click, icon=icon, tone="danger" if tone == "danger" else "neutral")
-    return set_meta(shown(ctx, entry, visible), **get_meta(entry))
+    return _marked(entry, shown(ctx, entry, visible))
 
 
 @dataclasses.dataclass(eq=False)

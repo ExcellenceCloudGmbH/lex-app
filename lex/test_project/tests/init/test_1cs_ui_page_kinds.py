@@ -93,7 +93,18 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         self.assertIn("rfds-skeleton", text, "a skeleton before the load has finished")
         self.assertEqual(page.loads(), ([KindDesk.open], [KindDesk.load_documents]),
                          "the page load and the sections' loads are reported separately")
-        self.assertNotIn("ui_loaded", str(_record().build(CTX)), "without a load the page is shown at once")
+        bare = str(_record().build(CTX))
+        self.assertNotIn("ui_loaded", bare, "without a load the page is shown at once")
+        self.assertIn("name_rx_state_", bare, "the title comes from the state (this page has no other use of it)")
+        odd = str(_record(sections=[kinds.section("2024 results", vocab.text("a")),
+                                    kinds.section("Übersicht", vocab.text("b")),
+                                    kinds.section("概要", vocab.text("c"))]).build(CTX))
+        for anchor in ('"#section-2024-results"', '"#ubersicht"', '"#section-3"'):
+            with self.subTest(anchor=anchor):
+                self.assertIn(anchor, odd, "every title gives a section an id that is a valid anchor")
+        gated = _record(sections=[kinds.section("Details", vocab.text("a"), visible=ui.edit(Group))])._sections(CTX)
+        self.assertEqual([section.permission for section in gated], ["auth.Group:edit"],
+                         "a section's permission is handed to RFDS, which keeps the heading and says why it is empty")
         tabbed = str(_record(tabs=True, sections=[kinds.section("A", vocab.text("a")),
                                                    kinds.section("B", vocab.text("b"))]).build(CTX))
         self.assertIn("rfds-tabs", tabbed, "tabs=True shows one section at a time")
@@ -105,7 +116,10 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         Given: record pages with a raw component among the facts, no section, no title, a
                status that is not a ui.status, and a section slot holding a text.
         When:  each is built.
-        Then:  each is a PageError naming the page and the slot and saying what to write.
+        Then:  each is a PageError naming the page and the slot and saying what to write --
+               also two sections with one title, a section hidden by a state value, a blank
+               title, a title that is not words, and an action called Save; a limit of RFDS's
+               own (five tables on one page) names the page and quotes RFDS's sentence.
         """
         cases = {
             "facts": (dict(facts=[rx.text("raw")]),
@@ -121,10 +135,31 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
             "sections": (dict(sections=[vocab.text("loose")]),
                          "Page `fund`, slot `sections`: got `ui.text`.\n`sections=` holds `ui.section(title, ...)`."),
         }
+        cases["same title"] = (dict(sections=[kinds.section("Notes", vocab.text("a")), kinds.section("Notes", vocab.text("b"))]),
+                               "Page `fund`, slot `sections`: two sections are both called `Notes`.\n"
+                               "Give each section its own title.")
+        cases["section by state"] = (
+            dict(sections=[kinds.section("Notes", vocab.text("a"), visible=KindDesk.name != "")]),
+            "Page `fund`, slot `sections[0]`: `visible=` on a section of a record page takes a permission.\n"
+            "A section's heading always shows. To hide the section from some users write `visible=ui.read(Model)`; "
+            "to show different content by state, put `ui.switch(...)` inside the section.")
+        cases["blank title"] = (dict(title="   "), "Page `fund`: the page has no title.\n"
+                                                    "Give the kind `title=\"...\"`, or a state value.")
+        cases["title not words"] = (dict(title=5), "Page `fund`: the page's title is `5`.\n"
+                                                    "Give the kind `title=\"...\"`, or a state value.")
+        cases["save"] = (dict(actions=[vocab.button("Save changes", KindDesk.close)]),
+                         "Page `fund`, slot `actions`: an action is called `Save changes`.\n"
+                         "RFDS shows a last-saved time beside a Save action, which a page header cannot give yet. "
+                         "Name the action for what it does (`\"Apply changes\"`); saving belongs to a form.")
         for name, (slots, message) in cases.items():
             with self.subTest(case=name), self.assertRaises(PageError) as raised:
                 _record(**slots).build(CTX)
             self.assertEqual(str(raised.exception), message, f"{name}: the message says what to write")
+        crowded = [kinds.section(f"Table {n}", tables.table(Group, columns=["name"])) for n in "abcde"]
+        with self.assertRaises(PageError) as limit:
+            _record(sections=crowded).build(CTX)
+        self.assertTrue(str(limit.exception).startswith("Page `fund`: RFDS's page layout refuses this page: rfds."),
+                        f"a limit of RFDS's own names the page and quotes RFDS: {limit.exception}")
 
     # -- 1.801 ---------------------------------------------------------
     def test_1_801_actions_are_placed_as_the_page_header_places_them(self) -> None:
@@ -135,8 +170,9 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         When:  they are built.
         Then:  the first action is the primary button -- unless it is dangerous, which is never
                primary; exactly one further action is a button; two or more further actions
-               are entries of the "More actions" menu, with their translated sentences;
-               something that is not a button or a link is refused.
+               are entries of the "More actions" menu, with their translated sentences and
+               their tone; a primary action with visible= stays primary; the author's part is
+               not changed; something that is not a button or a link is refused.
         """
         one = str(_record(actions=[vocab.button("Edit", KindDesk.close)]).build(CTX))
         self.assertIn('"data-rfds-intent":"primary"', one, "the first action is primary")
@@ -150,14 +186,20 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         self.assertIn('"rfds-menu-item-label"},rfdsI18n.t("Close fund", "Close fund"', three,
                       "two or more further actions are menu entries, translated")
         self.assertIn('"rfds-menu-item-label"},rfdsI18n.t("All groups", "All groups"', three, "the link is an entry too")
+        self.assertIn('"data-rfds-tone":"danger"', three, "a dangerous action keeps its tone in the menu")
         calm = str(_record(actions=[vocab.button("Edit", KindDesk.close), vocab.button("Close fund", KindDesk.close),
                                     vocab.link("All groups", to=group_page, key="1")]).build(CTX))
-        self.assertNotEqual(calm, three, "a dangerous action keeps its tone in the menu")
+        self.assertNotIn('"data-rfds-tone":"danger"', calm, "and only a dangerous one has it")
+        edit = vocab.button("Edit", KindDesk.close, visible=ui.edit(Group))
+        gated = str(_record(actions=[edit, vocab.button("Close fund", KindDesk.close, tone="danger")]).build(CTX))
+        self.assertIn('"data-rfds-intent":"primary"', gated, "a primary action with visible= stays primary")
+        self.assertIn('"data-rfds-intent":"danger"', gated, "and the action beside it is still built")
+        self.assertFalse(edit.primary, "the kind marks a copy primary, never the author's part")
         danger_first = str(_record(actions=[vocab.button("Close fund", KindDesk.close, tone="danger")]).build(CTX))
         self.assertNotIn('"data-rfds-intent":"primary"', danger_first, "a dangerous action is never the primary one")
         with self.assertRaises(PageError) as wrong:
             _record(actions=[vocab.text("loose")]).build(CTX)
-        self.assertIn("slot `actions`: got `ui.text`", str(wrong.exception))
+        self.assertIn("slot `actions`: got `ui.text`", str(wrong.exception), "what is not an action is named")
 
     # -- 1.802 ---------------------------------------------------------
     def test_1_802_a_list_page_is_a_title_a_table_and_its_actions(self) -> None:
@@ -178,4 +220,8 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         with self.assertRaises(PageError) as wrong:
             kinds.list_(title="Groups", table=vocab.text("loose")).build(Build(page="groups", route="/groups"))
         self.assertEqual(str(wrong.exception),
-                         "Page `groups`, slot `table`: got Text.\n`table=` holds one `ui.table(Model, columns=[...])`.")
+                         "Page `groups`, slot `table`: got `ui.text`.\n"
+                         "`table=` holds one `ui.table(Model, columns=[...])`.", "a wrong table is named by its ui name")
+        with self.assertRaises(PageError) as no_table:
+            kinds.list_(title="Groups").build(Build(page="groups", route="/groups"))
+        self.assertIn("got nothing (`None`).", str(no_table.exception), "a list without a table says so")

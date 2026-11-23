@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
+import unicodedata
 from typing import Any, ClassVar
 
 import reflex as rx
@@ -55,10 +56,14 @@ class Part:
             raise ctx.fail(f"{called(self)} got {called(wrong.value)} where its words belong.",
                            "Write the sentence the user reads, in English: `ui.text(\"3 open requests\")`. "
                            "A state value is shown as it is.") from None
-        return shown(ctx, component, self.visible)
+        return self._wrap(ctx, component)
 
     def _render(self, ctx: Build) -> rx.Component:
         raise NotImplementedError
+
+    def _wrap(self, ctx: Build, component: rx.Component) -> rx.Component:
+        """``component`` as the page shows it: only to whom, and when, ``visible`` says."""
+        return shown(ctx, component, self.visible)
 
 
 def shown(ctx: Build, component: rx.Component, visible: Any) -> rx.Component:
@@ -106,7 +111,9 @@ def say(sentence: Any, **values: Any) -> Any:
 
 
 def slug(text: str) -> str:
-    return re.sub(r"[^0-9a-z]+", "-", text.lower()).strip("-") or "part"
+    """``text`` as an id: its letters without accents, in lower case, joined by dashes."""
+    plain = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^0-9a-z]+", "-", plain.lower()).strip("-") or "part"
 
 
 def called(value: Any) -> str:
