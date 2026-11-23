@@ -110,7 +110,7 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         cases = {
             "facts": (dict(facts=[rx.text("raw")]),
                       "Page `fund`, slot `facts`: got a raw component (`Text`).\n"
-                      "Use `ui.fact(label, value)`, or wrap it in `ui.custom_block(..., reason=\"...\")`."),
+                      "Use `ui.fact(label, value)`."),
             "no section": (dict(sections=[]),
                            "Page `fund`, slot `sections`: a record page needs at least one section.\n"
                            "Add `sections=[ui.section(\"Details\", ...)]`."),

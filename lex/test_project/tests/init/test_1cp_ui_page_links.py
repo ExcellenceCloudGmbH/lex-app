@@ -74,7 +74,9 @@ class TestCluster01cp_PageLinks(SimpleTestCase):
         joined = str(links.href(CTX, fund_page, {"key": LinksDesk.fund}))
         self.assertIn('"/funds/"+', joined, "a state value is joined into the address")
         self.assertIn("fund_rx_state_", joined, "the state value is in the address")
-        self.assertIn("encodeURIComponent(", joined, "and the browser encodes it, so it stays one piece")
+        self.assertIn("encodeURIComponent(String(", joined, "and the browser encodes it, so it stays one piece")
+        self.assertIn("?? ''", str(links.href(CTX, fund_page, {"key": LinksDesk.count})),
+                      "a 0 from the state stays a 0 in the address (only a missing value is empty)")
         self.assertEqual(links.href(CTX, fund_page, {"key": "a/b", "tab": "x&y=1"}), "/funds/a%2Fb?tab=x%26y%3D1",
                          "a fixed value is encoded: it cannot change the page or add a parameter")
         for bad in (None, True, "", ".."):
@@ -177,6 +179,11 @@ class TestCluster01cp_PageLinks(SimpleTestCase):
             vocab.button("New", to=fund_page).click(CTX)
         from rfds.components.actions._common import get_meta
 
+        with self.assertRaises(PageError) as no_words:
+            vocab.button(3, LinksDesk.close).menu_entry(CTX.at("actions", "actions"))
+        self.assertEqual(str(no_words.exception),
+                         "Page `home`, slot `actions`: an action's label is `3`.\n"
+                         "Write the words: `ui.button(\"Close fund\", ...)`.", "a menu entry without words names its page")
         entry = run.menu_entry(CTX)
         self.assertIn('rfdsI18n.t("Close fund", "Close fund"', str(entry), "a menu entry is translated too")
         self.assertEqual(get_meta(entry).get("kind"), "menu_item", "RFDS recognises it as a menu entry")

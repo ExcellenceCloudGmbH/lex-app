@@ -17,10 +17,11 @@ from __future__ import annotations
 
 import pytest
 import reflex as rx
+from django.contrib.auth.models import Group
 from django.test import SimpleTestCase
 
 from lex import ui
-from lex.lex_app.reflex.ui.pages import kinds, vocab
+from lex.lex_app.reflex.ui.pages import kinds, parts, tables, vocab
 from lex.lex_app.reflex.ui.pages.parts import Build, PageError
 
 pytestmark = pytest.mark.init
@@ -49,9 +50,11 @@ class TestCluster01cq_PageSections(SimpleTestCase):
         When:  they are built.
         Then:  without a load the section is its content; with one, the content is shown only
                once ui.loaded says so, before that the failure message when there is one, else
-               a skeleton; on a page nothing is mounted (the opener starts the load); on a
-               dashboard the load starts when the section mounts; a section's title is a
-               sentence and comes first.
+               a skeleton (a table's, when the section is one table); on a page nothing is
+               mounted (the opener starts the load); on a dashboard the load starts when the
+               section mounts; a section's title is a sentence and comes first. Facts that
+               follow one another form one key-value list; a section inside a section, and
+               empty= without a table, are refused.
         """
         plain = str(kinds.section("Notes", vocab.text("Hello")).build(CTX))
         self.assertIn('rfdsI18n.t("Hello", "Hello"', plain, "the content is built")
@@ -69,6 +72,24 @@ class TestCluster01cq_PageSections(SimpleTestCase):
         self.assertIn("on_mount", on_dashboard.event_triggers, "on a dashboard the load starts when the section mounts")
         with self.assertRaises(TypeError, msg="a section's title comes first and is a sentence"):
             kinds.section(vocab.text("Hello"))
+        facts = str(kinds.section("Key facts", vocab.fact("A", 1), vocab.fact("B", 2), vocab.text("Hello")).build(CTX))
+        self.assertEqual(facts.count('"data-slot":"rfds-key-value"'), 1,
+                         "facts that follow one another are one key-value list, which is what RFDS's items need")
+        only_table = kinds.section("Groups", tables.table(Group, columns=["name"]), load=SectionDesk.load_documents)
+        self.assertIn("rfds-skeleton-row", str(only_table.build(CTX)), "a section that is one table waits as a table")
+        self.assertNotIn("rfds-skeleton-row", text, "any other section waits as a block")
+        with self.assertRaises(PageError) as nested:
+            kinds.section("Outer", kinds.section("Inner", vocab.text("x"))).build(CTX.at("sections[0]"))
+        self.assertEqual(str(nested.exception),
+                         "Page `fund`, slot `sections[0]`: a section inside a section.\n"
+                         "Sections do not nest: give the page each of them, in `sections=[...]`.",
+                         "a nested section is refused in its own words")
+        with self.assertRaises(PageError) as no_table:
+            kinds.section("Notes", vocab.text("x"), empty="Nothing yet.").build(CTX.at("sections[0]"))
+        self.assertEqual(str(no_table.exception),
+                         "Page `fund`, slot `sections[0]`: `empty=` is the sentence for a table without rows, and this "
+                         "section has no table.\nRemove `empty=`, or put a `ui.table(...)` in the section.",
+                         "empty= without a table is refused")
 
     # -- 1.795 ---------------------------------------------------------
     def test_1_795_each_repeats_and_switch_chooses(self) -> None:
@@ -86,11 +107,20 @@ class TestCluster01cq_PageSections(SimpleTestCase):
         self.assertIn("RadixThemesText", repeated, "each item is the part the function returned")
         with self.assertRaises(PageError) as raw:
             vocab.each(SectionDesk.documents, lambda name: rx.text(name)).build(CTX)
-        self.assertIn("did not return a lex component", str(raw.exception))
+        self.assertIn("did not return a lex component", str(raw.exception), "the refusal says what was wrong")
+        with self.assertRaises(PageError) as sectioned:
+            vocab.each(SectionDesk.documents, lambda name: kinds.section("One", vocab.text(name))).build(CTX)
+        self.assertEqual(str(sectioned.exception),
+                         "Page `fund`: `ui.each` produced `ui.section`, and sections do not nest.\n"
+                         "Give the page each section itself, in `sections=[...]`.", "each cannot produce sections")
+        with self.assertRaises(TypeError, msg="each takes a function"):
+            vocab.each(SectionDesk.documents, vocab.text("x"))
+        with self.assertRaises(ValueError, msg="switch needs a case"):
+            vocab.switch(SectionDesk.mode, {})
         chosen = str(vocab.switch(SectionDesk.mode, {"a": vocab.text("First"), "b": vocab.text("Second")}).build(CTX))
         self.assertIn("mode_rx_state_", chosen, "the value decides")
-        self.assertIn('rfdsI18n.t("First"', chosen)
-        self.assertIn('rfdsI18n.t("Second"', chosen)
+        self.assertIn('rfdsI18n.t("First"', chosen, "the first case is built")
+        self.assertIn('rfdsI18n.t("Second"', chosen, "and the second")
         with self.assertRaises(PageError, msg="a case must be a lex component"):
             vocab.switch(SectionDesk.mode, {"a": rx.text("raw")}).build(CTX)
 
@@ -102,8 +132,10 @@ class TestCluster01cq_PageSections(SimpleTestCase):
         When:  it is put into a section directly, and through ui.custom_block with and without
                a reason.
         Then:  directly it is refused, with the page, the slot and what to write; through
-               ui.custom_block with a reason it is accepted and built as it is; without a
-               reason, or with something that is not a component, custom_block is refused.
+               ui.custom_block with a reason it is accepted and built as it is, and an error
+               names it by its public name; without a reason, or with something that is not a
+               component, custom_block is refused. A section hands its empty= sentence to a
+               copy of its table, never to the author's part.
         """
         with self.assertRaises(PageError) as direct:
             kinds.section("Notes", rx.text("raw")).build(CTX.at("sections[0]"))
@@ -113,9 +145,6 @@ class TestCluster01cq_PageSections(SimpleTestCase):
         self.assertIn("ui.custom_block", str(direct.exception), "and the way out is named")
         marked = kinds.section("Notes", vocab.custom_block(rx.text("raw"), reason="A chart type the vocabulary lacks."))
         self.assertIn("raw", str(marked.build(CTX)), "a marked block is built as it is")
-        from lex.lex_app.reflex.ui.pages import parts, tables
-        from django.contrib.auth.models import Group
-
         block = vocab.custom_block(rx.text("raw"), reason="A chart type the vocabulary lacks.")
         self.assertEqual(parts.called(block), "`ui.custom_block`", "an error names it by its public name")
         shared = tables.table(Group, columns=["name"])

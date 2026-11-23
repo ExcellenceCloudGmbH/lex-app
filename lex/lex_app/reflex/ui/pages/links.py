@@ -89,13 +89,13 @@ def piece(ctx: Build, name: str, value: Any) -> Any:
     """
     import reflex as rx
 
-    instead = "Pass text or a number: `key=row.id`, `key=7`."
+    instead = f"Pass text or a number: `{name}=row.id`, `{name}=7`."
     if isinstance(value, rx.Var):
         kind = typing.get_origin(value._var_type) or value._var_type
         if kind in (bool, list, dict, tuple, set):
             raise ctx.fail(f"the value for `{name}` in a link is a {getattr(kind, '__name__', kind)} from the state.", instead)
-        text = value if kind is str else value.to_string(use_json=False)
-        return rx.Var(f"encodeURIComponent({text!s})", _var_data=text._get_all_var_data()).to(str)
+        # String(x ?? '') keeps a 0 as "0"; Reflex's own to-text turns it into nothing.
+        return rx.Var(f"encodeURIComponent(String({value!s} ?? ''))", _var_data=value._get_all_var_data()).to(str)
     if value is None or isinstance(value, bool) or str(value) in ("", ".", ".."):
         raise ctx.fail(f"the value for `{name}` in a link is {value!r}.", instead)
     return quote(str(value), safe="")

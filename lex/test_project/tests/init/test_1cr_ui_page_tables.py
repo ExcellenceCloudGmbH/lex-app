@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import pytest
 from django.contrib.auth.models import Group
+from django.contrib.sessions.models import Session
 from django.test import SimpleTestCase
 
 from lex.lex_app.reflex.ui.pages import links, tables
@@ -79,12 +80,14 @@ class TestCluster01cr_PageTables(SimpleTestCase):
         built = str(tables.table(Group, columns=[tables.column("name", label="Team", kind="text")], open=group_page,
                                  empty="No groups yet.").build(CTX))
         self.assertIn('"/groups/"', built, "rows link to the page")
-        self.assertIn("encodeURIComponent", built, "with the row's key encoded into the address")
+        keyed = str(tables.table(Session, columns=["expire_date"], open=group_page, visible=True).build(CTX))
+        self.assertIn("session_key", keyed,
+                      "a model whose primary key is not `id` builds, and its rows are keyed and linked by that key")
         self.assertIn('rfdsI18n.t("No groups yet.", "No groups yet."', built, "the empty sentence is a message")
         self.assertIn('rfdsI18n.t("Team", "Team"', built,
                       "the column's own label is used, and translated like every other sentence")
         self.assertNotIn('"Name"', built, "in place of the field's label")
-        for bad in (dict(kind="colour"), dict(label=""), dict(currency="EUR")):
+        for bad in (dict(kind="colour"), dict(label=""), dict(currency="EUR"), dict(kind="money", currency="euro")):
             with self.subTest(bad=bad), self.assertRaises(ValueError, msg="a column is checked when it is declared"):
                 tables.column("name", **bad)
         self.assertEqual(tables._RFDS_KIND["datetime"], "instant", "datetime is RFDS's instant")

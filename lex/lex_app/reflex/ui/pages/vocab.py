@@ -8,7 +8,7 @@ from typing import Any, Callable
 import reflex as rx
 
 from lex.lex_app.reflex.ui.pages import links
-from lex.lex_app.reflex.ui.pages.parts import Build, Part, say
+from lex.lex_app.reflex.ui.pages.parts import Build, NotASentence, Part, called, say
 
 TONES = ("neutral", "info", "success", "warning", "danger")
 KINDS = ("text", "number", "money", "percent", "datetime")
@@ -228,7 +228,12 @@ def menu_entry(ctx: Build, label: Any, click: Any, visible: Any, *, tone: str = 
 
     from lex.lex_app.reflex.ui.pages.parts import shown
 
-    entry = menu_item(say(label), on_select=click, icon=icon, tone="danger" if tone == "danger" else "neutral")
+    try:
+        words = say(label)
+    except NotASentence:
+        raise ctx.fail(f"an action's label is {called(label)}.",
+                       "Write the words: `ui.button(\"Close fund\", ...)`.") from None
+    entry = menu_item(words, on_select=click, icon=icon, tone="danger" if tone == "danger" else "neutral")
     return set_meta(shown(ctx, entry, visible), **get_meta(entry))
 
 
@@ -265,13 +270,17 @@ class Each(Part):
             if not isinstance(part, Part):
                 raise ctx.fail("the function given to `ui.each` did not return a lex component.",
                                "Return one of the `ui.*` components, or `ui.custom_block(...)`.")
+            _fits(ctx, part, "ui.each")
             return part.build(ctx)
 
         return rx.foreach(self.items, one)
 
 
 def each(items: Any, render: Callable[[Any], Part], *, visible: Any = None) -> Each:
-    """Repeats ``render`` for every item."""
+    """Repeats ``render`` for every item: a function of one item that returns a ``ui.*`` component."""
+    if not callable(render):
+        raise TypeError("ui.each(items, render) takes a function that returns a `ui.*` component for one item; "
+                        f"got {type(render).__name__}")
     return Each(items, render, visible)
 
 
@@ -286,12 +295,22 @@ class Switch(Part):
             if not isinstance(part, Part):
                 raise ctx.fail("a case of `ui.switch` is not a lex component.",
                                "Give each case one of the `ui.*` components, or `ui.custom_block(...)`.")
+            _fits(ctx, part, "ui.switch")
         return rx.match(self.value, *[(key, part.build(ctx)) for key, part in self.cases.items()], rx.fragment())
 
 
 def switch(value: Any, cases: dict, *, visible: Any = None) -> Switch:
-    """Shows the case whose key equals ``value``; nothing when none does."""
+    """Shows the case whose key equals ``value``; nothing when none does. The keys are fixed values."""
+    if not cases:
+        raise ValueError("ui.switch(value, cases) needs at least one case: `{\"open\": ui.text(...)}`")
     return Switch(value, dict(cases), visible)
+
+
+def _fits(ctx: Build, part: Part, where: str) -> None:
+    """Refuse a part that cannot sit inside a section, when `ui.each` or `ui.switch` produced it."""
+    if not type(part).nests:
+        raise ctx.fail(f"`{where}` produced {called(part)}, and sections do not nest.",
+                       "Give the page each section itself, in `sections=[...]`.")
 
 
 CONTENT = (Text, Fact, Status, Message, Link, Button, CustomBlock, Each, Switch)

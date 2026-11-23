@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import re
 from typing import Any
 
 import reflex as rx
@@ -35,6 +36,8 @@ def column(key: str, *, label: str | None = None, kind: str | None = None, curre
         raise ValueError(f"ui.column({key!r}, label=) takes a sentence; got {label!r}")
     if currency is not None and kind != "money":
         raise ValueError(f"ui.column({key!r}, currency=) goes with kind=\"money\"")
+    if currency is not None and not (isinstance(currency, str) and re.fullmatch(r"[A-Za-z]{3}", currency)):
+        raise ValueError(f"ui.column({key!r}, currency=) takes a three-letter code such as \"EUR\"; got {currency!r}")
     return Column(key, label, kind, currency)
 
 
@@ -84,7 +87,7 @@ class Table(Part):
             if options:
                 overrides[c.key] = options
         key = model._meta.pk.name
-        props: dict[str, Any] = {"row_key": key}
+        props: dict[str, Any] = {"row_key": key, "row_fields": (key,)}     # the key stays in each row, shown or not
         if self.open is not None:
             props["row_href"] = links.row_href(ctx, self.open, key)
         if self.empty is not None:

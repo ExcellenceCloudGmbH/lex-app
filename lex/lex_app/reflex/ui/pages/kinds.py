@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Any, ClassVar
 
 import reflex as rx
 
@@ -25,8 +25,32 @@ def states(ctx: Build, load: Any, content: rx.Component, shape: str) -> rx.Compo
     return rx.box(whole, on_mount=load, width="100%") if ctx.mounts else whole
 
 
+def _stacked(ctx: Build, parts: list) -> list:
+    """The parts built in order; facts that follow one another become one key-value list."""
+    import rfds
+
+    built: list = []
+    run: list = []
+
+    def close() -> None:
+        if run:
+            built.append(rfds.key_value(*vocab.build_all(ctx, run), columns=min(3, len(run))))
+            run.clear()
+
+    for part in parts:
+        if isinstance(part, vocab.Fact):
+            run.append(part)
+            continue
+        close()
+        built.append(part.build(ctx))
+    close()
+    return built
+
+
 @dataclasses.dataclass(eq=False)
 class Section(Part):
+    nests: ClassVar[bool] = False
+
     title: str
     content: tuple = ()
     load: Any = None
@@ -36,13 +60,22 @@ class Section(Part):
     def body(self, ctx: Build) -> rx.Component:
         import rfds
 
+        if any(isinstance(part, Section) for part in self.content):
+            raise ctx.fail("a section inside a section.",
+                           "Sections do not nest: give the page each of them, in `sections=[...]`.")
         parts = take(ctx, list(self.content), (*vocab.CONTENT, tables.Table),
                      "A section holds `ui.text`, `ui.table`, `ui.message`, `ui.link` and the other `ui.*` "
                      "components, or `ui.custom_block(..., reason=\"...\")`.")
-        if self.empty is not None:              # a table without its own sentence takes the section's; a copy, not the part
+        has_table = any(isinstance(part, tables.Table) for part in parts)
+        if self.empty is not None:
+            if not has_table:
+                raise ctx.fail("`empty=` is the sentence for a table without rows, and this section has no table.",
+                               "Remove `empty=`, or put a `ui.table(...)` in the section.")
+            # A table without its own sentence takes the section's: a copy, never the author's part.
             parts = [dataclasses.replace(part, empty=self.empty)
                      if isinstance(part, tables.Table) and part.empty is None else part for part in parts]
-        return states(ctx, self.load, rfds.stack(*vocab.build_all(ctx, parts)), "rect")
+        shape = "table" if has_table and len(parts) == 1 else "rect"
+        return states(ctx, self.load, rfds.stack(*_stacked(ctx, parts)), shape)
 
     def _render(self, ctx: Build) -> rx.Component:
         return self.body(ctx)
@@ -125,7 +158,7 @@ class Record(Kind):
             (badge,) = take(ctx.at("status"), self.status, (vocab.Status,), "`status=` holds one `ui.status(word, tone=)`.")
             head.append(badge.build(ctx.at("status")))
         facts = take(ctx.at("facts"), list(self.facts), (vocab.Fact,),
-                     "Use `ui.fact(label, value)`, or wrap it in `ui.custom_block(..., reason=\"...\")`.")
+                     "Use `ui.fact(label, value)`.")
         if facts:
             head.append(rfds.key_value(*vocab.build_all(ctx.at("facts"), facts), columns=min(3, len(facts))))
         parts = take(ctx.at("sections"), list(self.sections), (Section,), "`sections=` holds `ui.section(title, ...)`.")

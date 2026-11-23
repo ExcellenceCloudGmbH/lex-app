@@ -125,8 +125,11 @@ class TestCluster01co_PageParts(SimpleTestCase):
         self.assertEqual(str(wrong.exception),
                          "Page `fund`: `visible=` got `'editors'`.\nGive a permission -- `visible=ui.edit(Model)` -- "
                          "or a state value: `visible=State.is_open`.", "anything else is refused with what to write")
-        with self.assertRaises(PageError, msg="an empty list is refused, not shown to everyone"):
+        with self.assertRaises(PageError) as empty:
             vocab.text("While open", visible=[]).build(CTX)
+        self.assertEqual(str(empty.exception),
+                         "Page `fund`: `visible=` got an empty list.\nList at least one permission: "
+                         "`visible=[ui.read(Model)]`.", "an empty list is refused, not shown to everyone")
 
         for factory in (vocab.text, vocab.fact, vocab.status, vocab.message):
             with self.subTest(component=factory.__name__):

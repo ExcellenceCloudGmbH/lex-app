@@ -44,6 +44,8 @@ class Part:
 
     #: The public name, when it is not the class name in lower case (``custom_block``).
     ui_name: ClassVar[str] = ""
+    #: Whether the part may sit inside a section. A section may not: sections do not nest.
+    nests: ClassVar[bool] = True
     visible: Any = None
 
     def build(self, ctx: Build) -> rx.Component:
@@ -76,7 +78,9 @@ def shown(ctx: Build, component: rx.Component, visible: Any) -> rx.Component:
         from lex.lex_app.reflex.access import permission
 
         return can(permission(visible.target, visible.scope), component)
-    if isinstance(visible, (list, tuple)) and visible:
+    if isinstance(visible, (list, tuple)):
+        if not visible:
+            raise ctx.fail("`visible=` got an empty list.", "List at least one permission: `visible=[ui.read(Model)]`.")
         for one in visible:
             component = shown(ctx, component, one)
         return component
