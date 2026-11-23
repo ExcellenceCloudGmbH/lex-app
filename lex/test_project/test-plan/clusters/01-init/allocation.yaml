@@ -1917,7 +1917,8 @@ letters:
       strict CI conformance. The shared compile now defines its own example model
       (ReflexExampleFund, app lex_app, never migrated) so it does not depend on 1aq's module
       having been imported first; 1aq's 1.366 now expects the example's routes; 1bt's chrome
-      tests save and restore the process-wide navigation.
+      tests save and restore the process-wide navigation. Since batch 1cm the reference example
+      is written on lex.ui.
   bx:
     title: 'Reflex dashboards sign in through lex-app''s hand-off - no Reflex Enterprise, no Reflex account'
     scenarios: 1.728-1.735
@@ -2101,7 +2102,7 @@ letters:
     scenarios: 1.762-1.767
     status: complete
     tests:
-      pass: 6
+      pass: 7
       skip: 0
       xfail: 0
     note: >-
@@ -2117,22 +2118,22 @@ letters:
     scenarios: 1.768-1.773
     status: complete
     tests:
-      pass: 6
+      pass: 9
       skip: 0
       xfail: 0
     note: >-
       Runs work that takes longer than a second as a job: the body works on a copy of the
       state, lex-app merges only what the job changed at each yield and at the end, so the
-      user keeps working and what they typed meanwhile survives; one run per user and
-      argument at a time, cancel at the next yield, optional stop when the user leaves the
-      page (spec 6.4). These tests fail if the screen freezes during an export, if a job
+      user keeps working and what they typed meanwhile survives; one run per tab and set of
+      arguments at a time, cancel at the next yield, optional stop when the user leaves the
+      page; the wind-up runs even when the job is cancelled meanwhile (spec 6.4). These tests fail if the screen freezes during an export, if a job
       overwrites the user's input, or if the same export runs twice.
   cj:
     title: '@ui.load: page loads, the opener, the error page'
     scenarios: 1.774-1.778
     status: complete
     tests:
-      pass: 10
+      pass: 12
       skip: 0
       xfail: 0
     note: >-
@@ -2142,7 +2143,9 @@ letters:
       the page's visit, its state is reset once per visit, and a required failure goes to
       the error page with a reference. A load started by a component's `on_mount` (a
       dashboard) belongs to its component: only a newer run of itself replaces it, it resets
-      the state at every start, and its failure is reported in place (spec 6.4, 6.5). These
+      the state at every start, and its failure is reported in place (spec 6.4, 6.5). Who is
+      acting is settled before the user's lock is taken, and the wind-up runs even when the
+      load is cancelled meanwhile; a route argument named like a ui.State helper is refused. These
       tests fail if a page flashes another record's data, loads before sign-in, lets the
       browser pick which loads run or under which permission, or lets one broken region take
       the page down.
@@ -2176,7 +2179,8 @@ letters:
       reflex check` report what leaves the default path (spec 6.7). Every public method on a
       `ui.State` must be one of the four lex.ui decorators (an undecorated method is an
       error too); import aliases and inheritance across files are followed; a file that
-      cannot be analysed is an error. These tests fail if raw Reflex handlers creep back
+      cannot be analysed is an error; a field or method named like a body helper, and a call
+      to a sibling handler, are errors. These tests fail if raw Reflex handlers creep back
       into project code unnoticed, or if the check passes when RFDS's own checks do but
       lex.ui's do not.
   cm:
