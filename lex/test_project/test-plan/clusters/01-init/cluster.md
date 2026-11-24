@@ -1522,3 +1522,16 @@ does not remove user launch configurations.
 | 1.829 | A handler hands on to another states handler | the other state's handlers are results like the toast, in the order written, and reach the browser as they are; a browser script, a redirect and a plain object are refused with the handler's name and where raw events go |
 
 **Scenario range:** 1.829. **Test file:** `lex/test_project/tests/init/test_1de_ui_reflex_events.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1de](batches.md).
+
+### 1df. lex.ui: a button that says why it cannot be pressed; a download the browser can place ✅
+
+**What it tests:** `ui.button(disabled=<reason or row field>)` keeps a blocked button in place with its reason; `ui.download` tells the browser what a file built from data is, from its name.
+
+**Why a regression matters:** a button that vanishes or stays pressable for a row it cannot act on, a yes/no value shown as a reason, or a PDF the browser treats as text.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.830 | A button says why it cannot be pressed | each row's button is blocked exactly when its row has a reason, stays focusable and shows it; a fixed reason is shown; a yes/no field and True are refused with what to give instead |
+| 1.831 | A download tells the browser what the file is | a file built from data carries the media type its name says; a download by URL carries none |
+
+**Scenario range:** 1.830 – 1.831. **Test file:** `lex/test_project/tests/init/test_1df_ui_button_disabled.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1df](batches.md).

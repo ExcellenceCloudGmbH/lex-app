@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 829
+max_scenario: 831
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2437,3 +2437,14 @@ letters:
       custom region. These tests fail on a handler that cannot chain to another state, or a browser script slipping
       out of an ordinary handler, or a hand-on that could only fail later in the browser (a @ui.rows
       handler, or a handler of the running handler's own state).
+  df:
+    title: 'lex.ui: a button that says why it cannot be pressed; a download the browser can place'
+    scenarios: 1.830-1.831
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.button(disabled=<reason>)` and a download's media type from its file name. These tests fail on a button
+      that vanishes or stays pressable for a row it cannot act on, or a file the browser cannot place.

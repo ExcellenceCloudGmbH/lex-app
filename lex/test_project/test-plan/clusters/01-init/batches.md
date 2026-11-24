@@ -3167,3 +3167,25 @@ events stay in the custom region. 1.747's docstring follows.
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.829 | A handler hands on to another states handler | the other state's handlers are results like the toast, in the order written, and reach the browser as they are; a browser script, a redirect and a plain object are refused with the handler's name and where raw events go |
+
+### Batch 1df — lex.ui: a button that says why it cannot be pressed; a download the browser can place ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.830 – 1.831 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/vocab.py` (`button(disabled=)`), `lex/lex_app/reflex/ui/results.py` (`download`) |
+| Test file | `lex/test_project/tests/init/test_1df_ui_button_disabled.py` |
+| Test classes | `TestCluster01df_ButtonDisabled` (1.830–1.831) |
+| Fixtures | a rows handler with a reason per row |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Found while converting the reviewed customer project: row actions disabled with a reason per row, downloads of PDFs and
+workbooks, and flags that kept jobs from overlapping (and stuck when a job failed). 1.770's reserved names gain
+`is_running`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.830 | A button says why it cannot be pressed | each row's button is blocked exactly when its row has a reason, stays focusable and shows it; a fixed reason is shown; a yes/no field and True are refused with what to give instead |
+| 1.831 | A download tells the browser what the file is | a file built from data carries the media type its name says; a download by URL carries none |

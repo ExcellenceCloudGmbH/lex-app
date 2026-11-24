@@ -37,6 +37,7 @@ class Download:
     url: str | None = None
     filename: str | None = None
     data: Any = None
+    media_type: str | None = None
 
 
 class Refresh(list):
@@ -69,10 +70,14 @@ def toast(message: str, *, tone: str = "info", description: str = "") -> Toast:
 
 
 def download(*, url: str | None = None, filename: str | None = None, data: Any = None) -> Download:
-    """Hand the user a file: by ``url``, or ``data`` with a ``filename``."""
+    """Hand the user a file: by ``url``, or ``data`` with a ``filename``. The browser is told what
+    the file is from its name (``report.pdf`` is a PDF)."""
     if url is None and data is None:
         raise ValueError("ui.download() needs url= or data=")
-    return Download(url, filename, data)
+    import mimetypes
+
+    kind = mimetypes.guess_type(filename)[0] if (data is not None and filename) else None
+    return Download(url, filename, data, kind)
 
 
 def refresh(*handlers: Any) -> Refresh:
@@ -184,7 +189,7 @@ def to_events(items: list) -> list:
         elif _is_state_handler(item):
             events.append(item)
         else:
-            events.append(rx.download(url=item.url, filename=item.filename, data=item.data))
+            events.append(rx.download(url=item.url, filename=item.filename, data=item.data, mime_type=item.media_type))
     return events
 
 
