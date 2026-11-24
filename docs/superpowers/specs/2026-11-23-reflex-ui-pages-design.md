@@ -631,6 +631,23 @@ Built on 2026-11-24 (batches 1ds-1du), on top of 6.14:
   multi-select has no server search. *Cost:* an edit form cannot show the current customer in the box.
 - **It works in a form, a wizard's step and a button's `ask=`**, as every field. A project's unit test
   sends `ui_search` through `ui.testing.Harness` before it sends the form.
+- **A form's refusal is shown in the form, above its submit button** -- where the user is looking --
+  in RFDS's `inline_message` (warning tone, as the toast it replaces; `role="alert"`: it is new and the
+  form did not do what was asked). It is kept per handler (`ui_refused[key] = {title, message}`) and
+  leaves when the form is sent again, whatever comes of that send, and on a new visit -- as the result
+  of 6.14 does. It is not also a toast: RFDS's rule is that a warning is never *only* a toast, and the
+  same sentence twice, one of them persistent, is noise. A refusal by lex-app's API (not permitted, a
+  4xx) is a refusal too; an unexpected failure stays a toast with its reference, since nothing in the
+  form can fix it. One way to refuse, `raise ui.Refuse(...)`, wherever the handler runs: no
+  form-error return value was added.
+- **`ui.Refuse(message, title=)`: an optional short heading.** In a form it heads the inline message;
+  outside a form the refusal is a toast as before, its first line the title and its second the
+  sentence (RFDS's toast `description`). *Considered:* a `heading=` word; `title=` is the word the
+  page kinds, sections and RFDS's own messages already use.
+- **An action's `ask=` dialog stays open until the action succeeds**, so its refusal shows in the
+  dialog, above its buttons; before, it closed as soon as the values passed. A job's dialog still
+  closes when the job starts -- the user keeps working while it runs -- so a job's refusal from a
+  dialog is a toast, headed by its title. `confirm=` dialogs (no form) close first, as before.
 
 ---
 

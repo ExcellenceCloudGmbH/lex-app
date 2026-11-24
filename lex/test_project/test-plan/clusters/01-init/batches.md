@@ -3332,3 +3332,26 @@ kinds gains `choices`, and the message for options on a field that is no choice 
 | 1.902 | The field is RFDS's combobox searching on the server | server-search mode (`shouldFilter:false`) over `ui_matches`; typing and opening send `ui_search`; the id under the key, the label shown; compiled; in a step and ask=, the dialog hands the key and the id |
 | 1.903 | A searched choice declared wrongly | several from a search, a start value, an action as options, one field searching two rows handlers: each names page, slot and what to write |
 
+### Batch 1dt — lex.ui: a refusal shown above a form's submit button, with a title ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.904 – 1.907 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/results.py` (`Refuse`), `lex/lex_app/reflex/ui/handlers.py` (`_classify`, `_toast`, `_in_place`, `action`, `job`), `lex/lex_app/reflex/ui/forms.py` (`receive`, `refused`, `done`), `lex/lex_app/reflex/ui/pages/forms.py` (`Form._page`, `dialog`), `lex/lex_app/reflex/ui/state.py` (`ui_refused`), `lex/lex_app/reflex/ui/testing.py` (`fields`) |
+| Test file | `lex/test_project/tests/init/test_1dt_ui_refuse_in_place.py` |
+| Test classes | `TestCluster01dt_RefuseInPlace` (1.904–1.907) |
+| Fixtures | a neutral exports state: a form, a job form, row buttons that ask |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+What building settled is section 6.15 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`; the failures
+table of the action-state design (6.5) gains the form's row.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.904 | Outside a form a refusal is a toast headed by its title | `Refuse(title=)` kept; RFDS's warning toast with the title first and the sentence as its description; without a title the sentence alone; nothing kept in place; a title that is no text refused |
+| 1.905 | In a form the refusal stays above the button until the form is sent again | `ui_refused[key]` title and sentence, no toast; cleared by the next send, also one with a field problem, by a success and by a new visit; API "not permitted" kept too; an unexpected error a toast, not kept; a job's refusal kept |
+| 1.906 | The form shows it above its submit button | RFDS's inline message inside the form, before the action bar; warning tone, `role="alert"`, the title line; compiled; a wizard too |
+| 1.907 | A dialog that asked stays open with the refusal | the dialog's inline message above its buttons; an action's dialog stays open with it, closes on success; a job's dialog closed at the start, its refusal a titled toast |
+

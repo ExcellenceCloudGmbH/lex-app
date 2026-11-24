@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 903
+max_scenario: 907
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2508,3 +2508,13 @@ letters:
       xfail: 0
     note: >-
       `ui.field(key, options=State.rows_handler)`: RFDS's combobox in its server-search mode over a `@ui.rows` handler, a page of `{value, label}` matches per search, the first when the field opens; the value checked against what the tab was offered; in a form, a step and ask=. These tests fail on every customer in the page, a row's other fields in the browser, a forged id reaching the body, or an empty box until the user types.
+  dt:
+    title: 'lex.ui: a refusal shown where the user is looking -- above a form''s submit button, with a title'
+    scenarios: 1.904-1.907
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.Refuse(message, title=)`: in a form (and an action's ask= dialog) RFDS's inline message above the submit button, kept until the form is sent again; elsewhere, and from a job's dialog, a toast headed by the title. These tests fail on a refusal the user never sees, one that stays after the form was sent again, the same sentence as a toast and in place, or a lost title.

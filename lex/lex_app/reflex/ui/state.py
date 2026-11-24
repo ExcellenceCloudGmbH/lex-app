@@ -95,6 +95,9 @@ class State(rx.State):
     ui_step: dict[str, int] = {}
     #: Handler key -> whether its form's last submit succeeded: the form's result shows while it is true.
     ui_done: dict[str, bool] = {}
+    #: Handler key -> its form's last refusal, ``{"title", "message"}``: shown above the submit button
+    #: until the form is sent again.
+    ui_refused: dict[str, dict[str, str]] = {}
     #: The dialog of a button with ``confirm=`` or ``ask=`` that is open ('' when none is), and the
     #: values that button passes to its handler.
     ui_asking: str = ""
@@ -140,7 +143,7 @@ class State(rx.State):
         from lex.lex_app.reflex.ui import runs
 
         await runs.sweep(self)
-        self.ui_invalid, self.ui_step, self.ui_done = {}, {}, {}      # a form starts over on a new visit
+        self.ui_invalid, self.ui_step, self.ui_done, self.ui_refused = {}, {}, {}, {}  # a form starts over
         self.ui_asking, self.ui_asking_args = "", []
         self._ui_page = page
         self._ui_reset = []
@@ -175,7 +178,7 @@ class State(rx.State):
     def ui_ask(self, dialog: str, args: list):
         """A button with ``confirm=`` or ``ask=`` was pressed: its dialog opens, holding the button's values."""
         self.ui_asking, self.ui_asking_args = dialog, list(args)
-        self.ui_invalid = {}
+        self.ui_invalid, self.ui_refused = {}, {}
 
     @rx.event
     def ui_ask_close(self, open: bool = False):  # noqa: A002 - the name Radix gives the value

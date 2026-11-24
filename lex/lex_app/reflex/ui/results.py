@@ -12,11 +12,19 @@ RECORDER: list | None = None
 
 
 class Refuse(Exception):
-    """An expected refusal: ``message`` is shown to the user as written, and nothing is logged."""
+    """An expected refusal: ``message`` is shown to the user as written, and nothing is logged.
 
-    def __init__(self, message: str):
+    ``title`` is an optional short heading above it: ``ui.Refuse("No order in this region has an
+    invoice.", title="Nothing to export")``. A form's handler's refusal is shown in the form, above
+    its submit button, until the form is sent again; elsewhere it is a toast, headed by the title.
+    """
+
+    def __init__(self, message: str, *, title: str = ""):
+        if not isinstance(title, str):
+            raise TypeError(f"ui.Refuse(title=) is a short text, such as title=\"Nothing to export\"; got {title!r}")
         super().__init__(message)
         self.message = str(message)
+        self.title = title
 
 
 @dataclasses.dataclass(frozen=True)

@@ -42,7 +42,8 @@
 ``ui.goto/toast/download``  what a handler returns; ``ui.refresh(State.rows)`` makes the
                             tables of another state read again
 ``ui.progress``             what a job yields
-``ui.Refuse``               an expected refusal, shown in its own words
+``ui.Refuse``               an expected refusal, shown in its own words (``title=`` heads it): in
+                            a form above its submit button, elsewhere as a toast
 ``ui.ApiError``             lex-app's API refused a call (``.status``, ``.denied``,
                             ``.detail``); uncaught, it is shown to the user
 ``requires=``               ``ui.read/create/edit/delete(Model)``, ``ui.permission()``,

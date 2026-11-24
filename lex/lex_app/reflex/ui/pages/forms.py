@@ -349,6 +349,20 @@ def _register(ctx: Build, handler: Any, receives: rules.Receives) -> None:
                                                         "handler of its own.") from None
 
 
+def _refusal(handler: Any) -> rx.Component:
+    """The form's last refusal, above its submit button: RFDS's inline message, headed by its title."""
+    import rfds
+
+    from lex.lex_app.reflex.ui.state import State
+
+    refusal = State.ui_refused.get(runs.key_of(handler), {})
+    title, message = refusal.get("title", "").to(str), refusal.get("message", "").to(str)
+    # A warning, as the toast it replaces; "alert": it is new, and the form did not do what was asked.
+    return rx.cond(message != "", rx.cond(
+        title != "", rfds.inline_message(message, title=title, tone="warning", role="alert"),
+        rfds.inline_message(message, tone="warning", role="alert")))
+
+
 def _progress(handler: Any) -> rx.Component:
     """A job's progress while it runs, with a way to stop it."""
     import rfds
@@ -468,7 +482,7 @@ class Form(kinds.Kind):
         buttons = [send]
         if wizard:
             buttons.append(rx.cond(at > 0, rfds.button(say("Back"), intent="tertiary", on_click=State.ui_step_back(key))))
-        form = rfds.form(*body, form_actions(*buttons), id=form_id, on_submit=handler)
+        form = rfds.form(*body, _refusal(handler), form_actions(*buttons), id=form_id, on_submit=handler)
         entry: list = [form]
         if handler.fn.__ui_kind__ == "job":
             entry.append(_progress(handler))
@@ -499,7 +513,8 @@ def form(*, title: Any, load: Any = None, fields: Any = (), steps: Any = (), sub
     Before the body runs lex-app checks every field (``required=``, and that the value is of the
     field's kind); a problem is shown at its field and the body does not run. The submit button is
     called after the handler (``create`` is "Create"), shows it running, and for a job its progress
-    with a way to stop it. A refusal (``ui.Refuse``) and a failure are shown as for every handler.
+    with a way to stop it. A refusal (``ui.Refuse``) is shown in the form, above the submit button,
+    until the form is sent again; an unexpected failure is a toast, as for every handler.
 
     ``result=`` is what the page shows once the handler has succeeded, and until the form is sent
     again: what a section holds, or ``ui.section``\\ s. The handler keeps what the result shows in
@@ -540,12 +555,13 @@ def dialog(ctx: Build, button: Any) -> Any:
         _receiver(ctx, handler, also=len(passed))
         asked = _fields(ctx.at(f"{ctx.slot}.ask" if ctx.slot else "ask"), list(button.ask))
         _register(ctx, handler, rules.Receives(fields=tuple(one.expect(ctx, handler) for one in asked),
-                                               where=f"the button `{button.label}` on page `{ctx.page}`"))
+                                               where=f"the button `{button.label}` on page `{ctx.page}`", dialog=True))
         with form_scope(ident):
             controls = [one.control(ctx, handler, opening) for one in asked]
         send = rfds.button(say(button.label), type="submit", loading=runs.running(handler),
                            intent="danger" if button.tone == "danger" else "primary")
-        body = rfds.form(*controls, form_actions(send, rfds.button(say("Cancel"), on_click=State.ui_ask_close(False))),
+        body = rfds.form(*controls, _refusal(handler),
+                         form_actions(send, rfds.button(say("Cancel"), on_click=State.ui_ask_close(False))),
                          id=ident, on_submit=lambda data: handler(*passed, data))
         shown_dialog = kinds._rfds(ctx, lambda: rfds.dialog(body, open=is_open, on_open_change=State.ui_ask_close,
                                                             title=say(button.label), description=question))

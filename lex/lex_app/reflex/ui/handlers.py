@@ -120,7 +120,7 @@ def _classify(key: str, exc: BaseException, user: str = "") -> Outcome:
 
     denied = results.message("lex.ui.denied", "You are not permitted to do this.")
     if isinstance(exc, results.Refuse):
-        outcome = Outcome("refused", "", exc.message)
+        outcome = Outcome("refused", exc.title, exc.message)
     elif isinstance(exc, _NotPermitted) or (isinstance(exc, LexApiError) and exc.denied):
         logger.warning("lex.ui handler %s was not permitted for user %s", key, user or "(unknown)")
         outcome = Outcome("denied", "", denied)
@@ -150,7 +150,18 @@ def _classify(key: str, exc: BaseException, user: str = "") -> Outcome:
 
 
 def _toast(outcome: Outcome) -> results.Toast:
+    if outcome.kind == "refused" and outcome.title:         # the title heads it, the sentence under it
+        return results.Toast(outcome.title, "warning", outcome.message)
     return results.Toast(outcome.message, "warning" if outcome.kind == "refused" else "error")
+
+
+def _in_place(outcome: Outcome, receives: Any, kind: str) -> bool:
+    """Whether a refusal is shown in the form the user sent, rather than as a toast.
+
+    A form's or dialog's handler that refused (or was denied); not an unexpected failure. A dialog
+    that started a job closed when the job started: there is no form left to show it in.
+    """
+    return receives is not None and outcome.kind != "error" and not (kind == "job" and receives.dialog)
 
 
 async def _denied(session: context.Session, requirements: tuple | None) -> bool:
@@ -345,7 +356,7 @@ def action(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any
             session, failure = await _session(self, requirements)   # who is acting, what they may do
             if failure is None and receives is not None:
                 try:
-                    args, arg, go = forms.receive(self, key, fn, receives, args, kwargs)
+                    args, arg, go = forms.receive(self, key, fn, receives, args, kwargs, kind="action")
                     kwargs = {}
                 except Exception as exc:  # noqa: BLE001 - reported below, like a failure of the body
                     failure = exc
@@ -390,11 +401,14 @@ def action(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any
                 if failure is not None:
                     outcome = _classify(key, failure, user=_user_id(session))
                     message = outcome.message
-                    for event in results.to_events([_toast(outcome)]):
-                        yield event
+                    if _in_place(outcome, receives, "action"):
+                        forms.refused(self, key, outcome.title, outcome.message)
+                    else:
+                        for event in results.to_events([_toast(outcome)]):
+                            yield event
                 else:
                     if receives is not None:
-                        forms.done(self, key)
+                        forms.done(self, key, close=receives.dialog)
                     for event in _tables_of(self):        # its state's tables read again
                         yield event
             finally:
@@ -472,7 +486,7 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                     if failure is None and receives is not None:
                         async with self:
                             try:
-                                args, arg, go = forms.receive(self, key, fn, receives, args, kwargs)
+                                args, arg, go = forms.receive(self, key, fn, receives, args, kwargs, kind="job")
                                 kwargs = {}
                             except Exception as exc:  # noqa: BLE001 - reported below, outside the block
                                 failure, go = exc, True
@@ -522,8 +536,12 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                 except Exception as exc:  # noqa: BLE001 - the body has finished here; reported to the user
                     outcome = _classify(key, exc, user=_user_id(session))
                     message = outcome.message
-                    for event in results.to_events([_toast(outcome)]):
-                        yield event
+                    if _in_place(outcome, receives, "job"):
+                        async with self:
+                            forms.refused(self, key, outcome.title, outcome.message)
+                    else:
+                        for event in results.to_events([_toast(outcome)]):
+                            yield event
             finally:                                      # also on cancellation: nothing is left running
                 await _shielded(wind_up())
 

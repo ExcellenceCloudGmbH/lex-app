@@ -1629,3 +1629,18 @@ does not remove user launch configurations.
 
 **Scenario range:** 1.900 – 1.903. **Test file:** `lex/test_project/tests/init/test_1ds_ui_form_searched_choice.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ds](batches.md).
 
+### 1dt. lex.ui: a refusal shown above a form's submit button, with a title ✅
+
+**What it tests:** `ui.Refuse(message, title=)` -- in a form, and in an action's ask= dialog, RFDS's inline message above the submit button until the form is sent again; elsewhere a toast headed by the title.
+
+**Why a regression matters:** a refusal the user never sees, one that stays after the form was sent again, the same sentence twice, or a title that is lost.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.904 | Outside a form a refusal is a toast headed by its title | the title first, the sentence as the description; without a title as before; nothing kept in place |
+| 1.905 | In a form the refusal stays above the button until the form is sent again | kept per handler, no toast; cleared by every send and a new visit; API refusals too; errors stay toasts; jobs too |
+| 1.906 | The form shows it above its submit button | RFDS's inline message before the action bar, warning, announced, titled; compiled; a wizard too |
+| 1.907 | A dialog that asked stays open with the refusal | an action's dialog keeps it and closes on success; a job's dialog closed, its refusal a toast |
+
+**Scenario range:** 1.904 – 1.907. **Test file:** `lex/test_project/tests/init/test_1dt_ui_refuse_in_place.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dt](batches.md).
+

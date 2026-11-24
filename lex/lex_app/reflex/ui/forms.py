@@ -54,6 +54,7 @@ class Receives:
     fields: tuple = ()
     steps: tuple = ()                   # per step, the keys of its fields; empty for a form without steps
     where: str = ""                     # the page and slot that declared it, for a message
+    dialog: bool = False                # a button's ask= dialog: an action's stays open until it succeeds
 
 
 #: Handler id (module and qualified name) -> what it receives. Filled when a page is built.
@@ -298,13 +299,16 @@ def _set_invalid(state: Any, key: str, problems: dict) -> None:
     state.ui_invalid = {**kept, **{f"{key}|{field}": text for field, text in problems.items()}}
 
 
-def receive(state: Any, key: str, fn: Any, receives: Receives, args: tuple, kwargs: dict) -> tuple[tuple, str, bool]:
+def receive(state: Any, key: str, fn: Any, receives: Receives, args: tuple, kwargs: dict,
+            kind: str = "action") -> tuple[tuple, str, bool]:
     """Check the values a handler was sent, before its body runs. Call while holding the user's lock.
 
     Returns (the arguments for the body, with the values checked and typed; the run's first other
     argument as text, for the view; whether the body runs). The body does not run while a field has
     a problem -- the messages are kept for the fields -- or while a wizard has steps left: its
-    Continue button sends the same form, and only the last step's reaches the body.
+    Continue button sends the same form, and only the last step's reaches the body. The form's last
+    refusal and result leave: they were for other input. A dialog that starts a job closes now, so
+    the user keeps working; one that runs an action stays open until it succeeds (:func:`done`).
     """
     bound = inspect.signature(fn).bind(None, *args, **kwargs)
     others = tuple(value for name, value in list(bound.arguments.items())[1:] if name != VALUES)
@@ -324,12 +328,22 @@ def receive(state: Any, key: str, fn: Any, receives: Receives, args: tuple, kwar
         state.ui_step = {**dict(state.ui_step), key: step}
     _set_invalid(state, key, problems)
     state.ui_done = {**dict(state.ui_done), key: False}         # the last result leaves: it was for other input
-    if go:
-        if state.ui_asking:                                     # the dialog that asked closes
-            state.ui_asking, state.ui_asking_args = "", []
+    state.ui_refused = {name: one for name, one in dict(state.ui_refused).items() if name != key}
+    if go and kind == "job" and state.ui_asking:                # the dialog that asked closes
+        state.ui_asking, state.ui_asking_args = "", []
     return (*others, values), arg, go
 
 
-def done(state: Any, key: str) -> None:
-    """The handler's body finished: what the form shows after a successful submit appears."""
+def refused(state: Any, key: str, title: str, message: str) -> None:
+    """The handler refused what its form sent: kept for the form, shown above its submit button."""
+    state.ui_refused = {**dict(state.ui_refused), key: {"title": str(title or ""), "message": str(message)}}
+
+
+def done(state: Any, key: str, *, close: bool = False) -> None:
+    """The handler's body finished: what the form shows after a successful submit appears.
+
+    ``close``: the handler is an action whose dialog asked; it closes now that the action succeeded.
+    """
     state.ui_done = {**dict(state.ui_done), key: True}
+    if close and state.ui_asking:
+        state.ui_asking, state.ui_asking_args = "", []

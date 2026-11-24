@@ -187,7 +187,7 @@ class Harness:
         state = await self._state(state_cls)
         values = workcopy.snapshot(state)
         for name in ("ui_running", "ui_failed", "ui_progress", "ui_progress_message", "ui_visit", "ui_error",
-                     "ui_invalid", "ui_step", "ui_done", "ui_asking"):
+                     "ui_invalid", "ui_step", "ui_done", "ui_refused", "ui_asking"):
             values[name] = workcopy._plain(getattr(state, name))
         return values
 

@@ -440,6 +440,10 @@ values at the start, or at its last `yield`.
 | `@ui.load` started on mount | In place, through `ui.failed` |
 | `@ui.action` | A toast |
 | `@ui.job` | A toast, and `ui.failed` for showing it in place |
+| a form's handler (`ui.form`, `ask=`) | A refusal or "not permitted": in the form, above its submit button, until it is sent again (pages design 6.15); an unexpected error: a toast |
+
+`ui.Refuse(message, title=)` takes an optional short title: it heads the in-place message, or the
+toast (the sentence then is the toast's second line).
 
 A handler therefore needs no `try`/`except` for the normal cases:
 
