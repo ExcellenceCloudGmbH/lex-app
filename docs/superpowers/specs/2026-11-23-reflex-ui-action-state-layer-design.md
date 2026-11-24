@@ -717,6 +717,13 @@ class PayrollState(ui.State):
   kept while it is held, and reset when it is gone, so the page opens clean instead of looping
   through the error page's "Try again". A form kept across visits says it under the form (pages
   design 6.18).
+- **A computed var never reads it** (review, 2026-11-24): Reflex works a computed var out whenever it
+  sends the state and caches it by the fields it reads, which a private field is not -- a cached var
+  stays stale, and one with `cache=False` read after the value is gone raises in every later event
+  of the tab until the page is reloaded. Reflex's own dependency tracker finds what a var reads
+  (also through the methods it calls); one that reads a private field is refused when the class is
+  defined: read it in a `@ui.rows` handler, or make the var an ordinary field set where the private
+  one is written. A computed var over a backend field (`_name`) is Reflex's own and stays.
 - **`ui.testing`**: `fields={"_report": {...}}` seeds it and `result.fields["_report"]` reads it,
   as for every field; `ui.testing.GONE` seeds a value that is gone (to test the refusal) and is what
   `result.fields` holds for one.

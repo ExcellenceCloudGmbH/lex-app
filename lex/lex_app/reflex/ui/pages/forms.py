@@ -591,8 +591,9 @@ def form(*, title: Any, load: Any = None, fields: Any = (), steps: Any = (), sub
 
     ``result=`` is what the page shows once the handler has succeeded, and until the form is sent
     again: what a section holds, or ``ui.section``\\ s. The handler keeps what the result shows in
-    its state -- large or private data in a field whose name starts with ``_``, which stays on the
-    server -- and a ``@ui.rows`` handler or a computed value reads it. ``actions`` are placed in
+    its state -- large data in a field whose name starts with ``_``, which stays on the server,
+    personal data in a ``ui.private`` field -- and a ``@ui.rows`` handler reads it (a computed var
+    may read a ``_`` field, never a private one: copy what the page shows into a field instead). ``actions`` are placed in
     the page header, none of them as the primary one: that is the submit button. ``tabs=True``
     shows the result's sections one at a time, as on a record page: each section's title is its
     tab, and what comes before the first section is above the tabs.

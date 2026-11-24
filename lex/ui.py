@@ -45,7 +45,8 @@
                             another state read again
 ``ui.progress``             what a job yields
 ``ui.private``              a state field kept in the server's memory only, for its user, for a
-                            while: ``_report: dict = ui.private()``
+                            while: ``_report: dict = ui.private()``; a ``@ui.rows`` handler reads
+                            it, a computed var may not
 ``ui.Refuse``               an expected refusal, shown in its own words (``title=`` heads it): in
                             a form above its submit button, elsewhere as a toast
 ``ui.ApiError``             lex-app's API refused a call (``.status``, ``.denied``,

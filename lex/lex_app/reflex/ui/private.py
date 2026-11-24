@@ -19,6 +19,7 @@ from __future__ import annotations
 import collections
 import copy
 import dataclasses
+import inspect
 import os
 import threading
 import time
@@ -160,7 +161,9 @@ def private(*, idle_minutes: float = 60, max_hours: float = 8, keep: bool = Fals
     whenever another server process or another user reads the state. Reading it then fails with a
     plain sentence -- "This is no longer available: it is kept only for a while. Start again." --
     shown as every refusal is (a toast, a table's message), never with old or another user's data.
-    A load resets it like every field, unless ``keep=True`` and it is still kept.
+    A load resets it like every field, unless ``keep=True`` and it is still kept. A computed var
+    may not read it (refused when the class is defined): read it in a ``@ui.rows`` handler, or
+    copy what the page shows into an ordinary field where the private one is written.
     """
     for name, given in (("idle_minutes", idle_minutes), ("max_hours", max_hours)):
         if isinstance(given, bool) or not isinstance(given, (int, float)) or given <= 0:
@@ -168,6 +171,49 @@ def private(*, idle_minutes: float = 60, max_hours: float = 8, keep: bool = Fals
     if not isinstance(keep, bool):
         raise TypeError(f"ui.private(keep=) is True or False; got {keep!r}")
     return Private(idle_minutes, max_hours, keep)
+
+
+def check_computed(state_cls: Any) -> None:
+    """Refuse a computed var of ``state_cls`` that reads a private field (``TypeError``).
+
+    Reflex works a computed var out whenever it sends the state, and caches it by the fields it
+    reads; a private field is none of them, so a cached var would stay stale, and one read after
+    the value is gone raises in every later event of the tab. Reflex's own dependency tracker
+    finds what the var reads (through the methods it calls, too); a private field is looked for
+    the way it finds a backend field.
+    """
+    from reflex_base.vars.dep_tracking import DependencyTracker
+
+    found: list[str] = []
+
+    class _Reads(DependencyTracker):
+        def load_attr_or_method(self, instruction: Any) -> None:
+            if self.top_of_stack:
+                try:
+                    target = self.get_tracked_local(self.top_of_stack)
+                    held = inspect.getattr_static(target, instruction.argval, None)
+                except Exception:  # noqa: BLE001 - not a state: nothing private to read
+                    held = None
+                if isinstance(held, Private):
+                    found.append(instruction.argval)
+            super().load_attr_or_method(instruction)
+
+    for name, var in getattr(state_cls, "computed_vars", {}).items():
+        fget = getattr(var, "_fget", None)
+        if fget is None or name in getattr(state_cls, "inherited_vars", {}):
+            continue
+        found.clear()
+        try:
+            _Reads(func=fget, state_cls=state_cls)
+        except Exception:  # noqa: BLE001 - what Reflex cannot follow, it warns about itself
+            continue
+        if found:
+            raise TypeError(
+                f"{state_cls.__name__}.{name} reads the private field {found[0]}: a computed var is worked out "
+                f"whenever the page is sent, and a private value may be gone by then. Read it in a @ui.rows "
+                f"handler (a table's rows), or copy what the page shows into a field: make {name} an ordinary "
+                f"field, set where {found[0]} is written (`self.{name} = ...` beside `self.{found[0]} = ...`)."
+            )
 
 
 # -- what a state holds ------------------------------------------------------------------

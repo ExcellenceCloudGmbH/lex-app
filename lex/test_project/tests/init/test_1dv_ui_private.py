@@ -11,7 +11,7 @@ never another user's. A regression is personal data in a state pickle or in the 
 one user wrote read by another, a value that outlives its limits, or a page that silently shows
 nothing (or old data) where the value was.
 
-Cluster 1dv -- scenarios 1.920-1.926. Type: U.
+Cluster 1dv -- scenarios 1.920-1.926, 1.911. Type: U.
 Covers: lex/lex_app/reflex/ui/private.py, lex/lex_app/reflex/ui/workcopy.py (fields_of, snapshot,
 restore, reset, Draft), lex/lex_app/reflex/ui/state.py (_ui_private, ui_open),
 lex/lex_app/reflex/ui/context.py (user_id_of), lex/lex_app/reflex/ui/testing.py (GONE),
@@ -361,3 +361,55 @@ class TestCluster01dv_Private(SimpleTestCase):
         self.assertIn("_report", PayrollState.__dict__)
         self.assertNotIn("_report", PayrollState.backend_vars, "not a backend var: Reflex never stores it")
         self.assertNotIn("_report", PayrollState.base_vars, "nor a var the browser gets")
+
+    # -- 1.911 ---------------------------------------------------------
+    def test_1_911_a_computed_var_reading_a_private_field_is_refused_when_the_class_is_defined(self) -> None:
+        """
+        Scenario 1.911: a computed var never reads a private field.
+        Given: Reflex recomputes a computed var whenever it sends the state, and caches it by the
+               fields it reads -- which a private field is not; read after the value is gone it
+               raises in every later event of the tab.
+        When:  a ui.State declares `@rx.var` reading a private field -- cached, `cache=False`,
+               through a helper method -- and, beside it, one reading a backend field.
+        Then:  each one reading the private field is refused when the class is defined, naming
+               the var and the field and saying to read it in a `@ui.rows` handler or copy what
+               the page shows into a field; the one reading a backend field is accepted.
+        """
+        import reflex as rx
+
+        sentence = (r"ReadsPrivate\d?\.count reads the private field _lines.*a computed var is worked out "
+                    r"whenever the page is sent.*@ui\.rows.*copy what the page shows into a field")
+        with self.assertRaisesRegex(TypeError, sentence):
+            class ReadsPrivate(ui.State):
+                _lines: list = ui.private()
+
+                @rx.var
+                def count(self) -> int:
+                    return len(self._lines)
+        with self.assertRaisesRegex(TypeError, sentence):
+            class ReadsPrivate2(ui.State):
+                _lines: list = ui.private()
+
+                @rx.var(cache=False)
+                def count(self) -> int:
+                    return len(self._lines)
+        with self.assertRaisesRegex(TypeError, sentence):
+            class ReadsPrivate3(ui.State):
+                _lines: list = ui.private()
+
+                def _helper(self) -> int:
+                    return len(self._lines)
+
+                @rx.var
+                def count(self) -> int:
+                    return self._helper()
+
+        class ReadsBackend(ui.State):
+            _plain: list = []
+
+            @rx.var
+            def count(self) -> int:
+                return len(self._plain)
+
+        fine = ReadsBackend
+        self.assertIn("count", fine.computed_vars, "a computed var over a backend field is Reflex's own, and stays")
