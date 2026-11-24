@@ -110,6 +110,28 @@ def release(token: str, key: str, arg: str) -> None:
         _ACTIVE.pop((token, key, arg), None)
 
 
+#: Job key -> how many of its runs hold a place under its ``limit=`` in this process.
+_PLACES: dict[str, int] = {}
+
+
+def take_place(key: str, limit: int) -> bool:
+    """Take one of ``limit`` places for a run of ``key`` in this process; ``False`` when all are taken."""
+    with _LOCK:
+        if _PLACES.get(key, 0) >= limit:
+            return False
+        _PLACES[key] = _PLACES.get(key, 0) + 1
+        return True
+
+
+def give_place(key: str) -> None:
+    with _LOCK:
+        left = _PLACES.get(key, 0) - 1
+        if left > 0:
+            _PLACES[key] = left
+        else:
+            _PLACES.pop(key, None)
+
+
 def request_cancel(token: str, key: str) -> int:
     """Ask every run of ``key`` in one tab to stop at its next yield; returns how many."""
     with _LOCK:

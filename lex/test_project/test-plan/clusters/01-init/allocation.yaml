@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 926
+max_scenario: 929
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2508,3 +2508,13 @@ letters:
       xfail: 0
     note: >-
       `_report: dict = ui.private(idle_minutes=, max_hours=, keep=)`: read and written like a backend field, kept in the server process's memory only, bound to the tab and the user who wrote it; gone after its idle time, its maximum age, a new visit (unless keep=True), another process or user; reading it then is a plain refusal; ui.testing seeds it and GONE. These tests fail on personal data in a state pickle or the browser, one user's value read by another, a value that outlives its limits, or a page that shows nothing or old data where the value was.
+  dw:
+    title: 'lex.ui: a limit on how many runs of a job go at once -- @ui.job(limit=)'
+    scenarios: 1.927-1.929
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      `@ui.job(limit=2)`: at most two runs at once in the server process, for all users; a further press refused at once with a fixed sentence (toast and ui.failed), before a form's values are judged; the place given back however a run ends. These tests fail on a third run starting beside two, a refused press that changes the page, or a place never given back.

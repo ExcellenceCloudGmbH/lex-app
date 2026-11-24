@@ -36,7 +36,8 @@
                             ``self.params``, ``self.can()``, ``self.state()``
 ``@ui.load``                fills the page when it opens
 ``@ui.action``              a short handler, under about a second
-``@ui.job``                 long work with progress; the user keeps working
+``@ui.job``                 long work with progress; the user keeps working. ``limit=2``: at
+                            most two runs at once in the server, a further press is refused
 ``@ui.rows``                a table's rows, as a list of dicts; read-only, read as the user
 ``@ui.custom``              a raw Reflex handler, marked for review
 ``ui.goto/toast/download``  what a handler returns; ``ui.refresh(State.rows)`` makes the

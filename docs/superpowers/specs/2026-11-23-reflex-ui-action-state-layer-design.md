@@ -179,7 +179,7 @@ Fact 3 on Redis is from source reading only: no Redis was available for the prob
 | `ui.State` | Base class of every page state |
 | `@ui.load` | Runs when a page opens |
 | `@ui.action` | A short handler, under about a second |
-| `@ui.job` | Long work with progress |
+| `@ui.job` | Long work with progress; `limit=` caps its runs at once (6.12) |
 | `@ui.custom` | Marks a raw Reflex handler (the custom region) |
 | `ui.goto`, `ui.toast`, `ui.download` | What a handler returns to make the browser act |
 | `ui.progress` | What a job yields to report progress |
@@ -300,7 +300,7 @@ the handler when the class is created.
 | When the browser updates | At each `yield` and at the end | At each `yield` and at the end | At each `yield` and at the end |
 | A repeat while it runs | Declared on the page: a newer visit replaces it. Started on mount: a newer run replaces it | Queued, runs afterwards | Ignored |
 | The user leaves the page | Declared on the page: result discarded. Started on mount: kept | — | Keeps running; stops with `stop_on_leave=True` |
-| Options | `requires=`, `optional=`, `keep=` | `requires=` | `requires=`, `stop_on_leave=` |
+| Options | `requires=`, `optional=`, `keep=` | `requires=` | `requires=`, `stop_on_leave=`, `limit=` (6.12) |
 | Thread pool | Interactive | Interactive | Jobs |
 
 **A visit** is one opening of a page in one browser tab. `lex_page` starts a new visit on every page
@@ -701,6 +701,32 @@ class PayrollState(ui.State):
   another worker finds it gone and is told so. A process keeps at most the setting's number of
   values, of any size. The leave drop needs the page's opener: a page without one (a dashboard on
   plain `rx.page`) relies on the idle time.
+
+### 6.12 A limit on how many runs of a job go at once: `@ui.job(limit=)` (2026-11-24)
+
+An expensive job (reading another system) must not run more than N times at once. Built in batch
+1dw.
+
+```python
+@ui.job(limit=2)
+def export(self, region):
+    ...
+```
+
+- **Counted in this server process, for all users and tabs together**, from the run's start (after
+  `requires=`) to its wind-up, however it ends: success, failure, refusal, cancel, a form's wrong
+  field. Like the job pool (`LEX_UI_JOB_THREADS`), it is per process: with several backend workers
+  each allows N. A run waiting for a pool thread holds its place.
+- **A press beyond the limit is refused at once, not queued**: "Export is already running 2 times.
+  Try again in a moment." ("Export is already running. Try again in a moment." for `limit=1`),
+  as a toast and in `ui.failed`; nothing else on the page changes -- the check comes before a
+  form's values are judged, so no field message appears and the last result stays. The job is
+  named as its submit button is named (6.14 of the pages design).
+- *Fixed sentence:* `limit=` takes the number only. A sentence of the project's own would be a
+  second way to word a standard message, outside the translation of the others.
+  *Considered first:* the pool's own size (`LEX_UI_JOB_THREADS`, for every job at once), and
+  queueing (a queued press would wait unseen).
+- `limit=` is a whole number, 1 or more; anything else is refused when the state is written.
 
 ---
 

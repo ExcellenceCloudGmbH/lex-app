@@ -3333,3 +3333,24 @@ kinds gains `choices`, and the message for options on a field that is no choice 
 | 1.924 | What the user sees when it is gone | an action and a job are refused with the sentence (toast; ui.failed for a job); a table's message is the sentence; a failed action leaves it gone, and restores a kept value |
 | 1.925 | ui.testing seeds and reads it like any field | fields= seeds it; result.fields reads it; ui.testing.GONE seeds a gone value and is what result.fields holds; GONE copies and pickles as itself |
 | 1.926 | A private field declared wrongly says what to write | a public name, no type, a plain Reflex state, a limit of 0 or True, keep= not a bool; the empty value from the type; neither a backend var nor a var |
+
+### Batch 1dw — lex.ui: a limit on how many runs of a job go at once -- @ui.job(limit=) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.927 – 1.929 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/handlers.py` (`job`, `_limit_message`), `lex/lex_app/reflex/ui/runs.py` (`take_place`, `give_place`) |
+| Test file | `lex/test_project/tests/init/test_1dw_ui_job_limit.py` |
+| Test classes | `TestCluster01dw_JobLimit` (1.927–1.929) |
+| Fixtures | a neutral export state (an export held at a gate, a report form, a job that stops) |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+`limit=` on `@ui.job`. What building settled is section 6.12 of `docs/superpowers/specs/2026-11-23-reflex-ui-action-state-layer-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.927 | Beyond the limit a press is refused at once | two run at once; the third is refused before the others end, with the sentence, as a toast and in ui.failed; its body never runs; afterwards it runs |
+| 1.928 | A place is given back however the run ends | a failure, a body's refusal, a cancel and a form's wrong field each free the place; a refused press of a form's job leaves no field message; limit=1 has its own sentence |
+| 1.929 | The limit is declared as a whole number | 0, True, 2.5 and "2" refused with what to write; the handler carries its limit, also into a mixin's copy |
