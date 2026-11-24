@@ -1,4 +1,4 @@
-"""Where things lead: a link names a page function or a record, never a route string."""
+"""Where things lead: a link names a page function, a declared raw page or a record, never a route string."""
 
 from __future__ import annotations
 
@@ -40,6 +40,41 @@ def info_of(route: str, name: str, params: Any = ()) -> PageInfo:
     return PageInfo(name, route, arguments, params)
 
 
+class ReflexPage:
+    """A page written in raw Reflex, declared as somewhere a link may lead (see :func:`reflex_page`)."""
+
+    __slots__ = ("__ui_page__", "__name__")
+
+    def __init__(self, info: PageInfo) -> None:
+        self.__ui_page__ = info
+        self.__name__ = info.name
+
+    def __repr__(self) -> str:
+        return f"ui.reflex_page({self.__ui_page__.route!r})"
+
+
+def reflex_page(route: str, *, params: Any = ()) -> ReflexPage:
+    """A page written in raw Reflex at ``route``, as somewhere a lex.ui link may lead.
+
+    For a project that moves to lex.ui a table at a time: its pages are registered with
+    ``app.add_page`` and are not ``@ui.page`` functions yet, but a lex.ui table on one of them
+    still links to the others. Pass the result wherever a link takes a page::
+
+        REQUEST = ui.reflex_page("/requests/[req]")
+
+        ui.address(REQUEST, req=row["key"])            # in a @ui.rows handler
+        ui.table(State.requests, open=REQUEST, ...)    # every row opens its request
+
+    ``params`` are the query parameters the page reads besides its route's arguments. Declare it
+    next to the ``app.add_page`` call that registers the route: nothing else checks that the
+    page exists.
+    """
+    if not isinstance(route, str) or not route.startswith("/"):
+        raise ValueError(f"ui.reflex_page() takes the page's route as app.add_page registers it, starting with /, "
+                         f"such as \"/requests/[req]\"; got {route!r}.")
+    return ReflexPage(info_of(route, route, params))
+
+
 def page_info(target: Any) -> PageInfo | None:
     return getattr(target, "__ui_page__", None)
 
@@ -49,7 +84,8 @@ def href(ctx: Build, target: Callable[..., Any], values: dict) -> Any:
     info = page_info(target)
     if info is None:
         raise ctx.fail(f"`to=` got {getattr(target, '__name__', target)!r}, which is not a page.",
-                       "Pass a function declared with `@ui.page`. For an outside site use `href=\"https://...\"`.")
+                       "Pass a function declared with `@ui.page`, or a raw Reflex page declared with "
+                       "`ui.reflex_page(\"/route\")`. For an outside site use `href=\"https://...\"`.")
     missing = [name for name in info.arguments if name not in values]
     unknown = [name for name in values if name not in info.arguments and name not in info.params]
     if missing or unknown:
@@ -117,7 +153,8 @@ def address(page: Callable[..., Any], **values: Any) -> Address:
     """
     info = page_info(page)
     if info is None:
-        raise TypeError(f"ui.address() takes a page declared with @ui.page; got {getattr(page, '__name__', page)!r}")
+        raise TypeError(f"ui.address() takes a page declared with @ui.page or ui.reflex_page(\"/route\"); "
+                        f"got {getattr(page, '__name__', page)!r}")
     missing = [name for name in info.arguments if name not in values]
     unknown = [name for name in values if name not in info.arguments and name not in info.params]
     if missing or unknown:

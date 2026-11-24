@@ -1461,3 +1461,15 @@ does not remove user launch configurations.
 | 1.823 | A table that leaves the screen keeps none of its rows | once it has left, its state holds no row, no count, no totals and no filter choice; when it appears again it reads its rows afresh |
 
 **Scenario range:** 1.823. **Test file:** `lex/test_project/tests/init/test_1cz_ui_table_close.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1cz](batches.md).
+
+### 1da. lex.ui links: a raw Reflex page as somewhere a link may lead ✅
+
+**What it tests:** A project moving to lex.ui a table at a time keeps its pages in raw Reflex for a while; `ui.reflex_page("/route")` declares one as a link target, so `ui.address`, a table's `open=`, `ui.link(to=)` and `ui.button(to=)` lead to it as to a `@ui.page`.
+
+**Why a regression matters:** a converted table whose rows can no longer be opened (or opened in a new tab), or a row link built from a string.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.824 | A raw Reflex page is somewhere a link may lead | the address is the route with its value encoded as one piece, and is the kind of address a table follows; the table's rows link by their key; the link and the button lead there; a missing or unknown value, and a route that is no route, are refused with what to write |
+
+**Scenario range:** 1.824. **Test file:** `lex/test_project/tests/init/test_1da_ui_reflex_page.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1da](batches.md).

@@ -3065,3 +3065,23 @@ page stayed in the tab's state. 1.815's hidden table now holds no row either.
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.823 | A table that leaves the screen keeps none of its rows | once it has left, its state holds no row, no count, no totals and no filter choice; when it appears again it reads its rows afresh |
+
+### Batch 1da — lex.ui links: a raw Reflex page as somewhere a link may lead ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.824 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/links.py` (`reflex_page`), `lex/ui.py` |
+| Test file | `lex/test_project/tests/init/test_1da_ui_reflex_page.py` |
+| Test classes | `TestCluster01da_ReflexPage` (1.824) |
+| Fixtures | the rows handler of batch 1cw; two raw pages declared with `ui.reflex_page` |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Found while moving the reviewed customer project's tables to lex.ui: its pages are raw Reflex, and a converted table
+could only link to `@ui.page` functions, so its rows lost their links. 1.783's namespace gains `reflex_page`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.824 | A raw Reflex page is somewhere a link may lead | the address is the route with its value encoded as one piece, and is the kind of address a table follows; the table's rows link by their key; the link and the button lead there; a missing or unknown value, and a route that is no route, are refused with what to write |

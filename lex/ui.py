@@ -64,6 +64,7 @@ button/link``
 ``ui.table``                rows from a model (``where=``) or a ``@ui.rows`` handler; ``search=``,
                             ``filters=``, ``export=``, ``totals=``, ``row_actions=``
 ``ui.address``              a page's address, for a row that leads to a page of its own
+``ui.reflex_page``          a page written in raw Reflex, as somewhere a link may lead
 ``ui.custom_block``         a raw component, marked for review with its reason
 ``ui.embed``                the other way round: one lex.ui part inside a raw Reflex page,
                             for moving a project a table at a time
@@ -78,7 +79,7 @@ from lex.lex_app.reflex.ui import testing
 from lex.lex_app.reflex.ui.guard import create, delete, edit, permission, read, signed_in
 from lex.lex_app.reflex.ui.handlers import action, custom, job, load
 from lex.lex_app.reflex.ui.pages.declare import dashboard, embed, page
-from lex.lex_app.reflex.ui.pages.links import address
+from lex.lex_app.reflex.ui.pages.links import address, reflex_page
 from lex.lex_app.reflex.ui.pages.kinds import list_ as list  # noqa: A001 - ui.list is the page kind
 from lex.lex_app.reflex.ui.pages.kinds import record, section
 from lex.lex_app.reflex.ui.pages.parts import PageError
@@ -93,6 +94,6 @@ __all__ = [
     "ApiError", "PageError", "Refuse", "State", "action", "address", "button", "cancel", "column", "create", "custom",
     "custom_block", "dashboard", "delete", "download", "each", "edit", "embed", "fact", "failed", "goto", "job",
     "link", "load", "loaded", "message", "page", "permission", "progress", "progress_of", "read",
-    "record", "refresh", "rows", "running", "section", "signed_in", "status", "switch", "table", "testing", "text",
+    "record", "reflex_page", "refresh", "rows", "running", "section", "signed_in", "status", "switch", "table", "testing", "text",
     "toast",
 ]

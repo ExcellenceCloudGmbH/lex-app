@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 823
+max_scenario: 824
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2378,3 +2378,14 @@ letters:
     note: >-
       A table's rows stay in the tab's state only while it is on screen; `close` drops its page, count, totals and
       filter choices. These tests fail on a person's data left in a state nobody looks at any more.
+  da:
+    title: 'lex.ui links: a raw Reflex page as somewhere a link may lead'
+    scenarios: '1.824'
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.reflex_page("/route")` declares a raw Reflex page as a link target for `ui.address`, `open=`, `ui.link` and
+      `ui.button`. These tests fail on a converted table whose rows cannot be opened, or a row link built from a string.
