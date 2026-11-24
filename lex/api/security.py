@@ -6,6 +6,12 @@ One place for the checks that every endpoint applies the same way:
   once per request (the list filter, the serializer and the reserved-scopes
   field all ask; BUG-011).
 * :func:`is_readable` – whether the caller may see a record at all.
+* :func:`calculation_record_readable` – the same for the record a calculation
+  run is known by (``<model_name>_<pk>``), which keys its live log and its
+  entry in the active-calculations store.
+* :func:`sees_every_calculation` – whether the caller sees every run's live log
+  and state regardless (a superuser, the instance's own key, or
+  ``LEX_SEC_INTERNAL`` off).
 * :func:`edit_denial` – the 400 answer when a write touches fields the caller
   may not edit (BUG-010), or ``None``.
 * :func:`refusal` – the 400 body ``{code, detail, error}`` every refusal uses.
@@ -165,6 +171,50 @@ def is_readable(request, instance) -> bool:
         queryset = type(instance)._default_manager.filter(pk=instance.pk)
         return apply_read_restriction(queryset, request).exists()
     return bool(read_result(request, instance).allowed)
+
+
+def sees_every_calculation(request) -> bool:
+    """Whether the caller sees every calculation's live log and run state (``LEX_SEC_INTERNAL``).
+
+    A superuser does, as in the calculation-log tree, and so does the instance's
+    own key (``LEX_API_KEY``), which the Instance Controller sends to warn the
+    operator about running calculations before a release. With the flag off,
+    everyone does, as before. Anyone else sees only the runs on records they may
+    read (:func:`calculation_record_readable`).
+    """
+    from lex.api.utils.api_key_requests import is_instance_api_key_request
+    from lex.core.security_flags import superuser_only
+
+    return not superuser_only(request) or is_instance_api_key_request(request)
+
+
+def calculation_record_readable(request, calculation_record) -> bool:
+    """Whether the caller may read the record a calculation run is known by.
+
+    ``calculation_record`` is ``<model_name>_<pk>``
+    (:func:`lex.core.calculation_start.calculation_record_id`): the key of the
+    run's live log and of its entry in the active-calculations store. It names
+    no app, so every model of that name holding that primary key must be
+    readable. An id that names no record is not readable: its log is operator
+    data, as in the calculation-log tree.
+    """
+    from django.apps import apps
+    from django.core.exceptions import ValidationError
+
+    model_name, _, pk = str(calculation_record or "").rpartition("_")
+    if not model_name or not pk:
+        return False
+    records = []
+    for model in apps.get_models():
+        if model._meta.model_name != model_name:
+            continue
+        try:
+            record = model._default_manager.filter(pk=pk).first()
+        except (ValueError, TypeError, ValidationError):  # not a key of this model
+            continue
+        if record is not None:
+            records.append(record)
+    return bool(records) and all(is_readable(request, record) for record in records)
 
 
 def _camel_to_snake(name: str) -> str:
