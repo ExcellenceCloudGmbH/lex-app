@@ -891,7 +891,8 @@ since the look is lex-app's (section 8).
 
   It returns `True`, `False`, or the sentence the user is refused with. It runs on the server, on a
   worker thread (it may query the database), once per event however often it is named, like the
-  user's permissions; a rule that raises, or answers anything but `True`, `False` or a sentence,
+  user's permissions; `False` or nothing (`None`) refuses with lex-app's sentence; a rule that raises, or
+  answers anything but `True`, `False`, `None` or a sentence,
   refuses -- on a handler as an unexpected failure (logged, a reference for the user), on a page with
   lex-app's no-access sentence (logged). As for any `requires=`, a handler that declares a rule may
   query the database directly. For a page the opener runs it: a
