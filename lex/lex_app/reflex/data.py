@@ -110,6 +110,13 @@ class LexApi:
         self._client = client
 
     async def _request(self, method: str, path: str, *, params: Any = None, json: Any = None) -> Any:
+        response = await self._send(method, path, params=params, json=json)
+        if response.status_code == 204 or not response.content:
+            return None
+        return response.json()
+
+    async def _send(self, method: str, path: str, *, params: Any = None, json: Any = None) -> Any:
+        """The API's answer to one request; :class:`LexApiError` when it refuses."""
         import httpx
 
         headers = {"Authorization": f"Bearer {self._token}", "Accept": "application/json"}
@@ -128,9 +135,7 @@ class LexApi:
             except ValueError:
                 detail = response.text[:500]
             raise LexApiError(response.status_code, detail)
-        if response.status_code == 204 or not response.content:
-            return None
-        return response.json()
+        return response
 
     async def list(
         self,
@@ -174,6 +179,46 @@ class LexApi:
     async def delete(self, model: Any, pk: Any) -> None:
         """Delete a record as the user."""
         await self._request("DELETE", f"model_entries/{model_id(model)}/{operation_id(model, 'delete')}/one/{pk}")
+
+    async def calculate(self, model: Any, pk: Any) -> dict:
+        """Start a calculation record's run as the user, as lex-app's Calculate button does.
+
+        The run's id has the shape the button gives it (``<model>_<pk>_update_<uuid>``): the grid's
+        log button and :meth:`log` find a run's log by it. Answers the record, ``IN_PROGRESS``; a
+        run already going is left alone, and the record comes back as it is.
+        """
+        name = model_id(model)
+        run = f"{name}_{pk}_update_{uuid.uuid4()}"
+        return await self._request("PATCH", f"model_entries/{name}/{run}/one/{pk}", json={"calculate": "true"})
+
+    async def file(self, model: Any, pk: Any, field: str) -> dict:
+        """A record's file, as the user may download it through lex-app (its checks and audit entry apply).
+
+        ``{"data": bytes}``, or ``{"url": ...}`` where lex-app's storage serves the file at an address.
+        """
+        response = await self._send("GET", f"{model_id(model)}/file-download", params=[("pk", str(pk)), ("field", field)])
+        if str(response.headers.get("content-type", "")).startswith("application/json"):
+            return {"url": str((response.json() or {}).get("download_url") or "")}
+        return {"data": bytes(response.content)}
+
+    async def log(self, model: Any, pk: Any) -> "list[str]":
+        """The log of a calculation record's newest run, as the user may read it: one Markdown text per entry.
+
+        The run is the one the grid's log button opens (its list request names each row's newest
+        run); ``[]`` when the record has no stored log yet -- an atomic run stores its log when it
+        commits.
+        """
+        name = model_id(model)
+        found = await self._request("POST", f"model_entries/{name}/list", params=[("id", str(pk))],
+                                    json={"startRow": 0, "endRow": 1})
+        rows = list((found or {}).get("rowData") or [])
+        run = rows[0].get("lex_reserved_calculation_id") if rows else None
+        if not run:
+            return []
+        data = await self._request("GET", "model_entries/calculationlog/list",
+                                   params=[("calculationId", str(run)), ("ordering", "id")])
+        entries = data if isinstance(data, list) else list((data or {}).get("results", []))
+        return [str(entry.get("calculation_log") or "") for entry in entries if entry.get("calculation_log")]
 
 
 async def lex_api(state: rx.State) -> LexApi:
@@ -373,7 +418,8 @@ class ChosenColumns(rx.State, mixin=True):
 
     Only the table's own columns are kept; the first column names the row, so it is always shown
     and stays first; a width is whole pixels from 40 to 1,200 (RFDS's column chooser's range).
-    They live in the browser tab's state: a new visit starts from the table as declared.
+    They live in the browser tab's state until the tab is closed: a new visit keeps them, and a
+    new tab starts from the table as declared.
     """
 
     view_columns: list[str] = []          # shown columns ([] = all)
@@ -429,6 +475,8 @@ class LexTableState(DataTableMixin, ChosenColumns, mixin=True):
     #: The fixed filters' fields the browser may send when the table appears (``ui.table(where=)``);
     #: ``None``: any, as ``lex_table`` has always allowed.
     scope_fields: ClassVar[tuple[str, ...] | None] = None
+    #: The order of the rows until the user sorts a column (``"-id"``: newest first); ``""``: the model's.
+    default_ordering: ClassVar[str] = ""
 
     def _store_filter(self, key: str, value: Mapping[str, Any]) -> bool:
         allowed = type(self).choice_fields
@@ -480,7 +528,7 @@ class LexTableState(DataTableMixin, ChosenColumns, mixin=True):
                             for level in sort or [])
         api = await lex_api(self)
         data = await api.list(type(self).resource, page=offset // max(limit, 1) + 1, per_page=limit,
-                              ordering=ordering or None, params=params)
+                              ordering=ordering or type(self).default_ordering or None, params=params)
         return [{k: wire_value(v) for k, v in row.items()} for row in data["results"]], data["count"]
 
 
@@ -597,7 +645,7 @@ def _filters_identity(filters: Mapping[str, Any] | None) -> tuple:
 def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_field: str = "",
                 page_size: int = 25, filters: Mapping[str, Any] | None = None,
                 row_fields: Sequence[str] = (), choice_fields: Sequence[str] | None = None,
-                scope_fields: Sequence[str] | None = None) -> type:
+                scope_fields: Sequence[str] | None = None, ordering: str = "") -> type:
     """The :class:`LexTableState` for one table of ``model`` (one class per distinct table).
 
     The table opens at ``page_size`` rows, which is also among the sizes the
@@ -616,6 +664,8 @@ def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_fiel
         classvars["choice_fields"] = tuple(choice_fields)
     if scope_fields is not None:
         classvars["scope_fields"] = tuple(scope_fields)
+    if ordering:
+        classvars["default_ordering"] = str(ordering)
     return _state_for(LexTableState, model, classvars, defaults={"page_size": int(page_size)},
                       identity=_filters_identity(filters))
 

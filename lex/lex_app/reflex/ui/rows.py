@@ -90,9 +90,16 @@ def owner_of(handler: Any) -> type:
     return handler.state
 
 
-async def read(handler: Any, owner: Any, *, search: str = "") -> list:
+def copy_of(owner: Any) -> ReadOnly:
+    """The read-only copy a rows handler of ``owner`` reads. Take it while holding the user's lock."""
+    live = workcopy.raw(owner)
+    return ReadOnly(type(live), workcopy.snapshot(live))
+
+
+async def read(handler: Any, owner: Any, *, search: str = "", draft: ReadOnly | None = None) -> list:
     """Run the rows handler of ``owner`` (the live state) as the user and return what it returned.
 
+    ``draft``: the copy to read, taken earlier under the user's lock (a read that runs without it).
     Raises what the body raised, ``guard``'s refusal when ``requires=`` is not met, or
     :class:`RowsError` when the value is not a list of dicts.
     """
@@ -106,7 +113,8 @@ async def read(handler: Any, owner: Any, *, search: str = "") -> list:
     if failure is not None:
         raise failure
     live = workcopy.raw(owner)
-    draft = ReadOnly(type(live), workcopy.snapshot(live))
+    if draft is None:
+        draft = copy_of(owner)
     inv = context.Invocation(handler=key, kind="rows", session=session, loop=asyncio.get_running_loop(),
                              live=owner, orm=requirements is not None)
     inv.drafts[type(live)] = draft

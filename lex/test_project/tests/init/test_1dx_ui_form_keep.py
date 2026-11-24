@@ -10,7 +10,7 @@ empty or old. What was typed comes back through ``value=`` on a field the handle
 regression is a kept form that comes back empty, a result shown over data that is gone, or a
 failure that happened while the user was away and was never shown.
 
-Cluster 1dx -- scenarios 1.930-1.935. Type: U.
+Cluster 1dx -- scenarios 1.930-1.937, 1.939. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/forms.py (form keep=, the failure under a kept form),
 lex/lex_app/reflex/ui/forms.py (keep, kept, gone_message), lex/lex_app/reflex/ui/state.py (ui_open).
 Run: python -m lex pytest lex/test_project/tests/init/test_1dx_ui_form_keep.py -v
@@ -31,7 +31,7 @@ from lex import ui
 from lex.lex_app.reflex.ui import forms as rules
 from lex.lex_app.reflex.ui import private, runs, testing
 from lex.lex_app.reflex.ui import rows as rows_mod
-from lex.lex_app.reflex.ui.pages.parts import Build
+from lex.lex_app.reflex.ui.pages.parts import Build, PageError
 from lex.lex_app.reflex.ui.state import State
 
 pytestmark = pytest.mark.init
@@ -98,6 +98,54 @@ class TallyState(ui.State):
     @ui.rows
     def south(self):
         return [{"id": 2, "name": "Order two"}]
+
+
+class ToolState(ui.State):
+    """A kept tool written with one `keep=True`: nothing kept on the state, a load of the same state."""
+
+    customer: str = ""
+    total: str = ""
+    _lines: list[dict] = ui.private()
+
+    @ui.load
+    def open(self):
+        self.customer = self.customer or ""
+
+    @ui.action
+    def run(self, values):
+        self.customer = values["customer"]
+        self.total = "12.50"
+        self._lines = [{"id": 1, "customer": values["customer"]}]
+
+    @ui.rows
+    def lines(self):
+        return self._lines
+
+
+class NoteState(ui.State):
+    """A private value of a state no kept form lives in: it leaves with a visit."""
+
+    _note: str = ui.private()
+
+    @ui.action
+    def write(self, text: str):
+        self._note = text
+
+
+class HeaderState(ui.State):
+    """A page's load of another state, whose field a result shows."""
+
+    note: str = ""
+
+    @ui.load
+    def open(self):
+        self.note = "read"
+
+
+def tool():
+    return ui.form(title="Tool", load=ToolState.open, keep=True, submit=ToolState.run,
+                   fields=[ui.field("customer", required=True)],
+                   result=[ui.text(ToolState.total), ui.table(ToolState.lines, columns=["customer"])])
 
 
 def report():
@@ -213,7 +261,9 @@ class TestCluster01dx_FormKeep(SimpleTestCase):
                nothing: the form says, under it, "The last result is no longer available ...
                Send the form again."; the field that is not kept left with the visit but does
                not decide (what reads it says it is gone there); a failure while away is kept
-               for the form to show; sending the form again clears it.
+               for the form to show; sending the form again clears it. (Since 1.937 the
+               second private field is kept too: a kept form keeps every private field of
+               its state.)
         """
         key = runs.key_of(ReportState.build)
         now = [1000.0]
@@ -241,7 +291,8 @@ class TestCluster01dx_FormKeep(SimpleTestCase):
                          "past it: no result over nothing, and a sentence that says why")
         self.assertEqual((unkept["ui_done"], unkept["ui_failed"]), ({key: True}, {}),
                          "the kept result shows: a field that is not kept does not decide")
-        self.assertIs(summary, private.GONE, "but it left with the visit: what reads it is told so")
+        self.assertEqual(summary, {"total": "12.50"},
+                         "a kept form keeps every private field of its state, declared keep=True or not")
         self.assertIn("Reference:", failed["ui_failed"][key], "a failure while away is there to be shown")
         self.assertEqual((again["ui_done"], again["ui_failed"]), ({key: True}, {}), "sending again clears it")
 
@@ -369,7 +420,7 @@ class TestCluster01dx_FormKeep(SimpleTestCase):
 
         async def steps(harness):
             with patch.object(private, "_now", lambda: now[0]):
-                await (await harness.send(State, "ui_search", field=field, text="ac"))
+                await (await harness.send(State, "ui_search", field=field, text="ac")).wait_all()
                 offered = list(dict((await harness._state(State)).ui_matches).get(field, []))
                 await (await harness.send(TallyState, "tally", values={"customer": "7"}))
                 await _open(harness, "/elsewhere")
@@ -397,3 +448,133 @@ class TestCluster01dx_FormKeep(SimpleTestCase):
                          "past the idle time: no tabs over nothing, and the sentence")
         self.assertEqual(told, "This is no longer available: it is kept only for a while. Start again.",
                          "the tab's table says so too")
+
+    # -- 1.936 ---------------------------------------------------------
+    def test_1_936_a_reconnect_is_not_a_new_visit(self) -> None:
+        """
+        Scenario 1.936: the socket drops and comes back on the same page.
+        Given: a page opened on one connection; a private value that is not kept, a form's
+               result that is not kept, a field the user's run set.
+        When:  the connection drops and Reflex reconnects: it sends `hydrate` and the page's
+               `on_load` again, on a new connection, for the same address (as `state.js` does
+               on every reconnect); then the user follows a link to the same page on that
+               connection; then the tab reconnects on another address.
+        Then:  the reconnect is the same visit: the visit count, the private value and both
+               forms' results stay, and the page's loads run again without resetting what the
+               visit holds; following the link is a new visit, as is a reconnect elsewhere.
+        """
+        build, search = runs.key_of(ReportState.build), runs.key_of(ReportState.search)
+
+        def at(url: str, sid: str) -> dict:
+            return {"pathname": url, "asPath": url, "query": {}, "sid": sid}
+
+        async def visit(harness, url: str, sid: str, *, reconnect: bool) -> dict:
+            import reflex as rx
+
+            if reconnect:
+                await (await harness.send(rx.State, "hydrate", _router_data=at(url, sid)))
+            await (await harness.send(State, "ui_open", page=url, _router_data=at(url, sid)))
+            await asyncio.sleep(0.05)
+            found = await harness.fields(ReportState)
+            found["_note"] = private.peek(await harness._state(NoteState), "_note")
+            return found
+
+        from lex.lex_app.reflex.ui import handlers
+
+        handlers.register_page("/report", [ReportState.open], [], "")       # the page's load, as ui.page registers it
+        self.addCleanup(handlers._PAGES.pop, "/report", None)
+
+        async def steps(harness):
+            GATE["open"].set()
+            first = await visit(harness, "/report", "socket-1", reconnect=True)
+            await (await harness.send(ReportState, "build", values={"customer": "summary"}))
+            await (await harness.send(NoteState, "write", text="Ada Lovelace"))
+            await (await harness.send(ReportState, "search", values={"customer": "Acme"}))
+            await harness.set_fields(ReportState, regions=["west"])        # what the load sets again
+            back = await visit(harness, "/report", "socket-2", reconnect=True)
+            linked = await visit(harness, "/report", "socket-2", reconnect=False)
+            await (await harness.send(NoteState, "write", text="Ada Lovelace"))
+            elsewhere = await visit(harness, "/lookup", "socket-3", reconnect=True)
+            return first, back, linked, elsewhere
+
+        first, back, linked, elsewhere = _session(steps)
+        self.assertEqual(back["ui_visit"], first["ui_visit"], "a reconnect is the same visit")
+        self.assertEqual(back["_note"], "Ada Lovelace", "the private value was not dropped")
+        self.assertEqual(back["ui_done"], {build: True, search: True}, "neither form started over")
+        self.assertEqual((back["customer"], back["regions"]), ("Acme", ["north", "south"]),
+                         "the load ran again, without resetting the visit's fields")
+        self.assertEqual(linked["ui_visit"], first["ui_visit"] + 1, "a link to the same page is a new visit")
+        self.assertIs(linked["_note"], private.GONE, "which drops what is not kept")
+        self.assertEqual(linked["ui_done"], {build: True}, "and starts the form that is not kept over")
+        self.assertEqual(elsewhere["ui_visit"], linked["ui_visit"] + 1, "a reconnect on another address is a new visit")
+        self.assertIs(elsewhere["_note"], private.GONE)
+
+    # -- 1.937 ---------------------------------------------------------
+    def test_1_937_one_keep_true_keeps_what_the_result_shows(self) -> None:
+        """
+        Scenario 1.937: `ui.form(keep=True)` is the one declaration.
+        Given: a kept form whose state declares nothing kept -- a private result written with
+               `ui.private()`, a field the result shows, a page load of the same state without
+               `keep=` -- and a kept form whose result shows a field of another state, which the
+               page's load resets.
+        When:  the form is sent; the user opens another page and comes back (the load runs).
+        Then:  the result is back with all it shows: the private rows, the field, what was typed
+               -- `keep=True` implies keep for the submit state's private fields and its load's
+               reset; the form whose result shows another state's field that the page's load
+               resets is refused when the page is built, saying what to write.
+        """
+        from lex.lex_app.reflex.ui import handlers
+
+        page = tool()
+        page.build(Build(page="tool", route="/tool"))
+        handlers.register_page("/tool", [ToolState.open], [], "")
+        self.addCleanup(handlers._PAGES.pop, "/tool", None)
+        key = runs.key_of(ToolState.run)
+
+        async def steps(harness):
+            await _open(harness, "/tool")
+            await (await harness.send(ToolState, "run", values={"customer": "Acme"}))
+            await _open(harness, "/elsewhere")
+            await _open(harness, "/tool")
+            await asyncio.sleep(0.05)
+            fields = await harness.fields(ToolState)
+            rows = await rows_mod.read(ToolState.lines, await harness._state(ToolState))
+            return fields, rows
+
+        fields, rows = _session(steps)
+        self.assertEqual(fields["ui_done"], {key: True}, "the result shows again")
+        self.assertEqual(rows, [{"id": 1, "customer": "Acme"}], "with the private rows: not dropped on the visit")
+        self.assertEqual((fields["total"], fields["customer"]), ("12.50", "Acme"),
+                         "and the fields it shows: the load of the same state did not reset them")
+
+        wrong = ui.form(title="Header", load=HeaderState.open, keep=True, submit=ToolState.run,
+                        fields=[ui.field("customer", required=True)], result=[ui.text(HeaderState.note)])
+        with self.assertRaises(PageError) as raised:
+            wrong.build(Build(page="header", route="/header"))
+        said = str(raised.exception)
+        self.assertIn("HeaderState.note", said)
+        self.assertIn("HeaderState.open", said)
+        self.assertIn('@ui.load(keep=("note",))', said, "it says exactly what to write")
+
+    # -- 1.939 ---------------------------------------------------------
+    def test_1_939_the_docstrings_a_reader_learns_from_say_what_the_code_does(self) -> None:
+        """
+        Scenario 1.939: the words of ui.State, ui.form and ui.field (review, 2026-11-24).
+        Given: the docstrings a reader opens first, and the summary a wrong field's message quotes.
+        When:  they are read.
+        Then:  ui.State names every helper a handler has -- self.tab_id, and self.progress as the
+               only one safe from another thread; ui.form says one keep=True is enough and that a
+               computed var never reads a private field; the field summary names currency= and
+               lines=; no line of these docstrings runs past 110 characters.
+        """
+        from lex.lex_app.reflex.ui.pages import forms as page_forms
+
+        state_doc = State.__doc__
+        for words in ("self.tab_id", "self.progress", "another thread"):
+            self.assertIn(words, state_doc, f"ui.State names {words}")
+        self.assertRegex(page_forms.form.__doc__, r"The one ``keep=True``\s+is enough", "one keep=True is enough")
+        self.assertIn("never a private one", page_forms.form.__doc__)
+        self.assertIn("currency=, lines=", page_forms._FIELD, "the field summary names every argument")
+        for doc in (state_doc, page_forms.form.__doc__, page_forms.field.__doc__):
+            long = [line for line in doc.splitlines() if len(line) > 110]
+            self.assertEqual(long, [], "every line of the docstring fits")

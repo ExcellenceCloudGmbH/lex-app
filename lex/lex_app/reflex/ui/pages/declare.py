@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import dataclasses
 import os
 from typing import Any, Callable
+
+import reflex as rx
 
 from lex.lex_app.reflex.ui.pages import kinds, links
 from lex.lex_app.reflex.ui.pages.parts import Build, PageError, called
@@ -18,10 +22,31 @@ class Declared:
     icon: str | None
     permission: str | None
     done: bool = False
+    kind: Any = None                    # what the function returned when lex-app registered it
+    rules: tuple = ()                   # the project's rules (``@ui.rule``) in its requires=
+    requires: tuple = ()                # its requires= as written: permissions, ui.signed_in and rules
 
 
 #: Route -> the page declared for it, until :func:`finalize` hands it to lex-app.
 _DECLARED: dict[str, Declared] = {}
+
+#: The requires= of the page whose function lex-app is calling. A page kind whose handlers are
+#: lex-app's own (``ui.calculation``) gives them the page's requires=: the project cannot write it there.
+_PAGE_REQUIRES: contextvars.ContextVar[tuple] = contextvars.ContextVar("lex_ui_page_requires", default=())
+
+
+def page_requires() -> tuple:
+    """The requires= of the page being declared or built (``()`` outside one, or for a page without)."""
+    return _PAGE_REQUIRES.get()
+
+
+@contextlib.contextmanager
+def _declaring(requires: tuple):
+    token = _PAGE_REQUIRES.set(tuple(requires))
+    try:
+        yield
+    finally:
+        _PAGE_REQUIRES.reset(token)
 
 
 _PAGES_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -89,38 +114,52 @@ def _loads(name: str, kind: kinds.Kind) -> tuple[list, list]:
     return page_loads, part_loads
 
 
-def _permission(route: str, requires: Any) -> str | None:
-    """The page's permission string; ``None`` when any signed-in user may see it."""
+def _permission(route: str, requires: Any) -> tuple[tuple[str, ...], tuple]:
+    """The page's permission strings and the project's rules; both empty when any signed-in user may see it."""
     from lex.lex_app.reflex.access import permission
     from lex.lex_app.reflex.ui import guard
 
-    if requires is None or requires is guard.signed_in:
-        return None
-    if isinstance(requires, guard.Requirement):
-        return permission(requires.target, requires.scope)
-    raise TypeError(f"ui.page({route!r}, requires=) takes one permission: ui.read(Model), ui.create(Model), "
-                    f"ui.edit(Model), ui.delete(Model) or ui.permission(...); got {requires!r}. "
-                    "Leave it out for a page any signed-in user may see.")
+    try:
+        items = guard.normalise(requires) or ()
+    except (TypeError, ValueError) as wrong:
+        raise TypeError(f"ui.page({route!r}, requires=): {wrong} Leave it out for a page any signed-in user "
+                        "may see.") from None
+    strings = tuple(permission(item.target, item.scope) for item in items if isinstance(item, guard.Requirement))
+    return strings, guard.rules_of(items)
 
 
 def page(route: str, *, nav: str | None = None, icon: str | None = None, requires: Any = None,
          params: Any = ()) -> Callable[[Callable[[], Any]], Callable[[], Any]]:
     """Declare a page: its address, its place in the navigation, who may see it.
 
+    ``nav`` names the page's area in the navigation (``nav="Orders"``); the page is listed there, by
+    its title, after the pages declared before it. ``ui.frame(nav=[...])`` gives the areas' order.
+    A page with route arguments (``/orders/[key]``) is in its area -- its breadcrumbs say so -- but
+    not listed: it opens from the page that leads to it. Without ``nav`` a page is reached by links
+    only.
+
     The function returns a page kind and does nothing else: lex-app calls it when it registers
     the pages -- after the whole module is loaded, so it may name pages declared further down --
     and again when the page is built. A page that is declared wrongly stops the app from starting,
     with an error that names it.
 
+    ``requires=`` takes what a handler's does -- a permission, ``ui.signed_in``, a project's rule
+    (``@ui.rule``), or a list of them. A rule is asked on the server when the page opens: refused,
+    the page shows the no-access notice with the rule's sentence and starts no load.
+
     ``requires=`` and ``visible=`` decide what is shown, never what is allowed: a value a page
     shows reaches the browser. What a user may read or change is enforced by each handler's own
-    ``requires=`` and by lex-app's API, which acts as the user.
+    ``requires=`` and by lex-app's API, which acts as the user. A page kind whose handlers are
+    lex-app's (``ui.calculation``) gives them the page's ``requires=``.
     """
     if not route.startswith("/"):
         raise ValueError(f"ui.page() routes start with '/', got {route!r}")
     if isinstance(params, str):
         raise TypeError(f"ui.page({route!r}, params=) takes a list of names: params=[{params!r}]")
-    permission = _permission(route, requires)
+    from lex.lex_app.reflex.ui import guard
+
+    permissions, rules = _permission(route, requires)
+    permission = permissions[0] if len(permissions) == 1 else (permissions or None)
 
     def decorator(fn: Callable[[], Any]) -> Callable[[], Any]:
         known = _DECLARED.get(route)
@@ -128,7 +167,15 @@ def page(route: str, *, nav: str | None = None, icon: str | None = None, require
             raise ValueError(f"ui.page({route!r}): `{known.fn.__name__}` already is the page at this route; "
                              f"`{fn.__name__}` needs a route of its own.")
         fn.__ui_page__ = links.info_of(route, fn.__name__, params)
-        _DECLARED[route] = Declared(fn, fn.__ui_page__, nav, icon, permission)
+        _DECLARED[route] = Declared(fn, fn.__ui_page__, nav, icon, permission, rules=rules,
+                                    requires=tuple(guard.normalise(requires) or ()))
+        if nav and not fn.__ui_page__.arguments:      # a page with route arguments is in its area, not listed
+            from lex.lex_app.reflex.shell import NavEntry, list_in_nav
+
+            # Its place in the area is where it is declared, among raw pages too; its title, from the
+            # kind, replaces the name when lex-app registers the page.
+            list_in_nav(NavEntry(route=route, label=fn.__name__.replace("_", " ").capitalize(), section=nav,
+                                 icon=icon, permission=permissions[0] if permissions else None))
         return fn
 
     return decorator
@@ -148,23 +195,85 @@ def finalize() -> None:
         if declared.done:
             continue
         name = declared.fn.__name__
-        kind = _kind_of(declared.fn)
+        with _declaring(declared.requires):
+            kind = declared.kind = _kind_of(declared.fn)
         title = kind.title
-        if declared.nav and not isinstance(title, str):
+        listed = declared.nav if not declared.info.arguments else None
+        if listed and not isinstance(title, str):
             raise PageError(f"Page `{name}`: a page listed in the navigation needs a fixed title.\n"
                             "Give the kind `title=\"...\"`, or leave `nav=` out.")
         required, optional = _loads(name, kind)
         kind.build(Build(page=name, route=route))      # every slot checked now: a wrong page stops the start
 
-        def body(fn: Callable[[], Any] = declared.fn, route: str = route) -> rx.Component:
-            return _kind_of(fn).build(Build(page=fn.__name__, route=route))
+        def body(fn: Callable[[], Any] = declared.fn, route: str = route,
+                 requires: tuple = declared.requires) -> rx.Component:
+            with _declaring(requires):
+                return _kind_of(fn).build(Build(page=fn.__name__, route=route))
 
         body.__name__ = name
         body.__qualname__ = declared.fn.__qualname__
         lex_page(route, title=title if isinstance(title, str) else name.replace("_", " ").capitalize(),
-                 nav=declared.nav, icon=declared.icon, requires=declared.permission)(body)
-        handlers.register_page(route, required, optional, declared.permission or "")
+                 nav=listed, icon=declared.icon, requires=declared.permission, _rules=declared.rules)(body)
+        handlers.register_page(route, required, optional, declared.permission or "", declared.rules, title)
         declared.done = True
+    from lex.lex_app.reflex.shell import check_area, check_nav
+
+    check_nav({route: declared.fn.__name__ for route, declared in _DECLARED.items()})
+    for route, declared in _DECLARED.items():
+        if declared.nav and declared.info.arguments:
+            check_area(route, declared.nav, declared.fn.__name__)
+    _place_pages()
+
+
+def leads_to(kind: Any) -> tuple[list, list]:
+    """The pages ``kind`` leads to: (those a table opens, those a button or link leads to)."""
+    from lex.lex_app.reflex.ui.pages import tables, vocab
+
+    opens: list = []
+    led: list = []
+    seen: set[int] = set()
+
+    def walk(part: Any) -> None:
+        if isinstance(part, (list, tuple)):
+            for one in part:
+                walk(one)
+            return
+        if (not dataclasses.is_dataclass(part) or isinstance(part, (type, rx.Var, rx.Component))
+                or id(part) in seen):
+            return
+        seen.add(id(part))
+        if isinstance(part, tables.Table) and links.page_info(part.open) is not None:
+            opens.append(part.open)
+        if isinstance(part, (vocab.Button, vocab.Link)) and links.page_info(part.to) is not None:
+            led.append(part.to)
+        for field in dataclasses.fields(part):
+            walk(getattr(part, field.name))
+
+    walk(kind)
+    return opens, led
+
+
+def _place_pages() -> None:
+    """Where each declared page sits, for its breadcrumbs: a listed page in its area; any other page
+    under the first listed page whose table opens it, else whose button or link leads to it."""
+    from lex.lex_app.reflex.shell import Place, set_place
+
+    listed = [d for d in _DECLARED.values() if d.nav and not d.info.arguments and d.kind is not None]
+    led = {id(d): leads_to(d.kind) for d in listed}
+    for route, declared in _DECLARED.items():
+        if declared.kind is None:
+            continue
+        title = declared.kind.title
+        view = declared.kind.view_crumb() if hasattr(declared.kind, "view_crumb") else None
+        if any(d is declared for d in listed):
+            set_place(route, Place(declared.nav, title, view=view))
+            continue
+        parent = (next((d for d in listed if any(t is declared.fn for t in led[id(d)][0])), None)
+                  or next((d for d in listed if any(t is declared.fn for t in led[id(d)][1])), None))
+        area = declared.nav or (parent.nav if parent is not None else None)
+        if area:
+            set_place(route, Place(area, title, parent.info.route if parent else None,
+                                   parent.kind.title if parent else None, view=view))
 
 
 def install(app: Any) -> None:

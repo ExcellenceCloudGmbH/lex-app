@@ -8,7 +8,7 @@ a refused press that changes the page or holds a place, or a place that is never
 (after a failure, a cancel, a refusal or a form's wrong field), which would lock the job for
 everyone.
 
-Cluster 1dw -- scenarios 1.927-1.929. Type: U.
+Cluster 1dw -- scenarios 1.927-1.929, 1.915, 1.919. Type: U.
 Covers: lex/lex_app/reflex/ui/handlers.py (job, _limit_message), lex/lex_app/reflex/ui/runs.py
 (take_place, give_place).
 Run: python -m lex pytest lex/test_project/tests/init/test_1dw_ui_job_limit.py -v
@@ -81,6 +81,28 @@ class ExportState(ui.State):
         worker.join()
         if failed:
             raise failed[0]
+
+
+def _exports_in(module: str):
+    """A state `Exports` with a job `run(limit=1)`, written in the module ``module``: same names, another module."""
+    import sys
+    import types
+
+    made = sys.modules.setdefault(module, types.ModuleType(module))     # importable: Reflex pickles its states
+    space = made.__dict__
+    space.update({"ui": ui, "GATE": GATE, "RAN": RAN})
+    exec(  # noqa: S102 - a second module's class, for the test only
+        "class Exports(ui.State):\n"
+        "    @ui.job(limit=1)\n"
+        "    def run(self):\n"
+        "        if not GATE['open'].wait(5):\n"
+        "            raise RuntimeError('the gate was never opened')\n"
+        "        RAN.append(__name__)\n", space)
+    return space["Exports"]
+
+
+EXPORTS_A = _exports_in("lex_test_limits_orders")
+EXPORTS_B = _exports_in("lex_test_limits_invoices")
 
 
 async def _until(condition, failure: str) -> None:
@@ -180,7 +202,7 @@ class TestCluster01dw_JobLimit(SimpleTestCase):
 
         async def cancelled(harness):
             running = await harness.send(ExportState, "stoppable")
-            await _until(lambda: runs._PLACES.get("ExportState.stoppable") == 1, "the job never took its place")
+            await _until(lambda: runs._PLACES.get(f"{__name__}.ExportState.stoppable") == 1, "the job never took its place")
             await (await harness.send(ui.State, "ui_cancel", key="ExportState.stoppable"))
             await running
             return dict(runs._PLACES)
@@ -204,7 +226,7 @@ class TestCluster01dw_JobLimit(SimpleTestCase):
             return held
 
         STOPPED.clear()
-        self.assertEqual(_session(crunched), [{"ExportState.crunch": 1}] * 2,
+        self.assertEqual(_session(crunched), [{f"{__name__}.ExportState.crunch": 1}] * 2,
                          "a run reporting through self.progress holds its place while it reports")
         self.assertEqual((STOPPED, runs._PLACES), ([GeneratorExit] * 2, {}),
                          "its thread got the stop at its next report, and the place was given back")
@@ -219,7 +241,7 @@ class TestCluster01dw_JobLimit(SimpleTestCase):
         async def pressed_twice(harness):
             await harness.set_fields(ui.State, ui_done={key: True})          # an earlier result shows
             first = await harness.send(ExportState, "build_report", values={"year": "2025"})
-            await _until(lambda: runs._PLACES.get(key) == 1, "the first run never took its place")
+            await _until(lambda: runs._PLACES.get(f"{__name__}.{key}") == 1, "the first run never took its place")
             harness.outcomes.clear()
             harness.results.clear()
             await (await harness.send(ExportState, "build_report", values={"year": "x"}))
@@ -258,3 +280,78 @@ class TestCluster01dw_JobLimit(SimpleTestCase):
         self.assertEqual(ExportState.export.fn.__ui_options__["limit"], 2)
         self.assertEqual(ExportState.build_report.fn.__ui_again__.keywords["limit"], 1,
                          "a mixin's copy is decorated again with the same limit")
+
+    # -- 1.915 ---------------------------------------------------------
+    def test_1_915_two_jobs_of_the_same_name_in_two_modules_have_their_own_places(self) -> None:
+        """
+        Scenario 1.915: the limit is per job, not per name.
+        Given: two modules that each define `class Exports(ui.State)` with `@ui.job(limit=1) def run`.
+        When:  the first module's job runs (held at a gate) and the second's is pressed in another
+               tab.
+        Then:  the second runs beside it: each job has its own place, counted in each server
+               process; neither is refused with the other's limit.
+        """
+        async def steps(harness):
+            first = await harness.send(EXPORTS_A, "run")
+            await _until(lambda: runs._PLACES, "the first job never took its place")
+            harness.token = "tab2"                  # another user's tab: the limit is for all users together
+            second = await harness.send(EXPORTS_B, "run")
+            await asyncio.sleep(0.1)
+            GATE["open"].set()
+            await first
+            await second
+            await asyncio.sleep(0.05)
+            return list(harness.outcomes)
+
+        outcomes = _session(steps)
+        self.assertEqual(outcomes, [], "neither job was refused for the other's limit")
+        self.assertEqual(sorted(RAN), ["lex_test_limits_invoices", "lex_test_limits_orders"], "both ran")
+        self.assertEqual(runs._PLACES, {}, "and both gave their place back")
+
+    # -- 1.919 ---------------------------------------------------------
+    def test_1_919_the_limit_sentence_uses_the_buttons_words_and_leaves_with_the_visit(self) -> None:
+        """
+        Scenario 1.919: what the refusal says, and how long it stays.
+        Given: `export` (limit=2) pressed through a button that says "Export to CSV"; the kept
+               report form's job (limit=1).
+        When:  a third export is pressed while two run; the report is pressed while it runs, and
+               the user opens another page and comes back.
+        Then:  the refusal names the job as its button does -- "Export to CSV is already running
+               2 times. Try again in a moment." -- (a form's job, as its submit button: "Build
+               report"); the refusal was about that press: after a new visit it is no longer
+               kept, also under a kept form.
+        """
+        from lex.lex_app.reflex.ui import forms
+        from lex.lex_app.reflex.ui.state import State
+
+        for registry in (runs._WORDS, forms._KEPT, forms._KEPT_STATES):     # what this test declares, undone after it
+            self.addCleanup(lambda registry=registry, was=registry.copy(): (registry.clear(), registry.update(was)))
+        ui.button("Export to CSV", ExportState.export, "north").build(Build(page="exports", route="/exports"))
+        ui.form(title="Report", submit=ExportState.build_report, keep=True,
+                fields=[ui.field("year", kind="year", required=True)]).build(Build(page="report", route="/report"))
+        report = runs.key_of(ExportState.build_report)
+
+        async def steps(harness):
+            held = [await harness.send(ExportState, "export", region=region) for region in ("north", "south")]
+            await _until(lambda: runs._PLACES.get(f"{__name__}.ExportState.export") == 2, "the exports never started")
+            await (await harness.send(ExportState, "export", region="east"))
+            refused = [o.message for o in harness.outcomes]
+            harness.outcomes.clear()
+            first = await harness.send(ExportState, "build_report", values={"year": "2025"})
+            await _until(lambda: runs._PLACES.get(f"{__name__}.{report}") == 1, "the report never started")
+            await (await harness.send(ExportState, "build_report", values={"year": "2026"}))
+            before = dict((await harness.fields(ExportState))["ui_failed"])
+            await (await harness.send(State, "ui_open", page="/elsewhere"))
+            await (await harness.send(State, "ui_open", page="/report"))
+            after = dict((await harness.fields(ExportState))["ui_failed"])
+            GATE["open"].set()
+            for one in (*held, first):
+                await one
+            return refused, before, after
+
+        refused, before, after = _session(steps)
+        self.assertEqual(refused, ["Export to CSV is already running 2 times. Try again in a moment."],
+                         "the job is named as its button names it")
+        self.assertEqual(before.get(report), "Build report is already running. Try again in a moment.",
+                         "a form's job as its submit button")
+        self.assertNotIn(report, after, "the refusal of a press leaves with the visit, also under a kept form")

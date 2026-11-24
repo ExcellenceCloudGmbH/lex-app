@@ -11,7 +11,7 @@ never another user's. A regression is personal data in a state pickle or in the 
 one user wrote read by another, a value that outlives its limits, or a page that silently shows
 nothing (or old data) where the value was.
 
-Cluster 1dv -- scenarios 1.920-1.926. Type: U.
+Cluster 1dv -- scenarios 1.920-1.926, 1.911, 1.913, 1.938. Type: U.
 Covers: lex/lex_app/reflex/ui/private.py, lex/lex_app/reflex/ui/workcopy.py (fields_of, snapshot,
 restore, reset, Draft), lex/lex_app/reflex/ui/state.py (_ui_private, ui_open),
 lex/lex_app/reflex/ui/context.py (user_id_of), lex/lex_app/reflex/ui/testing.py (GONE),
@@ -82,6 +82,55 @@ class PayrollState(ui.State):
     @ui.load
     def open(self):
         self.note = f"report={self._report.get('name', '-')} draft={len(self._draft)}"
+
+
+class QuotaState(ui.State):
+    """Three private results of about 400 KB each, for the memory a user may hold."""
+
+    _a: str = ui.private()
+    _b: str = ui.private()
+    _c: str = ui.private()
+
+    @ui.action
+    def write(self, name: str, kilobytes: int):
+        setattr(self, f"_{name}", "x" * (kilobytes * 1024))
+
+
+class LedgerBase(ui.State):
+    """A state declaring a private field, and a state that inherits it."""
+
+    _lines: list = ui.private()
+    seen: str = ""
+
+    @ui.action
+    def show(self):
+        self.seen = repr(self._lines)
+
+
+class LedgerChild(LedgerBase):
+    """Reflex makes it a substate of LedgerBase: an inherited field is the parent's."""
+
+    note: str = ""
+
+    @ui.action
+    def write(self):
+        self._lines = [1, 2]
+
+    @ui.action
+    def read(self):
+        self.note = repr(self._lines)
+
+    @ui.job
+    def read_later(self):
+        self.note = repr(self._lines)
+
+    @ui.job
+    def write_later(self):
+        self._lines = [3]
+
+    @ui.load
+    def open(self):
+        self.note = "opened"
 
 
 def _session(steps, user: str = "tester"):
@@ -361,3 +410,152 @@ class TestCluster01dv_Private(SimpleTestCase):
         self.assertIn("_report", PayrollState.__dict__)
         self.assertNotIn("_report", PayrollState.backend_vars, "not a backend var: Reflex never stores it")
         self.assertNotIn("_report", PayrollState.base_vars, "nor a var the browser gets")
+
+    # -- 1.911 ---------------------------------------------------------
+    def test_1_911_a_computed_var_reading_a_private_field_is_refused_when_the_class_is_defined(self) -> None:
+        """
+        Scenario 1.911: a computed var never reads a private field.
+        Given: Reflex recomputes a computed var whenever it sends the state, and caches it by the
+               fields it reads -- which a private field is not; read after the value is gone it
+               raises in every later event of the tab.
+        When:  a ui.State declares `@rx.var` reading a private field -- cached, `cache=False`,
+               through a helper method -- and, beside it, one reading a backend field.
+        Then:  each one reading the private field is refused when the class is defined, naming
+               the var and the field and saying to read it in a `@ui.rows` handler or copy what
+               the page shows into a field; the one reading a backend field is accepted.
+        """
+        import reflex as rx
+
+        sentence = (r"ReadsPrivate\d?\.count reads the private field _lines.*a computed var is worked out "
+                    r"whenever the page is sent.*@ui\.rows.*copy what the page shows into a field")
+        with self.assertRaisesRegex(TypeError, sentence):
+            class ReadsPrivate(ui.State):
+                _lines: list = ui.private()
+
+                @rx.var
+                def count(self) -> int:
+                    return len(self._lines)
+        with self.assertRaisesRegex(TypeError, sentence):
+            class ReadsPrivate2(ui.State):
+                _lines: list = ui.private()
+
+                @rx.var(cache=False)
+                def count(self) -> int:
+                    return len(self._lines)
+        with self.assertRaisesRegex(TypeError, sentence):
+            class ReadsPrivate3(ui.State):
+                _lines: list = ui.private()
+
+                def _helper(self) -> int:
+                    return len(self._lines)
+
+                @rx.var
+                def count(self) -> int:
+                    return self._helper()
+
+        class ReadsBackend(ui.State):
+            _plain: list = []
+
+            @rx.var
+            def count(self) -> int:
+                return len(self._plain)
+
+        fine = ReadsBackend
+        self.assertIn("count", fine.computed_vars, "a computed var over a backend field is Reflex's own, and stays")
+
+    # -- 1.913 ---------------------------------------------------------
+    def test_1_913_one_user_cannot_fill_the_memory_and_signing_out_drops_their_values(self) -> None:
+        """
+        Scenario 1.913: what one user may hold, and signing out.
+        Given: `LEX_UI_PRIVATE_MB_PER_USER=1`; bob holds a 300 KB value written first; anna writes
+               three values of about 400 KB each, then one of 2 MB.
+        When:  anna's third value would take her past her megabyte; the 2 MB value is written;
+               anna signs out (`LexUser.sign_out`).
+        Then:  anna's own oldest value goes, never bob's (though bob's is older); a value larger
+               than what one user may hold is refused with a sentence naming the setting, and
+               nothing is kept; signing out drops every value anna holds in this process, and
+               bob's stays.
+        """
+        import logging
+
+        from lex.lex_app.reflex.auth import LexUser
+
+        def held(owner):
+            return sorted(key[2] for key, entry in private._STORE.items() if entry.owner == owner)
+
+        async def as_user(user, token, steps):
+            previous = context.set_user_id_of(lambda state: user)
+            try:
+                async with testing.Harness(user=user, token=token) as harness:
+                    await harness.open_tab()
+                    return await steps(harness)
+            finally:
+                context.set_user_id_of(previous)
+
+        async def write(harness, name, kilobytes):
+            await (await harness.send(QuotaState, "write", name=name, kilobytes=kilobytes))
+            await asyncio.sleep(0.02)
+
+        async def bob(harness):
+            await (await harness.send(PayrollState, "build", name="x" * 300_000))
+            await asyncio.sleep(0.02)
+
+        async def anna(harness):
+            for name in ("a", "b", "c"):
+                await write(harness, name, 400)
+            after_three = held("anna")
+            with self.assertLogs("lex.lex_app.reflex.ui.handlers", logging.ERROR) as logged:
+                await write(harness, "a", 2048)
+            after_big = held("anna")
+            await (await harness.send(LexUser, "sign_out"))
+            await asyncio.sleep(0.02)
+            return after_three, logged.records, after_big, held("anna")
+
+        with patch.dict(os.environ, {"LEX_UI_PRIVATE_MB_PER_USER": "1"}):
+            asyncio.run(as_user("bob", "tab-bob", bob))
+            after_three, records, after_big, signed_out = asyncio.run(as_user("anna", "tab-anna", anna))
+        self.assertEqual(after_three, ["_b", "_c"], "anna's own oldest value went to make room")
+        self.assertEqual(held("bob"), ["_report"], "never another user's, though it is older")
+        reason = str(records[0].exc_info[1])
+        self.assertIn("LEX_UI_PRIVATE_MB_PER_USER", reason, "a value too large names the setting")
+        self.assertRegex(reason, r"QuotaState\._a holds about 2\.0 MB")
+        self.assertEqual(after_big, ["_b", "_c"], "and is not kept")
+        self.assertEqual(signed_out, [], "signing out drops every value of the user")
+        self.assertEqual(held("bob"), ["_report"], "and only theirs")
+
+    # -- 1.938 ---------------------------------------------------------
+    def test_1_938_an_inherited_private_field_is_one_value_in_every_handler(self) -> None:
+        """
+        Scenario 1.938: a private field declared on a parent state, used from a child state.
+        Given: `LedgerBase._lines = ui.private()` and `LedgerChild(LedgerBase)`, which Reflex
+               makes a substate whose inherited fields are the parent's.
+        When:  the child's action writes `self._lines`; the child's action and job read it; the
+               child's job writes it; the parent reads it; the child's load runs.
+        Then:  there is one value, kept under the state that declares the field: the child's
+               action and job read and write it alike as `self._lines`, the parent sees what the
+               child wrote, and the child's load does not reset a field it only inherits.
+        """
+        async def steps(harness):
+            await (await harness.send(LedgerChild, "write"))
+            await (await harness.send(LedgerChild, "read"))
+            action = (await harness.fields(LedgerChild))["note"]
+            await (await harness.send(LedgerChild, "read_later"))
+            await asyncio.sleep(0.05)
+            job = (await harness.fields(LedgerChild))["note"]
+            await (await harness.send(LedgerChild, "write_later"))
+            await asyncio.sleep(0.05)
+            await (await harness.send(LedgerBase, "show"))
+            parent = (await harness.fields(LedgerBase))["seen"]
+            await (await harness.send(LedgerChild, "open"))
+            await asyncio.sleep(0.05)
+            await (await harness.send(LedgerBase, "show"))
+            after_load = (await harness.fields(LedgerBase))["seen"]
+            return action, job, parent, after_load, list(harness.outcomes), [key[1].rsplit(".", 1)[1] for key in private._STORE]
+
+        action, job, parent, after_load, outcomes, kept_under = _session(steps)
+        self.assertEqual(outcomes, [], "nothing failed")
+        self.assertEqual((action, job), ("[1, 2]", "[1, 2]"), "the child's action and job read it alike")
+        self.assertEqual(parent, "[3]", "the parent sees what the child's job wrote: one value")
+        self.assertEqual(after_load, "[3]", "the child's load does not reset a field it only inherits")
+        self.assertEqual(kept_under, ["lex___test_project___tests___init___test_1dv_ui_private____ledger_base"],
+                         "kept under the state that declares it")

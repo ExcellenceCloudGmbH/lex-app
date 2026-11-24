@@ -88,6 +88,8 @@ class Session:
     api_client: Any = None
     #: The browser tab the event came from (Reflex's client token): ``self.tab_id``.
     tab: str = ""
+    #: The answers of the project's rules (``@ui.rule``) in this event: each is asked once.
+    rules: dict = dataclasses.field(default_factory=dict)
 
 
 def _params_of(state: Any) -> Params:
@@ -295,6 +297,22 @@ class Api:
 
     def delete(self, model: Any, pk: Any) -> None:
         return self._call("delete", model, pk)
+
+    def calculate(self, model: Any, pk: Any) -> dict:
+        """Start a calculation record's run, as the Calculate button does; answers the record, ``IN_PROGRESS``.
+
+        Prefer it to ``update(Model, pk, {"calculate": "true"})``, which starts the run under an id
+        the grid's log button does not find.
+        """
+        return self._call("calculate", model, pk)
+
+    def file(self, model: Any, pk: Any, field: str) -> dict:
+        """A record's file, downloaded as the user: ``{"data": bytes}``, or ``{"url": ...}`` from a storage that serves it."""
+        return self._call("file", model, pk, field)
+
+    def log(self, model: Any, pk: Any) -> list[str]:
+        """The log of a calculation record's newest run, one Markdown text per entry (``[]`` before one is stored)."""
+        return self._call("log", model, pk)
 
 
 def api_of(inv: Invocation) -> Any:

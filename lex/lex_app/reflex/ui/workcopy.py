@@ -18,7 +18,8 @@ def raw(state: Any) -> Any:
 
 
 def fields_of(state_cls: Any) -> tuple[str, ...]:
-    """The class's own fields: its vars, its backend vars (not the inherited ones), its private fields."""
+    """The class's own fields: its vars, its backend vars (not the inherited ones), and its private fields
+    -- also those it inherits, which are the declaring state's one value (a load does not reset those)."""
     from lex.lex_app.reflex.ui import private
 
     inherited = set(getattr(state_cls, "inherited_backend_vars", {}) or {})
@@ -91,7 +92,10 @@ def reset(state: Any, keep: tuple[str, ...] = ()) -> None:
     state_cls = type(raw(state))
     declared = state_cls.get_fields()
     held = private.fields(state_cls)
+    own = private.fields(state_cls, inherited=False)
     for name in fields_of(state_cls):
+        if name in held and name not in own:
+            continue                        # inherited: the parent's value, reset by the parent's load
         if name in held:
             kept = held[name].keep or name in keep
             if not (kept and private.peek(raw(state), held[name]) is not private.GONE):

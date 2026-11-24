@@ -382,17 +382,19 @@ different widths, columns the user sizes, a file's rows in one scroll, a totals 
 it sums. Each is RFDS's own feature, exposed with the fewest new words:
 
 ```python
-ui.table(CustomersState.customers, page_size=None, choose_columns=True,
-         totals={"amount": "sum of all rows"},
-         columns=[ui.column("name", kind="name", pin=True), ui.column("code", kind="code"),
+ui.table(CustomersState.customers, page_size=200, choose_columns=True,
+         totals={"amount": "sum"}, totals_of_all=True,
+         columns=[ui.column("name", kind="name"), ui.column("code", kind="code"),
                   "region", ui.column("amount", kind="money", currency="currency")])
 ```
 
-- **One pinned column: the first.** `ui.column(..., pin=True)` is RFDS's `sticky="start"`. RFDS's
-  data table puts every start-sticky cell at the left edge and reserves scroll padding for one such
-  column, the identity cell, so only the first column -- the one that names the row -- may be
-  pinned ("RFDS keeps one column in place while the table scrolls sideways: the first, which names
-  the row. Pin it: ..."). Pinning several would need hand-made offsets; not added.
+- **One pinned column: the first, always.** RFDS's data table puts every start-sticky cell at the
+  left edge and reserves scroll padding for one such column, the identity cell, so only the first
+  column -- the one that names the row -- can stay in place. The first build asked for it with
+  `ui.column(..., pin=True)`, legal on the first column only. Review, 2026-11-24: an argument with
+  one legal place is a rule to learn and nothing to choose, so `pin=` is gone and the first column
+  of every lex.ui table, rows or model, is RFDS's `sticky="start"`: it stays in place whenever the
+  table scrolls sideways. Pinning several would need hand-made offsets; not added.
 - **No width argument; two kinds instead.** Rule 6.1(4) of the pages design forbids optional
   styling, and test 1.806 refuses a `width` argument on every component. The need is about the
   values, so two kinds say what they are: `kind="name"` (a person's or a company's name) is RFDS's
@@ -409,20 +411,38 @@ ui.table(CustomersState.customers, page_size=None, choose_columns=True,
   (RFDS's range), and the first column always shown and first, because it names the row and is
   its link. It lasts until the tab is closed; saving it needs RFDS's saved views and a store (not
   added). Name: like `search=`, `filters=` and `export=`, it names what the user gets.
-- **Every row: `page_size=None`, up to 200.** RFDS's rule DA-09: at most 200 rows reach the
-  browser in a data table (`DataTableMixin.page_size_options` must be 1-200). `page_size=None`
-  opens the table at 200 rows in one scroll, without the rows-per-page picker; past 200, RFDS's
-  `pagination` appears below the table, so no row is out of reach. More than 200 rows in one
-  scroll is RFDS's AG Grid (virtualised), a different engine; not added. `page_size=50` sets the
-  rows a page (1-200), offered with 25, 50, 100 and 200. Name: `page_size`, as `lex_table()` and
-  RFDS's state call it; `rows_per_page=` and `paged=False` were considered.
+- **Every row: `page_size=200`.** RFDS's rule DA-09: at most 200 rows reach the browser in a data
+  table (`DataTableMixin.page_size_options` must be 1-200). `page_size=50` sets the rows a page
+  (1-200), offered with 25, 50, 100 and 200; `page_size=200` shows every row of a file in one scroll.
+  More than 200 rows in one scroll is RFDS's AG Grid (virtualised), a different engine; not added.
+  Name: `page_size`, as `lex_table()` and RFDS's state call it; `rows_per_page=` and `paged=False`
+  were considered.
+- **Which state a built table got** (review, 2026-11-24) is noted for `ui.testing.rows(table=)` and a
+  section's row count in a weak map keyed by the table part itself, not by its `id()`: a part that
+  is dropped (pages are built again on every compile) leaves the map, and a new part that reuses a
+  dropped one's address is never taken for it.
+- **The pager comes only when it is needed** (review, 2026-11-24). The first build had
+  `page_size=None` meaning "200, no rows-per-page picker, a pager only past 200" -- a second way to
+  write 200, with its own pager rule. Now every lex.ui table, rows or model, draws RFDS's
+  `pagination` (with its rows-per-page choice) under the table only while there are more rows than
+  a page holds, instead of RFDS's always-on pager: a table whose rows all fit shows neither, since
+  neither would change anything. `page_size=None` is refused: "For every row on one page write
+  page_size=200".
 - **A totals row says what it sums.** `totals={"amount": "sum"}` totals the rows the search and
-  filters leave, as before; `"sum of all rows"` totals every row the handler returns, whatever the
-  user narrows (a handler that searches for itself is read again without the search). While a
-  search or a filter is on, the label says which: "Total of matching rows" or "Total of all rows";
-  otherwise "Total". All totals of one table cover the same rows ("write "sum" for each column,
-  or "sum of all rows" for each"). Name: a second word for `totals=` rather than a new argument
-  (`totals_of="all"` considered). A model table still cannot total (5.13).
+  filters leave, as before; `totals_of_all=True` beside it totals every row the handler returns,
+  whatever the user narrows (a migrated page had a total over all rows, with a note saying so).
+  While a search or a filter is on, the label says which: "Total of matching rows" or "Total of all
+  rows"; otherwise "Total". A model table still cannot total (5.13).
+- **Review, 2026-11-24: the all-rows total is one table option, read once.** It was first a second
+  word per column, `totals={"amount": "sum of all rows"}`: a table-wide choice written once per
+  column as a sentence, which had to agree across columns, and a handler that searches for itself
+  was asked for every row again on each keystroke. Now `totals_of_all=True` is one option (the
+  label already says what the total covers), and the total of every row is worked out when the
+  table reads its rows -- it appears, a handler of its state finished, `ui.refresh`, a new record --
+  and kept while the user searches and filters. The old sentence is refused with what to write
+  (`totals={"amount": "sum"}, totals_of_all=True`), as is `totals_of_all=` without `totals=`.
+  *Name:* `totals_of_all` reads as the label does ("Total of all rows"); `totals_over="all"` was
+  considered (a string whose only other value would be the default).
 
 ## 6. Limits and risks
 

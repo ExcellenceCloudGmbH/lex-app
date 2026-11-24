@@ -290,10 +290,11 @@ class TestCluster01dl_FormChoices(SimpleTestCase):
                            "Page `funds`, slot `fields`: field `regions` is a choice without `options=`.\n"
                            "Give what can be chosen: `options=[\"open\", \"closed\"]`, or "
                            "`options={\"open\": \"Open\", \"closed\": \"Closed\"}` to word them."),
-            "numbers": ([ui.field("regions", kind="choices", options=[1, 2])],
-                        "Page `funds`, slot `fields`: field `regions` got `[1, 2]` as its options.\n"
-                        "Give a list of texts, each once: `options=[\"open\", \"closed\"]`, or "
-                        "`options={\"open\": \"Open\", \"closed\": \"Closed\"}` to word them."),
+            "numbers": ([ui.field("regions", kind="choices", options=[1.5, 2.5])],
+                        "Page `funds`, slot `fields`: field `regions` got `[1.5, 2.5]` as its options.\n"
+                        "Give a list of texts or whole numbers, each once: `options=[\"open\", \"closed\"]`, or "
+                        "`options={\"open\": \"Open\", \"closed\": \"Closed\"}` to word them. The handler "
+                        "receives the option itself: `options=[2024, 2025]` gives an int."),
             "start": ([ui.field("regions", kind="choices", options=list(REGIONS), value="north")],
                       "Page `funds`, slot `fields`: field `regions` chooses several and starts as `'north'`.\n"
                       "`value=` is a list of options, such as `value=[\"north\"]`, or a state value."),

@@ -84,7 +84,7 @@ class Section(Part):
         from lex.lex_app.reflex.ui.pages import rows_table
 
         held = [part for part in parts if isinstance(part, tables.Table)]
-        state = rows_table._CACHE_BY_TABLE.get(id(held[0])) if len(held) == 1 else None
+        state = rows_table._CACHE_BY_TABLE.get(held[0]) if len(held) == 1 else None
         if state is None:
             return title
         return rx.cond(state.loaded_at != "", say("{title} ({count, number})", title=title, count=state.total_rows),

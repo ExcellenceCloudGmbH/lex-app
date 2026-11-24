@@ -25,7 +25,7 @@ from lex.lex_app.reflex.ui.pages.parts import Build, Part, called, say, shown, s
 DROPDOWN_OPTIONS = 12
 _CHOICES = ("choice", "choices")
 
-_FIELD = "`ui.field(key, label=, kind=, options=, required=, help=, value=)`"
+_FIELD = "`ui.field(key, label=, kind=, options=, required=, help=, value=, currency=, lines=)`"
 _DIALOGS = itertools.count(1)
 
 
@@ -120,12 +120,14 @@ class Field(Part):
             return listed, None, data.field_name.removesuffix("_rx_state_")
         pairs = list(given.items()) if isinstance(given, dict) else [(one, None) for one in (given or ())]
         values = [value for value, _ in pairs]
-        if (not pairs or isinstance(given, str) or len(set(values)) != len(values)
-                or not all(isinstance(value, str) and value for value in values)):
+        own = all((isinstance(value, str) and value) or (isinstance(value, int) and not isinstance(value, bool))
+                  for value in values)
+        if not pairs or isinstance(given, str) or not own or len({str(value) for value in values}) != len(values):
             raise ctx.fail(f"field `{self.key}` got {called(given)} as its options.",
-                           "Give a list of texts, each once: `options=[\"open\", \"closed\"]`, or "
-                           "`options={\"open\": \"Open\", \"closed\": \"Closed\"}` to word them.")
-        return ([{"value": value, "label": value if label is None else say(label)} for value, label in pairs],
+                           "Give a list of texts or whole numbers, each once: `options=[\"open\", \"closed\"]`, "
+                           "or `options={\"open\": \"Open\", \"closed\": \"Closed\"}` to word them. The handler "
+                           "receives the option itself: `options=[2024, 2025]` gives an int.")
+        return ([{"value": str(value), "label": str(value) if label is None else say(label)} for value, label in pairs],
                 tuple(values), "")
 
     def expect(self, ctx: Build, handler: Any) -> rules.Expect:
@@ -266,19 +268,21 @@ def field(key: str, *, label: Any = None, kind: str | None = None, options: Any 
     ``datetime``   a day and a time, in the app's time zone    ``datetime.datetime``
     ``year``       four digits                                 ``int``
     ``bool``       a box to tick                               ``bool``
-    ``choice``     one of ``options=``                         ``str``
-    ``choices``    several of ``options=``: boxes to tick,     ``list[str]``, in the order
-                   or a list to pick from above 12 options     of the options
+    ``choice``     one of ``options=``                         the option itself (``str``,
+                                                               ``int``, a row's ``id``)
+    ``choices``    several of ``options=``: boxes to tick,     a ``list`` of them, in the
+                   or a list to pick from above 12 options     order of the options
     =============  ==========================================  ==========================
 
     Nothing entered arrives as ``None`` (``""`` for text, ``False`` for a box, ``[]`` for
-    several). ``options=`` is a list of texts, a dict of value to wording, or a field of the
-    handler's own state; a field with options is a choice, and ``kind="choices"`` lets the user
-    choose several of them.
+    several). ``options=`` is a list of texts or whole numbers, a dict of value to wording, or a
+    field of the handler's own state; a field with options is a choice, and ``kind="choices"``
+    lets the user choose several of them. The handler receives each option's own value, whatever
+    the browser showed: ``options=[2024, 2025]`` gives an ``int``, as does ``{1: "Q1"}``.
 
     One among thousands, or among names that must not all reach the browser, is searched on the
     server: ``options=`` names a ``@ui.rows`` handler, whose rows give ``id`` (what the handler
-    receives; a number stays a number) and ``label`` (the words the user reads)::
+    receives, of its own type: a number stays a number) and ``label`` (the words the user reads)::
 
         @ui.rows
         def customers(self, search):
@@ -290,9 +294,11 @@ def field(key: str, *, label: Any = None, kind: str | None = None, options: Any 
     id and label only. A rows handler without ``search`` returns every row, and lex-app matches
     the typed words against the labels. The first page is there when the field opens. The value
     sent back must be one this browser tab was offered, else it is refused at the field. A
-    searched choice starts empty (no ``value=``) and chooses one (not ``kind="choices"``). ``label`` defaults to the key with a capital; ``help`` is a sentence
-    under it; ``value`` is what the field starts with (a value -- a list for several -- or a
-    state value the page's load filled). ``required=True`` (for several: at least one) and the
+    searched choice starts empty (no ``value=``) and chooses one (not ``kind="choices"``).
+
+    ``label`` defaults to the key with a capital; ``help`` is a sentence under it; ``value`` is
+    what the field starts with (a value -- a list for several -- or a state value the page's
+    load filled). ``required=True`` (for several: at least one) and the
     kind are checked before the handler runs, and the message is shown at the field.
 
     ``lines=6`` makes a text field several lines high, for notes, a comment or a pasted list:
@@ -523,8 +529,6 @@ class Form(kinds.Kind):
             raise ctx.at("result").fail("`tabs=True` shows the result's sections one at a time, and it has 0.",
                                         "Give `result=` two or more `ui.section(title, ...)`s, one per tab, or leave "
                                         "`tabs=` out.")
-        if self.keep:
-            rules.keep(handler)
         if self.load is not None:
             ctx = dataclasses.replace(ctx, under_load=True)
 
@@ -566,8 +570,50 @@ class Form(kinds.Kind):
             after = dataclasses.replace(ctx.at("result"), under_load=True,
                                         caption=self.title if isinstance(self.title, str) else "")
             # Its result takes the page's width: it is where the tables are.
-            whole.append(rx.cond(State.ui_done.get(key, False), rfds.page(rfds.stack(*self._result(after)))))
+            shown_after = self._result(after)
+            whole.append(rx.cond(State.ui_done.get(key, False), rfds.page(rfds.stack(*shown_after))))
+        else:
+            shown_after = []
+        if self.keep:
+            rules.keep(handler, self._kept_states(ctx.at("result"), handler, shown_after))
         return kinds.states(ctx, self.load, rx.fragment(*whole), "rect")
+
+    def _kept_states(self, ctx: Build, handler: Any, result: list) -> list:
+        """The states a kept result lives in besides the submit handler's: those its tables read.
+
+        Refuses a result that shows a field of the page's load's state (another state than the
+        submit handler's) that the load resets on every visit: kept, the result would come back
+        without it.
+        """
+        from lex.lex_app.reflex.ui.pages.rows_table import LexRowsTableState
+        from lex.lex_app.reflex.ui.state import State as UiState
+
+        read: dict[str, set] = {}
+        for var in rx.fragment(*result)._get_vars(include_children=True):
+            data = var._get_all_var_data()
+            for name, names in (dict(data.field_dependencies) if data is not None else {}).items():
+                read.setdefault(name, set()).update(names)
+        states: list = []
+        load_state = getattr(self.load, "state", None)
+        for name, names in sorted(read.items()):
+            try:
+                cls = rx.State.get_class_substate(name)
+            except Exception:  # noqa: BLE001 - not a state of this app's tree
+                continue
+            if issubclass(cls, LexRowsTableState):
+                states.append(cls.owner)
+                continue
+            if cls is handler.state or cls is not load_state or not issubclass(cls, UiState):
+                continue
+            exempt = set(getattr(self.load.fn, "__ui_options__", {}).get("keep") or ())
+            reset = sorted(field for field in names if field not in exempt and not field.startswith("ui_"))
+            if reset:
+                load = f"{cls.__name__}.{self.load.fn.__name__}"
+                raise ctx.fail(f"the kept result shows {cls.__name__}.{reset[0]}, which the page's load {load} "
+                               "resets on every visit: the result would come back without it.",
+                               f"Keep it in {handler.state.__name__}, the state the form submits to (a kept form "
+                               f"keeps that state's fields), or write `@ui.load(keep=(\"{reset[0]}\",))` on {load}.")
+        return states
 
 
 def form(*, title: Any, load: Any = None, fields: Any = (), steps: Any = (), submit: Any = None,
@@ -591,20 +637,24 @@ def form(*, title: Any, load: Any = None, fields: Any = (), steps: Any = (), sub
 
     ``result=`` is what the page shows once the handler has succeeded, and until the form is sent
     again: what a section holds, or ``ui.section``\\ s. The handler keeps what the result shows in
-    its state -- large or private data in a field whose name starts with ``_``, which stays on the
-    server -- and a ``@ui.rows`` handler or a computed value reads it. ``actions`` are placed in
-    the page header, none of them as the primary one: that is the submit button. ``tabs=True``
-    shows the result's sections one at a time, as on a record page: each section's title is its
-    tab, and what comes before the first section is above the tabs.
+    its state -- large data in a field whose name starts with ``_``, which stays on the server,
+    personal data in a ``ui.private`` field -- and a ``@ui.rows`` handler reads it (a computed var
+    may read a ``_`` field, never a private one: copy what the page shows into a field instead).
+    ``actions`` are placed in the page header, none of them as the primary one: that is the
+    submit button. ``tabs=True`` shows the result's sections one at a time, as on a record page:
+    each section's title is its tab, and what comes before the first section is above the tabs.
 
     A new visit starts the form over: its result leaves. ``keep=True`` keeps the result when the
     user leaves the page and comes back -- a job that finished meanwhile shows what it found, one
-    still running its progress -- for as long as what the result shows is kept: a ``ui.private``
-    field needs ``keep=True`` too, and a field the page's ``load=`` resets needs that load's
-    ``keep=``. A kept form also keeps its refusal above its submit button, shows its handler's
-    last other failure under it, and says so when its result is no longer kept. What was typed is
-    not kept by lex-app (it may be personal): to show it again, the handler sets a field and the
-    input starts from it (a searched choice starts empty, also on a kept form)::
+    still running its progress -- for as long as what the result shows is kept. The one ``keep=True``
+    is enough: the private fields of the submit handler's state, and of the states whose rows the
+    result's tables read, stay across visits, and a load of those states does not reset them. A
+    result that shows a field of another state, which the page's load resets, is refused when the
+    page is built, saying what to write. A kept form also keeps its refusal above its submit
+    button, shows its handler's last other failure under it, and says so when its result is no
+    longer kept. What was typed is not kept by lex-app (it may be personal): to show it again,
+    the handler sets a field and the input starts from it (a searched choice starts empty, also
+    on a kept form)::
 
         @ui.job
         def build(self, values):

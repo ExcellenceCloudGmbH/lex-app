@@ -9,7 +9,7 @@ Reflex refuses (`BaseState._check_overwritten_dynamic_args`) and nothing more. A
 project whose tests are green and whose deploy fails on a frontend build error, or a start-up that
 refuses an app Reflex would build.
 
-Cluster 1do -- scenarios 1.863-1.865. Type: U.
+Cluster 1do -- scenarios 1.863-1.865, 1.916. Type: U.
 Covers: lex/lex_app/reflex/ui/state.py (check_app_routes, check_route_fields).
 Run: python -m lex pytest lex/test_project/tests/init/test_1do_ui_route_argument_fields.py -v
 """
@@ -45,6 +45,14 @@ class RegionsBoard(ui.State):
     @ui.action
     def warehouse_slot(self):                # a handler: Reflex lets an argument of this name through
         return None
+
+
+class RegionRows(ui.State):
+    """A state whose rows a ui.table shows: lex-app builds the table's own state (page, sort, query...)."""
+
+    @ui.rows
+    def regions(self):
+        return [{"id": 1, "name": "North"}]
 
 
 class RawOrders(rx.State):
@@ -89,7 +97,8 @@ class TestCluster01do_RouteArgumentFields(SimpleTestCase):
                declared with a page decorator, an optional argument.
         When:  the app's routes are checked at start-up.
         Then:  the app stops with a ValueError naming the field, its state (and module) and the
-               route, saying Reflex would not build the pages, and saying to rename the field;
+               route, saying Reflex would not build the pages, and saying to rename the route's
+               argument or the field (the project's own);
                Reflex itself refuses each of these names.
         """
         module = RegionsBoard.__module__
@@ -108,7 +117,8 @@ class TestCluster01do_RouteArgumentFields(SimpleTestCase):
                 str(stopped.exception),
                 f"route {route!r}: its dynamic argument [{name}] has the name of {named} (in {module}). Reflex "
                 f"makes a route argument a value of every state, and does not build the app's pages while a state "
-                f"has a field of that name. Rename the field, e.g. {name}_value.")
+                f"has a field of that name. Rename the route argument, e.g. {route.replace(f'[{name}]', f'[{name}_key]')}, "
+                f"or the field, e.g. {name}_value.")
             self.assertTrue(_reflex_refuses(name), f"Reflex itself refuses [{name}]")
 
     # -- 1.864 ---------------------------------------------------------
@@ -144,3 +154,32 @@ class TestCluster01do_RouteArgumentFields(SimpleTestCase):
         with self.assertRaises(ValueError) as helper:
             _check(app_routes=["/users/[user]/[region_code]"])
         self.assertIn("ui.State helper self.user", str(helper.exception), "a helper's name has its own sentence")
+
+    # -- 1.916 ---------------------------------------------------------
+    def test_1_916_a_route_argument_named_like_a_table_field_says_to_rename_the_argument(self) -> None:
+        """
+        Scenario 1.916: /regions/[page] on an app with a lex.ui table.
+        Given: a `ui.table` over a rows handler, built as `@ui.page` builds its pages at start-up
+               (lex-app makes the table's own state, with `page`, `sort`, `query`,
+               `view_columns`...), and lex-app's start-up order.
+        When:  routes whose argument is `page` or `view_columns` are checked.
+        Then:  the app stops naming the table state's field, saying it belongs to lex-app and
+               telling the author to rename the route argument (`/regions/[page_key]`), never
+               the field they cannot rename; the declared pages, and with them their tables'
+               states, are built before the routes are checked.
+        """
+        from lex.lex_app.reflex.ui.pages import declare
+        from lex.lex_app.reflex.ui.pages.parts import Build
+
+        ui.table(RegionRows.regions, columns=["name"], choose_columns=True).build(Build(page="regions", route="/regions"))
+        for route, field in (("/regions/[page]", "page"), ("/regions/[view_columns]/list", "view_columns")):
+            with self.subTest(route=route), self.assertRaises(ValueError) as stopped:
+                ui_state.check_route_fields([route])
+            said = str(stopped.exception)
+            self.assertIn(f"Rename the route argument, e.g. {route.replace(f'[{field}]', f'[{field}_key]')}.", said)
+            self.assertIn("belongs to lex-app", said, "it says whose field it is")
+            self.assertNotIn("or the field", said, "and never to rename a field the author cannot rename")
+            self.assertTrue(_reflex_refuses(field), f"Reflex itself refuses [{field}]")
+        source = inspect.getsource(declare.install)
+        self.assertLess(source.index("finalize()"), source.index("check_app_routes(app)"),
+                        "the @ui.page pages, and their tables' states, exist when the routes are checked")

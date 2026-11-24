@@ -10,3 +10,8 @@
 .lex-embedded .rfds-shell-body {
   grid-template-columns: minmax(0, 1fr) !important;
 }
+/* The area of the current page: the heading of the navigation section holding the current entry. */
+.rfds-side-nav-section:has(.rfds-side-nav-link[aria-current="page"]) .rfds-side-nav-heading {
+  color: var(--rfds-color-text-default);
+  font-weight: 600;
+}

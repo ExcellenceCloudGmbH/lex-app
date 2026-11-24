@@ -497,8 +497,8 @@ Built on 2026-11-24 after a spike against RFDS 1.0.0 (`ui.form`, `ui.field`, `ui
   | `datetime` | the browser's `datetime-local` in RFDS's `field` frame: RFDS has no date-time input | `datetime` in the app's time zone | `None` |
   | `year` | `text_input`, numeric, four digits | `int` | `None` |
   | `bool` | `checkbox` | `bool` (`required=True`: must be ticked) | `False` |
-  | `choice` | `select` up to 12 fixed options; else `combobox` | `str`, one of the options | `None` |
-  | `choices` | `checkbox_group` up to 12 fixed options; else `multi_select` | `list[str]`, in the order of the options | `[]` |
+  | `choice` | `select` up to 12 fixed options; else `combobox` | the option's own value (`str`, `int`) | `None` |
+  | `choices` | `checkbox_group` up to 12 fixed options; else `multi_select` | a `list` of the options' own values, in their order | `[]` |
 
 - **Nothing reaches the server while the user types.** Text, number, year and date-time inputs are
   uncontrolled (`default_value`); RFDS's controlled inputs (money, percent, date, box, choice) hold
@@ -550,7 +550,7 @@ Built on 2026-11-24 after a spike against RFDS 1.0.0 (`ui.form`, `ui.field`, `ui
   half built: a choice among thousands loads its options with the page (RFDS's own guidance is server
   search above 200 and a value-help dialog above 1,000).
 - **Several of a list is `kind="choices"`, the same field as a choice.** It takes `options=` as a choice does
-  and gives the handler a `list[str]` in the order of the options, `[]` when none is chosen; `required=True` means
+  and gives the handler a list of the options' own values (texts, or whole numbers) in their order, `[]` when none is chosen; `required=True` means
   at least one ("Choose at least one."), and a value that is no option is refused at the field ("Choose from the
   options."). The input follows RFDS's own rule, at the same line as the dropdown: its checkbox group up to 12
   options, its multi-select above them or for options from the state. *Cost:* none chosen is `[]`, not `None`; no
@@ -617,12 +617,38 @@ Built on 2026-11-24 (batches 1ds-1du), on top of 6.14:
   shared by every searched field: `ui.State.ui_search(field, text)` and `ui_matches[field]`, keyed by
   the field's id (the receiving handler's module-qualified name and the field's key). The browser names
   only that id; the rows handler is looked up in the server's registry and runs as the user, as a
-  table's. Each row gives **`id`** (what the handler receives; an `int` stays an `int`, anything else
-  arrives as text) and **`label`** (the words the user reads) -- named keys rather than "the first
+  table's. Each row gives **`id`** (what the handler receives, as the row's own value: an `int` stays an
+  `int`, a UUID a UUID) and **`label`** (the words the user reads) -- named keys rather than "the first
   field that is not the id", which depends on a dict's order and is harder to explain.
 - **Only a page of matches reaches the browser** (`forms.MATCHES`, 50), each `{value, label}`: none of
   a row's other fields. The first page is asked for when the field appears (`on_mount`), so the list is
-  ready when it opens; RFDS debounces typing (250 ms) and a newer search supersedes an older one.
+  ready when it opens; RFDS debounces typing (250 ms).
+- **Offers belong to the user they were made to** (review, 2026-11-24). `_ui_offered` and
+  `ui_matches` used to grow for the life of the tab. They are now dropped when another user signs
+  in on the tab (checked when a search is asked, a form is sent and a page opens -- a value offered
+  to the previous user is refused at the field), and a new visit drops the matches the browser was
+  given (each searched field asks again when it appears). The offers themselves stay across the
+  same user's visits, so a kept form still accepts a value chosen before the user left (6.18),
+  bounded at 1,000 per field as before.
+- **A choice's value is the option's own value** (review, 2026-11-24). The first build gave a
+  searched choice's `int` id as an `int` and anything else as text, and a fixed choice always as
+  text (fixed options had to be texts). Now every kind of option reaches the handler as its own
+  value: fixed options may be texts or whole numbers (`options=[2024, 2025]`, `{1: "Q1"}`), options
+  from a state field keep that field's values, and a searched row's `id` arrives as the row gave it
+  (an `int`, a UUID). The browser still shows and sends text; the server maps it back. The names
+  `choice`/`choices` stay.
+- **Searches run per field, and never hold the tab** (review, 2026-11-24). `ui_search` was one
+  Reflex handler marked `supersedes=True`, and Reflex supersedes by (event name, tab): a search in one
+  field cancelled a search running in another field of the same form, and every keystroke held the
+  tab's lock while the rows handler ran. Now `ui_search` is an ordinary event that only records the
+  field's latest search (a number and the text) -- in order with the tab's other events, since Reflex
+  runs a tab's ordinary events one after another -- and returns `ui_search_run(field, number)`, a
+  background event: it copies the state under the lock, runs the rows handler without it, and offers
+  the matches only if that number is still the field's latest. A slow, older search that ends after a
+  newer one is dropped; another field's search is not touched; the user's other clicks go on while a
+  search runs. *Considered first:* only dropping `supersedes` (correct, but each keystroke would wait
+  for the rows handler while holding the tab), and making `ui_search` itself a background event (its
+  order would be the order the lock is taken in, which Reflex's Redis lock does not promise).
 - **The server accepts only a value it offered to this tab.** Every value offered is remembered on the
   server (`_ui_offered`, a backend field: never sent), so a value chosen from an earlier search stays
   valid while the user types on; a forged or merely existing value is refused at the field ("Choose one
@@ -637,7 +663,8 @@ Built on 2026-11-24 (batches 1ds-1du), on top of 6.14:
   accept, a value it never offered); `kind="choices"` with a searched source is refused: RFDS's
   multi-select has no server search. *Cost:* an edit form cannot show the current customer in the box.
 - **It works in a form, a wizard's step and a button's `ask=`**, as every field. A project's unit test
-  sends `ui_search` through `ui.testing.Harness` before it sends the form.
+  sends `ui_search` through `ui.testing.Harness` (awaiting `.wait_all()`, which includes the search's
+  run) before it sends the form.
 - **A form's refusal is shown in the form, above its submit button** -- where the user is looking --
   in RFDS's `inline_message` (warning tone, as the toast it replaces; `role="alert"`: it is new and the
   form did not do what was asked). It is kept per handler (`ui_refused[key] = {title, message}`) and
@@ -739,8 +766,8 @@ Built in batch 1dx.
   option (the result is declared on the page, not the handler), keeping every form (an entry form
   should start over).
 - **What was typed is not kept by lex-app** (it may be personal): a field shows it again through
-  `value=` on a state field the handler sets, which the load keeps -- `ui.field("customer",
-  value=ReportState.customer)`, `self.customer = values["customer"]`, `@ui.load(keep=("customer",))`.
+  `value=` on a state field the handler sets -- `ui.field("customer", value=ReportState.customer)`,
+  `self.customer = values["customer"]` (the kept form keeps that state's fields; see below).
 - **A kept result shows only while what it shows is kept.** On a new visit the opener checks the
   submit handler's state: if a `ui.private(keep=True)` field of it is gone (its idle time or age
   passed, another process, another user), the result does not show over nothing; the form says,
@@ -760,8 +787,323 @@ Built in batch 1dx.
 - **A searched choice (6.15) starts empty on a kept form too**: `value=` is refused for it, and the
   values offered to the tab (`_ui_offered`) are not part of the visit, so a value chosen before the
   visit away is still accepted when the user chooses it again.
-- *Cost:* the result's fields must be kept by the page's load too (its `keep=`, or `ui.private(keep=True)`);
-  lex-app cannot see which fields a result reads, so it does not check this.
+- **One `keep=True` is enough** (review, 2026-11-24; this replaces the first build's cost, "the
+  result's fields must be kept by the page's load too ... lex-app does not check this", which took
+  three declarations nothing checked). A kept form's result lives in the submit handler's state and
+  in the states of the `@ui.rows` handlers its result's tables read (found from the result's own
+  vars). Their `ui.private` fields stay across visits as if declared `keep=True`, and a load of
+  those states keeps all their fields (it still runs and sets what it sets). The one case lex-app
+  cannot imply is a result that shows a field of *another* state that the page's load resets: that
+  is refused when the page is built -- "Keep it in ReportState, the state the form submits to, or
+  write `@ui.load(keep=("note",))` on HeaderState.open." *Considered first:* checking the three
+  declarations and refusing what is missing (three things to write for one wish), and implying keep
+  for every state the result shows (a load of an unrelated, shared state would stop resetting).
+- **A reconnect is not a new visit** (review, 2026-11-24). Reflex sends the page's `on_load` again
+  whenever its socket reconnects (`state.js`: `hydrate` and `on_load_internal` on every connect), so
+  a laptop waking or a network blip used to drop the tab's private values and start every form
+  over. The opener records the address and the socket connection (Reflex's `sid`) it opened on; the
+  same address on a new connection is the same visit: nothing is dropped or started over, the
+  visit count stays (a `stop_on_leave` job keeps running), and the page's loads run again without
+  resetting what the visit holds (a load resets its state once per visit). A link to the same page
+  on the same connection is a new visit, as is a reconnect on another address. A reload (F5) of
+  the same page also arrives on a new connection, and the server cannot tell it from a reconnect:
+  it is the same visit too, which matches the rest of the state, which a reload keeps as well.
+  *Considered first:* a visit id kept in the browser (the reloaded `on_load` events are built on
+  the server from the route, so nothing of the browser's can ride on them), and not running the
+  loads again (a reload would then never refresh the page's data).
+
+### 6.19 lex-app's frame, configured: areas, breadcrumbs, no access, a page opened, a project's rule (2026-11-24)
+
+A need found while rewriting dashboards: a project with several areas of work ("Orders", "Reports",
+"Tools", each with several pages) had its own navigation in areas, breadcrumbs, a "you have no access"
+page with its own way out, and a "recently used" list. As lex.ui pages they lost all of it, because
+lex-app's frame decides how a page looks (goal 4). A per-project wrapper was built and withdrawn
+(`2026-11-24-reflex-ui-project-chrome-design.md`): it was a second chrome. Instead lex-app's own frame
+takes a few generic parts, each a need of any project with several areas; nothing in it draws.
+
+**One place: `ui.frame(...)`, once, in the dashboard module, beside the `@ui.page`s.**
+
+```python
+ui.frame(nav=["Orders", "Reports", "Tools"],
+         denied="Ask your administrator for access.", request_access=access_request,
+         opened=remember_page, sign_out="https://portal.example.com/sign-out")
+```
+
+*Why there, not in Django settings:* the areas are the same words as the pages' `nav=` beside it, and
+`request_access=`, `opened=` and `sign_out=` are a page, a function and an address that lex-app
+checks as it checks a link (a setting would be a dotted string, checked late). It is called once; a
+second call from another module is refused (a reload of the same module replaces it). Every argument
+is optional. *Considered:* settings (above); one argument per feature on every `@ui.page` (repeats
+itself on every page). *Not added:* the product name stays `LEX_DASHBOARD_TITLE` and the badge
+`LEX_ENVIRONMENT` -- values of a deployment, beside each other in its environment; no logo or colours,
+since the look is lex-app's (section 8).
+
+- **Areas are `nav=`.** A page's `nav="Orders"` already listed it under a heading; that heading is
+  its area. A page with route arguments (`/orders/[key]`) cannot be opened from the navigation, so its
+  `nav=` places it in the area -- its breadcrumbs, as section 1's example writes it -- without listing it.
+  `ui.frame(nav=[...])` -- the same word -- gives the areas' order; a page whose `nav=` is
+  not in that list stops the start with the list to choose from (a typo would make a new area).
+  Without it, areas come in the order their first page is declared. Pages in an area keep their
+  declaration order, `@ui.page`s and raw pages alike (a `@ui.page` takes its place when declared).
+  The current entry is RFDS's rule: its route, or a route below it (`/orders/7` is under `/orders`,
+  so a record page under its list's route marks its list); the area holding the current entry has its
+  heading marked too (lex-app's stylesheet, `:has()`, no state). A raw page joins with the same words:
+  `ui.reflex_page("/legacy", nav="Tools", title="Legacy export", icon="download")` -- `title=` is its
+  label, as on `@lex_page`; its `requires=` only hides its entry, since lex-app does not guard a raw page.
+- **Breadcrumbs come from the area and the page.** The frame shows RFDS's breadcrumbs above the page:
+  the area (text, an area is not a page), then the page. A page that is not listed in the navigation
+  has a parent: the first listed page whose table opens it (`open=`), else whose button or link leads
+  to it (`to=`), in declaration order -- `Orders / Orders / Order 7`; without a `nav=` of its own it
+  takes its parent's area. The parent is a link; the current page's title may be a state value. A
+  page with no area has no breadcrumbs. No page writes a crumb. *Cost:* one level of parent only; a page of a record's record shows its area and
+  itself.
+- **No access: `denied=` and `request_access=`.** RFDS's access-denied notice (`rfds.access_denied`)
+  is what every refused page shows, with the project's sentence (`denied=`) instead of RFDS's and a
+  "Request access" link (`request_access=`: a page, a `ui.reflex_page`, or an `https://` or `mailto:`
+  address). Its "Switch account" link -- sign in with another account -- goes to the sign-out address.
+  The page a refused load goes to (`/ui-error`) shows the same notice. *Considered:* a whole page of the
+  project's (the withdrawn wrapper again); a `ui.link` (RFDS's notice words its links itself).
+- **`sign_out=`** is where the user menu signs out, and where "Switch account" leads: a page or an
+  `https://` address; by default lex-app's `/logout`, which ends the dashboard's sign-in and lex-app's.
+  A project's address should end there too, or the dashboard's sign-in lasts until it expires.
+- **`opened=`: a function lex-app calls when a page opens**, `opened(user, page)`, with the signed-in
+  `ui` user and the page: `page.route`, `page.address` (with its values), `page.title` (a state title
+  as it stands after the load), `page.area`, `page.params`. For a "recently used" list or an audit
+  entry. It runs after the page's required loads succeeded (at once on a page without them), on a
+  worker thread, not awaited: the page never waits for it. A failure is logged, never shown. It is not
+  called for a refused page or one whose load failed. It is called once a visit: when the socket
+  reconnects on the same page (section 6.18's same visit), the page's loads run again but it is not
+  called again.
+- **A project's rule in `requires=`: `@ui.rule`.** `requires=` took lex-app's permissions; a project
+  also has rules of its own ("only the team of the order's region"). A function of the user and the
+  page's values, marked `@ui.rule`, is accepted wherever `requires=` is -- `@ui.page` and every
+  handler -- alone or in a list with permissions:
+
+  ```python
+  @ui.rule
+  def region_team(user, params):
+      if params.get("region") in teams.regions_of(user.id):
+          return True
+      return "Only the region's team sees its report."
+
+  @ui.page("/reports/[region]", nav="Reports", requires=[ui.read(Report), region_team])
+  ```
+
+  It returns `True`, `False`, or the sentence the user is refused with. It runs on the server, on a
+  worker thread (it may query the database), once per event however often it is named, like the
+  user's permissions; a rule that raises, or answers anything but `True`, `False` or a sentence,
+  refuses -- on a handler as an unexpected failure (logged, a reference for the user), on a page with
+  lex-app's no-access sentence (logged). As for any `requires=`, a handler that declares a rule may
+  query the database directly. For a page the opener runs it: a
+  refused page shows the no-access notice with the rule's sentence and starts no load; its navigation
+  entry stays (a rule cannot hide it in the browser). For a handler it is checked with the
+  permissions; its sentence is the refusal. A page's `requires=` now takes a list, as a handler's does.
+  `visible=` does not take a rule (it is decided in the browser); the message says to set a state field
+  in the load instead, where the rule may be called: `region_team(self.user, self.params)`.
+  *Considered:* `ui.permission("...")` with a project string (a Keycloak grant, not a rule); a
+  `requires=` that takes any function (a typo'd handler would pass silently).
+
+### 6.20 A calculation's page: `ui.calculation(Model, ...)` (2026-11-24, batches 1ef-1ei)
+
+The owner's decision (2026-11-24): a tool that writes to other systems, needs an audit trail and keeps
+a record people come back to is a lex-app calculation model, run on lex-app's worker with lex-app's
+status, audit and history. lex.ui gets one page kind over such a model: a form for its inputs, the run
+while it goes, its result, and the past runs -- with permissions taken from the model. It is written
+for any project with calculations; the example is a region report.
+
+**What lex-app already offers, and what the page uses of it** (read in `docs/calculations/`,
+`CalculationModel`, `One.py`, `CalculationLogTreeView`, `latest_calculation.py`):
+
+| Need | lex-app's own mechanism | Through |
+| --- | --- | --- |
+| Create the record | the create endpoint (`permission_create`, validation, audit entry) | `self.api.create` |
+| Start the run | the Calculate button's request: `PATCH ... calculate=true`, answered 202 with the record `IN_PROGRESS`; the run goes to the calculation thread pool, and from there to a Celery worker when Celery is on. A `calculate_on_create` model starts on its create | `self.api.calculate` (new) |
+| Status | `is_calculated`: `NOT_CALCULATED`, `IN_PROGRESS`, `SUCCESS`, `ERROR`, `CANCELLED`, `ABORTED` -- written by whichever process ran it | `self.api.get` |
+| The error | `calculation_error_message` (or `error_message`) when the model declares one: the exception's text, a blank line, the traceback | `self.api.get` |
+| Progress | **no fraction**: a run reports by logging (`LexLogger`). Its log lines are stored as `CalculationLog` rows (an atomic run's when it commits) and, while it runs, kept as live text in the calculation cache | `self.api.log` (new) |
+| The log of a past run | the newest run's id of a row (`lex_reserved_calculation_id`, resolved by the grid's list request) and its `CalculationLog` rows, read as the user | `self.api.log` (new) |
+| Files | a `FileField` of the record, served by `api/<model>/file-download` as the user, audited | the result's download button |
+| Stop | `PATCH ... cancel=true` (`CalculationModel.cancel`): revokes a worker's task, or stops a cooperative in-process run | the run's Stop button |
+
+**The API, as a reader writes it:**
+
+```python
+from lex import ui
+from reports.models import RegionReport, RegionReportLine
+
+@ui.page("/reports/regions", nav="Reports", requires=ui.read(RegionReport))
+def region_reports():
+    return ui.calculation(
+        RegionReport,
+        title="Region report",
+        fields=[ui.field("region", kind="choice", options={"north": "North", "south": "South"}, required=True),
+                ui.field("year", kind="year", required=True)],
+        result=[RegionReport.orders,
+                ui.fact("Revenue", RegionReport.revenue, kind="money"),
+                RegionReport.report_file,
+                ui.section("Lines", ui.table(RegionReportLine, where={"report": RegionReport.id},
+                                             columns=["customer", ui.column("amount", kind="money")]))],
+        history=ui.table(RegionReport, columns=["region", "year", "created_by"], search=True),
+    )
+```
+
+One new name, `ui.calculation`; everything inside it is form, section and table vocabulary. Three
+methods on `self.api` that a project's own handlers may use too: `self.api.calculate(Model, pk)`,
+`self.api.log(Model, pk)` and `self.api.file(Model, pk, field)` (a record's file through lex-app's
+download view, as the user: `{"data": bytes}`, or `{"url": ...}` where the storage serves it).
+
+**One page, two views.** The page at `/reports/regions` shows the form, and under it the past runs.
+The same page with `?run=42` shows that run: the page of a record. One declaration, one permission,
+one place in the navigation; a run's address is the page's address with its key, so it can be
+bookmarked and sent while the run still goes. *Considered:* two pages (a form page and a run page with
+a route argument), which every calculation would declare twice with the same model, title and
+result; and `ui.form` with a result that follows the run, which gives a run no address and a past
+run no page.
+
+**The kind is bound to the model, and writes no state of the project's.** lex-app makes the page's
+state (one per page, as a model table makes one per table) with its handlers: the form's submit, the
+run's load, the job that follows a run, Stop and a file's download. A project writes no handler for
+the ordinary page. *Considered:* a `ui.State` base class the project subclasses -- a second
+place to write the same page, for nothing the page needs.
+
+**A field of the run is written as the model's field: `RegionReport.orders`.** The page is about one
+model, so `RegionReport.orders` can only mean this run's `orders`. It works wherever a value goes:
+`ui.fact("Revenue", RegionReport.revenue, kind="money")`, `ui.text("{n} orders", n=RegionReport.orders)`,
+`ui.table(..., where={"report": RegionReport.id})`, `visible=`. Alone in `result=` it is a fact with the
+model's own label (its `verbose_name`, as a table's column header) and the kind its Django field
+implies (a whole number, a decimal, a date, an instant, yes or no, text); a `FileField` alone is a
+button that downloads the file as the user. A string is still a sentence everywhere, as on every
+other page. A field of another model is refused when the page is built ("`Customer.name` is a field
+of Customer; this page is about RegionReport"). *Considered:* field names as strings (`"orders"`),
+which would make a string mean a sentence on every page but this one; a `ui.run("orders")` helper, a
+new name for what the model already names.
+
+**The inputs are the record's fields.** Each field's key names a field of the model, which the form's
+values are written to: `ui.field("year")` is `RegionReport.year`. They are written as a form's fields
+(kinds, `options=`, `required=`, `steps=` for a wizard) -- nothing is inferred from the model, so a field
+reads the same on every page. Built-time checks: a key that is not a field the model lets one set
+(not a field, `is_calculated`, the key, an automatic time) is refused, naming the model's settable
+fields; a field the model requires on create (no default, not `null`, not `blank`) that the form
+leaves out is refused, since lex-app would refuse every create ("RegionReport needs `year` when a
+record is created: add `ui.field("year")`").
+
+**Starting is lex-app's create and lex-app's Calculate, as the user.** The submit button reads
+**Calculate** -- the word lex-app's grid uses -- and runs `calculate(values)`: the values are made
+into the API's shapes (a decimal as text, a date as ISO), the record is created through
+`self.api.create` (so `permission_create`, validation, `created_by` and the audit entry are the
+user's), and the run is started through `self.api.calculate`, unless the create already started it
+(`calculate_on_create`). The browser then goes to the run's address. A refusal by the API -- not
+permitted, a field it rejects, a closed record -- is the form's refusal, above the button, in the API's
+words (6.15).
+
+**`self.api.calculate(Model, pk)` mints the run's id as the grid does** (`<model>_<pk>_update_<uuid>`).
+`self.api.update(Model, pk, {"calculate": "true"})` starts a run too, but under an id of the
+`<model>_update_<uuid>` shape, under which neither the grid's log button nor this page finds the run's
+log. It answers the record, `IN_PROGRESS`; a run already going is left alone (lex-app answers the
+record as it is).
+
+**Following a run is reading the record until it settles: the same with Celery and without.** The
+page never talks to the process that runs the calculation; it reads the record through lex-app's API,
+as the user, every `calculations.POLL_SECONDS` (1 s), until its status is no longer `IN_PROGRESS`.
+Without Celery the run goes on lex-app's calculation thread pool, in the API's process; with Celery
+on a worker, which writes the status when it ends (`CallbackTask`). Either way the record's status is
+the truth, and the page shows it. The reading is a `@ui.job(stop_on_leave=True)` that starts when the
+run's view appears while the run goes (the progress part's `on_mount`): leaving the page stops the
+watching, never the run; coming back to the run's address watches again. *Considered:* lex-app's
+websocket of status changes, which the Reflex process does not hold a connection to and which carries
+no permission check of the reader; a Reflex background task per run without a job's run
+bookkeeping.
+
+**Progress is the run's own log.** lex-app reports no fraction, so the bar is RFDS's indeterminate
+bar, and its message is the newest line the run has logged -- from the live log while it runs (what the
+grid's log panel shows), else "Running". A project that wants a message per phase logs one
+(`LexLogger().add_text("Reading orders").log()`): nothing lex.ui-specific goes into a calculation.
+*Not built:* a fraction; lex-app would need a progress field written by the run.
+
+**The run's view** is RFDS's page header (the title, the run's name -- its `str()` -- under it, and
+"New run" leading back to the form), then:
+
+| Status | What is shown |
+| --- | --- |
+| any | a status badge (Not started, Running, Done, Failed, Stopped, Interrupted), and the inputs as facts, labelled as their fields |
+| `IN_PROGRESS` | the progress bar with the newest log line; **Stop** to users who may edit the model |
+| `SUCCESS` | `result=` |
+| `ERROR` | the calculation's error in its own words: the first part of `calculation_error_message`, without the traceback, in RFDS's inline message (danger); a model that keeps no message: "The calculation failed. Its log says what happened." |
+| `CANCELLED` | "The calculation was stopped before it finished." |
+| `ABORTED` | "The calculation was interrupted: lex-app found it unfinished after a restart. Start it again." |
+| a log exists | a closed section "Log" with the run's log, rendered as the grid renders it (Markdown, by RFDS's `safe_markdown`), whatever the status |
+
+The run's load reads it through the API, as the user. A run the reader may not read is, to them, no
+run: lex-app answers a record outside the reader's `permission_read` as one that does not exist, and
+the page says the same as for a key that is no run, on lex-app's error page: "There is no run 42."
+(found while building 1eg: the refusal is a 404, not a 403, so nothing tells a reader that the run
+exists). The run's log is lex-app's: a failed atomic run's lines are kept from lex-app's log cache.
+
+**The past runs are a `ui.table` over the model: `history=ui.table(RegionReport, columns=[...])`.** All
+of a table's words work (`search=`, `filters=`, `page_size=`, `choose_columns=`); lex-app adds the run's
+status as the last column (a status column, with the same words and tones as the badge), makes each row
+open the run's address, and orders the newest run first. Who sees which runs is the model's
+`permission_list`/`permission_read`, as on every model table. A table of another model is refused, so
+is `open=` (the page decides where a run leads) and a `where=` (the past runs are the model's). *Considered:*
+`history=["region", "year"]` -- a second way to list columns, without search or filters.
+*Built (1eh):* the table is written once, under the form, titled "Past runs". What lex-app adds goes
+through fields a page kind fills and `ui.table()`/`ui.column()` do not take -- the row's address
+template, the order until the user sorts (`"-id"`, new on lex-app's model table state as
+`default_ordering`), and the status column's words -- so the table vocabulary gains no argument.
+
+**Permissions come from the model.** The page's `requires=` is the author's (normally
+`ui.read(Model)`). The form is shown to users who may create the model (`visible=ui.create(Model)`), Stop
+to those who may edit it; lex-app's API enforces both whatever the browser shows, and every read and
+write of the page is the user's.
+
+**With the frame (6.19) and the review's fixes (merged 2026-11-24).**
+- *The page's `requires=` is its handlers' too* (1.978). A project writes `requires=` on its own
+  handlers; a calculation page's handlers are lex-app's, so lex-app gives them the page's -- its
+  permissions and its `@ui.rule`s. A user the page refuses cannot send its events by name either
+  (Calculate, the run's load, Stop, the download, the following): each is refused with the rule's
+  sentence before lex-app's API is called. Before the merge, a rule on the page hid the page and left
+  its handlers open. The state is one per page and requirements: the same title and fields under
+  another `requires=` is another state.
+- *A run's view sits under its page in the breadcrumbs* (1.979). `?run=` is the same route, so the
+  frame's trail would not change; while a run is open, the page becomes a link back to its form and the
+  run's name (its key until lex-app names it) is the last crumb. A page kind with a view inside it
+  gives the crumb with `view_crumb()`; the frame draws it.
+- *The past runs after the review's table changes* (1.998): the author's first column stays in place
+  and the added status column does not; the pager shows only while the runs do not fit one page;
+  `totals=` stays refused, as on every model table.
+- *A reconnect while a run is followed is the same visit* (6.18; 1.999): the following goes on, the
+  progress part's second `follow` is a repeat, the load reads the run again, and `ui.frame(opened=)`
+  is not called again -- it is called once a visit (1.977).
+
+**What a reader of a past run sees** is that run's view, as it stands: the same badge, inputs, result,
+error and log as the user who ran it saw at the end -- read now, as the reader, so a field the reader
+may not see is missing for them as it is in the grid.
+
+**Stop (built in 1ei).** A button under the progress, to users who may edit the model, asking "Stop this
+run?" (RFDS's confirmation: a stopped run cannot be resumed). It is lex-app's cancel
+(`PATCH ... cancel=true`). lex-app stops only a run on a worker -- it revokes the worker's task and
+writes CANCELLED, which the page then shows; a run in lex-app's own process goes on to its end (the
+cancel answers 409, `sync_calculation_not_cancellable`), and the page says so in words: "This run
+cannot be stopped: lex-app runs it in its own process, where a run goes on to its end. A run on a
+worker can be stopped." After the end: "The run has already ended." The file button is labelled with
+the field's `verbose_name` and shown only when the run has a file; the handler accepts only a
+`FileField` of the model, since its argument comes from the browser.
+
+**Built in four batches:** 1ef the kind, the form and the start (`self.api.calculate`); 1eg the run's
+view, following with and without Celery, the result, the error, the log (`self.api.log`); 1eh the past
+runs; 1ei a file of the result, and Stop.
+
+**Not built:**
+- *A review between the inputs and the run that depends on the inputs* (rows found for the region,
+  a decision per row): a wizard's steps have no handler between them. Checks of the inputs and a
+  confirming last step work as in any wizard (`steps=`); a per-row decision is a form of its own
+  before the calculation page, or a field of the record the calculation reads.
+- *The API's field errors at their fields*: lex-app's validation answers a 400 per field; the page
+  shows them together as the form's refusal, above the button.
+- *"Run again with these inputs"* on a past run.
+- *A fraction of progress*, and a run started elsewhere telling the page it began: the page reads
+  only while it is open on the run.
+- *Several records per run* (a batch's generated rows): a result's related table shows them.
 
 ---
 
@@ -806,7 +1148,7 @@ components are enough for that project, or which one is missing.
 ## 9. Not in this spec
 
 - Rules about content — how many figures an overview may have, wording, when a tone fits (piece 3).
-- The calculation-model page (piece 4).
+- The calculation-model page (piece 4) -- since designed and built: 6.20.
 - A chunked-upload component; until then an upload is a `ui.custom_block`.
 - A free dialog or side panel.
 - Layout helpers (rows, columns, spacing).
@@ -831,11 +1173,13 @@ components are enough for that project, or which one is missing.
 
 ```text
 Declaring        @ui.page(route, nav=, icon=, requires=, params=)      @ui.dashboard
+                 ui.frame(nav=, denied=, request_access=, opened=, sign_out=)      @ui.rule
 
 Kinds            ui.overview(title, load=, figures=, tiles=, sections=, actions=)
                  ui.list(title, load=, filters=, table=, actions=)
                  ui.record(title, load=, status=, facts=, sections=, tabs=, actions=)
                  ui.form(title, load=, fields= | steps=, submit=, result=, actions=, keep=)
+                 ui.calculation(Model, title=, fields= | steps=, result=, history=, actions=)
 
 Components       ui.text(sentence, **values)             ui.fact(label, value, kind=)
                  ui.figure(label, value, kind=, change=, to=)

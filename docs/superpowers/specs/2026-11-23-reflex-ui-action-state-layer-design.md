@@ -219,7 +219,7 @@ nothing.
 | `self.params` | The page's route and query values: `self.params.section`, `self.params.get("w")` |
 | `self.can(Model, "edit")` | Whether Keycloak grants the user that scope on the model (model-wide grants only, as `has_permission` today) |
 | `self.state(Other)` | Another state of the same user, to read or change. In an action it is the live state; in a load or job it is a working copy merged like `self`. |
-| `self.progress(fraction, message)` | In a job only: shows its progress, as `yield ui.progress(...)` does, also from a thread the body started (a library's callback). See `@ui.job` in 6.4. |
+| `self.progress(fraction, message)` | In a job only: shows its progress, as `yield ui.progress(...)` does, also from a thread the body started (a library's callback); it never waits, and the page gets the latest report, up to four a second. The only part of `self` safe from another thread. See `@ui.job` in 6.4. |
 
 The helpers' names are reserved. A `ui.State` subclass that declares a field (with or without a
 default), a computed var or a method named `user`, `api`, `params`, `can`, `state`, `tab_id` or
@@ -235,7 +235,12 @@ field `region`): Reflex refuses that collision too, but only when it adds the de
 builds the frontend -- after the project's tests have passed. The check mirrors Reflex's own
 (`BaseState._check_overwritten_dynamic_args`: a field or a computed var other than a route argument's own, on any
 state; not a backend field, not an event handler), names the field, its state and the route, and says to rename
-the field. Added 2026-11-24 (batch 1do). Outside a handler body the helpers
+the route argument (`/regions/[page_key]`) -- and the field only when it is the project's own: a field of a
+state lex-app, RFDS or Reflex made (a table's `page`, `sort`, `query`, `view_columns`, `column_order`,
+`column_widths`) cannot be renamed by the author, so the sentence says whose it is instead (review,
+2026-11-24). The tables of every `@ui.page` are built before the check (`ui.install` builds the declared
+pages first), so their states are seen; a `ui.embed` in a raw Reflex page is built only when Reflex
+compiles that page, and Reflex's own check finds those. Added 2026-11-24 (batch 1do). Outside a handler body the helpers
 raise a `RuntimeError` saying where they work.
 
 ### 6.3 Data access
@@ -390,11 +395,16 @@ one. A load started on a component's `on_mount` is not tied to the visit (below)
   `report = reports.build(values["year"], on_progress=self.progress)`. It records the same fraction
   and message, from the body's thread or any thread the body started. It writes only the progress:
   the job's other fields wait for its next `yield` or its end, so a library's thread never writes
-  them. Each call waits, like a `yield`, until lex-app has recorded it. Once the job is stopped
-  (a cancel, or `stop_on_leave`), the next call raises `GeneratorExit` -- what the next `yield`
-  raises -- in the thread that made it; a body that ends with it is a stopped run, not a failure.
-  In an action, a load, or after the job ended, it raises a `RuntimeError` saying it belongs in a
-  `@ui.job`. Added 2026-11-24 (batch 1dm), after rewrites of real dashboards needed a helper thread
+  them. A call never waits (review, 2026-11-24; it first waited a whole state round trip per call,
+  slowing a library that reports on every row): it keeps the latest report and returns, and
+  lex-app sends the page at most four reports a second (`REPORTS_PER_SECOND`), the latest each time
+  and always the last one before the job ends. Once the job is stopped (a cancel, or
+  `stop_on_leave`), the next call raises `GeneratorExit` -- what the next `yield` raises -- in the
+  thread that made it, without waiting (a cancel is seen at once, leaving the page at the next
+  report the page receives); a body that ends with it is a stopped run, not a failure. In an action
+  or a load it raises a `RuntimeError` saying it belongs in a `@ui.job`; after the job ended, one
+  saying the job has ended. `self.progress` is the only part of `self` that is safe from another
+  thread: a thread the body started must not read or write the state's fields. Added 2026-11-24 (batch 1dm), after rewrites of real dashboards needed a helper thread
   polling the library to report each step.
 - One run per tab, per job, per set of arguments at a time; a repeat while it runs is ignored. The
   arguments are compared as a whole: `export(2025, 2)` runs beside `export(2025, 1)`.
@@ -679,7 +689,10 @@ only a job can do that.
 
 A tool's result often names persons and amounts. A backend field (`_name`) stays out of the browser,
 but it is part of the state, and Reflex writes the whole state to Redis in production (to disk in
-development): the data lands there, outlives the page and has no idle limit. Built in batch 1dv.
+development): the data lands there and outlives the page -- in Redis until Reflex's state expiry
+(an hour after the tab's last event, `redis_token_expiration`), on disk with no limit at all -- and
+it has no limit of its own: no maximum age, nothing that drops it on a new visit or for another
+user. Built in batch 1dv.
 
 ```python
 class PayrollState(ui.State):
@@ -704,10 +717,11 @@ class PayrollState(ui.State):
   disk managers do, and the state as the browser gets it, and finds no part of the value.
 - **Gone after**: `idle_minutes` without a read or a write (default 60, Reflex's own state
   expiry); `max_hours` since it was written (default 8, a working day); the tab opening a page
-  again (the opener drops it; `keep=True` keeps it, within those times); another server process
-  (a restart, or the tab's events reaching another worker), another signed-in user on the tab, and
-  more than `LEX_UI_PRIVATE_VALUES` values in the process (default 5000; the least recently used
-  goes first). The lex.ui clock (the heartbeat, every 10 s) drops expired values from memory.
+  again (the opener drops it; `keep=True` keeps it, within those times; Reflex reconnecting its
+  socket to the same page is not opening it again, pages design 6.18); another server process
+  (a restart, or the tab's events reaching another worker), another signed-in user on the tab, the
+  user signing out, the user holding more than `LEX_UI_PRIVATE_MB_PER_USER` (below), and more than
+  `LEX_UI_PRIVATE_VALUES` values in the process (default 5000; the least recently used goes first). The lex.ui clock (the heartbeat, every 10 s) drops expired values from memory.
 - **What a reader sees when it is gone**: reading the field raises a refusal, "This is no longer
   available: it is kept only for a while. Start again.", shown as every refusal is -- a toast for
   an action or a job (and `ui.failed` for a job), in a form above its submit button (pages design
@@ -717,12 +731,38 @@ class PayrollState(ui.State):
   kept while it is held, and reset when it is gone, so the page opens clean instead of looping
   through the error page's "Try again". A form kept across visits says it under the form (pages
   design 6.18).
+- **A computed var never reads it** (review, 2026-11-24): Reflex works a computed var out whenever it
+  sends the state and caches it by the fields it reads, which a private field is not -- a cached var
+  stays stale, and one with `cache=False` read after the value is gone raises in every later event
+  of the tab until the page is reloaded. Reflex's own dependency tracker finds what a var reads
+  (also through the methods it calls); one that reads a private field is refused when the class is
+  defined: read it in a `@ui.rows` handler, or make the var an ordinary field set where the private
+  one is written. A computed var over a backend field (`_name`) is Reflex's own and stays.
+- **A child state's inherited private field is the parent's one value** (review, 2026-11-24). Reflex
+  makes a subclass of a state its substate, whose inherited fields are the parent's. A private field
+  was kept under the state that happened to be read, and a child's job could not see it at all
+  (the child's action could): two behaviours. Now a value is kept under the state that declares the
+  field (for a mixin's, the state using the mixin), and a child reads and writes it as `self._lines`
+  in an action, a load and a job alike. A child's load does not reset a private field it only
+  inherits -- the parent's load does, as for every inherited field.
 - **`ui.testing`**: `fields={"_report": {...}}` seeds it and `result.fields["_report"]` reads it,
   as for every field; `ui.testing.GONE` seeds a value that is gone (to test the refusal) and is what
   `result.fields` holds for one.
+- **One user cannot fill the memory, and signing out empties it** (review, 2026-11-24). The store
+  was one least-recently-used list of 5000 values of any size, so one user's large results could push
+  out everyone else's. Now each value's size is estimated when it is written (its pickle, else the sum
+  of its parts) and one user holds at most `LEX_UI_PRIVATE_MB_PER_USER` megabytes in a process
+  (default 100): a write past it drops that user's own least recently used values first, never
+  another user's; a single value larger than the whole allowance is refused with a sentence naming
+  the setting (an error with a reference for the user, the sentence in the log: it is the author's
+  to fix). `LexUser.sign_out` (the dashboard's Sign out and `/logout`) drops every value of the user
+  in that process. *One setting, not two:* a separate cap per value was considered; the allowance
+  already bounds one value, and a second number would have to be kept below the first.
 - *Cost:* a value lives in one process: with several backend workers, a tab whose events reach
-  another worker finds it gone and is told so. A process keeps at most the setting's number of
-  values, of any size. The leave drop needs the page's opener: a page without one (a dashboard on
+  another worker finds it gone and is told so. A process keeps at most `LEX_UI_PRIVATE_VALUES`
+  values, and each user at most `LEX_UI_PRIVATE_MB_PER_USER` of them. Signing out of lex-app itself
+  (not of the dashboard) does not reach the Reflex process: those values leave after their idle
+  time. The leave drop needs the page's opener: a page without one (a dashboard on
   plain `rx.page`) relies on the idle time.
 
 ### 6.12 A limit on how many runs of a job go at once: `@ui.job(limit=)` (2026-11-24)
@@ -736,7 +776,9 @@ def export(self, region):
     ...
 ```
 
-- **Counted in this server process, for all users and tabs together**, from the run's start (after
+- **Counted in each server process, for all users and tabs together** -- one user may hold every
+  place --, per job (its module and qualified name: two modules may both have `Exports.run`; review,
+  2026-11-24, it was the qualified name alone), from the run's start (after
   `requires=`) to its wind-up, however it ends: success, failure, refusal, cancel, a form's wrong
   field. Like the job pool (`LEX_UI_JOB_THREADS`), it is per process: with several backend workers
   each allows N. A run waiting for a pool thread holds its place. A run reporting through
@@ -748,12 +790,20 @@ def export(self, region):
   refusal is (pages design 6.15): it is about the press, not about what was entered, and it no
   longer holds once a run ends. Nothing else on the page changes -- the check comes before a
   form's values are judged, so no field message appears and the last result stays. The job is
-  named as its submit button is named (6.14 of the pages design).
+  named as its button says it (review, 2026-11-24): the words of the first `ui.button` that runs
+  it ("Export to CSV is already running 2 times."), else as a form's submit button is named (6.14
+  of the pages design: `build_report` is "Build report"). Because the refusal is about that press,
+  a new visit drops it from `ui.failed` -- so a kept form (pages design 6.18), which shows its
+  handler's last failure under it, never shows it when the user comes back.
 - *Fixed sentence:* `limit=` takes the number only. A sentence of the project's own would be a
   second way to word a standard message, outside the translation of the others.
   *Considered first:* the pool's own size (`LEX_UI_JOB_THREADS`, for every job at once), and
   queueing (a queued press would wait unseen).
 - `limit=` is a whole number, 1 or more; anything else is refused when the state is written.
+- *Not built: a limit shared by every process* (a counter in Redis). The review asked; the projects
+  being moved to lex.ui had the same limit per process, so nothing a user could do is lost, and a
+  shared counter needs a lease that a killed process gives back (the heartbeat's job), which is a
+  feature of its own. With N backend processes a job runs at most N x `limit` times at once.
 
 ---
 
