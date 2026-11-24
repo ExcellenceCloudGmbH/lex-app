@@ -23,6 +23,11 @@ Flags (name → what "on" means):
 * ``INTERNAL``      – internal tools are restricted: deleting unused files needs a superuser or the
   ``admin`` client role, writing to the server log and editing Django's users and groups need a
   superuser, and the calculation log tree and its PDFs show only logs of records the caller may read.
+  So do a calculation's live log (``api/init-calculation-logs``) and the list of running
+  calculations (``api/active-calculations``), which the instance's own key (``LEX_API_KEY``) still
+  sees whole, and the calculation WebSockets (``ws/calculation_logs/<id>``,
+  ``ws/calculation_status_update``, ``ws/calculations``), which carry a run only to a socket whose
+  user may read its record, and nothing to a socket without a sign-in (``lex.api.consumers.record_access``).
 * ``HISTORY_WRITE`` – history tables can only be written by superusers.
 * ``CREATE``        – ``permission_create`` is asked a second time on the record filled with the
   request's validated values (foreign keys set) before it is saved; a refusal answers like the

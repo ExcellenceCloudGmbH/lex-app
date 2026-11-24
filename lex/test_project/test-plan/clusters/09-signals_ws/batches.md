@@ -85,3 +85,23 @@
 **Why a regression matters:** live customer data reaches anonymous sockets (BUG-047), or a client cannot tell "sign in again" (4401) from "stop" (4403) or "retry later" (4503) and reconnects forever.
 
 ---
+
+### Batch 9k — The calculation sockets carry a run only to who may read its record (`LEX_SEC_INTERNAL`) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 9.74 – 9.81 |
+| Type | I |
+| Files covered | `lex/api/consumers/record_access.py` (new: `SocketReader`), `lex/api/consumers/CalculationLogConsumer.py`, `lex/api/consumers/UpdateCalculationStatusConsumer.py`, `lex/api/consumers/CalculationsConsumer.py` |
+| Test file | `lex/test_project/tests/signals_ws/test_9k_calculation_sockets_read.py` |
+| Test classes | `TestCluster09k_CalculationSocketsRead` (9.74 live log to a reader only, 9.75 superuser and the switch off, 9.76 status snapshot, 9.77 state changes with error and traceback, the store still synced, 9.78 run-started notice, 9.79 unsigned socket under `log`, 9.80 Keycloak roles and UMA permissions, the same answer as REST, 9.81 never refreshes a token, keeps its last permissions) |
+| Fixtures | `SigGuardedCalc` (secret rows readable only with the client role `calc-auditor`) and `SigScopedCalc` (LexModel's default `permission_read`: the Keycloak `read` scope) in `signals_ws/models.py`; `E2ETestCase` with the real store and run-started notifier; sockets on `lex.lex_app.asgi.application` through `asgiref.testing.ApplicationCommunicator`; extra sign-ins from `create_sign_in`; Keycloak's UMA answer per access token; `ensure_fresh` patched to fail if called (9.81) |
+| Tests landed | **8 pass / 0 fail** (2 subtests); cluster 9 + `api_layer` + 4m + 4p + 7m + 15r: **263 pass / 0 fail** |
+| Mutation check | With the three consumers as before the fix, 9.74 and 9.76 – 9.81 fail; 9.75 (superuser, switch off) passes, as it should |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-11-25-9k-calculation-sockets-read.md) |
+
+**Why a regression matters:** a record's log lines, its errors and tracebacks, and its running calculations reach users its `permission_read` refuses, and, under the default `LEX_WS_AUTH=log`, sockets with no sign-in at all.
+
+**Changed alongside:** 9f and 9j now set `LEX_SEC_INTERNAL=false`. They test wiring and the sign-in with made-up records (`rec42`, an empty `record_id`), which the rule rightly refuses; 9.79 now pins what an unsigned socket hears under `log`.
+
+---

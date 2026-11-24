@@ -6,6 +6,10 @@ socket that fans out calculation IDs/notifications, and a per-calculation log
 socket that streams live log lines. The ASGI shutdown hook also depends on each
 consumer tracking active connections so server shutdown can close them cleanly.
 
+These are wiring tests: which group a socket joins and the shape of what it sends.
+Whether a socket may hear about a given record is 9k's subject (``LEX_SEC_INTERNAL``);
+here that switch is off, so every message reaches the socket.
+
 Cluster 9f — scenarios 9.37–9.42. Type: U.
 Covers: lex/api/consumers/BackendHealthConsumer.py,
         lex/api/consumers/CalculationsConsumer.py,
@@ -16,6 +20,8 @@ Run: python -m lex pytest lex/test_project/tests/signals_ws/test_9f_core_consume
 from __future__ import annotations
 
 import json
+import os
+from unittest import mock
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -32,6 +38,7 @@ pytestmark = pytest.mark.signals_ws
 def _consumer(consumer_cls):
     """Instantiate a consumer with mocked socket/channel-layer boundaries."""
     consumer = consumer_cls()
+    consumer.scope = {}
     consumer.channel_name = "test-channel"
     consumer.channel_layer = MagicMock()
     consumer.channel_layer.group_add = AsyncMock()
@@ -46,6 +53,10 @@ class _ConsumerStateMixin:
 
     def setUp(self) -> None:
         super().setUp()
+        # Record read permission is 9k's subject; these tests check the wiring only.
+        switch = mock.patch.dict(os.environ, {"LEX_SEC_INTERNAL": "false"})
+        switch.start()
+        self.addCleanup(switch.stop)
         for consumer_cls in (
             BackendHealthConsumer,
             CalculationsConsumer,

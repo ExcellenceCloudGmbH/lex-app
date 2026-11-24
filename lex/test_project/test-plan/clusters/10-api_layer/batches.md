@@ -284,3 +284,33 @@ a project reaching for column options is most likely to have.
   [session note](../../progress/sessions/2026-10-20-native-column-filters.md).
 
 ---
+
+
+## Batch 10ah — a calculation's live log and the running-calculations list follow permission_read (10.198-10.201)
+
+- **Type:** E
+- **Files covered:** `lex/api/views/calculations/InitCalculationLogs.py`,
+  `lex/api/views/calculations/ActiveCalculations.py`, `lex/api/security.py`
+  (`sees_every_calculation`, `calculation_record_readable`), `lex/core/security_flags.py` (the
+  `INTERNAL` flag's description)
+- **Test file:** `lex/test_project/tests/api_layer/test_10ah_calculation_endpoints_read.py`
+- **Test classes:** `TestCluster10ah_CalculationEndpointsRead`
+- **Fixtures:** `ApiLayerGuardedCalc` (`api_layer/models.py`: open rows readable, secret rows
+  refused by `permission_read`); the real `ActiveCalculationStateStore` and log cache
+  (`e2e_unpatch`)
+- **Status:** complete — 4 pass
+- **Note:** `api/init-calculation-logs` returned the lines a run had logged, and
+  `api/active-calculations` every running calculation with its record's display name, model, pk
+  and calculation id, to every signed-in user. Both now apply the calculation-log tree's rule
+  (`LEX_SEC_INTERNAL`, 4.103-4.104): the log and the run of a record the caller may read; a
+  superuser sees all. A refused log answers `{"logs": null}`, the cache-miss answer the bundled
+  frontend already handles, so the panel stays empty and learns nothing. The instance's own key
+  (`LEX_API_KEY`), which the Instance Controller sends before a release, still sees every run.
+  On untouched lex-app-v2 10.198-10.200 fail on the leak and 10.201 passes; dropping the
+  instance-key exemption fails 10.201.
+- **Not covered here:** the WebSocket side (the status socket's reconnect snapshot and the
+  live-log socket) still answers every signed-in user; it is a separate surface (cluster 9).
+- **Allocation note:** the first letter free on lex-app-v2 and every remote branch (a-z and aa-ag
+  are held), with a range above the highest `max_scenario` on any branch (197).
+
+---

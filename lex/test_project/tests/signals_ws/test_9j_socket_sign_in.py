@@ -22,6 +22,10 @@ Every socket here goes through ``lex.lex_app.asgi.application`` -- origin check,
 user, ``OIDCSessionASGIMiddleware``, the routes -- or, for a project's own consumer, through the
 same stack around it.
 
+Which calculations a served socket hears about is 9k's subject (``LEX_SEC_INTERNAL``: only the
+runs of records its user may read; nothing for a socket without a sign-in, even under ``log``).
+These tests switch it off, so "served" here means every broadcast reaches the socket.
+
 Cluster 9j -- scenarios 9.53-9.73. Type: I. 9.68-9.73 come from the security review of
 2026-11-06.
 Covers: lex/api/consumers/auth.py (new), lex/api/consumers/CalculationsConsumer.py,
@@ -193,6 +197,12 @@ class _SocketTestCase(TransactionTestCase):
         super().setUp()
         _Guarded.verdict = True
         self.addCleanup(async_to_sync(get_channel_layer().flush))
+        # Which records a served socket may hear about is 9k's subject (LEX_SEC_INTERNAL): with
+        # it on, the made-up records these broadcasts name (``rec42``) reach no one. Off here, so
+        # every broadcast reaches a served socket and these tests see only the sign-in.
+        switch = mock.patch.dict(os.environ, {"LEX_SEC_INTERNAL": "false"})
+        switch.start()
+        self.addCleanup(switch.stop)
 
     def _signed_in(self, username: str = "ada", **kwargs) -> tuple[Client, OIDCSession]:
         """A browser signed in through Keycloak (an OIDC sign-in row); its client and the row."""

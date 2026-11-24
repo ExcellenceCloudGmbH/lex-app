@@ -51,3 +51,75 @@ ALL_MODELS = [SigAtomicCalc]
 
 SIG_ATOMIC = "sigatomiccalc"
 
+
+
+# ---------------------------------------------------------------------------
+# Calculation sockets follow the record's read permission (Cluster 9k)
+# ---------------------------------------------------------------------------
+
+#: The Keycloak client role that may read secret rows of :class:`SigGuardedCalc`.
+GUARDED_CALC_AUDITOR_ROLE = "calc-auditor"
+
+
+class SigGuardedCalc(CalculationModel):
+    """Cluster 9k: a calculation model whose secret rows only an auditor may read.
+
+    Open rows are readable by every signed-in user. A secret row's ``permission_read``
+    refuses everyone but a user holding the Keycloak client role
+    :data:`GUARDED_CALC_AUDITOR_ROLE` -- so a test can tell whether a socket is judged with
+    its sign-in's roles, as an API call is.
+    """
+
+    name = models.CharField(max_length=200)
+    is_secret = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):  # pragma: no cover
+        return None
+
+    def permission_read(self, uc):
+        if self.is_secret and GUARDED_CALC_AUDITOR_ROLE not in (uc.client_roles or ()):
+            return PermissionResult.deny("cluster 9k: secret row")
+        return PermissionResult.allow_all("cluster 9k: readable row")
+
+    def permission_list(self, uc):
+        return True
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 9k: edit-open")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+
+class SigScopedCalc(CalculationModel):
+    """Cluster 9k: a calculation model on LexModel's default ``permission_read``.
+
+    It does not override ``permission_read``, so a row is readable with the Keycloak ``read``
+    scope on ``lex_app.SigScopedCalc`` (UMA) and refused without it -- the case of every model
+    a project leaves to Keycloak.
+    """
+
+    name = models.CharField(max_length=200)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):  # pragma: no cover
+        return None
+
+
+SOCKET_READ_MODELS = [SigGuardedCalc, SigScopedCalc]
