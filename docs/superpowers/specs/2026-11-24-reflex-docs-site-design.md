@@ -64,6 +64,11 @@ docs_site/
 `docs_site/` is not part of the `lex-app` wheel: it is excluded from packaging, and model
 discovery never sees it.
 
+### Built differently (2026-11-24)
+
+- The entry module is `docs_site/docs_site/docs_site.py`, not `app.py`: Reflex looks for
+  `<app_name>/<app_name>.py`.
+
 ## What a reader sees
 
 Like reflex.dev:
@@ -74,6 +79,13 @@ Like reflex.dev:
   extracts them).
 - **Bottom**: previous and next page, in `nav.py` order.
 - **Header**: search, "Copy page", "View Markdown".
+
+### Built differently (2026-11-24)
+
+- Sidebar groups are not collapsible: every section and group is always listed.
+- The breadcrumb is the section's name above the title, as plain text, not a link.
+- "Copy page" and "View Markdown" sit under the page title, not in the header; the header holds
+  the site name and search.
 
 ### Sections
 
@@ -136,6 +148,17 @@ start-up instead of lex-app's sign-in hand-off.
 - **Guards:** `SandboxApi` refuses anything outside the sample models; a job demo is capped at a
   few seconds of simulated work.
 
+### Built differently (2026-11-24)
+
+- A reload does not reset the sample data. Reflex keeps the client token in the tab's
+  sessionStorage, so a reload keeps the tab's copy and a new tab starts fresh. Each demo card has
+  a "Reset sample data" button that starts the tab's copy over and makes the page's tables read
+  again.
+- No job demo has a time cap: the only code that runs is the code in this repository's pages.
+- The role lives only in the tab's `RoleState`; the resolver reads it on every event, and the
+  per-tab store holds rows only.
+- A live `ui.table(Model)` remains code-only, as settled below.
+
 ### Settled while planning (2026-11-24)
 
 - **Model-bound tables are not live in the first release.** `ui.table(Model)` reads
@@ -163,6 +186,10 @@ start-up instead of lex-app's sign-in hand-off.
 
 An index built at start-up from titles, headings and paragraph text, searched by a state in the
 app's own backend as the reader types. No third-party service.
+
+### Built differently (2026-11-24)
+
+- The index is built on the first query (and kept for the process), not at start-up.
 
 ## CI and local checks
 
