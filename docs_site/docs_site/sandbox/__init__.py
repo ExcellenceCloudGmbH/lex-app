@@ -1,6 +1,7 @@
-"""The docs' sandbox: who is asking (a demo user), what they may do (the tab's role) and what
-``self.api`` answers (a copy of the sample data for the tab). Installed in place of lex-app's
-sign-in, so no demo needs Keycloak, a lex-app instance or a database.
+"""The docs' sandbox: who is asking (a demo user), what they may do (the tab's role, read from
+its ``RoleState``) and what ``self.api`` answers (a copy of the sample data for the tab).
+Installed in place of lex-app's sign-in, so no demo needs Keycloak, a lex-app instance or a
+database.
 """
 
 from typing import Any
@@ -16,6 +17,18 @@ ROLES: dict[str, list[dict]] = {
 }
 
 
+async def role_of(target: Any) -> str:
+    """The tab's role, from its RoleState. A state with no ``get_state`` (a test's stand-in) is
+    an editor."""
+    from docs_site.sandbox.role import RoleState
+
+    get_state = getattr(target, "get_state", None)
+    if get_state is None:
+        return "editor"
+    role = (await get_state(RoleState)).role
+    return role if role in ROLES else "editor"
+
+
 async def resolve(state: Any):
     from lex.lex_app.reflex.ui import context, workcopy
 
@@ -25,7 +38,7 @@ async def resolve(state: Any):
     except Exception:  # noqa: BLE001 - a state without router data comes from no tab
         tab = ""
     data = STORE.tab(tab)
-    grants = ROLES[data.role]
+    grants = ROLES[await role_of(target)]
 
     async def token() -> str:
         return "docs-sandbox"

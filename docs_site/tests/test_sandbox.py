@@ -40,10 +40,10 @@ def test_reset_restores_the_seed():
 def test_an_idle_tab_is_dropped():
     now = [0.0]
     store = Store(clock=lambda: now[0], idle_seconds=10)
-    store.tab("a").role = "viewer"
+    store.tab("a").rows["Fund"].clear()
     now[0] = 11.0
     store.tab("b")                       # any access sweeps
-    assert store.tab("a").role == "editor"
+    assert store.tab("a").rows["Fund"] == data.seed()["Fund"]
 
 
 import pytest
@@ -97,15 +97,24 @@ from docs_site import sandbox
 from docs_site.sandbox.store import STORE
 
 
-def _fake_state(tab: str):
+def _fake_state(tab: str, role: str | None = None):
+    """A state as the resolver sees it; with ``role``, its tab's RoleState holds that role."""
     router = SimpleNamespace(session=SimpleNamespace(client_token=tab), url="/pages/record", page=SimpleNamespace(params={}))
-    return SimpleNamespace(router=router)
+    state = SimpleNamespace(router=router)
+    if role is not None:
+        from docs_site.sandbox.role import RoleState
+
+        async def get_state(state_cls):
+            assert state_cls is RoleState
+            return SimpleNamespace(role=role)
+
+        state.get_state = get_state
+    return state
 
 
 def test_the_resolver_gives_the_tab_its_data_and_role():
     STORE.reset("tab-r")
-    STORE.tab("tab-r").role = "viewer"
-    session = asyncio.run(sandbox.resolve(_fake_state("tab-r")))
+    session = asyncio.run(sandbox.resolve(_fake_state("tab-r", "viewer")))
     grants = asyncio.run(session.permissions())
     assert session.tab == "tab-r"
     assert session.user.username == "demo"
@@ -130,10 +139,8 @@ def test_a_lex_ui_handler_reads_the_sandbox():
                                       "Alder Credit Opportunities"]
 
 
-def _grants(tab: str, role: str):
-    STORE.reset(tab)
-    STORE.tab(tab).role = role
-    session = asyncio.run(sandbox.resolve(_fake_state(tab)))
+def _grants(tab: str, role: str | None):
+    session = asyncio.run(sandbox.resolve(_fake_state(tab, role)))
     return asyncio.run(session.permissions())
 
 
@@ -147,6 +154,23 @@ def test_a_viewer_cannot_edit_and_an_editor_can():
     assert guard.granted((guard.delete(Fund),), _grants("tab-e", "editor")) is True
 
 
+def test_a_state_without_get_state_is_an_editor():
+    from lex.lex_app.reflex.ui import guard
+
+    assert guard.granted((guard.edit(Fund),), _grants("tab-n", None)) is True
+
+
+def test_the_role_is_read_from_a_real_state_tree():
+    """Reflex's get_state on a state instance finds the tab's RoleState (the in-memory tree)."""
+    import reflex as rx
+
+    from docs_site.sandbox.role import RoleState
+
+    root = rx.State(_reflex_internal_init=True)
+    root.get_substate(RoleState.get_full_name().split(".")[1:]).role = "viewer"
+    assert asyncio.run(sandbox.role_of(root)) == "viewer"
+
+
 def _set_role(tab: str, value):
     from docs_site.sandbox.role import RoleState
 
@@ -157,14 +181,10 @@ def _set_role(tab: str, value):
     return stub
 
 
-def test_set_role_changes_the_tab_role_and_ignores_bad_values():
-    STORE.reset("tab-s")
-    stub = _set_role("tab-s", "viewer")
-    assert stub.role == "viewer" and STORE.tab("tab-s").role == "viewer"
-    stub = _set_role("tab-s", "admin")
-    assert stub.role == "editor" and STORE.tab("tab-s").role == "viewer"  # stub keeps its own; store unchanged
-    _set_role("tab-s", ["editor"])
-    assert STORE.tab("tab-s").role == "editor"
+def test_set_role_sets_the_role_and_ignores_bad_values():
+    assert _set_role("tab-s", "viewer").role == "viewer"
+    assert _set_role("tab-s", "admin").role == "editor"     # refused: the stub keeps its own
+    assert _set_role("tab-s", ["viewer"]).role == "viewer"
 
 
 def test_the_switch_builds():

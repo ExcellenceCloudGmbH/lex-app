@@ -15,7 +15,6 @@ from docs_site.sandbox.data import seed
 class TabData:
     def __init__(self, now: float):
         self.rows: dict[str, list[dict]] = seed()
-        self.role: str = "editor"
         self.seen = now
 
 
