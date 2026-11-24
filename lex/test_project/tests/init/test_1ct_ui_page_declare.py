@@ -239,7 +239,7 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
         with self.assertRaises(PageError) as not_a_kind:
             declare.finalize()
         self.assertEqual(str(not_a_kind.exception),
-                         "Page `raw`: it returned Text.\nReturn a page kind: `ui.record(...)`, `ui.list(...)`.",
+                         "Page `raw`: it returned Text.\nReturn a page kind: `ui.record(...)`, `ui.list(...)`, `ui.form(...)`.",
                          "a function that does not return a kind is told what to return")
 
     # -- 1.805 ---------------------------------------------------------

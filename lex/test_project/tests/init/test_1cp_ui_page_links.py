@@ -168,7 +168,7 @@ class TestCluster01cp_PageLinks(SimpleTestCase):
         for bad in ((LinksDesk.close, {"to": funds_page}), (None, {})):
             with self.subTest(bad=str(bad)[:30]), self.assertRaises(ValueError, msg="a handler or to=, one of them"):
                 vocab.button("X", bad[0], **bad[1])
-        danger = vocab.button("Delete", LinksDesk.close, tone="danger")
+        danger = vocab.button("Delete", LinksDesk.close, tone="danger", confirm="Delete this fund?")
         self.assertIn('"data-rfds-intent":"danger"', str(danger.build(CTX)), "danger intent")
         first = vocab.button("Save", LinksDesk.close)
         first.primary = True

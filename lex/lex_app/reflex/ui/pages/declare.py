@@ -49,17 +49,17 @@ def _kind_of(fn: Callable[..., Any], *args: Any) -> kinds.Kind:
         raise _raised(fn, wrong) from wrong
     if kind is None:
         raise PageError(f"Page `{fn.__name__}`: it returned nothing. Did you forget `return`?\n"
-                        "Return a page kind: `ui.record(...)`, `ui.list(...)`.")
+                        "Return a page kind: `ui.record(...)`, `ui.list(...)`, `ui.form(...)`.")
     if not isinstance(kind, kinds.Kind):
         raise PageError(f"Page `{fn.__name__}`: it returned {type(kind).__name__}.\n"
-                        "Return a page kind: `ui.record(...)`, `ui.list(...)`.")
+                        "Return a page kind: `ui.record(...)`, `ui.list(...)`, `ui.form(...)`.")
     return kind
 
 
 def _raised(fn: Callable[..., Any], wrong: Exception) -> PageError:
     return PageError(f"Page `{fn.__name__}`: its function raised {type(wrong).__name__}: {wrong}\n"
-                     "A page function only describes the page: it returns `ui.record(...)` or "
-                     "`ui.list(...)` and does nothing else.")
+                     "A page function only describes the page: it returns `ui.record(...)`, "
+                     "`ui.list(...)` or `ui.form(...)` and does nothing else.")
 
 
 def _named(load: Any) -> str:
@@ -206,7 +206,10 @@ def embed(part: Any, *, name: str = "embedded") -> Any:
     if not isinstance(part, Part):
         raise TypeError(f"ui.embed() takes a lex.ui part such as ui.table(...); got {called(part)}")
     caption = "" if name == "embedded" else str(name)       # a table's caption: the name it is given
-    return part.build(Build(page=str(name), mounts=True, caption=caption))
+    from lex.lex_app.reflex.ui.pages.parts import with_overlays
+
+    ctx = Build(page=str(name), mounts=True, caption=caption)
+    return with_overlays(ctx, part.build(ctx))
 
 
 def dashboard(fn: Callable[..., Any]) -> Callable[..., Any]:

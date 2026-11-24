@@ -1,6 +1,6 @@
 # lex.ui pages: page kinds with named slots, and a closed vocabulary
 
-**Status:** design approved in conversation on 2026-11-23; nothing is implemented.
+**Status:** design approved in conversation on 2026-11-23; step 1, tables and forms are implemented (6.13, 6.14).
 **Second of four pieces.** The first, the action and state layer, is
 `2026-11-23-reflex-ui-action-state-layer-design.md`.
 
@@ -471,6 +471,125 @@ five things in this spec:
 - **`kind=` in step 1** is `text`, `number`, `money`, `percent` or `datetime`; the others arrive
   with the form fields.
 
+### 6.14 What building forms settled
+
+Built on 2026-11-24 after a spike against RFDS 1.0.0 (`ui.form`, `ui.field`, `ui.step`, `confirm=`,
+`ask=`; batches 1dh-1dk). These differ from, or add to, the sections above:
+
+- **The handler receives the values as its last argument, called `values`.** `def create(self, values)`;
+  a button with values of its own and `ask=` puts them first: `def decline(self, key, values)`. The
+  signature is checked when the page is built ("It receives what was entered as its last argument,
+  called `values`: `def create(self, values): ...`"). Submit is an `@ui.action` or an `@ui.job`;
+  a load or a raw handler is refused.
+- **lex-app checks before the body runs, on the server.** Every declared field is read from what the
+  browser sent (anything undeclared is dropped), checked for `required=` and for its kind, and turned
+  into a Python value. A problem is kept as `ui_invalid["Handler.name|field"]`, shown at the field
+  by RFDS's own error slot, and the body does not run (no toast, nothing left running). The values
+  the body receives:
+
+  | `kind=` | Input (RFDS 1.0.0) | The handler gets | Nothing entered |
+  | --- | --- | --- | --- |
+  | `text` | `text_input` | `str`, stripped | `""` |
+  | `number` | `number_input` | `int`, or `Decimal` with decimals | `None` |
+  | `money` | `money_input` (`currency=` as on `ui.fact`, else the home currency) | `Decimal` | `None` |
+  | `percent` | `percent_input` (5.25 % is posted as 0.0525) | `Decimal` ratio | `None` |
+  | `date` | `date_input` | `datetime.date` | `None` |
+  | `datetime` | the browser's `datetime-local` in RFDS's `field` frame: RFDS has no date-time input | `datetime` in the app's time zone | `None` |
+  | `year` | `text_input`, numeric, four digits | `int` | `None` |
+  | `bool` | `checkbox` | `bool` (`required=True`: must be ticked) | `False` |
+  | `choice` | `select` up to 12 fixed options; else `combobox` | `str`, one of the options | `None` |
+
+- **Nothing reaches the server while the user types.** Text, number, year and date-time inputs are
+  uncontrolled (`default_value`); RFDS's controlled inputs (money, percent, date, box, choice) hold
+  their value in a browser-side client state until the form is sent. The form is RFDS's `rfds.form`,
+  sent once as one dictionary.
+- **A handler receives one set of fields.** Building a page tells its handler which fields it
+  receives; another page or button giving the same handler other fields is refused, naming where
+  the first set was declared. *Cost:* two forms cannot share a handler; each gets its own (a shared
+  body goes into a `_method`).
+- **The page is RFDS's page header over RFDS's form, at RFDS's `form` width.** RFDS has no form
+  floorplan besides the wizard. The submit button is the page's one primary action, so `actions=`
+  on a form are all secondary (one as a button, more in the menu). **The submit button is called
+  after the handler**: `create` reads "Create", `build_report` "Build report". *Cost:* the handler's
+  name is user-facing text; no label argument was added.
+- **`result=` shows after a successful run, below the form at full width**, and leaves as soon as
+  the form is sent again -- also when the new input is refused at a field -- and on a new visit.
+  It holds what a section holds, or `ui.section`s. The handler keeps what it shows in the state,
+  large or private data in a backend field (`_name`), read by a `@ui.rows` or a computed value; no
+  store was added. A `@ui.job` as submit shows RFDS's progress bar with its message and a Stop button
+  while it runs, under the form.
+- **A wizard is one form shown in steps, not RFDS's `wizard_page`.** RFDS's wizard needs a
+  `WizardState` subclass with a field schema, step ids, save-for-later and knockouts per form: a
+  second way to write a form. `steps=` instead keeps all fields in the one `rfds.form`, the other
+  steps hidden, with RFDS's `stepper` above. Continue sends the form; the server checks the fields up
+  to the current step and moves on (`ui_step`); only the last step's submit runs the body, once,
+  with every step's values; a problem in an earlier step returns to it. Back is `ui_step_back`.
+  *Cost:* no save-for-later and no "check your answers" page; a wizard of one step is refused.
+- **`confirm=` is RFDS's confirmation dialog; `ask=` RFDS's dialog holding an RFDS form.** The
+  question follows RFDS's own wording rule, enforced as a lex error: a question naming the action
+  ("Close this order?"), never "Are you sure?". The button that agrees repeats the button's label.
+  With `ask=` the question, if given, is the dialog's description; the dialog's values are checked
+  like a form's, and the dialog stays open with the message at the field until they pass.
+- **One dialog per button as written, placed beside the page.** Which dialog is open, and the values
+  the button passes (a row's key), are kept in the tab's state (`ui_asking`, `ui_asking_args`), so a
+  table's row action has one dialog, not one per row. The values come back from the browser, as a
+  row button's always did: the handler checks them.
+- **Every `tone="danger"` button must have `confirm=` or `ask=`**, also in a page header's menu and
+  among a table's `row_actions` (which the tables design still allowed, 5.9). *Cost:* existing pages
+  with a bare dangerous button stop building until they ask.
+- **Every button shows its handler running**, not only a row's button: an action's or a job's button
+  is loading while it has a run.
+- **`kind=` is one list for showing and for entering.** `ui.fact` now takes `date`, `year` (no
+  thousands separator), `bool` (the words Yes and No) and `choice` too.
+- **A choice among many is a type-ahead box over a list the page holds; a server-searched choice is
+  not built.** `options=` takes a list, a dict of value to wording, or a field of the handler's own
+  state (filled by the page's load), checked against that field on the server. RFDS's `combobox`
+  searches on the server only through an event handler and a results field per field: in lex.ui that
+  would be a sixth handler kind or a generated state per field, for one input. Left out rather than
+  half built: a choice among thousands loads its options with the page (RFDS's own guidance is server
+  search above 200 and a value-help dialog above 1,000).
+- **A file field is not built** (`kind="file"` says to use `ui.custom_block`).
+- **A new visit starts every form over**: the opener clears the messages, the wizard steps, the
+  results and an open dialog.
+- **`ui.testing.run(...)` results gain `invalid`** (field -> message) for a project's form tests.
+
+A tool page, whole -- a form, a job with progress as submit, a result with a table and a download:
+
+```python
+class InvoiceReportState(ui.State):
+    _lines: list[dict] = []                       # stays on the server, per browser tab
+
+    @ui.job
+    def build_report(self, values):
+        lines = []
+        for month in range(1, 13):
+            lines += invoices_of(self.user.id, values["customer"], values["year"], month)
+            yield ui.progress(month / 12, "Reading invoices")
+        self._lines = lines
+
+    @ui.rows
+    def lines(self):
+        return self._lines
+
+    @ui.action
+    def download(self):
+        out = io.StringIO()
+        csv.DictWriter(out, ["number", "amount"], extrasaction="ignore").writerows(self._lines)
+        return ui.download(data=out.getvalue().encode(), filename="invoices.csv")
+
+
+@ui.page("/invoices/report", nav="Invoices")
+def invoice_report():
+    return ui.form(
+        title="Invoice report",
+        fields=[ui.field("customer", required=True), ui.field("year", kind="year", required=True)],
+        submit=InvoiceReportState.build_report,
+        result=[ui.section("Invoices", ui.table(InvoiceReportState.lines, columns=["number", ui.column("amount", kind="money")],
+                                                totals={"amount": "sum"})),
+                ui.button("Download", InvoiceReportState.download)],
+    )
+```
+
 ---
 
 ## 7. Order of building
@@ -553,7 +672,7 @@ Components       ui.text(sentence, **values)             ui.fact(label, value, k
                  ui.grid(model, columns=, filters=)      ui.column(key, label=, kind=)
                  ui.button(label, handler | to=, confirm=, ask=, tone=, icon=)
                  ui.link(label, to= | record= | href=)
-                 ui.field(key, label=, kind=, options=, required=, help=, value=)
+                 ui.field(key, label=, kind=, options=, required=, help=, value=, currency=)
                  ui.section(title, *content, load=, empty=)
                  ui.step(title, fields=)
 

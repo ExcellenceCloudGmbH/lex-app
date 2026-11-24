@@ -10,7 +10,7 @@ import reflex as rx
 
 from lex.lex_app.reflex.ui import runs
 from lex.lex_app.reflex.ui.pages import tables, vocab
-from lex.lex_app.reflex.ui.pages.parts import Build, NotASentence, Part, called, say, slug, take
+from lex.lex_app.reflex.ui.pages.parts import Build, NotASentence, Part, called, say, slug, take, with_overlays
 
 
 def _many(value: Any) -> tuple:
@@ -151,10 +151,17 @@ class Kind:
         return ([self.load] if self.load is not None else []), []
 
     def build(self, ctx: Build) -> rx.Component:
+        """The page, and beside it the dialogs its buttons open."""
+        return with_overlays(ctx, self._page(ctx))
+
+    def _page(self, ctx: Build) -> rx.Component:
         raise NotImplementedError
 
-    def _buttons(self, ctx: Build) -> list:
-        """The page's actions as RFDS places them: one primary button; one more as a button, more in a menu."""
+    def _buttons(self, ctx: Build, lead: bool = True) -> list:
+        """The page's actions as RFDS places them: one primary button; one more as a button, more in a menu.
+
+        ``lead=False`` when the page has its primary action elsewhere (a form's submit button).
+        """
         ctx = ctx.at("actions", "actions")
         parts = take(ctx, list(self.actions), (vocab.Button, vocab.Link),
                      "`actions=` holds `ui.button(...)` (or `ui.link(...)`, shown as a button).")
@@ -163,7 +170,8 @@ class Kind:
                 raise ctx.fail(f"an action is called `{part.label}`.",
                                "RFDS shows a last-saved time beside a Save action, which a page header cannot give "
                                "yet. Name the action for what it does (`\"Apply changes\"`); saving belongs to a form.")
-        first = parts[0] if parts and isinstance(parts[0], vocab.Button) and parts[0].tone != "danger" else None
+        first = (parts[0] if lead and parts and isinstance(parts[0], vocab.Button) and parts[0].tone != "danger"
+                 else None)
         rest = [part for part in parts if part is not first]
         built: list = []
         if first is not None:
@@ -231,7 +239,7 @@ class Record(Kind):
                 id=ident, title_id=part.title, title_default=part.title, content=content, permission=needs)))
         return built
 
-    def build(self, ctx: Build) -> rx.Component:
+    def _page(self, ctx: Build) -> rx.Component:
         import rfds
         from rfds import templates
 
@@ -278,7 +286,7 @@ class List(Kind):
     table: Any = None
     actions: tuple = ()
 
-    def build(self, ctx: Build) -> rx.Component:
+    def _page(self, ctx: Build) -> rx.Component:
         from rfds import templates
 
         if not isinstance(self.table, tables.Table):

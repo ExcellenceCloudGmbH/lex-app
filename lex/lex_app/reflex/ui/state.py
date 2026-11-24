@@ -89,6 +89,16 @@ class State(rx.State):
     ui_visit: int = 0
     #: What ``/ui-error`` shows: kind, title, message, path.
     ui_error: dict[str, str] = {}
+    #: "Handler key|field key" -> what is wrong with the value last sent for that field.
+    ui_invalid: dict[str, str] = {}
+    #: Handler key -> the step a wizard shows (0 is the first).
+    ui_step: dict[str, int] = {}
+    #: Handler key -> whether its form's last submit succeeded: the form's result shows while it is true.
+    ui_done: dict[str, bool] = {}
+    #: The dialog of a button with ``confirm=`` or ``ask=`` that is open ('' when none is), and the
+    #: values that button passes to its handler.
+    ui_asking: str = ""
+    ui_asking_args: list = []
 
     _ui_boots: dict[str, str] = {}
     _ui_pending_loads: list[str] = []
@@ -126,6 +136,8 @@ class State(rx.State):
         from lex.lex_app.reflex.ui import runs
 
         await runs.sweep(self)
+        self.ui_invalid, self.ui_step, self.ui_done = {}, {}, {}      # a form starts over on a new visit
+        self.ui_asking, self.ui_asking_args = "", []
         self._ui_page = page
         self._ui_reset = []
         entry = handlers.page_of(page)
@@ -154,6 +166,23 @@ class State(rx.State):
         from lex.lex_app.reflex.ui import runs
 
         runs.request_cancel(EventContext.get().token, key)
+
+    @rx.event
+    def ui_ask(self, dialog: str, args: list):
+        """A button with ``confirm=`` or ``ask=`` was pressed: its dialog opens, holding the button's values."""
+        self.ui_asking, self.ui_asking_args = dialog, list(args)
+        self.ui_invalid = {}
+
+    @rx.event
+    def ui_ask_close(self, open: bool = False):  # noqa: A002 - the name Radix gives the value
+        """The open dialog was answered or dismissed."""
+        if not open:
+            self.ui_asking, self.ui_asking_args = "", []
+
+    @rx.event
+    def ui_step_back(self, key: str):
+        """A wizard's Back button: the step before, with what was entered kept."""
+        self.ui_step = {**dict(self.ui_step), key: max(int(dict(self.ui_step).get(key, 0)) - 1, 0)}
 
 
 def error_page() -> rx.Component:
