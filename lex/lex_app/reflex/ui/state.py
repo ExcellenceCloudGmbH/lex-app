@@ -267,7 +267,7 @@ def error_page() -> rx.Component:
     """What ``/ui-error`` shows: why the page could not be opened, a reference, and a way back."""
     import rfds
 
-    from lex.lex_app.reflex.shell import lex_chrome
+    from lex.lex_app.reflex.shell import denied_notice, lex_chrome
 
     retry = rfds.link("Try again", href=State.ui_error.get("path", "/"))
     title = State.ui_error.get("title", "This page could not be opened")
@@ -276,7 +276,7 @@ def error_page() -> rx.Component:
         rfds.page_header(title="This page could not be opened", path=ERROR_ROUTE),
         rx.cond(
             State.ui_error.get("kind", "error") == "denied",
-            rfds.empty_state(kind="no_permission", title=title, description=message),
+            denied_notice(message=message.to(str)),        # the refusal's sentence, the project's way out
             rfds.empty_state(kind="error", title=title, description=message, primary_action=retry),
         ),
     ))

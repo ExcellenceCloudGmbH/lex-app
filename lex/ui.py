@@ -60,7 +60,9 @@ progress_of/cancel``        event of a Cancel button
                             who may see it. lex-app's frame heads it with its breadcrumbs: the
                             area, the listed page that opens it, the page
 ``ui.frame``                lex-app's frame for this project, set once in the dashboard module:
-                            ``nav=[...]`` the areas' order; ``sign_out=`` where the user menu
+                            ``nav=[...]`` the areas' order; ``denied=`` the sentence a refused
+                            user reads, ``request_access=`` their way out (a page, https:// or
+                            mailto:); ``sign_out=`` where the user menu
                             signs out (a page or an https:// address; lex-app's /logout by default)
 ``@ui.dashboard``           a page that is not a route (the project's ``main()``)
 ``ui.record/list/form``     the page kinds: named slots, placed by lex-app (``ui.list`` is

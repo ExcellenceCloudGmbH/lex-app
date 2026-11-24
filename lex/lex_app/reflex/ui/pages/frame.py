@@ -18,6 +18,8 @@ class Frame:
 
     nav: tuple[str, ...] = ()
     sign_out: str = ""                  # '' = lex-app's own /logout
+    denied: str = ""                    # '' = RFDS's sentence
+    request_access: str = ""            # '' = no "Request access" link
     module: str = ""
 
 
@@ -30,7 +32,7 @@ def current() -> Frame:
     return _FRAME or Frame()
 
 
-def frame(*, nav: Any = (), sign_out: Any = None) -> None:
+def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign_out: Any = None) -> None:
     """Configure lex-app's frame for this project: call it once, in the dashboard module.
 
     ``nav`` is the navigation's areas in the order they are listed: the same words a page names
@@ -38,6 +40,13 @@ def frame(*, nav: Any = (), sign_out: Any = None) -> None:
     start. Without it, areas come in the order their first page is declared::
 
         ui.frame(nav=["Orders", "Reports", "Tools"])
+
+    ``denied`` is the sentence a user reads where a page refuses them (instead of RFDS's), and
+    ``request_access`` their way out: a page, or an ``https://`` or ``mailto:`` address, shown as
+    RFDS's "Request access" link. The notice's "Switch account" link -- sign in with another
+    account -- goes to the sign-out address::
+
+        ui.frame(denied="Ask your administrator for access.", request_access="mailto:it@example.com")
 
     ``sign_out`` is where the user menu's "Sign out" leads: a page (``@ui.page`` or
     ``ui.reflex_page``) or an ``https://`` address. By default it is lex-app's ``/logout``, which
@@ -53,7 +62,13 @@ def frame(*, nav: Any = (), sign_out: Any = None) -> None:
     if _FRAME is not None and _FRAME.module != module:
         raise ValueError(f"ui.frame() is already configured, in module {_FRAME.module!r}. A project configures "
                          f"lex-app's frame once, in its dashboard module; move this call ({module!r}) there.")
+    if denied is not None and (not isinstance(denied, str) or not denied.strip()):
+        raise TypeError(f"ui.frame(denied=) takes the sentence a refused user reads, such as "
+                        f"denied=\"Ask your administrator for access.\"; got {denied!r}.")
     _FRAME = Frame(nav=_areas(nav), sign_out="" if sign_out is None else target(sign_out, argument="sign_out"),
+                   denied=denied or "",
+                   request_access="" if request_access is None else target(request_access, argument="request_access",
+                                                                           mail=True),
                    module=module)
 
 

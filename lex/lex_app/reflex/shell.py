@@ -213,6 +213,24 @@ def nav_sections() -> tuple:
     return tuple(sections)
 
 
+def denied_notice(message: Any = None):
+    """RFDS's access-denied notice, as this project words it (``ui.frame(denied=, request_access=)``).
+
+    ``message`` is the refusal's own sentence (a rule's, a state value); without it the project's
+    ``denied=``, else RFDS's. "Switch account" goes to the sign-out address.
+    """
+    from rfds.patterns.security import access_denied
+
+    from lex.lex_app.reflex.ui.pages import frame
+    from lex.lex_app.reflex.ui.pages.parts import say
+
+    configured = frame.current()
+    if message is None and configured.denied:
+        message = say(configured.denied)
+    return access_denied(inline=True, message=message, request_access_href=configured.request_access or None,
+                         switch_account_href=sign_out_href())
+
+
 def lex_chrome(body, *, embedded=None, route=None):
     """``body`` in lex-app's chrome: RFDS's shell standalone, the bare page inside lex-app.
 
@@ -312,9 +330,8 @@ def lex_page(
             body = page_fn()
             if requires:
                 from rfds.auth import can
-                from rfds.patterns.security import access_denied
 
-                body = can(requires, body, fallback=access_denied(inline=True))
+                body = can(requires, body, fallback=denied_notice())
             return lex_chrome(body, route=route)
 
         page.__name__ = page_fn.__name__
