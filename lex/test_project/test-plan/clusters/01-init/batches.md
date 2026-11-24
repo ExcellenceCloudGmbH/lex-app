@@ -3455,13 +3455,13 @@ What building settled is section 6.15 of `docs/superpowers/specs/2026-11-23-refl
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.940 – 1.946 |
+| Scenario range | 1.940 – 1.946, 1.953 |
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/pages/tables.py` (`column(kind="name"/"code", pin=)`, `table(page_size=, choose_columns=, totals=)`), `lex/lex_app/reflex/ui/pages/rows_table.py` (page size, totals of all rows, their label), `lex/lex_app/reflex/data.py` (`ChosenColumns`) |
 | Test file | `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py` |
-| Test classes | `TestCluster01dy_TableColumnsRows` (1.940–1.946) |
+| Test classes | `TestCluster01dy_TableColumnsRows` (1.940–1.946, 1.953) |
 | Fixtures | a neutral customers state (name, code, region, amount in two currencies); Django's `Group` as a model table |
-| Tests landed | **7 pass / 0 fail** |
+| Tests landed | **8 pass / 0 fail** |
 | Status | ✅ Complete |
 
 Table needs found while rewriting dashboards. What building settled is section 5.14 of
@@ -3476,6 +3476,7 @@ Table needs found while rewriting dashboards. What building settled is section 5
 | 1.944 | Every row in one scroll, and past 200 the rest is reached | 150 rows on one page; of 250, 200 then 50 on the next page |
 | 1.945 | A totals row says what it sums and can sum every row | "Total" with nothing narrowing; "Total of matching rows" / "Total of all rows" while a filter or search is on, per currency; mixing or another word refused |
 | 1.946 | A table with all of it compiles | Reflex's page compiler: sticky column, column chooser, pagination |
+| 1.953 | A total of every row is one table option, read once | totals={...: "sum"}, totals_of_all=True over a handler that searches itself: Total of all rows while searching, every row read once and not on each keystroke; the old "sum of all rows" sentence, totals_of_all without totals, and a non-bool refused with what to write |
 
 ### Batch 1dz — lex.ui pages: a section closed until the user opens it, saying how many rows it holds ✅
 

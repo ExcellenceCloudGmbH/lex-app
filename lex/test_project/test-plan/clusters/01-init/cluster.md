@@ -1719,8 +1719,9 @@ does not remove user launch configurations.
 | 1.944 | Every row in one scroll, and past 200 the rest is reached | 150 on one page; 250 as 200 + 50 |
 | 1.945 | A totals row says what it sums and can sum every row | "Total", "Total of matching rows", "Total of all rows"; mixing refused |
 | 1.946 | A table with all of it compiles | Reflex's page compiler |
+| 1.953 | A total of every row is one table option, read once | totals={...: "sum"}, totals_of_all=True over a handler that searches itself: Total of all rows while searching, every row read once and not on each keystroke; the old "sum of all rows" sentence, totals_of_all without totals, and a non-bool refused with what to write |
 
-**Scenario range:** 1.940 – 1.946. **Test file:** `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dy](batches.md).
+**Scenario range:** 1.940 – 1.946, 1.953. **Test file:** `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dy](batches.md).
 
 ### 1dz. lex.ui pages: a section closed until the user opens it, saying how many rows it holds ✅
 

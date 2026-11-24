@@ -25,8 +25,8 @@ _COMMON_CODES = {"EUR", "USD", "GBP", "CHF", "JPY", "SEK", "NOK", "DKK", "PLN", 
 _FIELD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 #: The kinds that set a column's width, to RFDS's field widths: a name gets room, a code stays narrow.
 _KIND_WIDTH = {"name": "var(--rfds-size-field-md)", "code": "var(--rfds-size-field-xs)"}
-#: What ``totals=`` sums: the rows the search and filters leave, or every row.
-TOTALS = ("sum", "sum of all rows")
+#: What ``totals=`` does with a column: its sum (``totals_of_all=True``: of every row, not the matching ones).
+TOTALS = ("sum",)
 #: The most rows RFDS lets a table hold in the browser (DA-09): ``page_size=None`` shows up to this many.
 MAX_PAGE = 200
 
@@ -141,6 +141,7 @@ class Table(Part):
     row_actions: Callable[[Any], Any] | None = None
     page_size: int | None = 25
     choose_columns: bool = False
+    totals_of_all: bool = False
 
     def build(self, ctx: Build) -> rx.Component:
         # A model table reads through the API as the user; without the grant it could only show an error.
@@ -184,18 +185,21 @@ class Table(Part):
             if col is None:
                 raise ctx.fail(f"`totals=` names {name}, which is not a column.",
                                f"Total columns of the table: {', '.join(keys)}.")
+            if how == "sum of all rows":
+                raise ctx.fail(f"`totals=` asks for the sum of all rows of {name}.",
+                               f"Whether the totals cover every row is one choice for the table: write "
+                               f"`totals={{\"{name}\": \"sum\"}}, totals_of_all=True`.")
             if how not in TOTALS:
                 raise ctx.fail(f"`totals=` asks for {how!r} of {name}.",
-                               "A total is the \"sum\" of a number, money or percent column -- of the rows the "
-                               "search and filters leave -- or the \"sum of all rows\": "
-                               "`totals={\"amount\": \"sum\"}`.")
+                               "A total is the \"sum\" of a number, money or percent column, of the rows the "
+                               "search and filters leave: `totals={\"amount\": \"sum\"}`; add `totals_of_all=True` "
+                               "to sum every row instead.")
             if col.kind not in _NUMERIC:
                 raise ctx.fail(f"`totals=` sums {name}, which is not a number.",
                                "Give it kind=\"number\", \"money\" or \"percent\".")
-        if len(set(dict(self.totals or {}).values())) > 1:
-            raise ctx.fail("`totals=` mixes \"sum\" and \"sum of all rows\".",
-                           "A table's totals all cover the same rows: write \"sum\" for each column, or "
-                           "\"sum of all rows\" for each.")
+        if self.totals_of_all and not self.totals:
+            raise ctx.fail("`totals_of_all=True` and no `totals=`.",
+                           "Name the columns to total: `totals={\"amount\": \"sum\"}, totals_of_all=True`.")
         if self.search and not any(c.kind in _TEXTUAL and c.show is None for c in cols):
             raise ctx.fail("`search=True`, and the table has no text column to search.",
                            "Add a text column, or leave search out.")
@@ -349,7 +353,7 @@ class Table(Part):
             if name.split("__")[0] not in known and name.split("__")[0] not in {f.name for f in model._meta.get_fields()}:
                 raise ctx.fail(f"`where=` names {name}, which {model.__name__} does not have.",
                                f"Narrow by its fields: {', '.join(sorted(known))}.")
-        if self.export or self.totals:
+        if self.export or self.totals or self.totals_of_all:
             raise ctx.fail("a model table cannot export or total yet.",
                            "Leave `export=` and `totals=` out; they come with the model's export permission.")
         linked = [c.key for c in cols if c.open is not None]
@@ -464,7 +468,7 @@ class Table(Part):
             search_fields=tuple(c.key for c in cols if c.kind in ("text", None, "status", "tag", "name", "code")
                                 and c.show is None),
             totals_spec=totals_spec, totals_currency=money[0].currency if money and self.totals else "",
-            totals_of_all=TOTALS[1] in dict(self.totals or {}).values(),
+            totals_of_all=bool(self.totals_of_all),
             page_size=MAX_PAGE if self.page_size is None else self.page_size,
             export_columns=_export_columns(cols),
             export_kinds={label: _EXPORT_KIND[kinds_by_key[field]] for field, label in _export_columns(cols)
@@ -543,7 +547,7 @@ def _renderer(ctx: Build, c: Column) -> Callable[[Any], rx.Component] | None:
 def table(source: Any, *, columns: Any = (), key: str | None = None, where: dict | None = None, open: Any = None,
           search: bool = False, filters: Any = (), export: bool = False, totals: dict | None = None,
           row_actions: Callable[[Any], Any] | None = None, empty: Any = None, visible: Any = None,
-          page_size: int | None = 25, choose_columns: bool = False) -> Table:
+          page_size: int | None = 25, choose_columns: bool = False, totals_of_all: bool = False) -> Table:
     """Rows from a model, or from a ``@ui.rows`` handler, paged on the server and read as the user.
 
     Where the rows come from:
@@ -566,8 +570,9 @@ def table(source: Any, *, columns: Any = (), key: str | None = None, where: dict
       one scroll, up to 200 -- RFDS's limit for a table in the browser -- with a pager only past
       that), sorting by column, loading rows, the error in place, ``empty=`` when there are no
       rows, "No rows match" with a way to clear the search; ``totals={"amount": "sum"}`` adds a
-      totals row over every matching row, ``"sum of all rows"`` over every row whatever the search
-      and filters leave, one per currency; while a search or filter is on, its label says which.
+      totals row over every matching row (``totals_of_all=True``: over every row, whatever the
+      search and filters leave), one per currency; while a search or filter is on, its label says
+      which ("Total of matching rows", "Total of all rows").
 
     ``columns`` are field names or ``ui.column(...)``s; the first names the row and is plain text.
     ``key`` names the field that tells rows apart (a model: its primary key; rows: ``"id"``). Only
@@ -591,6 +596,9 @@ def table(source: Any, *, columns: Any = (), key: str | None = None, where: dict
                                   or not 1 <= page_size <= MAX_PAGE):
         raise ValueError(f"ui.table(page_size=) takes a number of rows up to {MAX_PAGE}, or None for every row in one "
                          f"scroll (up to {MAX_PAGE}, RFDS's limit for a table in the browser); got {page_size!r}")
+    if not isinstance(totals_of_all, bool):
+        raise TypeError(f"ui.table(totals_of_all=) takes True or False; got {totals_of_all!r}. "
+                        "`totals_of_all=True` sums every row, whatever the search and filters leave.")
     cols = tuple(columns) if isinstance(columns, (list, tuple)) else (columns,)
     return Table(source, cols, open, empty, visible, key, where, bool(search), tuple(filters), bool(export),
-                 totals, row_actions, page_size, bool(choose_columns))
+                 totals, row_actions, page_size, bool(choose_columns), totals_of_all)

@@ -69,6 +69,10 @@ class LexRowsTableState(DataTableMixin, ExportMixin, ChosenColumns, mixin=True):
     chosen: dict[str, str] = {}
     dates: dict[str, dict[str, str]] = {}             # a date filter's range, as its picker shows it
     _row_to: dict[str, str] = {}
+    #: The totals of every row (``totals_of_all``), worked out when the table last read its rows: a
+    #: search or a filter keeps them, so a handler that searches is not asked for every row each time.
+    _totals_all: list[list[dict]] = []
+    _totals_all_read: bool = False
 
     # -- events ----------------------------------------------------------------------------------
     @rx.event
@@ -76,6 +80,7 @@ class LexRowsTableState(DataTableMixin, ExportMixin, ChosenColumns, mixin=True):
         """The table appeared: read the first page (on a list page, with the address's search)."""
         self.shown = True
         self.page = 0
+        self._totals_all_read = False
         name = type(self).query_param
         if name:
             self.query = " ".join(str(self.router.page.params.get(name, "") or "").split())[:200]
@@ -97,6 +102,7 @@ class LexRowsTableState(DataTableMixin, ExportMixin, ChosenColumns, mixin=True):
         """Read again if the table is on screen: after a handler of its state, or ``ui.refresh``."""
         if not self.shown:
             return
+        self._totals_all_read = False
         async for _ in self.load():
             yield
 
@@ -106,6 +112,7 @@ class LexRowsTableState(DataTableMixin, ExportMixin, ChosenColumns, mixin=True):
         if not self.shown:
             return
         self.page = 0
+        self._totals_all_read = False
         async for _ in self.load():
             yield
 
@@ -319,10 +326,15 @@ class LexRowsTableState(DataTableMixin, ExportMixin, ChosenColumns, mixin=True):
         cls = type(self)
         searched = bool(query) and cls.searchable
         if cls.totals_spec and cls.totals_of_all:
-            # Every row the handler gives, whatever the search and filters leave; a handler that
-            # searches for itself is asked again without the search.
-            every = await self._all("") if searched and cls.takes_search else rows
-            self.totals_rows = self._totals(every, narrowed=searched or bool(filters))
+            # Every row the handler gives, whatever the search and filters leave, totalled when the
+            # table reads its rows; a search or a filter keeps that total. A handler that searches for
+            # itself is asked for every row once then, not on each keystroke.
+            if not self._totals_all_read or not (cls.takes_search and searched):
+                every = await self._all("") if cls.takes_search and searched else rows
+                # As shown with nothing narrowing the rows ("Total"), and with something ("Total of all rows").
+                self._totals_all = [self._totals(every), self._totals(every, narrowed=True)]
+                self._totals_all_read = True
+            self.totals_rows = self._totals_all[1 if searched or filters else 0]
         else:
             self.totals_rows = self._totals(found, narrowed=searched or bool(filters))
         page = found[offset:offset + limit]

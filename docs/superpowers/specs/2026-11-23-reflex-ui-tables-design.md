@@ -383,7 +383,7 @@ it sums. Each is RFDS's own feature, exposed with the fewest new words:
 
 ```python
 ui.table(CustomersState.customers, page_size=None, choose_columns=True,
-         totals={"amount": "sum of all rows"},
+         totals={"amount": "sum"}, totals_of_all=True,
          columns=[ui.column("name", kind="name", pin=True), ui.column("code", kind="code"),
                   "region", ui.column("amount", kind="money", currency="currency")])
 ```
@@ -417,12 +417,20 @@ ui.table(CustomersState.customers, page_size=None, choose_columns=True,
   rows a page (1-200), offered with 25, 50, 100 and 200. Name: `page_size`, as `lex_table()` and
   RFDS's state call it; `rows_per_page=` and `paged=False` were considered.
 - **A totals row says what it sums.** `totals={"amount": "sum"}` totals the rows the search and
-  filters leave, as before; `"sum of all rows"` totals every row the handler returns, whatever the
-  user narrows (a handler that searches for itself is read again without the search). While a
-  search or a filter is on, the label says which: "Total of matching rows" or "Total of all rows";
-  otherwise "Total". All totals of one table cover the same rows ("write "sum" for each column,
-  or "sum of all rows" for each"). Name: a second word for `totals=` rather than a new argument
-  (`totals_of="all"` considered). A model table still cannot total (5.13).
+  filters leave, as before; `totals_of_all=True` beside it totals every row the handler returns,
+  whatever the user narrows (a migrated page had a total over all rows, with a note saying so).
+  While a search or a filter is on, the label says which: "Total of matching rows" or "Total of all
+  rows"; otherwise "Total". A model table still cannot total (5.13).
+- **Review, 2026-11-24: the all-rows total is one table option, read once.** It was first a second
+  word per column, `totals={"amount": "sum of all rows"}`: a table-wide choice written once per
+  column as a sentence, which had to agree across columns, and a handler that searches for itself
+  was asked for every row again on each keystroke. Now `totals_of_all=True` is one option (the
+  label already says what the total covers), and the total of every row is worked out when the
+  table reads its rows -- it appears, a handler of its state finished, `ui.refresh`, a new record --
+  and kept while the user searches and filters. The old sentence is refused with what to write
+  (`totals={"amount": "sum"}, totals_of_all=True`), as is `totals_of_all=` without `totals=`.
+  *Name:* `totals_of_all` reads as the label does ("Total of all rows"); `totals_over="all"` was
+  considered (a string whose only other value would be the default).
 
 ## 6. Limits and risks
 

@@ -11,7 +11,7 @@ whether it sums the rows the search left or every row. A regression is a name th
 a row that cannot be reached, a width that only breaks in the browser, a user's column choice
 that hides the row's name, or a total that silently changes meaning when the user searches.
 
-Cluster 1dy -- scenarios 1.940-1.946. Type: U.
+Cluster 1dy -- scenarios 1.940-1.946, 1.953. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/tables.py (column kind="name"/"code", pin=; table page_size=,
 choose_columns=, totals=), lex/lex_app/reflex/ui/pages/rows_table.py (page size, totals over all
 rows, their label), lex/lex_app/reflex/data.py (ChosenColumns, the model table's page size).
@@ -44,6 +44,20 @@ class CustomersState(ui.State):
     def customers(self):
         return [{"id": n, "name": f"Customer {n:03}", "code": f"C{n:03}", "region": "North" if n % 2 else "South",
                  "amount": "1.00", "currency": "EUR" if n % 3 else "USD"} for n in range(1, DATA["count"] + 1)]
+
+
+#: The search texts the searching customers handler was given, in order.
+SEARCHED: list = []
+
+
+class SearchingState(ui.State):
+    """Customers searched by the handler itself (a ranked search in another system)."""
+
+    @ui.rows
+    def customers(self, search):
+        SEARCHED.append(search)
+        rows = [{"id": n, "name": f"Customer {n:03}", "amount": "1.00"} for n in range(1, 7)]
+        return [row for row in rows if search.casefold() in row["name"].casefold()]
 
 
 CTX = Build(page="customers", route="/customers", caption="Customers")
@@ -232,21 +246,21 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
     # -- 1.945 ---------------------------------------------------------
     def test_1_945_a_totals_row_says_what_it_sums_and_can_sum_every_row(self) -> None:
         """
-        Scenario 1.945: totals= "sum" and "sum of all rows".
+        Scenario 1.945: totals= "sum", over the matching rows or (totals_of_all=True, 1.953) every row.
         Given: a searchable table with a region filter whose amounts are in two currencies,
                totalled once over the matching rows and once over all rows.
         When:  the table appears, and the user picks a region and searches.
         Then:  with nothing narrowing the rows both say "Total"; once a filter or a search narrows
-               them, "sum" totals the rows left and says "Total of matching rows", and "sum of all
-               rows" keeps the total of every row and says "Total of all rows" -- each per
-               currency; mixing the two, or another word, is refused with what to write.
+               them, "sum" totals the rows left and says "Total of matching rows", and with
+               totals_of_all=True keeps the total of every row and says "Total of all rows" -- each
+               per currency; another word is refused with what to write.
         """
         DATA["count"] = 6
         columns = ["name", "region", ui.column("amount", kind="money", currency="currency")]
         matching, _ = built(ui.table(CustomersState.customers, columns=columns, search=True, filters=["region"],
                                      totals={"amount": "sum"}))
         every, _ = built(ui.table(CustomersState.customers, columns=columns, search=True, filters=["region"],
-                                  totals={"amount": "sum of all rows"}))
+                                  totals={"amount": "sum"}, totals_of_all=True))
 
         async def totals_of(state):
             async with testing.Harness(user="ada") as h:
@@ -274,22 +288,15 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
         self.assertEqual(sums["search"], [("Total of matching rows", "1.00")],
                          "a search too; one currency left needs no code")
         self.assertEqual(alls["north"], [("Total of all rows (EUR)", "4.00"), ("Total of all rows (USD)", "2.00")],
-                         "sum of all rows keeps every row, and says so")
+                         "totals_of_all=True keeps every row, and says so")
         self.assertEqual(alls["search"], [("Total of all rows (EUR)", "4.00"), ("Total of all rows (USD)", "2.00")],
                          "also while searching")
 
-        mixed = ui.table(CustomersState.customers, totals={"amount": "sum", "code": "sum of all rows"},
-                         columns=["name", ui.column("code", kind="number"), ui.column("amount", kind="money")])
-        with self.assertRaises(PageError) as raised:
-            mixed.build(CTX)
-        self.assertIn("A table's totals all cover the same rows: write \"sum\" for each column, or "
-                      "\"sum of all rows\" for each.", str(raised.exception))
         other = ui.table(CustomersState.customers, totals={"amount": "average"},
                          columns=["name", ui.column("amount", kind="money")])
         with self.assertRaises(PageError) as raised:
             other.build(CTX)
-        self.assertIn("A total is the \"sum\" of a number, money or percent column -- of the rows the search and "
-                      "filters leave -- or the \"sum of all rows\"", str(raised.exception))
+        self.assertIn("A total is the \"sum\" of a number, money or percent column", str(raised.exception))
 
     # -- 1.946 ---------------------------------------------------------
     def test_1_946_a_table_with_all_of_it_compiles_to_a_real_page(self) -> None:
@@ -302,9 +309,50 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
         """
         page = ui.list(title="Customers", table=ui.table(
             CustomersState.customers, search=True, choose_columns=True, page_size=None,
-            totals={"amount": "sum of all rows"},
+            totals={"amount": "sum"}, totals_of_all=True,
             columns=[ui.column("name", kind="name", pin=True), ui.column("code", kind="code"),
                      ui.column("amount", kind="money", currency="currency")]))
         _, module = compile_page("/customers/all", page.build(Build(page="customers", route="/customers/all")))
         for expected in ('"data-rfds-sticky":"start"', "column_chooser", "rfds-pagination"):
             self.assertIn(expected, module, f"compiled: {expected}")
+
+    # -- 1.953 ---------------------------------------------------------
+    def test_1_953_a_total_of_every_row_is_one_table_option_read_once(self) -> None:
+        """
+        Scenario 1.953: `totals={"amount": "sum"}, totals_of_all=True`.
+        Given: a rows handler that searches by itself, its table totalling every row; the old
+               per-column sentence "sum of all rows"; totals_of_all= without totals=, or not a bool.
+        When:  the table appears and the user types three searches.
+        Then:  the total stays the total of every row, "Total of all rows" while searching; every
+               row is read once, when the table reads its rows -- not again on each keystroke;
+               the old sentence is refused saying to write `totals_of_all=True`; the option
+               without totals, or not True/False, is refused with what to write.
+        """
+        SEARCHED.clear()
+        state, _ = built(ui.table(SearchingState.customers, search=True, totals={"amount": "sum"},
+                                  totals_of_all=True, columns=["name", ui.column("amount", kind="number")]))
+
+        async def scenario():
+            async with testing.Harness(user="ada") as h:
+                await h.open_tab("/customers")
+                await (await h.send(state, "open"))
+                for text in ("Customer 00", "Customer 001", "Customer 002"):
+                    await (await h.send(state, "set_query", value=text))
+                return [(row["name"], row["amount"]) for row in (await h._state(state)).totals_rows]
+
+        totals = asyncio.run(scenario())
+        self.assertEqual(totals, [("Total of all rows", "6.00")], "every row's total, and the label says so")
+        self.assertEqual(SEARCHED.count(""), 1, "every row was read once, not on each keystroke")
+        self.assertEqual([one for one in SEARCHED if one], ["Customer 00", "Customer 001", "Customer 002"])
+
+        old = ui.table(CustomersState.customers, totals={"amount": "sum of all rows"},
+                       columns=["name", ui.column("amount", kind="money")])
+        with self.assertRaises(PageError) as raised:
+            old.build(CTX)
+        self.assertIn('`totals={"amount": "sum"}, totals_of_all=True`', str(raised.exception))
+        alone = ui.table(CustomersState.customers, totals_of_all=True, columns=["name", ui.column("amount", kind="money")])
+        with self.assertRaises(PageError) as raised:
+            alone.build(CTX)
+        self.assertIn("`totals_of_all=True` and no `totals=`", str(raised.exception))
+        with self.assertRaisesRegex(TypeError, r"ui.table\(totals_of_all=\) takes True or False"):
+            ui.table(CustomersState.customers, totals={"amount": "sum"}, totals_of_all="yes", columns=["name"])
