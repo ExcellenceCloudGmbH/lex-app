@@ -13,18 +13,21 @@ Run: python -m lex pytest lex/test_project/tests/init/test_1da_ui_reflex_page.py
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import pytest
 import reflex as rx
 from django.test import SimpleTestCase
 
 from lex import ui
+from lex.lex_app.reflex.ui.pages import links
 from lex.lex_app.reflex.ui.pages.links import Address
-from lex.test_project.tests.init.test_1cw_ui_rows_table import TableDesk
+from lex.lex_app.reflex.ui.state import check_app_routes
+from lex.test_project.tests.init.test_1cw_ui_rows_table import PeopleState
 
 pytestmark = pytest.mark.init
 
-REQUEST = ui.reflex_page("/requests/[req]")
-SEARCH = ui.reflex_page("/search", params=("q",))
 
 
 class TestCluster01da_ReflexPage(SimpleTestCase):
@@ -36,36 +39,50 @@ class TestCluster01da_ReflexPage(SimpleTestCase):
         Scenario 1.824: links to a raw Reflex page.
         Given: two raw Reflex pages declared with ui.reflex_page, one with a route argument and one
                with a query parameter.
-        When:  a rows handler builds an address to one, a table opens one from every row, and a link
-               and a button lead to them.
+        When:  a rows handler builds an address to one, a table opens one from every row, a link
+               and a button lead to them, and the app starts with and without those pages.
         Then:  the address is the route with its value encoded as one piece, and is the kind of
                address a table follows; the table's rows link by their key; the link and the button
                lead there; a missing or unknown value, and a route that is no route, are refused
-               with what to write.
+               with what to write; an app without a declared page does not start, and the message
+               names the route.
         """
-        address = ui.address(REQUEST, req="R 1/2")
-        self.assertEqual(address, "/requests/R%201%2F2", "the value stays one piece of the address")
+        registry = patch.dict(links._REFLEX_PAGES, clear=True)
+        registry.start()
+        self.addCleanup(registry.stop)
+        ORDER = ui.reflex_page("/orders/[key]")
+        SEARCH = ui.reflex_page("/search", params=("q",))
+        address = ui.address(ORDER, key="R 1/2")
+        self.assertEqual(address, "/orders/R%201%2F2", "the value stays one piece of the address")
         self.assertIsInstance(address, Address, "a table follows it as a link")
         self.assertEqual(ui.address(SEARCH, q="a&b=c"), "/search?q=a%26b%3Dc")
-        self.assertEqual(ui.address(REQUEST, req=None), "", "no value, no link")
+        self.assertEqual(ui.address(ORDER, key=None), "", "no value, no link")
 
-        page = rx.box(ui.embed(ui.table(TableDesk.people, open=REQUEST, columns=["name"]), name="requests"),
+        page = rx.box(ui.embed(ui.table(PeopleState.people, open=ORDER, columns=["name"]), name="orders"),
                       ui.embed(ui.section("Go", ui.link("Search", to=SEARCH, q="x"),
-                                          ui.button("Open", to=REQUEST, req="7")), name="go"))
+                                          ui.button("Open", to=ORDER, key="7")), name="go"))
         built = str(page)
-        self.assertTrue('to:("/requests/"+(encodeURIComponent(String(r_rx_state_?.["id"]' in built,
+        self.assertTrue('to:("/orders/"+(encodeURIComponent(String(r_rx_state_?.["id"]' in built,
                         "every row opens its request by its key, encoded")
         self.assertTrue('to:"/search?q=x"' in built, "a link leads to the raw page")
-        self.assertTrue('["path"] : "/requests/7"' in built, "so does a button")
+        self.assertTrue('["path"] : "/orders/7"' in built, "so does a button")
 
         with self.assertRaises(TypeError) as missing:
-            ui.address(REQUEST)
-        self.assertIn("takes req", str(missing.exception), "a missing value says what the page takes")
+            ui.address(ORDER)
+        self.assertIn("takes key", str(missing.exception), "a missing value says what the page takes")
         with self.assertRaises(TypeError):
-            ui.address(REQUEST, req="1", tab="x")
+            ui.address(ORDER, key="1", tab="x")
         with self.assertRaises(ValueError) as wrong:
-            ui.reflex_page("requests/[req]")
+            ui.reflex_page("orders/[key]")
         self.assertIn("starting with /", str(wrong.exception))
         with self.assertRaises(TypeError) as plain:
-            ui.address("/requests/1")
+            ui.address("/orders/1")
         self.assertIn("ui.reflex_page", str(plain.exception), "a route string is no page")
+        app = SimpleNamespace(_unevaluated_pages={"orders/[key]": None, "search": None})
+        with patch("reflex_base.registry.RegistrationContext.ensure_context",
+                   lambda: SimpleNamespace(decorated_pages=[])):
+            check_app_routes(app)                       # both pages exist: the app starts
+            del app._unevaluated_pages["orders/[key]"]
+            with self.assertRaises(ValueError) as missing_page:
+                check_app_routes(app)
+        self.assertIn("'/orders/[key]'", str(missing_page.exception), "the message names the route")

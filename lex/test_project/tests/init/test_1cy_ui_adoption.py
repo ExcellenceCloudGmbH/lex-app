@@ -24,7 +24,7 @@ from lex.lex_app.reflex.ui import testing
 pytestmark = pytest.mark.init
 
 
-class AdoptionDesk(ui.State):
+class AdoptionState(ui.State):
     """A state whose rows and action a raw page uses."""
 
     granted: list[str] = []
@@ -53,7 +53,7 @@ class TestCluster01cy_Adoption(SimpleTestCase):
                mistake in the embedded part names it by the name given.
         """
         page = rx.box(rx.heading("A page in raw Reflex"),
-                      ui.embed(ui.table(AdoptionDesk.items, columns=["name"], search=True), name="items table"))
+                      ui.embed(ui.table(AdoptionState.items, columns=["name"], search=True), name="items table"))
         built = str(page)
         self.assertIn("rfds-data-table", built, "the embedded table is RFDS's data table")
         self.assertIn("A page in raw Reflex", built, "inside the raw page")
@@ -65,7 +65,7 @@ class TestCluster01cy_Adoption(SimpleTestCase):
         with self.assertRaises(TypeError, msg="a raw component is not a lex.ui part"):
             ui.embed(rx.text("raw"))
         with self.assertRaises(ui.PageError) as wrong:
-            ui.embed(ui.table(AdoptionDesk.items, columns=["name"], where={"x": 1}), name="items table")
+            ui.embed(ui.table(AdoptionState.items, columns=["name"], where={"x": 1}), name="items table")
         self.assertTrue(str(wrong.exception).startswith("Page `items table`: "),
                         f"a mistake names the embedded part: {wrong.exception}")
 
@@ -80,9 +80,9 @@ class TestCluster01cy_Adoption(SimpleTestCase):
                permissions is refused.
         """
         grants = ["auth.Group:read", "auth.User:read"]
-        (row,) = testing.rows(AdoptionDesk.items, grants=grants)
+        (row,) = testing.rows(AdoptionState.items, grants=grants)
         self.assertEqual(row["by"], "auth.Group,auth.User", "a rows handler reads the user's permission list")
-        ran = testing.run(AdoptionDesk, "remember", grants=grants)
+        ran = testing.run(AdoptionState, "remember", grants=grants)
         self.assertEqual(sorted(ran.fields["granted"]), ["auth.Group", "auth.User", "tab:tab1"],
                          "so does an action, and self.tab_id is the browser tab it runs for")
         from lex.lex_app.reflex.ui.context import User

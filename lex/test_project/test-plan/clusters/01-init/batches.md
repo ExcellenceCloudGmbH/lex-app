@@ -3084,29 +3084,29 @@ could only link to `@ui.page` functions, so its rows lost their links. 1.783's n
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.824 | A raw Reflex page is somewhere a link may lead | the address is the route with its value encoded as one piece, and is the kind of address a table follows; the table's rows link by their key; the link and the button lead there; a missing or unknown value, and a route that is no route, are refused with what to write |
+| 1.824 | A raw Reflex page is somewhere a link may lead | the address is the route with its value encoded as one piece, and is the kind of address a table follows; the table's rows link by their key; the link and the button lead there; a missing or unknown value, and a route that is no route, are refused with what to write; an app without a declared page does not start, naming the route |
 
-### Batch 1db — lex.ui pages in a project's own chrome, in a project's own app ✅
+### Batch 1db — lex.ui's part of lex-app's app, and every page in lex-app's chrome ✅
 
 | Property | Value |
 | --- | --- |
 | Scenario range | 1.825 – 1.826 |
 | Type | U |
-| Files covered | `lex/lex_app/reflex/ui/pages/declare.py` (`chrome`, `install`), `lex/lex_app/reflex/shell.py` (`framed`, `first_loads`), `lex/lex_app/reflex/ui/state.py` (`error_page`), `lex/lex_app/reflex/app.py` |
-| Test file | `lex/test_project/tests/init/test_1db_ui_project_chrome.py` |
-| Test classes | `TestCluster01db_ProjectChrome` (1.825–1.826) |
-| Fixtures | a project frame and gate; `rx.page` and the app's `add_page` recorded |
+| Files covered | `lex/lex_app/reflex/ui/pages/declare.py` (`install`), `lex/lex_app/reflex/app.py`, `lex/ui.py` |
+| Test file | `lex/test_project/tests/init/test_1db_ui_install.py` |
+| Test classes | `TestCluster01db_Install` (1.825–1.826) |
+| Fixtures | `rx.page` and the app's `add_page` recorded |
 | Tests landed | **2 pass / 0 fail** |
 | Status | ✅ Complete |
 
-Found while moving the reviewed customer project to lex.ui: it has its own frame, gate, error page and app module, so
-`@ui.page` could not be used without changing how its pages look. 1.778 and 1.805 now read `create_app`'s call of
-`ui.install`; 1.783's namespace gains `chrome` and `install`.
+First built as a project-frame hook (`ui.chrome`, a public `ui.install`) for the reviewed customer project, then
+withdrawn after an independent review (design note `2026-11-24-reflex-ui-project-chrome-design.md`); what stays is
+`create_app`'s one internal step. 1.778 and 1.805 read `create_app`'s call of it.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.825 | A page in the projects own frame after its gate | the page is in the project's frame, not lex-app's chrome; its load events are the grants, then the project's gate for that route, then the opener; the error page is in the frame too; without ui.chrome lex-app's chrome; a non-function is refused |
-| 1.826 | Install puts lex ui into a projects own app | the declared page is registered; the error page is added with the grants and the project's gate as its loads; the jobs' clock is registered once; the routes are checked after the project's pages |
+| 1.825 | Create app hands lex ui its pages in one step | the declared page is registered once; the error page is added after the user's grants; the jobs' clock is registered once; the routes are checked after the pages; create_app runs the step, and lex.ui offers no app or chrome hook |
+| 1.826 | Every page is in lex apps chrome after the grants | a page and the error page are in lex-app's chrome; the page's load events are the grants, then the opener - nothing of the project's between them |
 
 ### Batch 1dc — lex.ui handlers declared on a state mixin are each state's own ✅
 

@@ -38,6 +38,9 @@ def check_app_routes(app: Any) -> None:
                if kwargs.get("route")]
     for route in routes:
         check_route(route)
+    from lex.lex_app.reflex.ui.pages import links
+
+    links.check_reflex_pages(routes)   # a link to a raw page leads to a page the app has
 
 
 def _page_permitted(state: Any, requires: str) -> bool:
@@ -156,16 +159,16 @@ def error_page() -> rx.Component:
     """What ``/ui-error`` shows: why the page could not be opened, a reference, and a way back."""
     import rfds
 
-    from lex.lex_app.reflex.shell import framed
+    from lex.lex_app.reflex.shell import lex_chrome
 
     retry = rfds.link("Try again", href=State.ui_error.get("path", "/"))
     title = State.ui_error.get("title", "This page could not be opened")
     message = State.ui_error.get("message", "Try again.")
-    return framed(rfds.page(
+    return lex_chrome(rfds.page(
         rfds.page_header(title="This page could not be opened", path=ERROR_ROUTE),
         rx.cond(
             State.ui_error.get("kind", "error") == "denied",
             rfds.empty_state(kind="no_permission", title=title, description=message),
             rfds.empty_state(kind="error", title=title, description=message, primary_action=retry),
         ),
-    ), ERROR_ROUTE)
+    ))

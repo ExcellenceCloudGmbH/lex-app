@@ -167,41 +167,15 @@ def finalize() -> None:
         declared.done = True
 
 
-def chrome(frame: Callable[[Any, str], Any], *, first: Callable[[str], Any] | None = None) -> None:
-    """The project's own chrome for every ``@ui.page``, for a project that already has its own.
-
-    ``frame(page, route)`` returns the built page inside the project's frame - its header,
-    navigation and footer - and ``first(route)``, when given, the project's own load events that
-    run before the page's loads: a gate that resolves who is asking, say. Without it a page is in
-    lex-app's chrome. Call it once, in the app module, before :func:`install`::
-
-        ui.chrome(lambda page, route: shell.frame(page, section=section_of(route)),
-                  first=lambda route: [DeskState.guard(section_of(route))])
-        ui.install(app)
-
-    The gate decides what is shown, never what is allowed: every handler still checks its own
-    ``requires=``, and lex-app's API acts as the user.
-    """
-    from lex.lex_app.reflex import shell
-
-    if not callable(frame) or (first is not None and not callable(first)):
-        raise TypeError("ui.chrome(frame, first=) takes two functions: frame(page, route) returns the page in the "
-                        "project's frame; first(route) returns the load events that run before the page's own.")
-    shell._PROJECT_CHROME[:] = [shell.ProjectChrome(frame, first)]
-
-
 def install(app: Any) -> None:
-    """lex.ui in a project that builds its own Reflex app (``rx.App(...)``) instead of lex-app's.
+    """lex.ui's part of lex-app's app (``create_app``): the declared ``@ui.page`` pages, the page a
+    failed load goes to (``/ui-error``), the clock that ends abandoned jobs (once), and the route check.
 
-    Call it last, after the project's own pages are added: it hands the ``@ui.page`` pages to the
-    app, adds the page a failed load goes to (``/ui-error``, in the project's chrome when it has
-    one), starts the clock that ends abandoned jobs, and refuses a page route whose argument is
-    named like a ``ui.State`` helper. lex-app's own app calls it too.
+    Called by ``create_app`` once the project's module is loaded; a project does not call it.
     """
     import rfds
 
     from lex.lex_app.reflex.access import LexAccessState
-    from lex.lex_app.reflex.shell import first_loads
     from lex.lex_app.reflex.ui import runs
     from lex.lex_app.reflex.ui.state import ERROR_ROUTE, check_app_routes, error_page
 
@@ -211,7 +185,7 @@ def install(app: Any) -> None:
         app._lex_ui_installed = True
     finalize()                                     # the project's @ui.page pages
     app.add_page(error_page, route=ERROR_ROUTE, title="This page could not be opened",
-                 on_load=[LexAccessState.load, *first_loads(ERROR_ROUTE)])
+                 on_load=[LexAccessState.load])
     check_app_routes(app)
 
 
