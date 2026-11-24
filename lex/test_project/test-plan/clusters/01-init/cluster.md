@@ -1794,5 +1794,6 @@ does not remove user launch configurations.
 | 1.933 | A kept form with a load keeps what the load keeps | after a revisit and the load: the kept private result and the field in the load's keep= survive; what the load does not keep is reset |
 | 1.934 | A kept form keeps its refusal above its submit button | a ui.Refuse with a title stays above the button across a visit for a kept form and leaves for a form not kept; the line under a kept form does not repeat it; sending again clears both |
 | 1.935 | A kept form with tabs and a searched choice | keep=True with tabs=True compiles with its search; back within the idle time the tab's table reads the kept private value; a customer offered before the visit is still accepted; past the idle time the form and the tab's table say it is gone |
+| 1.936 | A reconnect is not a new visit | hydrate and on_load again on a new connection for the same address keep the visit count, a private value not kept and both forms' results, and run the loads without resetting; a link to the same page on the same connection, and a reconnect on another address, are new visits |
 
-**Scenario range:** 1.930 – 1.935. **Test file:** `lex/test_project/tests/init/test_1dx_ui_form_keep.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dx](batches.md).
+**Scenario range:** 1.930 – 1.935, 1.936. **Test file:** `lex/test_project/tests/init/test_1dx_ui_form_keep.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dx](batches.md).

@@ -762,6 +762,19 @@ Built in batch 1dx.
   visit away is still accepted when the user chooses it again.
 - *Cost:* the result's fields must be kept by the page's load too (its `keep=`, or `ui.private(keep=True)`);
   lex-app cannot see which fields a result reads, so it does not check this.
+- **A reconnect is not a new visit** (review, 2026-11-24). Reflex sends the page's `on_load` again
+  whenever its socket reconnects (`state.js`: `hydrate` and `on_load_internal` on every connect), so
+  a laptop waking or a network blip used to drop the tab's private values and start every form
+  over. The opener records the address and the socket connection (Reflex's `sid`) it opened on; the
+  same address on a new connection is the same visit: nothing is dropped or started over, the
+  visit count stays (a `stop_on_leave` job keeps running), and the page's loads run again without
+  resetting what the visit holds (a load resets its state once per visit). A link to the same page
+  on the same connection is a new visit, as is a reconnect on another address. A reload (F5) of
+  the same page also arrives on a new connection, and the server cannot tell it from a reconnect:
+  it is the same visit too, which matches the rest of the state, which a reload keeps as well.
+  *Considered first:* a visit id kept in the browser (the reloaded `on_load` events are built on
+  the server from the route, so nothing of the browser's can ride on them), and not running the
+  loads again (a reload would then never refresh the page's data).
 
 ---
 

@@ -155,6 +155,10 @@ class State(rx.State):
     _ui_optional_loads: list[str] = []
     #: The route of this visit, and the states a load of this visit has already reset.
     _ui_page: str = ""
+    #: The address and the socket connection the visit's page last opened on: the same address on a
+    #: new connection is Reflex reconnecting, not a new visit.
+    _ui_location: str = ""
+    _ui_connection: str = ""
     _ui_reset: list[str] = []
     #: The ids of the loads the opener started that have not begun yet: a load not listed here
     #: was started on mount.
@@ -186,13 +190,22 @@ class State(rx.State):
         ``on_load`` themselves. Only the route comes from the browser: the loads and the
         permission they need are looked up in the server's page registry. Optional loads start
         when the required ones have succeeded.
+
+        Reflex sends ``on_load`` again whenever the socket reconnects (a laptop waking, a network
+        blip): the same address on a new connection is the same visit. Its loads run again, as
+        Reflex intends, but nothing of the visit is dropped or started over.
         """
-        from lex.lex_app.reflex.ui import handlers
+        from lex.lex_app.reflex.ui import forms, handlers, private, runs
 
+        await runs.sweep(self)                      # runs of a process that is gone: also after a reconnect
+        location = handlers._location(self)
+        connection = str(self.router.session.session_id or "")
+        again = bool(connection) and connection != self._ui_connection and (page, location) == (
+            self._ui_page, self._ui_location)
+        self._ui_connection, self._ui_location = connection, location
+        if again:
+            return self._ui_start(page, again=True)
         self.ui_visit += 1
-        from lex.lex_app.reflex.ui import forms, private, runs
-
-        await runs.sweep(self)
         private.leave(str(self.router.session.client_token or ""))   # private values not kept across visits
         kept = forms.kept()
         # A form starts over on a new visit: its field messages, its step, its result and its refusal leave.
@@ -208,10 +221,16 @@ class State(rx.State):
         self.ui_asking, self.ui_asking_args = "", []
         self._ui_page = page
         self._ui_reset = []
+        return self._ui_start(page)
+
+    def _ui_start(self, page: str, again: bool = False) -> Any:
+        """The loads of ``page`` to start, and its tables' reads; ``again``: the same visit reconnected."""
+        from lex.lex_app.reflex.ui import handlers
+
         entry = handlers.page_of(page)
         from lex.lex_app.reflex.ui.pages import rows_table
 
-        tables = rows_table.reopen_events(page)     # a table already on screen: the new record's rows
+        tables = [] if again else rows_table.reopen_events(page)    # a table on screen: the new record's rows
         if entry is None or not _page_permitted(self, entry.requires):
             self._ui_pending_loads, self._ui_optional_loads, self._ui_started = [], [], []
             return None

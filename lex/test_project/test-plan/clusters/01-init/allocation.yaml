@@ -2610,10 +2610,10 @@ letters:
       `@ui.job(limit=2)`: at most two runs at once in the server process, for all users; a further press refused at once with a fixed sentence (toast and ui.failed, also for a form's job), before a form's values are judged; the place given back however a run ends, also one reporting through self.progress. These tests fail on a third run starting beside two, a refused press that changes the page, or a place never given back.
   dx:
     title: 'lex.ui forms: a result kept across visits -- ui.form(keep=True)'
-    scenarios: 1.930-1.935
+    scenarios: 1.930-1.935, 1.936
     status: complete
     tests:
-      pass: 6
+      pass: 7
       skip: 0
       xfail: 0
     note: >-

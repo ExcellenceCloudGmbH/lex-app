@@ -10,7 +10,7 @@ empty or old. What was typed comes back through ``value=`` on a field the handle
 regression is a kept form that comes back empty, a result shown over data that is gone, or a
 failure that happened while the user was away and was never shown.
 
-Cluster 1dx -- scenarios 1.930-1.935. Type: U.
+Cluster 1dx -- scenarios 1.930-1.936. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/forms.py (form keep=, the failure under a kept form),
 lex/lex_app/reflex/ui/forms.py (keep, kept, gone_message), lex/lex_app/reflex/ui/state.py (ui_open).
 Run: python -m lex pytest lex/test_project/tests/init/test_1dx_ui_form_keep.py -v
@@ -397,3 +397,62 @@ class TestCluster01dx_FormKeep(SimpleTestCase):
                          "past the idle time: no tabs over nothing, and the sentence")
         self.assertEqual(told, "This is no longer available: it is kept only for a while. Start again.",
                          "the tab's table says so too")
+
+    # -- 1.936 ---------------------------------------------------------
+    def test_1_936_a_reconnect_is_not_a_new_visit(self) -> None:
+        """
+        Scenario 1.936: the socket drops and comes back on the same page.
+        Given: a page opened on one connection; a job's private result that is not kept, a
+               form's result that is not kept, a field the user's run set.
+        When:  the connection drops and Reflex reconnects: it sends `hydrate` and the page's
+               `on_load` again, on a new connection, for the same address (as `state.js` does
+               on every reconnect); then the user follows a link to the same page on that
+               connection; then the tab reconnects on another address.
+        Then:  the reconnect is the same visit: the visit count, the private value and both
+               forms' results stay, and the page's loads run again without resetting what the
+               visit holds; following the link is a new visit, as is a reconnect elsewhere.
+        """
+        build, search = runs.key_of(ReportState.build), runs.key_of(ReportState.search)
+
+        def at(url: str, sid: str) -> dict:
+            return {"pathname": url, "asPath": url, "query": {}, "sid": sid}
+
+        async def visit(harness, url: str, sid: str, *, reconnect: bool) -> dict:
+            import reflex as rx
+
+            if reconnect:
+                await (await harness.send(rx.State, "hydrate", _router_data=at(url, sid)))
+            await (await harness.send(State, "ui_open", page=url, _router_data=at(url, sid)))
+            await asyncio.sleep(0.05)
+            found = await harness.fields(ReportState)
+            found["_summary"] = private.peek(await harness._state(ReportState), "_summary")
+            return found
+
+        from lex.lex_app.reflex.ui import handlers
+
+        handlers.register_page("/report", [ReportState.open], [], "")       # the page's load, as ui.page registers it
+        self.addCleanup(handlers._PAGES.pop, "/report", None)
+
+        async def steps(harness):
+            GATE["open"].set()
+            first = await visit(harness, "/report", "socket-1", reconnect=True)
+            await (await harness.send(ReportState, "build", values={"customer": "summary"}))
+            await (await harness.send(ReportState, "search", values={"customer": "Acme"}))
+            await harness.set_fields(ReportState, regions=["west"])        # what the load sets again
+            back = await visit(harness, "/report", "socket-2", reconnect=True)
+            linked = await visit(harness, "/report", "socket-2", reconnect=False)
+            await (await harness.send(ReportState, "build", values={"customer": "summary"}))
+            elsewhere = await visit(harness, "/lookup", "socket-3", reconnect=True)
+            return first, back, linked, elsewhere
+
+        first, back, linked, elsewhere = _session(steps)
+        self.assertEqual(back["ui_visit"], first["ui_visit"], "a reconnect is the same visit")
+        self.assertEqual(back["_summary"], {"total": "12.50"}, "the private result was not dropped")
+        self.assertEqual(back["ui_done"], {build: True, search: True}, "neither form started over")
+        self.assertEqual((back["customer"], back["regions"]), ("Acme", ["north", "south"]),
+                         "the load ran again, without resetting the visit's fields")
+        self.assertEqual(linked["ui_visit"], first["ui_visit"] + 1, "a link to the same page is a new visit")
+        self.assertIn(linked["_summary"], ({}, private.GONE), "which drops what is not kept")
+        self.assertEqual(linked["ui_done"], {build: True}, "and starts the form that is not kept over")
+        self.assertEqual(elsewhere["ui_visit"], linked["ui_visit"] + 1, "a reconnect on another address is a new visit")
+        self.assertIn(elsewhere["_summary"], ({}, private.GONE))

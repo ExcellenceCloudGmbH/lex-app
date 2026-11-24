@@ -3568,13 +3568,13 @@ form's `result=`. What building settled is section 6.17 of `docs/superpowers/spe
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.930 – 1.935 |
+| Scenario range | 1.930 – 1.935, 1.936 |
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/pages/forms.py` (`form` keep=, the failure under a kept form), `lex/lex_app/reflex/ui/forms.py` (`keep`, `kept`, `gone_message`), `lex/lex_app/reflex/ui/state.py` (`ui_open`) |
 | Test file | `lex/test_project/tests/init/test_1dx_ui_form_keep.py` |
-| Test classes | `TestCluster01dx_FormKeep` (1.930–1.935) |
+| Test classes | `TestCluster01dx_FormKeep` (1.930–1.935, 1.936) |
 | Fixtures | a neutral invoice report state (a job held at a gate, a kept private result, a load that keeps the customer) |
-| Tests landed | **6 pass / 0 fail** |
+| Tests landed | **7 pass / 0 fail** |
 | Status | ✅ Complete |
 
 `keep=` on `ui.form`, after checking what `@ui.load(keep=)` already gave: the fields survived, the result flag did not. What building settled is section 6.18 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`. Test 1.841 (a new visit starts a form over) still holds for a form that is not kept.
@@ -3587,3 +3587,4 @@ form's `result=`. What building settled is section 6.17 of `docs/superpowers/spe
 | 1.933 | A kept form with a load keeps what the load keeps | after a revisit and the load: the kept private result and the field in the load's keep= survive; what the load does not keep is reset |
 | 1.934 | A kept form keeps its refusal above its submit button | a ui.Refuse with a title stays above the button across a visit for a kept form and leaves for a form not kept; the line under a kept form does not repeat it; sending again clears both |
 | 1.935 | A kept form with tabs and a searched choice | keep=True with tabs=True compiles with its search; back within the idle time the tab's table reads the kept private value; a customer offered before the visit is still accepted; past the idle time the form and the tab's table say it is gone |
+| 1.936 | A reconnect is not a new visit | hydrate and on_load again on a new connection for the same address keep the visit count, a private value not kept and both forms' results, and run the loads without resetting; a link to the same page on the same connection, and a reconnect on another address, are new visits |

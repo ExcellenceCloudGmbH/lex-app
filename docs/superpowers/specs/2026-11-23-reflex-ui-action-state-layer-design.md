@@ -704,7 +704,8 @@ class PayrollState(ui.State):
   disk managers do, and the state as the browser gets it, and finds no part of the value.
 - **Gone after**: `idle_minutes` without a read or a write (default 60, Reflex's own state
   expiry); `max_hours` since it was written (default 8, a working day); the tab opening a page
-  again (the opener drops it; `keep=True` keeps it, within those times); another server process
+  again (the opener drops it; `keep=True` keeps it, within those times; Reflex reconnecting its
+  socket to the same page is not opening it again, pages design 6.18); another server process
   (a restart, or the tab's events reaching another worker), another signed-in user on the tab, and
   more than `LEX_UI_PRIVATE_VALUES` values in the process (default 5000; the least recently used
   goes first). The lex.ui clock (the heartbeat, every 10 s) drops expired values from memory.
