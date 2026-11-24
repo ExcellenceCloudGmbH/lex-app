@@ -1305,6 +1305,16 @@ lex-app project. (The table gaps of the same round are section 5.15 of the table
   a part after the sections stays refused (what every tab shares has one place, above the tabs) --
   neither is a need of every project.
 
+- **More than four tables on a record page: RFDS's limit, said with the way out (batch 1fa).** RFDS's
+  object page refuses more than four tables (`MAX_GRID_TABLES`, rule n02) and suggests "tab navigation
+  or a sub-page"; it counts every section's tables whatever the navigation, so `tabs=True` does not
+  lift it. The limit is RFDS's design rule and is kept: hiding tables from its count (a closed
+  section, a deferred mount) would break the rule, not meet it. lex.ui counts the tables in a record
+  page's sections before RFDS does and refuses in its own words, naming how many, in which sections,
+  that tabs do not lift it, and the way that does: a page of their own (a `@ui.page` whose tables'
+  `where=` name the record) led to from a section by `ui.link(..., to=page, key=...)`. A form's result
+  and a list page are RFDS pages without that rule. 1cs's 1.800 expects the new words.
+
 ## 7. Order of building
 
 One spec, four steps. Each ends by porting real pages of the reviewed project, in the scratchpad

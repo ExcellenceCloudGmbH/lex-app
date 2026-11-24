@@ -125,7 +125,7 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
                also two sections with one title, a section hidden by a state value, a blank
                title, a title that is not words, two badges, and an action called Save (one
                fact or one section given without brackets is a list of one); a limit of RFDS's
-               own (five tables on one page) names the page and quotes RFDS's sentence.
+               own (five tables on one page) names the page and the sections, in lex.ui's words (1.1037).
         """
         cases = {
             "facts": (dict(facts=[rx.text("raw")]),
@@ -170,8 +170,8 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         crowded = [kinds.section(f"Table {n}", tables.table(Group, columns=["name"])) for n in "abcde"]
         with self.assertRaises(PageError) as limit:
             _record(sections=crowded).build(CTX)
-        self.assertTrue(str(limit.exception).startswith("Page `fund`: RFDS's page layout refuses this page: rfds."),
-                        f"a limit of RFDS's own names the page and quotes RFDS: {limit.exception}")
+        self.assertTrue(str(limit.exception).startswith("Page `fund`, slot `sections`: the page has 5 tables"),
+                        f"RFDS's limit of tables is said in lex.ui's words (1.1037): {limit.exception}")
 
     # -- 1.801 ---------------------------------------------------------
     def test_1_801_actions_are_placed_as_the_page_header_places_them(self) -> None:

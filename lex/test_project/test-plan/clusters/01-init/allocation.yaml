@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1035
+max_scenario: 1037
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2858,3 +2858,13 @@ letters:
       xfail: 0
     note: >-
       1ea's 1.952 changed its given: a state value on a later tab is now accepted, so the case is a state value on the first tab, plus visible= that is neither; 1cs's 1.800 expects the record refusal's added pointer to tabs=True.
+  fa:
+    title: 'lex.ui pages: more than four tables on a record page refused in lex.ui''s words, with the way out'
+    scenarios: 1.1037
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      The limit is RFDS's MAX_GRID_TABLES (4), read from RFDS. 1cs's 1.800 expects these words instead of RFDS's quoted sentence.

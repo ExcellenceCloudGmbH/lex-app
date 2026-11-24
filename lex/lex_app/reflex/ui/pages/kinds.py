@@ -381,6 +381,7 @@ class Record(Kind):
         self._shown_tabs = {}                       # a tab's id -> the state value that shows it
         for index, part in enumerate(parts):
             part.fixed(ctx.at(f"sections[{index}]"), "a record page")
+        self._at_most_tables(ctx, parts)
         titles = [part.title for part in parts]
         twice = sorted({title for title in titles if titles.count(title) > 1})
         if twice:
@@ -410,6 +411,23 @@ class Record(Kind):
             built.append(_rfds(at, lambda part=part, ident=ident, content=content, needs=needs: templates.ObjectSection(
                 id=ident, title_id=part.title, title_default=part.title, content=content, permission=needs)))
         return built
+
+    @staticmethod
+    def _at_most_tables(ctx: Build, parts: list) -> None:
+        """RFDS's limit of tables on one record page, said in lex.ui's words, with what to do instead."""
+        from rfds.templates import MAX_GRID_TABLES
+
+        holding = [(part.title, sum(isinstance(one, tables.Table) for one in part.content)) for part in parts]
+        count = sum(n for _, n in holding)
+        if count <= MAX_GRID_TABLES:
+            return
+        where = ", ".join(f"`{title}`" + (f" ({n})" if n > 1 else "") for title, n in holding if n)
+        raise ctx.at("sections").fail(
+            f"the page has {count} tables (in {where}), and a record page shows at most {MAX_GRID_TABLES} "
+            f"-- RFDS's rule for one page, with tabs=True too.",
+            "Give the further tables a page of their own -- a `@ui.page(\"/orders/[key]/invoices\")` whose "
+            "tables' `where=` name this record -- and lead there from a section of this one: "
+            "`ui.section(\"Invoices\", ui.link(\"All invoices\", to=order_invoices, key=OrderState.key))`.")
 
     def _page(self, ctx: Build) -> rx.Component:
         import rfds
