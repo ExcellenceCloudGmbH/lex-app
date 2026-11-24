@@ -10,6 +10,7 @@ from __future__ import annotations
 import itertools
 import re
 import json
+import weakref
 from collections.abc import Mapping, Sequence
 from typing import Any, ClassVar
 
@@ -30,8 +31,9 @@ _BY_HANDLER: dict[str, list[type]] = {}
 _BY_ROUTE: dict[str, list[type]] = {}
 _BY_OWNER: dict[str, list[type]] = {}
 _CACHE: dict[tuple, type] = {}
-#: id of a ui.table part -> the state class built for it (for ``ui.testing.rows(table=...)``).
-_CACHE_BY_TABLE: dict[int, type] = {}
+#: A built ui.table part -> the state class built for it (for ``ui.testing.rows(table=...)``). Weak: a part
+#: that is dropped leaves it, and a new part is never taken for an old one that had its address.
+_CACHE_BY_TABLE: "weakref.WeakKeyDictionary[Any, type]" = weakref.WeakKeyDictionary()
 _COUNTER = itertools.count(1)
 _ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 

@@ -368,7 +368,7 @@ def rows(handler: Any, *, user: str = "tester", grants: Any = (), params: dict |
         if table.source is not handler:
             raise ValueError("ui.testing.rows(handler, table=...): the table must read that handler")
         table.build(Build(page="test", caption="Rows"))
-        cls = rows_table._CACHE_BY_TABLE[id(table)]
+        cls = rows_table._CACHE_BY_TABLE[table]
         wired = cls._wire(handler.fn.__ui_key__, found)
         refused = [name for name in (filters or {}) if name not in cls.choice_fields]
         if refused:

@@ -11,7 +11,7 @@ whether it sums the rows the search left or every row. A regression is a name th
 a row that cannot be reached, a width that only breaks in the browser, a user's column choice
 that hides the row's name, or a total that silently changes meaning when the user searches.
 
-Cluster 1dy -- scenarios 1.940-1.946, 1.953-1.956. Type: U.
+Cluster 1dy -- scenarios 1.940-1.946, 1.953-1.957. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/tables.py (column kind="name"/"code", pin=; table page_size=,
 choose_columns=, totals=), lex/lex_app/reflex/ui/pages/rows_table.py (page size, totals over all
 rows, their label), lex/lex_app/reflex/data.py (ChosenColumns, the model table's page size).
@@ -65,7 +65,7 @@ CTX = Build(page="customers", route="/customers", caption="Customers")
 
 def built(table) -> tuple[type, str]:
     text = str(table.build(CTX))
-    return rows_table._CACHE_BY_TABLE[id(table)], text
+    return rows_table._CACHE_BY_TABLE[table], text
 
 
 def spec_of(state: type, field: str) -> dict:
@@ -106,13 +106,13 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
 
         groups = ui.table(Group, columns=["name"])
         text = str(groups.build(Build(page="groups", route="/groups", caption="Groups")))
-        spec = spec_of(rows_table._CACHE_BY_TABLE[id(groups)], "name")
+        spec = spec_of(rows_table._CACHE_BY_TABLE[groups], "name")
         self.assertEqual((spec.get("sticky"), spec["header"], spec["kind"]), ("start", "Name", "text"),
                          "a model table's first field stays in place and keeps its own label and kind")
         self.assertIn('"data-rfds-sticky":"start"', text, "RFDS marks it")
         named = ui.table(Group, columns=["id", ui.column("name", kind="name")])
         named.build(Build(page="groups", route="/groups", caption="Groups"))
-        spec = spec_of(rows_table._CACHE_BY_TABLE[id(named)], "name")
+        spec = spec_of(rows_table._CACHE_BY_TABLE[named], "name")
         self.assertEqual((spec["header"], spec["kind"], spec.get("width")), ("Name", "entity", "var(--rfds-size-field-md)"),
                          "a model's field of kind name keeps its label and gets the room")
 
@@ -192,7 +192,7 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
         self.assertEqual(opens_at(every), 200, "every row: as many as RFDS lets a table hold in the browser")
         groups = ui.table(Group, columns=["name"], page_size=200)
         groups.build(Build(page="groups", route="/groups", caption="Groups"))
-        self.assertEqual(opens_at(rows_table._CACHE_BY_TABLE[id(groups)]), 200, "a model table the same way")
+        self.assertEqual(opens_at(rows_table._CACHE_BY_TABLE[groups]), 200, "a model table the same way")
         for wrong in (0, 201, "all", True, 2.5, None):
             with self.assertRaisesRegex(ValueError, r"page_size=\) takes a number of rows from 1 to 200"):
                 ui.table(CustomersState.customers, columns=["name"], page_size=wrong)
@@ -381,7 +381,7 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
                          "the first column stays in place while the table scrolls sideways; the others scroll")
         groups = ui.table(Group, columns=["name", "id"])
         groups.build(Build(page="groups", route="/groups", caption="Groups"))
-        self.assertEqual([spec.get("sticky") for spec in rows_table._CACHE_BY_TABLE[id(groups)].table_columns],
+        self.assertEqual([spec.get("sticky") for spec in rows_table._CACHE_BY_TABLE[groups].table_columns],
                          ["start", None], "a model table the same way")
         with self.assertRaises(TypeError):
             ui.column("name", pin=True)
@@ -414,3 +414,25 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
         self.assertEqual(asyncio.run(scenario()), ["name", "region"], "the choice survives a new visit")
         self.assertIn("until the tab is closed: a new visit keeps them", ChosenColumns.__doc__,
                       "and the class says what it does")
+
+    # -- 1.957 ---------------------------------------------------------
+    def test_1_957_a_built_tables_state_is_held_only_while_the_table_is(self) -> None:
+        """
+        Scenario 1.957: lex-app's note of which state each built table got.
+        Given: 200 tables built (as pages are, once per compile) and dropped; then a new table
+               that was never built.
+        When:  Python collects the dropped tables.
+        Then:  the note does not grow with them, and the new table -- which may reuse a dropped
+               table's memory address -- is not taken for one of them.
+        """
+        import gc
+
+        gc.collect()
+        before = len(rows_table._CACHE_BY_TABLE)
+        for _ in range(200):
+            ui.table(CustomersState.customers, columns=["name"]).build(CTX)
+        gc.collect()
+        self.assertLessEqual(len(rows_table._CACHE_BY_TABLE), before, "dropped tables leave the note")
+        fresh = [ui.table(CustomersState.customers, columns=["name"]) for _ in range(50)]
+        self.assertEqual([table for table in fresh if table in rows_table._CACHE_BY_TABLE], [],
+                         "a table never built has no state, whatever its address")

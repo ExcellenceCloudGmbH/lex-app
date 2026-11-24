@@ -147,7 +147,7 @@ class Table(Part):
 
             copy = dataclasses.replace(self, visible=guard.read(self.source))
             component = copy.build(ctx)
-            rows_table._CACHE_BY_TABLE[id(self)] = rows_table._CACHE_BY_TABLE[id(copy)]   # the table as written
+            rows_table._CACHE_BY_TABLE[self] = rows_table._CACHE_BY_TABLE[copy]   # the table as written
             return component
         return super().build(ctx)
 
@@ -392,7 +392,7 @@ class Table(Part):
                                  page_size=self.page_size,
                                  row_fields=tuple(sorted(used)), choice_fields=tuple(self.filters),
                                  scope_fields=tuple(dict(self.where or {})))
-        rows_table._CACHE_BY_TABLE[id(self)] = state
+        rows_table._CACHE_BY_TABLE[self] = state
         options = {}
         for name in self.filters:
             field = known[name]
@@ -470,7 +470,7 @@ class Table(Part):
             query_param="q" if (self.search and ctx.page_search and ctx.route) else "",
             searchable=bool(self.search), exportable=bool(self.export),
             entity=self.source.fn.__name__.replace("_", " "))
-        rows_table._CACHE_BY_TABLE[id(self)] = state
+        rows_table._CACHE_BY_TABLE[self] = state
         if not ctx.under_load:          # under a load the table appears again after it, and reads then
             rows_table.on_route(ctx.route, state)
         props: dict[str, Any] = {"row_key": "id"}

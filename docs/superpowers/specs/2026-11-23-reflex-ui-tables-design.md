@@ -417,6 +417,10 @@ ui.table(CustomersState.customers, page_size=200, choose_columns=True,
   More than 200 rows in one scroll is RFDS's AG Grid (virtualised), a different engine; not added.
   Name: `page_size`, as `lex_table()` and RFDS's state call it; `rows_per_page=` and `paged=False`
   were considered.
+- **Which state a built table got** (review, 2026-11-24) is noted for `ui.testing.rows(table=)` and a
+  section's row count in a weak map keyed by the table part itself, not by its `id()`: a part that
+  is dropped (pages are built again on every compile) leaves the map, and a new part that reuses a
+  dropped one's address is never taken for it.
 - **The pager comes only when it is needed** (review, 2026-11-24). The first build had
   `page_size=None` meaning "200, no rows-per-page picker, a pager only past 200" -- a second way to
   write 200, with its own pager rule. Now every lex.ui table, rows or model, draws RFDS's

@@ -1725,8 +1725,9 @@ does not remove user launch configurations.
 | 1.954 | The pager shows only when the rows do not fit one page | rows and model tables, default and page_size=200: no always-on pager; RFDS's pagination with its rows-per-page choice under a condition on total_rows > page_size; page_size=None refused saying to write page_size=200; 1.943 now checks 1-200 |
 | 1.955 | The first column always stays in place, and pin= is gone | rows and model tables with nothing written: the first column is RFDS's start-sticky column and no other; ui.column(pin=) is no argument; 1.940 and 1.941 rewritten without pin= |
 | 1.956 | The user's column choice lasts until the tab is closed | a choice from the Columns menu survives a new visit and the table appearing again; ChosenColumns' docstring says so (it claimed a new visit starts from the table as declared) |
+| 1.957 | A built table's state is held only while the table is | 200 tables built and dropped leave the note (a weak map keyed by the part); a never-built table is not taken for a dropped one at the same address |
 
-**Scenario range:** 1.940 – 1.946, 1.953, 1.954, 1.955, 1.956. **Test file:** `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dy](batches.md).
+**Scenario range:** 1.940 – 1.946, 1.953, 1.954, 1.955, 1.956, 1.957. **Test file:** `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dy](batches.md).
 
 ### 1dz. lex.ui pages: a section closed until the user opens it, saying how many rows it holds ✅
 
