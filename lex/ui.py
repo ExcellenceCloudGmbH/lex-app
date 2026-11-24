@@ -54,7 +54,9 @@
                             a form above its submit button, elsewhere as a toast
 ``ui.ApiError``             lex-app's API refused a call (``.status``, ``.denied``,
                             ``.detail``); uncaught, it is shown to the user
-``self.api``                lex-app's API as the user: ``list/get/create/update/delete``, and for
+``self.api``                lex-app's API as the user: ``list/get/create/update/delete``;
+                            ``all(Model, filters=)`` every record, page after page (at most
+                            10,000; more is refused in words), for a ``@ui.rows`` table; and for
                             a calculation ``calculate(Model, pk)`` (as the Calculate button),
                             ``log(Model, pk)`` (its newest run's log); ``file(Model, pk, field)``
                             a record's file, downloaded as the user

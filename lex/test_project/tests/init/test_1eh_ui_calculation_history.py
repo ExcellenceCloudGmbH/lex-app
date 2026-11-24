@@ -171,7 +171,8 @@ class TestCluster01eh_CalculationHistory(E2ETestCase):
             with self.subTest(totals_of_all=history.totals_of_all), self.assertRaises(PageError) as wrong:
                 region_reports(history).build(CTX)
             self.assertIn("slot `history`", str(wrong.exception))
-            self.assertIn("cannot export or total yet", str(wrong.exception))
+            self.assertIn("cannot export or total", str(wrong.exception))
+            self.assertIn("self.api.all(UiRegionReport", str(wrong.exception))
         with self.assertRaises(TypeError):
             ui.column("region", pin=True)
         with self.assertRaisesRegex(ValueError, "write page_size=200"):

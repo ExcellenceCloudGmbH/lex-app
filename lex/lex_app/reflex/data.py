@@ -428,6 +428,12 @@ def scope_params(scope: Mapping[str, Any]) -> list[tuple[str, str]]:
 # -- table and grid states ----------------------------------------------------
 
 
+def _iso_day(value: Any) -> str:
+    """``value`` as an ISO day (``YYYY-MM-DD``), or ``""`` when it is not one."""
+    text = str(value or "").strip()[:10]
+    return text if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text) else ""
+
+
 class ChosenColumns(rx.State, mixin=True):
     """The columns a user chose in RFDS's "Columns" menu (``ui.table(choose_columns=True)``).
 
@@ -549,6 +555,39 @@ class LexTableState(DataTableMixin, ChosenColumns, RowsNotStored, mixin=True):
     scope_fields: ClassVar[tuple[str, ...] | None] = None
     #: The order of the rows until the user sorts a column (``"-id"``: newest first); ``""``: the model's.
     default_ordering: ClassVar[str] = ""
+    #: The date filters (``ui.table(filters=["ordered"])`` on a date field): field -> the API's lookup
+    #: (``"ordered"`` for a date, ``"ordered__date"`` for a date and time).
+    date_lookups: ClassVar[dict] = {}
+    #: A date filter's range, as its picker shows it: ``{field: {"start": ..., "end": ...}}``.
+    dates: dict[str, dict[str, str]] = {}
+
+    @rx.event
+    async def set_dates(self, field: str, value: Mapping[str, Any]):
+        """A date filter's range, ``{"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}``; both empty remove it."""
+        if field not in type(self).date_lookups:
+            return
+        value = value if isinstance(value, Mapping) else {}
+        start, end = (_iso_day(value.get("start")), _iso_day(value.get("end")))
+        dates = {k: v for k, v in self.dates.items() if k != field}
+        if start or end:
+            dates[field] = {"start": start, "end": end}
+        self.dates, self.page = dates, 0
+        async for _ in self.load():
+            yield
+
+    def _date_params(self) -> list[tuple[str, str]]:
+        """The date filters' ranges as the API's ``__gte`` / ``__lte`` lookups."""
+        params = []
+        lookups = getattr(type(self), "date_lookups", {}) or {}
+        for field, chosen in dict(getattr(self, "dates", {}) or {}).items():
+            lookup = lookups.get(field)
+            if not lookup:
+                continue
+            if chosen.get("start"):
+                params.append((f"{lookup}__gte", chosen["start"]))
+            if chosen.get("end"):
+                params.append((f"{lookup}__lte", chosen["end"]))
+        return params
 
     def _store_filter(self, key: str, value: Mapping[str, Any]) -> bool:
         allowed = type(self).choice_fields
@@ -569,10 +608,10 @@ class LexTableState(DataTableMixin, ChosenColumns, RowsNotStored, mixin=True):
 
     @rx.event
     async def clear_filters(self):
-        """"Clear filters": every filter, and the dropdowns that show them."""
+        """"Clear filters": every filter, and the dropdowns and ranges that show them."""
         self.chosen = {}
-        if self.filters:
-            self.filters = {}
+        if self.filters or self.dates:
+            self.filters, self.dates = {}, {}
             await self._after_filter_change()
 
     @rx.event
@@ -593,7 +632,7 @@ class LexTableState(DataTableMixin, ChosenColumns, RowsNotStored, mixin=True):
             yield
 
     async def _fetch_page(self, *, offset, limit, sort, filters, query):
-        params = scope_params(self.scope) + filter_params(filters)
+        params = scope_params(self.scope) + filter_params(filters) + LexTableState._date_params(self)
         if query and type(self).search_field:
             params.append((f"{type(self).search_field}__icontains", query))
         # A foreign key's column shows the related record's name and sorts by the key, as lex-app's grid does.
@@ -719,7 +758,8 @@ def _filters_identity(filters: Mapping[str, Any] | None) -> tuple:
 def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_field: str = "",
                 page_size: int = 25, filters: Mapping[str, Any] | None = None,
                 row_fields: Sequence[str] = (), choice_fields: Sequence[str] | None = None,
-                scope_fields: Sequence[str] | None = None, ordering: str = "", not_stored: bool = False) -> type:
+                scope_fields: Sequence[str] | None = None, ordering: str = "", not_stored: bool = False,
+                date_lookups: Mapping[str, str] | None = None) -> type:
     """The :class:`LexTableState` for one table of ``model`` (one class per distinct table).
 
     The table opens at ``page_size`` rows, which is also among the sizes the
@@ -742,6 +782,8 @@ def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_fiel
         classvars["default_ordering"] = str(ordering)
     if not_stored:
         classvars["rows_not_stored"] = True
+    if date_lookups:
+        classvars["date_lookups"] = dict(date_lookups)
     return _state_for(LexTableState, model, classvars, defaults={"page_size": int(page_size)},
                       identity=_filters_identity(filters))
 

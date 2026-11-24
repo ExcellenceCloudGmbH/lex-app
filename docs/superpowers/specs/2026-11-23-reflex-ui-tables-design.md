@@ -492,6 +492,23 @@ Gaps found while rewriting dashboards onto lex.ui, each a need of any lex-app pr
   before. `self.api.list(fields=["customer"])` keeps the name beside the id. A `@ui.rows` table
   over `self.api.list` rows names the column `customer__short_description` itself.
 
+- **Every record for a rows table; dates on a model table (batch 1et).** A model table reads one
+  page at a time through lex-app's API, so it can neither export nor total every row, and projects
+  copied a paging helper into a `@ui.rows` handler instead. Considered: giving model tables export and
+  totals. lex-app's export endpoint (`ModelExportView`) takes AG Grid's filter model, not the list
+  parameters a model table sends, and writes its own columns; totals would need the AG Grid POST in
+  pivot mode -- two more paths for what a rows table already does. Chosen, one way:
+  **`self.api.all(Model, filters=, search=, ordering=, fields=)`** reads every record the user may
+  read, 1,000 a page, ordered by `ordering` and then the key (no row twice, none missed), and refuses
+  more than 10,000 (`context.ALL_LIMIT`, what a rows table holds in memory) with a sentence: "There are
+  12,345 orders here, more than can be shown at once (10,000). Narrow them down first." -- before a
+  second page is read. A `@ui.rows` handler returns it, and its table has export, totals, search and
+  date filters already. A model table's `export=` / `totals=` refusal now says exactly that. A model
+  table does gain **date filters**: a date or date-and-time field in `filters=` is RFDS's date range
+  picker, sent as the API's `field__gte`/`__lte` (`field__date__gte`/`__lte` for a date and time), as on
+  a rows table. *Name:* `all`, as Django's `objects.all()`; `every`, `list(all=True)` and
+  `list(per_page=-1)` (lex-app's "everything" page size, unbounded) were considered.
+
 ## 6. Limits and risks
 
 - **The address on mount.** Step 1 found that Reflex sends a component's mount event with the

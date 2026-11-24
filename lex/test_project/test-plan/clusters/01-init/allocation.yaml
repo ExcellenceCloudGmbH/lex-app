@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1027
+max_scenario: 1029
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2798,3 +2798,13 @@ letters:
       xfail: 0
     note: >-
       The name is lex-app's own `<fk>__short_description` (str of the related record). These tests fail on an id shown in a foreign key's column or fact, a sort sent by the name key, or the id lost from the row.
+  et:
+    title: 'lex.ui: every record through self.api.all, and a model table filtered by a range of days'
+    scenarios: 1.1028-1.1029
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      1cx's 1.809 and 1eh's 1.998 now expect the export/totals refusal's new words (it names self.api.all). These tests fail on a row read twice or missed, an unbounded read, or a model date filter not sent.

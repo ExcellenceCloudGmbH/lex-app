@@ -1,14 +1,14 @@
 
 
-### 1es. lex.ui: a foreign key shows the related record's name, in a model table, a run's history and its facts ✅
+### 1et. lex.ui: every record through self.api.all, and a model table filtered by a range of days ✅
 
-**What it tests:** a model table's foreign-key column shows `<fk>__short_description` from lex-app's real list view, keeps the id in the row, sorts by the key; lex_columns and the grid's columns too; `self.api.list(fields=[fk])` keeps the name; a calculation's past runs and its run's facts read the name.
+**What it tests:** `self.api.all` reads every row once across pages of 1,000 ordered by the asked order then the key, refuses past the ceiling after one page, and feeds a rows table with export and totals; a model table's refusal points to it; a model table's date filter sends the API's `__date__gte`/`__lte` and clears.
 
-**Why a regression matters:** A bare id where a person reads a customer's name, or a sort the API refuses.
+**Why a regression matters:** Rows read twice or missed, an unbounded read into memory, or a date filter the API never receives.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.1026 | A model table's foreign key shows the related record's name | column field customer__short_description headed Customer; rows carry names and ids through the real list view; desc sort sends -customer and returns beta first; lex_columns/lex_grid_columns; Api.list(fields=[customer]) keeps the name |
-| 1.1027 | A calculation's history and run show the customer's name | the past runs' column is customer__short_description; the run's input fact and result fact read run[customer__short_description] |
+| 1.1028 | self.api.all reads every record in a stable order up to a ceiling | 2,345 rows once and in order; pages 1-3 of 1,000 with ordering amount,id; count; ALL_LIMIT refusal after the first page with the count; a rows table over it builds with export and totals; a model table's totals refusal names self.api.all |
+| 1.1029 | A model table filters a date field by a range of days | date_lookups event_at -> event_at__date; the picker in the toolbar; event_at__date__gte/lte sent; a field that is no date filter ignored; a malformed day dropped; clear_filters removes the range |
 
-**Scenario range:** 1.1026 – 1.1027. **Test file:** `lex/test_project/tests/init/test_1es_ui_foreign_key_names.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1es](batches.md).
+**Scenario range:** 1.1028 – 1.1029. **Test file:** `lex/test_project/tests/init/test_1et_ui_api_all_and_model_dates.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1et](batches.md).
