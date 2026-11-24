@@ -507,7 +507,17 @@ async def _merge(inv: context.Invocation, live: Any) -> None:
         workcopy.merge(target, draft)
 
 
-def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_leave: bool = False) -> Any:
+def _limit_message(fn: Callable[..., Any], limit: int) -> str:
+    """The refusal of a run over ``limit=``, naming the job as its button does ("Build report")."""
+    name = fn.__name__.replace("_", " ").strip().capitalize()
+    if limit == 1:
+        return results.message("lex.ui.job.limit.one", "{name} is already running. Try again in a moment.", name=name)
+    return results.message("lex.ui.job.limit", "{name} is already running {limit} times. Try again in a moment.",
+                           name=name, limit=limit)
+
+
+def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_leave: bool = False,
+        limit: int | None = None) -> Any:
     """Long work, written as a plain function; the user keeps working while it runs.
 
     The body works on a copy of the state. Only what it changed is written back, at each
@@ -529,7 +539,15 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
     ``yield`` and at its end. Once the job is stopped, the next ``self.progress(...)`` raises the
     stop its next ``yield`` would (``GeneratorExit``), so the library stops too. Anywhere but a
     running job it raises an error.
+
+    ``limit=2`` lets at most two runs of the job go at once in this server process, for all users
+    together (an expensive read of another system). A press beyond that is refused at once, not
+    queued: "Export is already running 2 times. Try again in a moment." -- a toast, and
+    ``ui.failed``.
     """
+    if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or limit < 1):
+        raise ValueError(f"@ui.job(limit=) is how many runs of the job may go at once: a whole number, 1 or "
+                         f"more; got {limit!r}")
 
     def decorate(fn: Callable[..., Any]) -> Any:
         _check_plain(fn, "job")
@@ -549,6 +567,7 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                 return                                    # already running: a repeat is ignored
             started = False
             stopped = False
+            placed = False                                 # holds one of the job's places under limit=
             message = ""
             session: context.Session | None = None
 
@@ -561,12 +580,18 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                         elif message:
                             self.ui_failed = {**dict(self.ui_failed), key: message}
                 finally:
+                    if placed:
+                        runs.give_place(key)
                     runs.release(token, key, call)
 
             try:
                 try:
                     # Resolved before the user's lock is taken: nothing inside a block below raises.
                     session, failure = await _session(self, requirements)
+                    if failure is None and limit is not None:
+                        placed = runs.take_place(key, limit)
+                        if not placed:                    # refused at once, before the values: nothing else changes
+                            failure = results.Refuse(_limit_message(fn, limit))
                     if failure is None and receives is not None:
                         async with self:
                             try:
@@ -632,8 +657,8 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
             finally:                                      # also on cancellation: nothing is left running
                 await _shielded(wind_up())
 
-        _mark(wrapper, fn, "job", requires=requirements, stop_on_leave=stop_on_leave)
-        wrapper.__ui_again__ = functools.partial(job, requires=requires, stop_on_leave=stop_on_leave)
+        _mark(wrapper, fn, "job", requires=requirements, stop_on_leave=stop_on_leave, limit=limit)
+        wrapper.__ui_again__ = functools.partial(job, requires=requires, stop_on_leave=stop_on_leave, limit=limit)
         return rx.event(wrapper, background=True)
 
     return decorate(fn) if fn is not None else decorate

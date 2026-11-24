@@ -404,6 +404,7 @@ class Form(kinds.Kind):
     result: tuple = ()
     actions: tuple = ()
     tabs: bool = False
+    keep: bool = False
 
     def loads(self) -> tuple[list, list]:
         parts = [part for part in self.result if isinstance(part, kinds.Section)]
@@ -522,6 +523,8 @@ class Form(kinds.Kind):
             raise ctx.at("result").fail("`tabs=True` shows the result's sections one at a time, and it has 0.",
                                         "Give `result=` two or more `ui.section(title, ...)`s, one per tab, or leave "
                                         "`tabs=` out.")
+        if self.keep:
+            rules.keep(handler)
         if self.load is not None:
             ctx = dataclasses.replace(ctx, under_load=True)
 
@@ -551,6 +554,11 @@ class Form(kinds.Kind):
         entry: list = [form]
         if handler.fn.__ui_kind__ == "job":
             entry.append(_progress(handler))
+        if self.keep:       # the user may have been away when its failure was toasted, or its result went
+            # A refusal is already above the submit button, with its title (and kept across visits): not twice.
+            problem = runs.failed(handler)
+            refused = State.ui_refused.get(key, {}).get("message", "").to(str)
+            entry.append(rx.cond((problem != "") & (refused == ""), rfds.inline_message(problem, tone="warning")))
         header = kinds._rfds(ctx, lambda: rfds.page_header(title=title, path=ctx.route or "/",
                                                             secondary_actions=actions))
         whole: list = [rfds.page(header, *entry, width="form")]            # a form is narrow
@@ -563,7 +571,7 @@ class Form(kinds.Kind):
 
 
 def form(*, title: Any, load: Any = None, fields: Any = (), steps: Any = (), submit: Any = None,
-         result: Any = (), actions: Any = (), tabs: bool = False) -> Form:
+         result: Any = (), actions: Any = (), tabs: bool = False, keep: bool = False) -> Form:
     """Entering something, at once or in steps. A tool is a form with a ``result=``.
 
     ``fields=`` is a list of ``ui.field``; ``steps=[ui.step("Details", fields=[...]), ...]`` makes
@@ -588,12 +596,28 @@ def form(*, title: Any, load: Any = None, fields: Any = (), steps: Any = (), sub
     the page header, none of them as the primary one: that is the submit button. ``tabs=True``
     shows the result's sections one at a time, as on a record page: each section's title is its
     tab, and what comes before the first section is above the tabs.
+
+    A new visit starts the form over: its result leaves. ``keep=True`` keeps the result when the
+    user leaves the page and comes back -- a job that finished meanwhile shows what it found, one
+    still running its progress -- for as long as what the result shows is kept: a ``ui.private``
+    field needs ``keep=True`` too, and a field the page's ``load=`` resets needs that load's
+    ``keep=``. A kept form also keeps its refusal above its submit button, shows its handler's
+    last other failure under it, and says so when its result is no longer kept. What was typed is
+    not kept by lex-app (it may be personal): to show it again, the handler sets a field and the
+    input starts from it (a searched choice starts empty, also on a kept form)::
+
+        @ui.job
+        def build(self, values):
+            self.customer = values["customer"]          # ui.field("customer", value=ReportState.customer)
+            self._lines = invoices_of(self.user.id, values["customer"])
     """
     if not isinstance(tabs, bool):
         raise TypeError(f"ui.form(tabs=) takes True or False; got {tabs!r}. `tabs=True` shows the result's sections "
                         "one at a time.")
+    if not isinstance(keep, bool):
+        raise TypeError(f"ui.form(keep=) is True or False; got {keep!r}")
     return Form(title, load, kinds._many(fields), kinds._many(steps), submit, kinds._many(result), kinds._many(actions),
-                tabs)
+                tabs, keep)
 
 
 def dialog(ctx: Build, button: Any) -> Any:

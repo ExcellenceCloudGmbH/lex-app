@@ -179,10 +179,11 @@ Fact 3 on Redis is from source reading only: no Redis was available for the prob
 | `ui.State` | Base class of every page state |
 | `@ui.load` | Runs when a page opens |
 | `@ui.action` | A short handler, under about a second |
-| `@ui.job` | Long work with progress |
+| `@ui.job` | Long work with progress; `limit=` caps its runs at once (6.12) |
 | `@ui.custom` | Marks a raw Reflex handler (the custom region) |
 | `ui.goto`, `ui.toast`, `ui.download` | What a handler returns to make the browser act |
 | `ui.progress` | What a job yields to report progress |
+| `ui.private` | A state field kept in the server process's memory only, for its user, for a while (6.11) |
 | `ui.Refuse`, `ui.ApiError` | Exceptions |
 | `ui.read`, `ui.create`, `ui.edit`, `ui.delete`, `ui.permission`, `ui.signed_in` | Values for `requires=` |
 | `ui.running`, `ui.failed`, `ui.progress_of`, `ui.cancel` | For views: status of a handler, and the cancel event |
@@ -306,7 +307,7 @@ the handler when the class is created.
 | When the browser updates | At each `yield` and at the end | At each `yield` and at the end | At each `yield` and at the end |
 | A repeat while it runs | Declared on the page: a newer visit replaces it. Started on mount: a newer run replaces it | Queued, runs afterwards | Ignored |
 | The user leaves the page | Declared on the page: result discarded. Started on mount: kept | — | Keeps running; stops with `stop_on_leave=True` |
-| Options | `requires=`, `optional=`, `keep=` | `requires=` | `requires=`, `stop_on_leave=` |
+| Options | `requires=`, `optional=`, `keep=` | `requires=` | `requires=`, `stop_on_leave=`, `limit=` (6.12) |
 | Thread pool | Interactive | Interactive | Jobs |
 
 **A visit** is one opening of a page in one browser tab. `lex_page` starts a new visit on every page
@@ -673,6 +674,82 @@ only a job can do that.
 | `@ui.action(once=True)` drops a repeat click | Removed. A job ignores repeats; an action queues them. | Reflex takes the user's lock before it starts any handler, so a click arriving while an action runs cannot be examined until the action has finished. The probe showed three rapid clicks running twice. |
 | An ORM query without a declared permission "fails the build" | Blocked at run time; flagged by the check on a best-effort basis | Detecting ORM use by reading code is not reliable. Blocking the query on the worker thread is. |
 | `ui.running` and `ui.failed` | Plus `ui.progress_of` | A view needs to read what `yield ui.progress(...)` recorded. |
+
+### 6.11 A result held privately on the server: `ui.private` (2026-11-24)
+
+A tool's result often names persons and amounts. A backend field (`_name`) stays out of the browser,
+but it is part of the state, and Reflex writes the whole state to Redis in production (to disk in
+development): the data lands there, outlives the page and has no idle limit. Built in batch 1dv.
+
+```python
+class PayrollState(ui.State):
+    _report: dict = ui.private()                       # idle_minutes=60, max_hours=8, keep=False
+
+    @ui.job
+    def build(self, values):
+        self._report = salaries_of(self.user.id, values["month"])
+```
+
+- **A field declaration, read and written like a backend field.** `ui.private()` is a data
+  descriptor; Reflex 0.9.13 leaves a descriptor out of its backend vars (it never enters the state's
+  `__dict__`, so no pickle holds it) and out of every delta (it is no base var). It needs the `_`
+  name (refused otherwise: a public name would be a var the browser gets) and its type, which gives
+  its empty value (`{}`, `[]`, `""`, `0`, `None`), as Reflex does for an annotated backend field.
+  *Considered first:* a backend field with a flag (Reflex would pickle it), a `ui.store` next to the
+  state (a second place to read from), `_report = ui.private()` without a type (no empty value).
+- **Kept in this process's memory, keyed by tab, state and field, and bound to the user** who wrote
+  it (the signed-in user's id, found from the session without waiting). The state holds only a
+  random stamp per field (`_ui_private`): so a reader tells "nothing was kept" (the empty value)
+  from "what was kept is gone". A test pickles every state of the tab the way Reflex's Redis and
+  disk managers do, and the state as the browser gets it, and finds no part of the value.
+- **Gone after**: `idle_minutes` without a read or a write (default 60, Reflex's own state
+  expiry); `max_hours` since it was written (default 8, a working day); the tab opening a page
+  again (the opener drops it; `keep=True` keeps it, within those times); another server process
+  (a restart, or the tab's events reaching another worker), another signed-in user on the tab, and
+  more than `LEX_UI_PRIVATE_VALUES` values in the process (default 5000; the least recently used
+  goes first). The lex.ui clock (the heartbeat, every 10 s) drops expired values from memory.
+- **What a reader sees when it is gone**: reading the field raises a refusal, "This is no longer
+  available: it is kept only for a while. Start again.", shown as every refusal is -- a toast for
+  an action or a job (and `ui.failed` for a job), in a form above its submit button (pages design
+  6.15), a table's message for a `@ui.rows`, at the field for a searched choice's rows -- and the
+  page keeps what it showed. Never the empty value, never old data, never another user's. A load
+  resets a private field like every field; one declared `keep=True` (or in the load's `keep=`) is
+  kept while it is held, and reset when it is gone, so the page opens clean instead of looping
+  through the error page's "Try again". A form kept across visits says it under the form (pages
+  design 6.18).
+- **`ui.testing`**: `fields={"_report": {...}}` seeds it and `result.fields["_report"]` reads it,
+  as for every field; `ui.testing.GONE` seeds a value that is gone (to test the refusal) and is what
+  `result.fields` holds for one.
+- *Cost:* a value lives in one process: with several backend workers, a tab whose events reach
+  another worker finds it gone and is told so. A process keeps at most the setting's number of
+  values, of any size. The leave drop needs the page's opener: a page without one (a dashboard on
+  plain `rx.page`) relies on the idle time.
+
+### 6.12 A limit on how many runs of a job go at once: `@ui.job(limit=)` (2026-11-24)
+
+An expensive job (reading another system) must not run more than N times at once. Built in batch
+1dw.
+
+```python
+@ui.job(limit=2)
+def export(self, region):
+    ...
+```
+
+- **Counted in this server process, for all users and tabs together**, from the run's start (after
+  `requires=`) to its wind-up, however it ends: success, failure, refusal, cancel, a form's wrong
+  field. Like the job pool (`LEX_UI_JOB_THREADS`), it is per process: with several backend workers
+  each allows N. A run waiting for a pool thread holds its place.
+- **A press beyond the limit is refused at once, not queued**: "Export is already running 2 times.
+  Try again in a moment." ("Export is already running. Try again in a moment." for `limit=1`),
+  as a toast and in `ui.failed`; nothing else on the page changes -- the check comes before a
+  form's values are judged, so no field message appears and the last result stays. The job is
+  named as its submit button is named (6.14 of the pages design).
+- *Fixed sentence:* `limit=` takes the number only. A sentence of the project's own would be a
+  second way to word a standard message, outside the translation of the others.
+  *Considered first:* the pool's own size (`LEX_UI_JOB_THREADS`, for every job at once), and
+  queueing (a queued press would wait unseen).
+- `limit=` is a whole number, 1 or more; anything else is refused when the state is written.
 
 ---
 

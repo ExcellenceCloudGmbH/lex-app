@@ -8,6 +8,11 @@ import time
 from typing import Any
 
 from lex.lex_app.reflex.ui import context, handlers, pools, results
+from lex.lex_app.reflex.ui.private import GONE
+
+#: What a ``ui.private`` field holds once its value is gone: seed it with ``fields={"_name": GONE}``
+#: to test what a handler does then, and find it in ``result.fields["_name"]``.
+__all__ = ["GONE", "Harness", "Result", "rows", "run"]
 
 
 class _NoApi:
@@ -142,7 +147,8 @@ class Harness:
                                    params=context.Params(params), token=token, permissions=permissions,
                                    api=api if api is not None else _NoApi(), tab=self.token)
 
-        self._previous = (context.set_resolver(resolve), results.RECORDER, handlers.OUTCOMES)
+        self._previous = (context.set_resolver(resolve), results.RECORDER, handlers.OUTCOMES,
+                          context.set_user_id_of(lambda state: user))
         results.RECORDER = self.results
         handlers.OUTCOMES = self.outcomes
         self._registry = RegistrationContext.set(_registry_with_app())
@@ -158,8 +164,9 @@ class Harness:
             await self._running.__aexit__(*exc)
         finally:
             RegistrationContext.reset(self._registry)
-            resolver, recorder, outcomes = self._previous
+            resolver, recorder, outcomes, user_id_of = self._previous
             context.set_resolver(resolver)
+            context.set_user_id_of(user_id_of)
             results.RECORDER = recorder
             handlers.OUTCOMES = outcomes
             pools.shutdown()

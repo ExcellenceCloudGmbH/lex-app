@@ -2588,3 +2588,33 @@ letters:
       xfail: 0
     note: >-
       `ui.form(..., tabs=True)`: the result's sections as RFDS's tabs, each title its tab, what they share above; compiled with Reflex's page compiler; a tab's permission is RFDS's; every mistake refused. These tests fail on a second way to write tabs, a tab whose content is lost, a tab a user may not see drawn anyway, or a mistake that only shows in the browser.
+  dv:
+    title: 'lex.ui: a result held privately on the server -- ui.private'
+    scenarios: 1.920-1.926
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      `_report: dict = ui.private(idle_minutes=, max_hours=, keep=)`: read and written like a backend field, kept in the server process's memory only, bound to the tab and the user who wrote it; gone after its idle time, its maximum age, a new visit (unless keep=True), another process or user; reading it then is a plain refusal; ui.testing seeds it and GONE. These tests fail on personal data in a state pickle or the browser, one user's value read by another, a value that outlives its limits, or a page that shows nothing or old data where the value was.
+  dw:
+    title: 'lex.ui: a limit on how many runs of a job go at once -- @ui.job(limit=)'
+    scenarios: 1.927-1.929
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      `@ui.job(limit=2)`: at most two runs at once in the server process, for all users; a further press refused at once with a fixed sentence (toast and ui.failed), before a form's values are judged; the place given back however a run ends. These tests fail on a third run starting beside two, a refused press that changes the page, or a place never given back.
+  dx:
+    title: 'lex.ui forms: a result kept across visits -- ui.form(keep=True)'
+    scenarios: 1.930-1.933
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.form(..., keep=True)`: the result flag survives a new visit; back while the job runs its progress, back after it the result; a kept private result that is gone is said under the form; a kept form shows its last failure in place; what was typed returns through value=. These tests fail on a kept form that comes back empty, a result shown over data that is gone, or a failure while away that is never shown.

@@ -162,6 +162,9 @@ class State(rx.State):
     _ui_load_runs: dict[str, str] = {}
     #: Searched field id -> every value offered to this tab (as text) -> the row's id: what a form accepts.
     _ui_offered: dict[str, dict] = {}
+    #: "State.field" -> the stamp of the value a ``ui.private`` field holds in the server's memory.
+    #: Only the stamp is part of the state: the value itself is never stored with it.
+    _ui_private: dict[str, str] = {}
 
     user = property(lambda self: context.current().session.user)
     api = property(lambda self: context.api_of(context.current()))
@@ -186,10 +189,21 @@ class State(rx.State):
         from lex.lex_app.reflex.ui import handlers
 
         self.ui_visit += 1
-        from lex.lex_app.reflex.ui import runs
+        from lex.lex_app.reflex.ui import forms, private, runs
 
         await runs.sweep(self)
-        self.ui_invalid, self.ui_step, self.ui_done, self.ui_refused = {}, {}, {}, {}  # a form starts over
+        private.leave(str(self.router.session.client_token or ""))   # private values not kept across visits
+        kept = forms.kept()
+        # A form starts over on a new visit: its field messages, its step, its result and its refusal leave.
+        # One declared keep=True keeps its result while what it shows is kept, and its refusal: shown above its
+        # submit button, as when the user stayed (the user may have been away when it came).
+        done = {key: True for key, value in dict(self.ui_done).items() if value and key in kept}
+        for key in list(done):
+            if private.gone_in(await self.get_state(kept[key])):
+                done.pop(key)
+                self.ui_failed = {**dict(self.ui_failed), key: forms.gone_message()}
+        refused = {key: one for key, one in dict(self.ui_refused).items() if key in kept}
+        self.ui_invalid, self.ui_step, self.ui_done, self.ui_refused = {}, {}, done, refused
         self.ui_asking, self.ui_asking_args = "", []
         self._ui_page = page
         self._ui_reset = []

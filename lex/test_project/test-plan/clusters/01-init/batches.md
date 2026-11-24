@@ -3516,3 +3516,71 @@ form's `result=`. What building settled is section 6.17 of `docs/superpowers/spe
 | 1.950 | The result's sections are tabs, each title its tab | RFDS's tabs; titles as tabs, not repeated as headings; shared parts above; without `tabs=` as before; the record's `tabs=True` unchanged |
 | 1.951 | Tabs compile and keep who may see a tab | Reflex's page compiler; RFDS's tab permission: a refused tab and its table not drawn; a section's load stays a part load |
 | 1.952 | Tabs written wrongly say what to write | no result, one section, a part after a section, two of one title, a closed section, a state `visible=`, not a bool |
+
+### Batch 1dv — lex.ui: a result held privately on the server -- ui.private ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.920 – 1.926 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/private.py`, `lex/lex_app/reflex/ui/workcopy.py` (`fields_of`, `snapshot`, `restore`, `reset`, `Draft`), `lex/lex_app/reflex/ui/state.py` (`_ui_private`, `ui_open`), `lex/lex_app/reflex/ui/context.py` (`user_id_of`), `lex/lex_app/reflex/ui/testing.py` (`GONE`), `lex/lex_app/reflex/ui/runs.py` (the clock's sweep) |
+| Test file | `lex/test_project/tests/init/test_1dv_ui_private.py` |
+| Test classes | `TestCluster01dv_Private` (1.920–1.926) |
+| Fixtures | a neutral payroll state (a report not kept, a draft kept) |
+| Tests landed | **7 pass / 0 fail** |
+| Status | ✅ Complete |
+
+`ui.private` for personal data in a tool's result. What building settled is section 6.11 of `docs/superpowers/specs/2026-11-23-reflex-ui-action-state-layer-design.md`. Test 1.783 follows: `ui.private` is a public name.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.920 | The value stays in memory, never in a pickle or the browser | an action, a job and a table's rows read it; every state pickled as Reflex's Redis and disk managers do, the state as the browser gets it, and every update hold no part of it; only a stamp; nothing kept is the empty value |
+| 1.921 | Another user or another process never sees it | another user signed in on the tab is refused with the sentence and gets nothing; a process that never held it says the same; the page keeps what it had |
+| 1.922 | It leaves after its idle time and its maximum age | reads within the idle time keep it; past the maximum age or the idle time it is gone; the lex.ui clock drops it from memory; LEX_UI_PRIVATE_VALUES bounds memory, least recently used first |
+| 1.923 | A new visit drops it unless kept | the opener drops a value not kept (reading says so); keep=True stays; a load resets the one not kept and keeps the kept; a kept value that is gone is reset by the load: no error-page loop |
+| 1.924 | What the user sees when it is gone | an action and a job are refused with the sentence (toast; ui.failed for a job); a table's message is the sentence; a failed action leaves it gone, and restores a kept value |
+| 1.925 | ui.testing seeds and reads it like any field | fields= seeds it; result.fields reads it; ui.testing.GONE seeds a gone value and is what result.fields holds; GONE copies and pickles as itself |
+| 1.926 | A private field declared wrongly says what to write | a public name, no type, a plain Reflex state, a limit of 0 or True, keep= not a bool; the empty value from the type; neither a backend var nor a var |
+
+### Batch 1dw — lex.ui: a limit on how many runs of a job go at once -- @ui.job(limit=) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.927 – 1.929 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/handlers.py` (`job`, `_limit_message`), `lex/lex_app/reflex/ui/runs.py` (`take_place`, `give_place`) |
+| Test file | `lex/test_project/tests/init/test_1dw_ui_job_limit.py` |
+| Test classes | `TestCluster01dw_JobLimit` (1.927–1.929) |
+| Fixtures | a neutral export state (an export held at a gate, a report form, a job that stops) |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+`limit=` on `@ui.job`. What building settled is section 6.12 of `docs/superpowers/specs/2026-11-23-reflex-ui-action-state-layer-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.927 | Beyond the limit a press is refused at once | two run at once; the third is refused before the others end, with the sentence, as a toast and in ui.failed; its body never runs; afterwards it runs |
+| 1.928 | A place is given back however the run ends | a failure, a body's refusal, a cancel and a form's wrong field each free the place; a refused press of a form's job leaves no field message; limit=1 has its own sentence |
+| 1.929 | The limit is declared as a whole number | 0, True, 2.5 and "2" refused with what to write; the handler carries its limit, also into a mixin's copy |
+
+### Batch 1dx — lex.ui forms: a result kept across visits -- ui.form(keep=True) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.930 – 1.933 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/forms.py` (`form` keep=, the failure under a kept form), `lex/lex_app/reflex/ui/forms.py` (`keep`, `kept`, `gone_message`), `lex/lex_app/reflex/ui/state.py` (`ui_open`) |
+| Test file | `lex/test_project/tests/init/test_1dx_ui_form_keep.py` |
+| Test classes | `TestCluster01dx_FormKeep` (1.930–1.933) |
+| Fixtures | a neutral invoice report state (a job held at a gate, a kept private result, a load that keeps the customer) |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+`keep=` on `ui.form`, after checking what `@ui.load(keep=)` already gave: the fields survived, the result flag did not. What building settled is section 6.18 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`. Test 1.841 (a new visit starts a form over) still holds for a form that is not kept.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.930 | A kept form shows what its job found after the user was away | back while the job runs: running and its progress; back after: the result flag and the rows; the field starts from what was typed; a form not kept starts over |
+| 1.931 | A kept result whose data is gone says so | within the private idle time the result shows; past it, no result and the sentence under the form; a private field not kept does not decide; a failure while away stays to be shown; sending again clears it |
+| 1.932 | The kept form page compiles and shows its failure in place | RFDS's inline message bound to ui.failed for a kept form only; the field's start from the state; compiled with Reflex's page compiler; registered with its state; keep= True or False only |
+| 1.933 | A kept form with a load keeps what the load keeps | after a revisit and the load: the kept private result and the field in the load's keep= survive; what the load does not keep is reset |

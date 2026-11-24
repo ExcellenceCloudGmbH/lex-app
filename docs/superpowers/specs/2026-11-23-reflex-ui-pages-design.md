@@ -564,7 +564,7 @@ Built on 2026-11-24 after a spike against RFDS 1.0.0 (`ui.form`, `ui.field`, `ui
   *Cost:* no character limit or counter (RFDS's `max_length=`, `show_count=`).
 - **A file field is not built** (`kind="file"` says to use `ui.custom_block`).
 - **A new visit starts every form over**: the opener clears the messages, the wizard steps, the
-  results and an open dialog.
+  results and an open dialog -- except the result and the refusal of a form declared `keep=True` (6.18).
 - **`ui.testing.run(...)` results gain `invalid`** (field -> message) for a project's form tests.
 
 A tool page, whole -- a form, a job with progress as submit, a result with a table and a download:
@@ -642,7 +642,7 @@ Built on 2026-11-24 (batches 1ds-1du), on top of 6.14:
   in RFDS's `inline_message` (warning tone, as the toast it replaces; `role="alert"`: it is new and the
   form did not do what was asked). It is kept per handler (`ui_refused[key] = {title, message}`) and
   leaves when the form is sent again, whatever comes of that send, and on a new visit -- as the result
-  of 6.14 does. It is not also a toast: RFDS's rule is that a warning is never *only* a toast, and the
+  of 6.14 does (a form declared `keep=True` keeps both: 6.18). It is not also a toast: RFDS's rule is that a warning is never *only* a toast, and the
   same sentence twice, one of them persistent, is noise. A refusal by lex-app's API (not permitted, a
   4xx) is a refusal too; an unexpected failure stays a toast with its reference, since nothing in the
   form can fix it. One way to refuse, `raise ui.Refuse(...)`, wherever the handler runs: no
@@ -721,6 +721,48 @@ ui.form(title="Region report", submit=RegionReportState.build_report, fields=[..
 - *Not added:* a count on each tab (RFDS's tab badge): a table in a tab that is not open has not
   read its rows, so the count would be missing exactly where it is wanted.
 
+
+### 6.18 A form's result kept across visits: `ui.form(keep=True)` (2026-11-24)
+
+A user starts a long job from a form, leaves the page, comes back, and should find what it found.
+Built in batch 1dx.
+
+- **What existed, and what did not.** A state's fields already survive a visit: a page without a
+  load never resets them, and a load's `keep=("customer",)` exempts fields from its reset. A job
+  keeps running when the user leaves (unless `stop_on_leave=True`) and writes its result. What did
+  not survive was the form's result flag: the opener starts every form over (6.14). So `keep=` on
+  the state alone shows an empty form; one option was added.
+- **`ui.form(..., keep=True)` keeps the result flag across visits**, the same word as the load's
+  `keep=` and `ui.private(keep=True)`: "survives a new visit". Back while the job runs, the form
+  shows its progress; back after it finished, the result. Its wizard step and field messages still
+  start over. *Considered first:* `@ui.load(keep=...)` alone (does not reach the flag), a job
+  option (the result is declared on the page, not the handler), keeping every form (an entry form
+  should start over).
+- **What was typed is not kept by lex-app** (it may be personal): a field shows it again through
+  `value=` on a state field the handler sets, which the load keeps -- `ui.field("customer",
+  value=ReportState.customer)`, `self.customer = values["customer"]`, `@ui.load(keep=("customer",))`.
+- **A kept result shows only while what it shows is kept.** On a new visit the opener checks the
+  submit handler's state: if a `ui.private(keep=True)` field of it is gone (its idle time or age
+  passed, another process, another user), the result does not show over nothing; the form says,
+  under it, "The last result is no longer available: results are kept only for a while. Send the
+  form again." A private field that is not kept leaves with every visit and does not decide: what
+  reads it says it is gone where it reads it (action design 6.11).
+- **A kept form shows its handler's last failure under it**, in RFDS's inline message (warning
+  tone), besides the toast: the user may have been away when it was toasted. Sending the form again
+  clears it.
+- **A kept form keeps its refusal too, in the one place a refusal shows** (6.15's refusal in place): the
+  opener keeps `ui_refused` for a kept form's handler, so a `ui.Refuse` stays above the submit
+  button, headed by its title, whether the user stayed or came back; the line under the form then
+  stays empty (`ui_failed` holds the same sentence), so a refusal is never shown twice. Under the
+  form remain what has no place above the button: an unexpected failure's toasted reference, and
+  "The last result is no longer available ...". A form that is not kept drops its refusal on a new
+  visit, as 6.15 says.
+- **A searched choice (6.15) starts empty on a kept form too**: `value=` is refused for it, and the
+  values offered to the tab (`_ui_offered`) are not part of the visit, so a value chosen before the
+  visit away is still accepted when the user chooses it again.
+- *Cost:* the result's fields must be kept by the page's load too (its `keep=`, or `ui.private(keep=True)`);
+  lex-app cannot see which fields a result reads, so it does not check this.
+
 ---
 
 ## 7. Order of building
@@ -793,7 +835,7 @@ Declaring        @ui.page(route, nav=, icon=, requires=, params=)      @ui.dashb
 Kinds            ui.overview(title, load=, figures=, tiles=, sections=, actions=)
                  ui.list(title, load=, filters=, table=, actions=)
                  ui.record(title, load=, status=, facts=, sections=, tabs=, actions=)
-                 ui.form(title, load=, fields= | steps=, submit=, result=, actions=)
+                 ui.form(title, load=, fields= | steps=, submit=, result=, actions=, keep=)
 
 Components       ui.text(sentence, **values)             ui.fact(label, value, kind=)
                  ui.figure(label, value, kind=, change=, to=)
