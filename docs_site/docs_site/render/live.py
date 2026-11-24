@@ -1,6 +1,7 @@
 """Running a page's python fences: setup (exec) and demos (demo, demo-only), in a module per page."""
 
 import ast
+import re
 import sys
 import types
 from typing import Any
@@ -47,13 +48,21 @@ class PageModule:
 def to_component(value: Any, name: str) -> rx.Component:
     if isinstance(value, rx.Component):
         return value
-    if isinstance(value, Kind):
-        def page() -> Any:
-            return value
-        page.__name__ = page.__qualname__ = name.replace("/", "_").replace("-", "_")
-        return ui.dashboard(page)()
-    if isinstance(value, Part):
-        return ui.embed(value, name=name)
+    # The demo is named the way a reader's own page would be, because lex.ui shows the name as a
+    # table's caption: a page kind after its title, a bare part not at all. ``name`` (the page and
+    # the demo's number) only goes into an error, so a broken demo still says where it is.
+    try:
+        if isinstance(value, Kind):
+            title = value.title if isinstance(value.title, str) else ""
+            def page() -> Any:
+                return value
+            page.__name__ = page.__qualname__ = re.sub(r"\W+", "_", title.lower()).strip("_") or "demo"
+            return ui.dashboard(page)()
+        if isinstance(value, Part):
+            return ui.embed(value)
+    except Exception as error:
+        error.add_note(f"in the docs demo {name}")
+        raise
     raise TypeError(f"{name}: a demo shows a component, a lex.ui page kind (ui.record, ui.list) or a part "
                     f"(ui.table, ui.section); got {type(value).__name__}")
 

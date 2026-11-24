@@ -108,3 +108,16 @@ def test_reset_empties_the_tab_and_rereads_the_page_tables():
     assert STORE.tab("tab-other").rows["Fund"] == []
     assert len(events) == 2              # the toast, and the reread of the page's one table
     STORE.reset("tab-other")
+
+
+def test_a_demo_table_is_captioned_like_a_project_page_not_with_the_docs_name():
+    """A demo's table caption is what a reader's own page would show: the page's name from its
+    title for a page kind, none for a bare part - never the docs' internal "slug#n"."""
+    page = PageModule("t/caption")
+    page.run(_STATE)
+    listed = str(to_component(page.value('ui.list(title="Open funds", table=ui.table(Funds.rows, columns=["name"]))'),
+                              "t/caption#1"))
+    assert "t/caption" not in listed and "caption#1" not in listed
+    assert '"Open funds"' in listed
+    embedded = str(to_component(page.value('ui.table(Funds.rows, columns=["name"])'), "t/caption#2"))
+    assert "caption#2" not in embedded and "t/caption" not in embedded
