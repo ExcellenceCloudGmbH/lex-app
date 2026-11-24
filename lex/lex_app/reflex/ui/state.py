@@ -54,6 +54,7 @@ def _page_permitted(state: Any, requires: str) -> bool:
     return requires in lex_permission_resolver(current_identity(state))
 
 
+
 class State(rx.State):
     """The base class of a page state: handler status for views, and the body's helpers.
 

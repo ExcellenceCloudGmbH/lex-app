@@ -37,6 +37,7 @@ class Download:
     url: str | None = None
     filename: str | None = None
     data: Any = None
+    media_type: str | None = None
 
 
 class Refresh(list):
@@ -69,10 +70,14 @@ def toast(message: str, *, tone: str = "info", description: str = "") -> Toast:
 
 
 def download(*, url: str | None = None, filename: str | None = None, data: Any = None) -> Download:
-    """Hand the user a file: by ``url``, or ``data`` with a ``filename``."""
+    """Hand the user a file: by ``url``, or ``data`` with a ``filename``. The browser is told what
+    the file is from its name (``report.pdf`` is a PDF)."""
     if url is None and data is None:
         raise ValueError("ui.download() needs url= or data=")
-    return Download(url, filename, data)
+    import mimetypes
+
+    kind = mimetypes.guess_type(filename)[0] if (data is not None and filename) else None
+    return Download(url, filename, data, kind)
 
 
 def refresh(*handlers: Any) -> Refresh:
@@ -107,14 +112,28 @@ def split(value: Any, *, handler: str) -> tuple[list, Progress | None]:
             continue
         if isinstance(item, Progress):
             report = item
-        elif isinstance(item, (Goto, Toast, Download, Refresh)):
+        elif isinstance(item, (Goto, Toast, Download, Refresh)) or _is_state_handler(item):
             out.append(item)
         else:
             raise TypeError(
-                f"{handler} returned {item!r}. A lex.ui handler returns ui.goto(), ui.toast(), ui.download() "
-                "or ui.refresh(), and a job may yield ui.progress(). Use @ui.custom for raw Reflex events."
+                f"{handler} returned {item!r}. A lex.ui handler returns ui.goto(), ui.toast(), ui.download(), "
+                "ui.refresh() or another state's handler (`Other.reload`, `Other.open(key)`), and a job may "
+                "yield ui.progress(). Use @ui.custom for raw Reflex events such as rx.call_script()."
             )
     return out, report
+
+
+def _is_state_handler(item: Any) -> bool:
+    """Another state's handler, as a handler may hand it on: ``Other.reload`` or ``Other.open(key)``.
+
+    Only a handler of a state: Reflex's own events (``rx.call_script``, ``rx.redirect``,
+    ``rx.download``...) stay in the custom region (``@ui.custom``) - a toast, a goto and a download
+    have lex.ui results of their own.
+    """
+    from reflex.event import EventHandler, EventSpec
+
+    target = item.handler if isinstance(item, EventSpec) else item
+    return isinstance(target, EventHandler) and bool(target.state_full_name)
 
 
 def _external(path: str) -> bool:
@@ -146,8 +165,10 @@ def to_events(items: list) -> list:
 
             extra = {"description": item.description} if item.description else {}
             events.append(getattr(rfds.toast, item.tone)(item.message, **extra))
+        elif _is_state_handler(item):
+            events.append(item)
         else:
-            events.append(rx.download(url=item.url, filename=item.filename, data=item.data))
+            events.append(rx.download(url=item.url, filename=item.filename, data=item.data, mime_type=item.media_type))
     return events
 
 

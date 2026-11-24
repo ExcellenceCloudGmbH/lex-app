@@ -525,6 +525,11 @@ component's `on_mount` on `url`, followed by the page's opener, in Reflex's real
 A handler that needs raw Reflex is decorated `@ui.custom` in place of `@rx.event`. It behaves
 identically; the marker makes it visible. Chunked uploads use it until an upload component exists.
 
+Amended 2026-11-24: a body may also return or yield another state's handler (`Other.reload`,
+`Other.open(key)`); the browser runs it after the results before it, in order. Reflex's own raw
+events (`rx.call_script`, `rx.redirect`, `rx.download`...) are still refused: they belong in an
+`@ui.custom` handler, where the check lists them.
+
 `lex reflex check` gains:
 
 | Finding | Result |

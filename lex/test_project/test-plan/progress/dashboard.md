@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 105 | 827 | 801 | 3 | 0 |
+| 1. Init — Project Bootstrap | 108 | 831 | 805 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -129,6 +129,9 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1da | lex.ui links: a raw Reflex page as somewhere a link may lead | 1.824 | complete | 1 | 0 | 0 | `ui.reflex_page("/route")` declares a raw Reflex page as a link target for `ui.address`, `open=`, `ui.link` and `ui.button`. These tests fail on a converted table whose rows cannot be opened, or a row link built from a string. |
 | 1db | lex.ui's part of lex-app's app, and every page in lex-app's chrome | 1.825-1.826 | complete | 2 | 0 | 0 | create_app runs lex.ui's part of the app in one internal step, and every page is in lex-app's chrome after the grants; the project-frame hook built first was withdrawn after review. These tests fail on a page registered twice, without its error page, or outside lex-app's chrome. |
 | 1dc | lex.ui handlers declared on a state mixin are each state's own | 1.827 | complete | 1 | 0 | 0 | A lex.ui handler that a state takes from a mixin is decorated again under the state's own name. These tests fail on a button that stays busy, or a press ignored as a repeat, because another state runs the same handler. |
+| 1dd | lex.ui tables: a date column is filtered by a range of days | 1.828 | complete | 1 | 0 | 0 | A date or datetime column named in `filters=` is filtered by a range of days, on the server, only on the fields the table offers. These tests fail on a list that cannot be narrowed to a month, a range that drops its last day, or a filter on a field the table does not offer. |
+| 1de | lex.ui handlers may hand on to another state's handler | 1.829 | complete | 1 | 0 | 0 | A handler body may return or yield another state's handler among its results; raw Reflex events stay in the custom region. These tests fail on a handler that cannot chain to another state, or a browser script slipping out of an ordinary handler. |
+| 1df | lex.ui: a button that says why it cannot be pressed; a download the browser can place | 1.830-1.831 | complete | 2 | 0 | 0 | `ui.button(disabled=<reason>)` and a download's media type from its file name. These tests fail on a button that vanishes or stays pressable for a row it cannot act on, or a file the browser cannot place. |
 | 1e |  | 1.30-1.43 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |

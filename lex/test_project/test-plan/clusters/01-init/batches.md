@@ -3127,3 +3127,65 @@ showed every section busy while one exported, and ignored a second section's exp
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.827 | A handler from a mixin is each states own | each state keeps the handler under its own name, so a view of one state's running export does not show the other's; the second export runs too instead of being ignored as a repeat; a handler written on the state itself keeps its name |
+
+### Batch 1dd — lex.ui tables: a date column is filtered by a range of days ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.828 | A date column is filtered by a range of days | the kind column has a dropdown and the date column a date-range picker; a month keeps its first to last day (a datetime on the last evening included, an undated row never); an open start or end; the range and the dropdown together; clearing empties the picker; a range for a field that is no date filter and a date that is not a day change nothing |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/tables.py` (the toolbar, filters by column kind), `lex/lex_app/reflex/ui/pages/rows_table.py` (`set_dates`, matching) |
+| Test file | `lex/test_project/tests/init/test_1dd_ui_table_filters.py` |
+| Test classes | `TestCluster01dd_TableFilters` (1.828) |
+| Fixtures | a rows handler with dates of every shape; `ui.testing.Harness` |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+First built as `ui.filter(kind="dates" | "text")`; after an independent review the filter's control follows the
+column's kind (no new name), and the "contains" filter was dropped: `search=True` already does it.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.828 | A date column is filtered by a range of days | the kind column has a dropdown and the date column a date-range picker; a month keeps its first to last day (a datetime on the last evening included, an undated row never); an open start or end; the range and the dropdown together; clearing empties the picker; a range for a field that is no date filter and a date that is not a day change nothing |
+
+### Batch 1de — lex.ui handlers may hand on to another state's handler ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.829 | A handler hands on to another states handler | the other state's handlers are results like the toast, in the order written, and reach the browser as they are; a browser script, a redirect and a plain object are refused with the handler's name and where raw events go |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/results.py` (`split`, `to_events`) |
+| Test file | `lex/test_project/tests/init/test_1de_ui_reflex_events.py` |
+| Test classes | `TestCluster01de_ReflexEvents` (1.829) |
+| Fixtures | a raw Reflex state with two handlers |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+First built to accept any Reflex event; after an independent review only another state's handler is accepted, so raw
+events stay in the custom region. 1.747's docstring follows.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.829 | A handler hands on to another states handler | the other state's handlers are results like the toast, in the order written, and reach the browser as they are; a browser script, a redirect and a plain object are refused with the handler's name and where raw events go |
+
+### Batch 1df — lex.ui: a button that says why it cannot be pressed; a download the browser can place ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.830 – 1.831 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/vocab.py` (`button(disabled=)`), `lex/lex_app/reflex/ui/results.py` (`download`) |
+| Test file | `lex/test_project/tests/init/test_1df_ui_button_disabled.py` |
+| Test classes | `TestCluster01df_ButtonDisabled` (1.830–1.831) |
+| Fixtures | a rows handler with a reason per row |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Found while converting the reviewed customer project: row actions disabled with a reason per row, downloads of PDFs and
+workbooks, and flags that kept jobs from overlapping (and stuck when a job failed). 1.770's reserved names gain
+`is_running`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.830 | A button says why it cannot be pressed | each row's button is blocked exactly when its row has a reason, stays focusable and shows it; a fixed reason is shown; a yes/no field and True are refused with what to give instead |
+| 1.831 | A download tells the browser what the file is | a file built from data carries the media type its name says; a download by URL carries none |
