@@ -36,8 +36,11 @@ def _sidebar(current: str) -> rx.Component:
                                      weight="medium" if slug == current else "regular",
                                      color_scheme="teal" if slug == current else "gray",
                                      aria_current="page" if slug == current else None))
-    return rx.vstack(*items, spacing="1", align="start", width="240px", flex_shrink="0",
-                     padding="16px", class_name="docs-sidebar")
+    return rx.el.nav(
+        rx.vstack(*items, spacing="1", align="start"),
+        aria_label="Docs", width="240px", flex_shrink="0", padding="16px", class_name="docs-sidebar",
+        display=rx.breakpoints(initial="none", md="block"),
+    )
 
 
 def _prev_next(slug: str) -> rx.Component:
@@ -54,9 +57,10 @@ def shell(slug: str, body: rx.Component, *, aside: rx.Component | None = None) -
         _header(),
         rx.hstack(
             _sidebar(slug),
-            rx.box(body, flex="1", min_width="0", max_width="760px", padding="24px"),
-            rx.box(aside or rx.fragment(), width="200px", flex_shrink="0", padding="24px",
-                   display=["none", "none", "block"]),
+            rx.box(body, flex="1", min_width="0", max_width="760px",
+                   padding=rx.breakpoints(initial="16px", md="24px")),
+            rx.el.nav(aside, aria_label="On this page", width="200px", flex_shrink="0", padding="24px",
+                      display=rx.breakpoints(initial="none", lg="block")) if aside is not None else rx.fragment(),
             align="start", width="100%",
         ),
         spacing="0", width="100%",
