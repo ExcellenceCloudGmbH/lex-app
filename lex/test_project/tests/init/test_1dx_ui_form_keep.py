@@ -10,7 +10,7 @@ empty or old. What was typed comes back through ``value=`` on a field the handle
 regression is a kept form that comes back empty, a result shown over data that is gone, or a
 failure that happened while the user was away and was never shown.
 
-Cluster 1dx -- scenarios 1.930-1.937. Type: U.
+Cluster 1dx -- scenarios 1.930-1.937, 1.939. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/forms.py (form keep=, the failure under a kept form),
 lex/lex_app/reflex/ui/forms.py (keep, kept, gone_message), lex/lex_app/reflex/ui/state.py (ui_open).
 Run: python -m lex pytest lex/test_project/tests/init/test_1dx_ui_form_keep.py -v
@@ -555,3 +555,26 @@ class TestCluster01dx_FormKeep(SimpleTestCase):
         self.assertIn("HeaderState.note", said)
         self.assertIn("HeaderState.open", said)
         self.assertIn('@ui.load(keep=("note",))', said, "it says exactly what to write")
+
+    # -- 1.939 ---------------------------------------------------------
+    def test_1_939_the_docstrings_a_reader_learns_from_say_what_the_code_does(self) -> None:
+        """
+        Scenario 1.939: the words of ui.State, ui.form and ui.field (review, 2026-11-24).
+        Given: the docstrings a reader opens first, and the summary a wrong field's message quotes.
+        When:  they are read.
+        Then:  ui.State names every helper a handler has -- self.tab_id, and self.progress as the
+               only one safe from another thread; ui.form says one keep=True is enough and that a
+               computed var never reads a private field; the field summary names currency= and
+               lines=; no line of these docstrings runs past 110 characters.
+        """
+        from lex.lex_app.reflex.ui.pages import forms as page_forms
+
+        state_doc = State.__doc__
+        for words in ("self.tab_id", "self.progress", "another thread"):
+            self.assertIn(words, state_doc, f"ui.State names {words}")
+        self.assertRegex(page_forms.form.__doc__, r"The one ``keep=True``\s+is enough", "one keep=True is enough")
+        self.assertIn("never a private one", page_forms.form.__doc__)
+        self.assertIn("currency=, lines=", page_forms._FIELD, "the field summary names every argument")
+        for doc in (state_doc, page_forms.form.__doc__, page_forms.field.__doc__):
+            long = [line for line in doc.splitlines() if len(line) > 110]
+            self.assertEqual(long, [], "every line of the docstring fits")

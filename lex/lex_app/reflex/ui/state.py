@@ -118,10 +118,12 @@ def _page_permitted(state: Any, requires: str) -> bool:
 class State(rx.State):
     """The base class of a page state: handler status for views, and the body's helpers.
 
-    Inside a handler body: ``self.user``, ``self.api``, ``self.params``, ``self.can(Model, scope)``
-    and ``self.state(Other)``; in a job, ``self.progress(fraction, message)``. They are properties,
-    so the browser cannot call them. Their names are reserved: a subclass declaring a field, computed var or method with one of them is refused
-    when the class is defined.
+    Inside a handler body: ``self.user``, ``self.api``, ``self.params``, ``self.can(Model, scope)``,
+    ``self.state(Other)`` and ``self.tab_id`` (the browser tab, for a project's per-tab store); in a
+    job, ``self.progress(fraction, message)`` -- the only one that is safe from another thread (a
+    library's callback): such a thread reads and writes no other part of ``self``. They are
+    properties, so the browser cannot call them. Their names are reserved: a subclass declaring a
+    field, computed var or method with one of them is refused when the class is defined.
     """
 
     def __init_subclass__(cls, **kwargs: Any):

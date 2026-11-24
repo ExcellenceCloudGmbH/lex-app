@@ -338,7 +338,7 @@ class TestCluster01dj_FormPage(SimpleTestCase):
                            "The handler finds each value under its field's key: give each field its own."),
             "raw": (dict(fields=[rx.text("Name")]),
                     "Page `new_invoice`, slot `fields`: got a raw component (`Text`).\n`fields=` holds "
-                    "`ui.field(key, label=, kind=, options=, required=, help=, value=)`."),
+                    "`ui.field(key, label=, kind=, options=, required=, help=, value=, currency=, lines=)`."),
             "no submit": (dict(fields=ok, submit=None),
                           "Page `new_invoice`, slot `submit`: the form has no `submit=`.\n"
                           "Name the handler that receives the values: `submit=OrdersState.create`."),

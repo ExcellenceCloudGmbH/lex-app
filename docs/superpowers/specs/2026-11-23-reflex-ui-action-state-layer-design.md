@@ -689,7 +689,10 @@ only a job can do that.
 
 A tool's result often names persons and amounts. A backend field (`_name`) stays out of the browser,
 but it is part of the state, and Reflex writes the whole state to Redis in production (to disk in
-development): the data lands there, outlives the page and has no idle limit. Built in batch 1dv.
+development): the data lands there and outlives the page -- in Redis until Reflex's state expiry
+(an hour after the tab's last event, `redis_token_expiration`), on disk with no limit at all -- and
+it has no limit of its own: no maximum age, nothing that drops it on a new visit or for another
+user. Built in batch 1dv.
 
 ```python
 class PayrollState(ui.State):

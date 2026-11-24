@@ -3582,13 +3582,13 @@ form's `result=`. What building settled is section 6.17 of `docs/superpowers/spe
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.930 – 1.935, 1.936, 1.937 |
+| Scenario range | 1.930 – 1.935, 1.936, 1.937, 1.939 |
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/pages/forms.py` (`form` keep=, the failure under a kept form), `lex/lex_app/reflex/ui/forms.py` (`keep`, `kept`, `gone_message`), `lex/lex_app/reflex/ui/state.py` (`ui_open`) |
 | Test file | `lex/test_project/tests/init/test_1dx_ui_form_keep.py` |
-| Test classes | `TestCluster01dx_FormKeep` (1.930–1.935, 1.936, 1.937) |
+| Test classes | `TestCluster01dx_FormKeep` (1.930–1.935, 1.936, 1.937, 1.939) |
 | Fixtures | a neutral invoice report state (a job held at a gate, a kept private result, a load that keeps the customer) |
-| Tests landed | **8 pass / 0 fail** |
+| Tests landed | **9 pass / 0 fail** |
 | Status | ✅ Complete |
 
 `keep=` on `ui.form`, after checking what `@ui.load(keep=)` already gave: the fields survived, the result flag did not. What building settled is section 6.18 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`. Test 1.841 (a new visit starts a form over) still holds for a form that is not kept.
@@ -3603,3 +3603,4 @@ form's `result=`. What building settled is section 6.17 of `docs/superpowers/spe
 | 1.935 | A kept form with tabs and a searched choice | keep=True with tabs=True compiles with its search; back within the idle time the tab's table reads the kept private value; a customer offered before the visit is still accepted; past the idle time the form and the tab's table say it is gone |
 | 1.936 | A reconnect is not a new visit | hydrate and on_load again on a new connection for the same address keep the visit count, a private value not kept and both forms' results, and run the loads without resetting; a link to the same page on the same connection, and a reconnect on another address, are new visits |
 | 1.937 | One keep=True keeps what the result shows | with no keep on the state, a private result and a field shown come back after a visit and the page's load of the same state; a result showing another state's field the page's load resets is refused at page build with @ui.load(keep=(...)) to write |
+| 1.939 | The docstrings a reader learns from say what the code does | ui.State names self.tab_id and self.progress as the only helper safe from another thread; ui.form says one keep=True is enough and a computed var never reads a private field; the field summary names currency= and lines=; no docstring line past 110 characters |

@@ -25,7 +25,7 @@ from lex.lex_app.reflex.ui.pages.parts import Build, Part, called, say, shown, s
 DROPDOWN_OPTIONS = 12
 _CHOICES = ("choice", "choices")
 
-_FIELD = "`ui.field(key, label=, kind=, options=, required=, help=, value=)`"
+_FIELD = "`ui.field(key, label=, kind=, options=, required=, help=, value=, currency=, lines=)`"
 _DIALOGS = itertools.count(1)
 
 
@@ -294,9 +294,11 @@ def field(key: str, *, label: Any = None, kind: str | None = None, options: Any 
     id and label only. A rows handler without ``search`` returns every row, and lex-app matches
     the typed words against the labels. The first page is there when the field opens. The value
     sent back must be one this browser tab was offered, else it is refused at the field. A
-    searched choice starts empty (no ``value=``) and chooses one (not ``kind="choices"``). ``label`` defaults to the key with a capital; ``help`` is a sentence
-    under it; ``value`` is what the field starts with (a value -- a list for several -- or a
-    state value the page's load filled). ``required=True`` (for several: at least one) and the
+    searched choice starts empty (no ``value=``) and chooses one (not ``kind="choices"``).
+
+    ``label`` defaults to the key with a capital; ``help`` is a sentence under it; ``value`` is
+    what the field starts with (a value -- a list for several -- or a state value the page's
+    load filled). ``required=True`` (for several: at least one) and the
     kind are checked before the handler runs, and the message is shown at the field.
 
     ``lines=6`` makes a text field several lines high, for notes, a comment or a pasted list:
@@ -637,10 +639,10 @@ def form(*, title: Any, load: Any = None, fields: Any = (), steps: Any = (), sub
     again: what a section holds, or ``ui.section``\\ s. The handler keeps what the result shows in
     its state -- large data in a field whose name starts with ``_``, which stays on the server,
     personal data in a ``ui.private`` field -- and a ``@ui.rows`` handler reads it (a computed var
-    may read a ``_`` field, never a private one: copy what the page shows into a field instead). ``actions`` are placed in
-    the page header, none of them as the primary one: that is the submit button. ``tabs=True``
-    shows the result's sections one at a time, as on a record page: each section's title is its
-    tab, and what comes before the first section is above the tabs.
+    may read a ``_`` field, never a private one: copy what the page shows into a field instead).
+    ``actions`` are placed in the page header, none of them as the primary one: that is the
+    submit button. ``tabs=True`` shows the result's sections one at a time, as on a record page:
+    each section's title is its tab, and what comes before the first section is above the tabs.
 
     A new visit starts the form over: its result leaves. ``keep=True`` keeps the result when the
     user leaves the page and comes back -- a job that finished meanwhile shows what it found, one
@@ -648,10 +650,11 @@ def form(*, title: Any, load: Any = None, fields: Any = (), steps: Any = (), sub
     is enough: the private fields of the submit handler's state, and of the states whose rows the
     result's tables read, stay across visits, and a load of those states does not reset them. A
     result that shows a field of another state, which the page's load resets, is refused when the
-    page is built, saying what to write. A kept form also keeps its refusal above its submit button, shows its handler's
-    last other failure under it, and says so when its result is no longer kept. What was typed is
-    not kept by lex-app (it may be personal): to show it again, the handler sets a field and the
-    input starts from it (a searched choice starts empty, also on a kept form)::
+    page is built, saying what to write. A kept form also keeps its refusal above its submit
+    button, shows its handler's last other failure under it, and says so when its result is no
+    longer kept. What was typed is not kept by lex-app (it may be personal): to show it again,
+    the handler sets a field and the input starts from it (a searched choice starts empty, also
+    on a kept form)::
 
         @ui.job
         def build(self, values):
