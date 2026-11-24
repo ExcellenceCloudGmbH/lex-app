@@ -693,7 +693,8 @@ class PayrollState(ui.State):
   page keeps what it showed. Never the empty value, never old data, never another user's. A load
   resets a private field like every field; one declared `keep=True` (or in the load's `keep=`) is
   kept while it is held, and reset when it is gone, so the page opens clean instead of looping
-  through the error page's "Try again".
+  through the error page's "Try again". A form kept across visits says it under the form (pages
+  design 6.15).
 - **`ui.testing`**: `fields={"_report": {...}}` seeds it and `result.fields["_report"]` reads it,
   as for every field; `ui.testing.GONE` seeds a value that is gone (to test the refusal) and is what
   `result.fields` holds for one.

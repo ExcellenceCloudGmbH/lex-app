@@ -136,11 +136,18 @@ class State(rx.State):
         from lex.lex_app.reflex.ui import handlers
 
         self.ui_visit += 1
-        from lex.lex_app.reflex.ui import private, runs
+        from lex.lex_app.reflex.ui import forms, private, runs
 
         await runs.sweep(self)
         private.leave(str(self.router.session.client_token or ""))   # private values not kept across visits
-        self.ui_invalid, self.ui_step, self.ui_done = {}, {}, {}      # a form starts over on a new visit
+        kept = forms.kept()
+        # A form starts over on a new visit; one declared keep=True keeps its result while what it shows is kept.
+        done = {key: True for key, value in dict(self.ui_done).items() if value and key in kept}
+        for key in list(done):
+            if private.gone_in(await self.get_state(kept[key])):
+                done.pop(key)
+                self.ui_failed = {**dict(self.ui_failed), key: forms.gone_message()}
+        self.ui_invalid, self.ui_step, self.ui_done = {}, {}, done
         self.ui_asking, self.ui_asking_args = "", []
         self._ui_page = page
         self._ui_reset = []

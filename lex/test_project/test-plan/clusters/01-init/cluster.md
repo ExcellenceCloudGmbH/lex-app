@@ -1645,3 +1645,18 @@ does not remove user launch configurations.
 | 1.929 | The limit is declared as a whole number | 0, True, 2.5 and "2" refused with what to write; the handler carries its limit, also into a mixin's copy |
 
 **Scenario range:** 1.927 – 1.929. **Test file:** `lex/test_project/tests/init/test_1dw_ui_job_limit.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dw](batches.md).
+
+### 1dx. lex.ui forms: a result kept across visits -- ui.form(keep=True) ✅
+
+**What it tests:** `ui.form(..., keep=True)` -- a form's result shown again when the user comes back, while what it shows is kept; said plainly when it is not.
+
+**Why a regression matters:** a user who comes back to an empty form after a long job, a result shown over data that is gone, or a failure while away that is never shown.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.930 | A kept form shows what its job found after the user was away | back while the job runs: running and its progress; back after: the result flag and the rows; the field starts from what was typed; a form not kept starts over |
+| 1.931 | A kept result whose data is gone says so | within the private idle time the result shows; past it, no result and the sentence under the form; a private field not kept does not decide; a failure while away stays to be shown; sending again clears it |
+| 1.932 | The kept form page compiles and shows its failure in place | RFDS's inline message bound to ui.failed for a kept form only; the field's start from the state; compiled with Reflex's page compiler; registered with its state; keep= True or False only |
+| 1.933 | A kept form with a load keeps what the load keeps | after a revisit and the load: the kept private result and the field in the load's keep= survive; what the load does not keep is reset |
+
+**Scenario range:** 1.930 – 1.933. **Test file:** `lex/test_project/tests/init/test_1dx_ui_form_keep.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dx](batches.md).

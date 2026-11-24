@@ -67,6 +67,26 @@ def register(handler: Any, receives: Receives) -> None:
     _RECEIVES[name] = receives
 
 
+#: Handler key -> its state class, for the forms declared ``keep=True``: their result stays across visits.
+_KEPT: dict[str, Any] = {}
+
+
+def keep(handler: Any) -> None:
+    """Record that the form of ``handler`` keeps its result when the user leaves the page and comes back."""
+    _KEPT[runs.key_of(handler)] = handler.state
+
+
+def kept() -> dict[str, Any]:
+    """Handler key -> state class, for every form declared ``keep=True``."""
+    return dict(_KEPT)
+
+
+def gone_message() -> str:
+    """What a kept form says when the result it kept is no longer there."""
+    return results.message("lex.ui.form.gone", "The last result is no longer available: results are kept only "
+                                               "for a while. Send the form again.")
+
+
 def of(fn: Any) -> Receives | None:
     """What the handler whose body is ``fn`` receives; ``None`` when it is no form's or dialog's handler."""
     return _RECEIVES.get(f"{fn.__module__}.{fn.__qualname__}")

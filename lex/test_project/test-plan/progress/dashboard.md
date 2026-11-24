@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 115 | 929 | 839 | 3 | 0 |
+| 1. Init — Project Bootstrap | 116 | 933 | 843 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -139,6 +139,7 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1dl | lex.ui forms: a field where the user chooses several of a list of options | 1.852-1.855 | complete | 4 | 0 | 0 | `ui.field(kind="choices", options=...)`: RFDS's checkbox group up to 12 fixed options, its multi-select above or for options from the state; the handler gets a `list[str]` in the order of the options, `[]` for none, checked on the server; in a form, a step and a button's ask=; `ui.fact` shows the kind joined by commas. These tests fail on a text where a list was promised, a value that is no option reaching the body, a required field passing with nothing ticked, or a field that calls the server on every tick. |
 | 1dv | lex.ui: a result held privately on the server -- ui.private | 1.920-1.926 | complete | 7 | 0 | 0 | `_report: dict = ui.private(idle_minutes=, max_hours=, keep=)`: read and written like a backend field, kept in the server process's memory only, bound to the tab and the user who wrote it; gone after its idle time, its maximum age, a new visit (unless keep=True), another process or user; reading it then is a plain refusal; ui.testing seeds it and GONE. These tests fail on personal data in a state pickle or the browser, one user's value read by another, a value that outlives its limits, or a page that shows nothing or old data where the value was. |
 | 1dw | lex.ui: a limit on how many runs of a job go at once -- @ui.job(limit=) | 1.927-1.929 | complete | 3 | 0 | 0 | `@ui.job(limit=2)`: at most two runs at once in the server process, for all users; a further press refused at once with a fixed sentence (toast and ui.failed), before a form's values are judged; the place given back however a run ends. These tests fail on a third run starting beside two, a refused press that changes the page, or a place never given back. |
+| 1dx | lex.ui forms: a result kept across visits -- ui.form(keep=True) | 1.930-1.933 | complete | 4 | 0 | 0 | `ui.form(..., keep=True)`: the result flag survives a new visit; back while the job runs its progress, back after it the result; a kept private result that is gone is said under the form; a kept form shows its last failure in place; what was typed returns through value=. These tests fail on a kept form that comes back empty, a result shown over data that is gone, or a failure while away that is never shown. |
 | 1e |  | 1.30-1.43 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |

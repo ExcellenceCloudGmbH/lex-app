@@ -295,6 +295,7 @@ class Form(kinds.Kind):
     submit: Any = None
     result: tuple = ()
     actions: tuple = ()
+    keep: bool = False
 
     def loads(self) -> tuple[list, list]:
         parts = [part for part in self.result if isinstance(part, kinds.Section)]
@@ -365,6 +366,8 @@ class Form(kinds.Kind):
             fields=tuple(one.expect(ctx.at("fields"), handler) for one in every),
             steps=tuple(tuple(one.key for one in fields) for _, fields in steps) if wizard else (),
             where=f"page `{ctx.page}`"))
+        if self.keep:
+            rules.keep(handler)
         if self.load is not None:
             ctx = dataclasses.replace(ctx, under_load=True)
 
@@ -394,6 +397,9 @@ class Form(kinds.Kind):
         entry: list = [form]
         if handler.fn.__ui_kind__ == "job":
             entry.append(_progress(handler))
+        if self.keep:       # the user may have been away when its failure was toasted, or its result went
+            problem = runs.failed(handler)
+            entry.append(rx.cond(problem != "", rfds.inline_message(problem, tone="warning")))
         header = kinds._rfds(ctx, lambda: rfds.page_header(title=title, path=ctx.route or "/",
                                                             secondary_actions=actions))
         whole: list = [rfds.page(header, *entry, width="form")]            # a form is narrow
@@ -406,7 +412,7 @@ class Form(kinds.Kind):
 
 
 def form(*, title: Any, load: Any = None, fields: Any = (), steps: Any = (), submit: Any = None,
-         result: Any = (), actions: Any = ()) -> Form:
+         result: Any = (), actions: Any = (), keep: bool = False) -> Form:
     """Entering something, at once or in steps. A tool is a form with a ``result=``.
 
     ``fields=`` is a list of ``ui.field``; ``steps=[ui.step("Details", fields=[...]), ...]`` makes
@@ -428,8 +434,24 @@ def form(*, title: Any, load: Any = None, fields: Any = (), steps: Any = (), sub
     its state -- large or private data in a field whose name starts with ``_``, which stays on the
     server -- and a ``@ui.rows`` handler or a computed value reads it. ``actions`` are placed in
     the page header, none of them as the primary one: that is the submit button.
+
+    A new visit starts the form over: its result leaves. ``keep=True`` keeps the result when the
+    user leaves the page and comes back -- a job that finished meanwhile shows what it found, one
+    still running its progress -- for as long as what the result shows is kept: a ``ui.private``
+    field needs ``keep=True`` too, and a field the page's ``load=`` resets needs that load's
+    ``keep=``. A kept form also shows its handler's last failure under it, and says so when its
+    result is no longer kept. What was typed is not kept by lex-app (it may be personal): to show
+    it again, the handler sets a field and the input starts from it::
+
+        @ui.job
+        def build(self, values):
+            self.customer = values["customer"]          # ui.field("customer", value=ReportState.customer)
+            self._lines = invoices_of(self.user.id, values["customer"])
     """
-    return Form(title, load, kinds._many(fields), kinds._many(steps), submit, kinds._many(result), kinds._many(actions))
+    if not isinstance(keep, bool):
+        raise TypeError(f"ui.form(keep=) is True or False; got {keep!r}")
+    return Form(title, load, kinds._many(fields), kinds._many(steps), submit, kinds._many(result), kinds._many(actions),
+                keep)
 
 
 def dialog(ctx: Build, button: Any) -> Any:

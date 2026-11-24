@@ -557,7 +557,7 @@ Built on 2026-11-24 after a spike against RFDS 1.0.0 (`ui.form`, `ui.field`, `ui
   `max=`.
 - **A file field is not built** (`kind="file"` says to use `ui.custom_block`).
 - **A new visit starts every form over**: the opener clears the messages, the wizard steps, the
-  results and an open dialog.
+  results and an open dialog -- except the result of a form declared `keep=True` (6.15).
 - **`ui.testing.run(...)` results gain `invalid`** (field -> message) for a project's form tests.
 
 A tool page, whole -- a form, a job with progress as submit, a result with a table and a download:
@@ -596,6 +596,37 @@ def invoice_report():
                 ui.button("Download", InvoiceReportState.download)],
     )
 ```
+
+### 6.15 A form's result kept across visits: `ui.form(keep=True)` (2026-11-24)
+
+A user starts a long job from a form, leaves the page, comes back, and should find what it found.
+Built in batch 1dx.
+
+- **What existed, and what did not.** A state's fields already survive a visit: a page without a
+  load never resets them, and a load's `keep=("customer",)` exempts fields from its reset. A job
+  keeps running when the user leaves (unless `stop_on_leave=True`) and writes its result. What did
+  not survive was the form's result flag: the opener starts every form over (6.14). So `keep=` on
+  the state alone shows an empty form; one option was added.
+- **`ui.form(..., keep=True)` keeps the result flag across visits**, the same word as the load's
+  `keep=` and `ui.private(keep=True)`: "survives a new visit". Back while the job runs, the form
+  shows its progress; back after it finished, the result. Its wizard step and field messages still
+  start over. *Considered first:* `@ui.load(keep=...)` alone (does not reach the flag), a job
+  option (the result is declared on the page, not the handler), keeping every form (an entry form
+  should start over).
+- **What was typed is not kept by lex-app** (it may be personal): a field shows it again through
+  `value=` on a state field the handler sets, which the load keeps -- `ui.field("customer",
+  value=ReportState.customer)`, `self.customer = values["customer"]`, `@ui.load(keep=("customer",))`.
+- **A kept result shows only while what it shows is kept.** On a new visit the opener checks the
+  submit handler's state: if a `ui.private(keep=True)` field of it is gone (its idle time or age
+  passed, another process, another user), the result does not show over nothing; the form says,
+  under it, "The last result is no longer available: results are kept only for a while. Send the
+  form again." A private field that is not kept leaves with every visit and does not decide: what
+  reads it says it is gone where it reads it (action design 6.11).
+- **A kept form shows its handler's last failure under it**, in RFDS's inline message (warning
+  tone), besides the toast: the user may have been away when it was toasted. Sending the form again
+  clears it.
+- *Cost:* the result's fields must be kept by the page's load too (its `keep=`, or `ui.private(keep=True)`);
+  lex-app cannot see which fields a result reads, so it does not check this.
 
 ---
 
@@ -669,7 +700,7 @@ Declaring        @ui.page(route, nav=, icon=, requires=, params=)      @ui.dashb
 Kinds            ui.overview(title, load=, figures=, tiles=, sections=, actions=)
                  ui.list(title, load=, filters=, table=, actions=)
                  ui.record(title, load=, status=, facts=, sections=, tabs=, actions=)
-                 ui.form(title, load=, fields= | steps=, submit=, result=, actions=)
+                 ui.form(title, load=, fields= | steps=, submit=, result=, actions=, keep=)
 
 Components       ui.text(sentence, **values)             ui.fact(label, value, kind=)
                  ui.figure(label, value, kind=, change=, to=)
