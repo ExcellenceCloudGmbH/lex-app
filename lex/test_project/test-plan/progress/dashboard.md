@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 115 | 907 | 837 | 3 | 0 |
+| 1. Init — Project Bootstrap | 116 | 910 | 840 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -139,6 +139,7 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1dl | lex.ui forms: a field where the user chooses several of a list of options | 1.852-1.855 | complete | 4 | 0 | 0 | `ui.field(kind="choices", options=...)`: RFDS's checkbox group up to 12 fixed options, its multi-select above or for options from the state; the handler gets a `list[str]` in the order of the options, `[]` for none, checked on the server; in a form, a step and a button's ask=; `ui.fact` shows the kind joined by commas. These tests fail on a text where a list was promised, a value that is no option reaching the body, a required field passing with nothing ticked, or a field that calls the server on every tick. |
 | 1ds | lex.ui forms: a choice searched on the server -- one record among thousands, as the user types | 1.900-1.903 | complete | 4 | 0 | 0 | `ui.field(key, options=State.rows_handler)`: RFDS's combobox in its server-search mode over a `@ui.rows` handler, a page of `{value, label}` matches per search, the first when the field opens; the value checked against what the tab was offered; in a form, a step and ask=. These tests fail on every customer in the page, a row's other fields in the browser, a forged id reaching the body, or an empty box until the user types. |
 | 1dt | lex.ui: a refusal shown where the user is looking -- above a form's submit button, with a title | 1.904-1.907 | complete | 4 | 0 | 0 | `ui.Refuse(message, title=)`: in a form (and an action's ask= dialog) RFDS's inline message above the submit button, kept until the form is sent again; elsewhere, and from a job's dialog, a toast headed by the title. These tests fail on a refusal the user never sees, one that stays after the form was sent again, the same sentence as a toast and in place, or a lost title. |
+| 1du | lex.ui: a toast that offers to open the result elsewhere -- ui.toast(link=ui.link(...)) | 1.908-1.910 | complete | 3 | 0 | 0 | `ui.toast(..., link=ui.link(...))`: a link's targets (a page, a raw page, a record, an outside address) and checks, run when the handler makes the toast; RFDS's toast with one action. These tests fail on a toast without its button, a button that leads to the wrong page, or a link whose mistake is found only when a user presses it. |
 | 1e |  | 1.30-1.43 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |

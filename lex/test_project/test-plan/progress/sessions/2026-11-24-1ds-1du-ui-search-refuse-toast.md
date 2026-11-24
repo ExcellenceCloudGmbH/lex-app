@@ -1,8 +1,8 @@
 ---
 date: 2026-11-24
 clusters: [1]
-tests_added: 8
-suite_tally: "every Reflex batch (1ap 1aq 1bt-1bz 1ca-1cz 1da-1dt 4n 10ag 10d): 216 pass / 0 fail, 405 subtests pass"
+tests_added: 11
+suite_tally: "every Reflex batch (1ap 1aq 1bt-1bz 1ca-1cz 1da-1du 4n 10ag 10d): 219 pass / 0 fail, 418 subtests pass"
 ---
 
 # lex.ui forms: a choice searched on the server (1ds)
@@ -15,4 +15,9 @@ was offered. Batch [1ds](../../clusters/01-init/batches.md).
 
 `raise ui.Refuse(message, title=)` from a form's handler is shown in the form, above its submit button, until the
 form is sent again; elsewhere it is a toast headed by its title. Batch [1dt](../../clusters/01-init/batches.md).
+
+# lex.ui: a toast that offers to open the result elsewhere (1du)
+
+`ui.toast(..., link=ui.link("Open", to=history_page))`: one button in RFDS's toast, written as every link is and
+checked when the handler makes the toast. Batch [1du](../../clusters/01-init/batches.md).
 

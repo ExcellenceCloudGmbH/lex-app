@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 907
+max_scenario: 910
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2518,3 +2518,13 @@ letters:
       xfail: 0
     note: >-
       `ui.Refuse(message, title=)`: in a form (and an action's ask= dialog) RFDS's inline message above the submit button, kept until the form is sent again; elsewhere, and from a job's dialog, a toast headed by the title. These tests fail on a refusal the user never sees, one that stays after the form was sent again, the same sentence as a toast and in place, or a lost title.
+  du:
+    title: 'lex.ui: a toast that offers to open the result elsewhere -- ui.toast(link=ui.link(...))'
+    scenarios: 1.908-1.910
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.toast(..., link=ui.link(...))`: a link's targets (a page, a raw page, a record, an outside address) and checks, run when the handler makes the toast; RFDS's toast with one action. These tests fail on a toast without its button, a button that leads to the wrong page, or a link whose mistake is found only when a user presses it.

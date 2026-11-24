@@ -3355,3 +3355,24 @@ table of the action-state design (6.5) gains the form's row.
 | 1.906 | The form shows it above its submit button | RFDS's inline message inside the form, before the action bar; warning tone, `role="alert"`, the title line; compiled; a wizard too |
 | 1.907 | A dialog that asked stays open with the refusal | the dialog's inline message above its buttons; an action's dialog stays open with it, closes on success; a job's dialog closed at the start, its refusal a titled toast |
 
+### Batch 1du — lex.ui: a toast that offers to open the result elsewhere ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.908 – 1.910 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/results.py` (`toast`, `Toast.link`, `to_events`), `lex/lex_app/reflex/ui/pages/vocab.py` (`Link.target`), `lex/lex_app/reflex/ui/testing.py` (`Result.toasts`) |
+| Test file | `lex/test_project/tests/init/test_1du_ui_toast_link.py` |
+| Test classes | `TestCluster01du_ToastLink` (1.908–1.910) |
+| Fixtures | a neutral export state (a job and an action that end with a linked toast); a page stand-in |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+What building settled is section 6.15 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.908 | A toast link leads where a ui.link leads | a page with encoded values and a parameter, a raw Reflex page, lex-app's record page, an outside address; which leave the dashboards |
+| 1.909 | The toast is RFDS's toast with its action | through `ui.testing.run`: the toast with its link; RFDS's toast with one action worded as the link, redirecting (outside as outside); 10 s with an action; none without |
+| 1.910 | A toast link written wrongly is refused where it is written | not a ui.link, a button, `visible=`, a missing or unknown page value, an empty key: each says what to write |
+

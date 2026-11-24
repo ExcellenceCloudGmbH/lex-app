@@ -39,8 +39,9 @@
 ``@ui.job``                 long work with progress; the user keeps working
 ``@ui.rows``                a table's rows, as a list of dicts; read-only, read as the user
 ``@ui.custom``              a raw Reflex handler, marked for review
-``ui.goto/toast/download``  what a handler returns; ``ui.refresh(State.rows)`` makes the
-                            tables of another state read again
+``ui.goto/toast/download``  what a handler returns; ``ui.toast(link=ui.link(...))`` offers to
+                            open something; ``ui.refresh(State.rows)`` makes the tables of
+                            another state read again
 ``ui.progress``             what a job yields
 ``ui.Refuse``               an expected refusal, shown in its own words (``title=`` heads it): in
                             a form above its submit button, elsewhere as a toast

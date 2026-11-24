@@ -648,6 +648,18 @@ Built on 2026-11-24 (batches 1ds-1du), on top of 6.14:
   dialog, above its buttons; before, it closed as soon as the values passed. A job's dialog still
   closes when the job starts -- the user keeps working while it runs -- so a job's refusal from a
   dialog is a toast, headed by its title. `confirm=` dialogs (no form) close first, as before.
+- **A toast offers to open something with `link=ui.link(...)`**: `return ui.toast("Your export is
+  ready.", link=ui.link("Open", to=history_page, key=report_id))`. No action API was invented: the
+  link is written as every link is, with the same targets (`to=` a page or a `ui.reflex_page`,
+  `record=(Model, pk)`, `href=` an outside address) and the same checks, run when the handler makes
+  the toast, so a wrong link fails the handler, not the user's click ("ui.toast(link=): a link to page
+  `export_page` (/exports/[key]) is missing key. ... Write `to=export_page, key=...`."). It becomes
+  RFDS's `ToastAction` -- one button, the link's words, opening the address as `ui.link` would
+  (`record=` and `href=` as outside addresses) -- and RFDS keeps a success or info toast with an action
+  open 10 seconds. `visible=` is refused: a toast's link is always shown. RFDS's rule that a toast's
+  action is also reachable on the page is the author's, said in `ui.toast`'s docstring. *Considered:*
+  `action=` (RFDS's word, but it takes an event) and a `ui.toast_action`; both are a second way to say
+  where something leads.
 
 ---
 

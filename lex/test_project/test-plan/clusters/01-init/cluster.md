@@ -1644,3 +1644,17 @@ does not remove user launch configurations.
 
 **Scenario range:** 1.904 – 1.907. **Test file:** `lex/test_project/tests/init/test_1dt_ui_refuse_in_place.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dt](batches.md).
 
+### 1du. lex.ui: a toast that offers to open the result elsewhere ✅
+
+**What it tests:** `ui.toast(..., link=ui.link(...))` -- the targets and checks of every link, run when the handler makes the toast; RFDS's toast with one action.
+
+**Why a regression matters:** a toast without its button, a button that leads to the wrong page, or a link whose mistake is found only when a user presses it.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.908 | A toast link leads where a ui.link leads | page, raw page, record, outside address |
+| 1.909 | The toast is RFDS's toast with its action | one action, worded as the link, redirecting; longer duration |
+| 1.910 | A toast link written wrongly is refused where it is written | each mistake says what to write |
+
+**Scenario range:** 1.908 – 1.910. **Test file:** `lex/test_project/tests/init/test_1du_ui_toast_link.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1du](batches.md).
+
