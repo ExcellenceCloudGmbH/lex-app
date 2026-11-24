@@ -41,8 +41,8 @@ NAV: tuple[Section, ...] = (
         Group("Data", ("data-and-permissions/api",)),
         Group("Permissions", ("data-and-permissions/can", "data-and-permissions/grants")),
     )),
-    Section("look-and-chrome", "Look & chrome", "lex-app's design, your own frame, and dashboards inside lex-app.", (
-        Group("Look & chrome", ("look-and-chrome/look", "look-and-chrome/chrome", "look-and-chrome/embedding")),
+    Section("look-and-chrome", "Look & chrome", "lex-app's design and frame, and dashboards inside lex-app.", (
+        Group("Look & chrome", ("look-and-chrome/look", "look-and-chrome/embedding")),
     )),
     Section("ship-it", "Ship it", "Sign-in, checks and deployment.", (
         Group("Ship it", ("ship-it/sign-in", "ship-it/deploying", "ship-it/check")),

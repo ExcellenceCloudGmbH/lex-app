@@ -11,7 +11,7 @@ import rfds  # noqa: E402
 from rfds.platform import install_platform  # noqa: E402
 
 from docs_site import layout, llms, sandbox
-from lex import ui
+from lex.lex_app.reflex.ui.pages import declare
 from lex.lex_app.reflex.design import lex_head_components, lex_security_headers
 
 
@@ -22,4 +22,4 @@ install_platform(app, headers=lex_security_headers())
 rfds.install(app, tenant=None, auth=None)
 rfds.toast  # noqa: B018 - lazy attribute; loading it defines states, which must exist before any event
 layout.add_pages(app)
-ui.install(app)
+declare.install(app)  # lex.ui's part of an app: /ui-error, the jobs' clock, the route check (as create_app does)

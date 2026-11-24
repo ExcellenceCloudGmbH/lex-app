@@ -5,7 +5,7 @@ import inspect
 from lex import ui
 
 GROUPS: dict[str, tuple[str, ...]] = {
-    "pages": ("page", "dashboard", "reflex_page", "chrome", "install", "embed", "record", "list"),
+    "pages": ("page", "dashboard", "reflex_page", "embed", "record", "list"),
     "parts": ("section", "table", "column", "fact", "text", "each", "status", "custom", "custom_block",
               "button", "link", "switch", "address", "message", "progress", "progress_of"),
     "state": ("State", "action", "job", "load", "rows", "running", "failed", "loaded", "cancel", "refresh"),
