@@ -1,15 +1,15 @@
 
 
-### Batch 1eu — lex.ui frame: areas nav= does not list follow the listed ones; a typo is still refused ✅
+### Batch 1ev — lex reflex check follows the project's own imports from its dashboards ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.1030 |
+| Scenario range | 1.1031 |
 | Type | U |
-| Files covered | `lex/lex_app/reflex/shell.py` (`check_nav`, `check_area`, `_raw_areas`, `_areas`), `lex/lex_app/reflex/ui/pages/frame.py` (`nav=`), `lex/lex_app/reflex/ui/pages/declare.py` (`finalize`) |
-| Test file | `lex/test_project/tests/init/test_1eu_ui_frame_unlisted_areas.py` |
-| Test classes | `TestCluster01eu_FrameUnlistedAreas` (1.1030) |
-| Fixtures | `FrameCase` and `_record` from 1eb |
+| Files covered | `lex/lex_app/reflex/ui/checks.py` (`followed`, `_imported`, `_module_files`), `lex/lex_app/reflex/scaffold.py` (`check_paths`) |
+| Test file | `lex/test_project/tests/init/test_1ev_reflex_check_follows_imports.py` |
+| Test classes | `TestCluster01ev_CheckFollowsImports` (1.1031) |
+| Fixtures | a project written into a temporary folder |
 | Tests landed | **1 pass / 0 fail** |
 | Status | ✅ Complete |
 
@@ -17,4 +17,4 @@ Section 6.22 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.1030 | Unlisted areas follow; a typo is still refused | finalize goes on with raw areas Admin, Tools unlisted; sections Orders, Admin, Tools; a ui.page in Admin listed there; nav=Ordres and a record page in Reprots refused, naming Orders, Admin, Tools |
+| 1.1031 | The check follows the project's imports | paths: _dashboards, _reflex_structure.py, helpers.py, orders/__init__.py, orders/pages/__init__.py, orders/pages/tickets.py (not unused.py, not os/reflex/lex); one error in tickets.py: TicketsState.approve has no lex.ui decorator |

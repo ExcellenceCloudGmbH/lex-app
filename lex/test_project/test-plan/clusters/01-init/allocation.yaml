@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1030
+max_scenario: 1031
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2818,3 +2818,13 @@ letters:
       xfail: 0
     note: >-
       1.960 still holds (its typo is a lex.ui page's). These tests fail on an unlisted raw area refused, areas out of order, or a lex.ui typo accepted.
+  ev:
+    title: 'lex reflex check follows the project''s own imports from its dashboards'
+    scenarios: 1.1031
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      The files are parsed, never imported. These tests fail on an imported project module left unchecked, or a module outside the project read.

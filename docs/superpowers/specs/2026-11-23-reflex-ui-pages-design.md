@@ -1254,6 +1254,15 @@ lex-app project. (The table gaps of the same round are section 5.15 of the table
   may join a raw page's area without listing it. *Not added:* refusing a listed area that no page has
   -- raw pages may be listed after the frame is checked.
 
+- **`lex reflex check` follows the project's own imports (batch 1ev).** The check read only
+  `_reflex_structure.py` and `_dashboards/`, so a state or page moved into a module of its own and
+  imported from there went unchecked. It now follows every import from those files, transitively:
+  an absolute import is resolved against the project's root (where `lex start` runs it), a relative
+  one against the importing file's package, and only what is a file under the root is read -- never
+  lex-app, Reflex or another installed package, and never by importing (the files are parsed). The
+  followed files get lex.ui's checks and RFDS's `lint --strict`, as the dashboards always did.
+  *Not followed:* a module loaded by name at run time (`importlib.import_module("...")`).
+
 ## 7. Order of building
 
 One spec, four steps. Each ends by porting real pages of the reviewed project, in the scratchpad
