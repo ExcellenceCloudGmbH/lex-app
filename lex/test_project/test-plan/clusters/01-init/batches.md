@@ -3308,3 +3308,27 @@ kinds gains `choices`, and the message for options on a field that is no choice 
 | 1.853 | The field is RFDS's input for several and sends nothing while picking | checkbox group up to 12 fixed options, multi-select above or from the state; label, help, required mark, the server's message; `value=` a list or a state value; one event: the submit; compiled with Reflex's page compiler; in a step and in ask= |
 | 1.854 | A run hands the body the checked list | through Reflex's event processor and `ui.testing.run`: the list in option order; nothing ticked or no option is a message at the field and no run; a wizard's last step; a dialog's row key and list |
 | 1.855 | Several choices declared wrongly, and shown | no options, non-text options, a start that is no list, options on another kind, the kinds listed; `ui.fact(kind="choices")` joined by commas |
+
+### Batch 1dm — lex.ui: a job reports progress from a callback -- self.progress(fraction, message) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.856 – 1.859 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/handlers.py` (`job`, `_drive`, `reporter`), `lex/lex_app/reflex/ui/state.py` (`State.progress`), `lex/lex_app/reflex/ui/context.py` (`RESERVED`), `lex/lex_app/reflex/ui/checks.py` (reserved names) |
+| Test file | `lex/test_project/tests/init/test_1dm_ui_job_progress_callback.py` |
+| Test classes | `TestCluster01dm_JobProgressCallback` (1.856–1.859) |
+| Fixtures | a neutral reports state, and a stand-in library that reports from its own worker thread |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+`self.progress` beside `yield ui.progress(...)`, for libraries that report through a callback. What building
+settled is in the `@ui.job` part of section 6.4 of `docs/superpowers/specs/2026-11-23-reflex-ui-action-state-layer-design.md`.
+`progress` became a reserved name, so the job state of 1ci renames its field `progress` to `step`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.856 | A callback on the library's thread shows the job's progress | each fraction and message reaches the browser in order, as a yield's; the callback ran on the library's thread; a report carries no other field; the job ends with its result; `self.progress` on the body's thread beside `yield ui.progress` |
+| 1.857 | After Stop the next report raises the stop a yield would | Stop and leaving a `stop_on_leave` page: `GeneratorExit` in the calling thread; the library stops; the body's cleanup runs; changes since the last yield discarded; no error; nothing running |
+| 1.858 | Elsewhere self.progress says it belongs in a job | an action, a load, a job that has ended: `RuntimeError` naming `self.progress` and `@ui.job`; nothing reported |
+| 1.859 | progress is a name a ui.State reserves | a property the browser cannot call; a field, computed var or method named `progress` refused when the class is defined; the route argument `[progress]` refused; `lex reflex check` reports it |

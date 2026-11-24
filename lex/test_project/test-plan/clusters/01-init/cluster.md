@@ -1613,3 +1613,18 @@ does not remove user launch configurations.
 | 1.855 | Several choices declared wrongly, and shown | no options, non-text options, a start that is no list, options on another kind, the kinds listed; `ui.fact(kind="choices")` joined by commas |
 
 **Scenario range:** 1.852 – 1.855. **Test file:** `lex/test_project/tests/init/test_1dl_ui_form_choices.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dl](batches.md).
+
+### 1dm. lex.ui: a job reports progress from a callback -- self.progress(fraction, message) ✅
+
+**What it tests:** `self.progress(fraction, message)` in a `@ui.job`, handed to a library as its progress callback and called from the library's own thread: the page shows it as a `yield ui.progress(...)`; Stop reaches the library through it; anywhere else it says it belongs in a job; `progress` is a reserved name.
+
+**Why a regression matters:** a progress bar frozen while a library works, a Stop button the library never hears, half-finished fields written from a foreign thread, or a field called `progress` that silently hides the helper.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.856 | A callback on the library's thread shows the job's progress | each fraction and message reaches the browser in order, as a yield's; the callback ran on the library's thread; a report carries no other field; the job ends with its result; `self.progress` on the body's thread beside `yield ui.progress` |
+| 1.857 | After Stop the next report raises the stop a yield would | Stop and leaving a `stop_on_leave` page: `GeneratorExit` in the calling thread; the library stops; the body's cleanup runs; changes since the last yield discarded; no error; nothing running |
+| 1.858 | Elsewhere self.progress says it belongs in a job | an action, a load, a job that has ended: `RuntimeError` naming `self.progress` and `@ui.job`; nothing reported |
+| 1.859 | progress is a name a ui.State reserves | a property the browser cannot call; a field, computed var or method named `progress` refused when the class is defined; the route argument `[progress]` refused; `lex reflex check` reports it |
+
+**Scenario range:** 1.856 – 1.859. **Test file:** `lex/test_project/tests/init/test_1dm_ui_job_progress_callback.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dm](batches.md).

@@ -52,6 +52,13 @@ class _Step:
         self.done = threading.Event()
 
 
+class _Report(_Step):
+    """One ``self.progress(...)`` of a job, from its body or from a thread the body started.
+
+    Only the progress is written: the job's other fields wait for its next yield or its end.
+    """
+
+
 @dataclasses.dataclass
 class _Return:
     value: Any
@@ -200,8 +207,37 @@ async def _shielded(wind_up: Any) -> Any:
     return task.result()
 
 
+#: A running job's working copy (by id) -> (that copy, how its ``self.progress`` reaches the page).
+_REPORTERS: dict[int, tuple[Any, Callable[[results.Progress], bool]]] = {}
+_REPORTERS_LOCK = threading.Lock()
+
+_NOT_IN_A_JOB = ("self.progress(fraction, message) belongs in a @ui.job: call it in the job's body, or in a "
+                 "thread the body started, while the job runs. An action or a load shows no progress; make "
+                 "long work a @ui.job.")
+
+
+def reporter(target: Any) -> Callable[..., None]:
+    """``self.progress``: show a running job's progress in the page, like ``yield ui.progress(...)``.
+
+    Callable from the job's body and from any thread the body started (a library's callback). It
+    writes only the progress. Once the job was stopped -- Stop, or leaving the page with
+    ``stop_on_leave=True`` -- it raises ``GeneratorExit``, the stop the job's next yield would raise.
+    Anywhere else it raises a ``RuntimeError`` saying it belongs in a ``@ui.job``.
+    """
+
+    def progress(fraction: float, message: str = "") -> None:
+        with _REPORTERS_LOCK:
+            found = _REPORTERS.get(id(target))
+        if found is None or found[0] is not target:
+            raise RuntimeError(_NOT_IN_A_JOB)
+        if found[1](results.progress(fraction, message)):
+            raise GeneratorExit
+
+    return progress
+
+
 async def _drive(inv: context.Invocation, pool: str, fn: Callable[..., Any], target: Any,
-                 args: tuple, kwargs: dict) -> AsyncIterator[Any]:
+                 args: tuple, kwargs: dict, *, reports: bool = False) -> AsyncIterator[Any]:
     """Run the body on ONE pool thread; yield a ``_Step`` for each of its yields, then a ``_Return``.
 
     The body's thread waits at each yield until the consumer has handled the step (and may have
@@ -209,42 +245,72 @@ async def _drive(inv: context.Invocation, pool: str, fn: Callable[..., Any], tar
     consumer stops early (closes this generator, fails, or is cancelled), the body is told to
     stop at its yield, and this generator returns only once the body's thread has finished, so
     the body's own cleanup never runs after the consumer has moved on.
+
+    With ``reports=True`` (a job), ``self.progress(...)`` on ``target`` -- from the body's thread or
+    any other -- yields a ``_Report`` and waits, like a yield, for the consumer to handle it. A
+    report answered with ``stop`` raises ``GeneratorExit`` where it was made; the body ending with
+    it is a stopped run.
     """
     loop = inv.loop
     queue: asyncio.Queue = asyncio.Queue()
     lock = threading.Lock()
     closed = False
-    outstanding: _Step | None = None     # the step the body's thread is waiting on, if any
+    halted = False                       # a report was answered with stop
+    outstanding: set[_Step] = set()      # the steps threads are waiting on
 
-    def emit(value: Any) -> bool:
-        nonlocal outstanding
-        step = _Step(value)
+    def emit(value: Any, kind: type = _Step) -> bool:
+        nonlocal halted
+        step = kind(value)
         with lock:
             if closed:
+                halted = halted or kind is _Report
                 return True
-            outstanding = step
+            outstanding.add(step)
         loop.call_soon_threadsafe(queue.put_nowait, step)
         step.done.wait()
+        with lock:
+            outstanding.discard(step)
+            if step.stop and kind is _Report:
+                halted = True
         return step.stop
+
+    def report(value: results.Progress) -> bool:
+        try:
+            on_loop = asyncio.get_running_loop() is loop
+        except RuntimeError:
+            on_loop = False
+        if on_loop:                      # it would wait for the loop it blocks
+            raise RuntimeError(_NOT_IN_A_JOB)
+        return emit(value, _Report)
 
     def body() -> Any:
         token = context.enter(inv)
         try:
             access = guard.acting_user(inv.session.user) if inv.orm else guard.block_queries(inv.handler)
             with access:
-                out = fn(target, *args, **kwargs)
-                if not inspect.isgenerator(out):
-                    return out
                 try:
-                    while True:
-                        if emit(next(out)):
-                            out.close()
-                            return _STOPPED
-                except StopIteration as done:
-                    return done.value
+                    out = fn(target, *args, **kwargs)
+                    if not inspect.isgenerator(out):
+                        return out
+                    try:
+                        while True:
+                            if emit(next(out)):
+                                out.close()
+                                return _STOPPED
+                    except StopIteration as done:
+                        return done.value
+                except GeneratorExit:
+                    with lock:
+                        stopped = halted
+                    if stopped:              # self.progress raised the stop, and the body let it through
+                        return _STOPPED
+                    raise
         finally:
             context.leave(token)
 
+    if reports:
+        with _REPORTERS_LOCK:
+            _REPORTERS[id(target)] = (target, report)
     task = asyncio.ensure_future(pools.run(pool, body))
     task.add_done_callback(lambda _: queue.put_nowait(_END))
     try:
@@ -257,10 +323,11 @@ async def _drive(inv: context.Invocation, pool: str, fn: Callable[..., Any], tar
     finally:
         with lock:
             closed = True
-            waiting = outstanding
-        if waiting is not None and not waiting.done.is_set():   # stopped early: let the body's thread go
-            waiting.stop = True
-            waiting.done.set()
+            waiting = list(outstanding)
+        for step in waiting:                                    # stopped early: let the waiting threads go
+            if not step.done.is_set():
+                step.stop = True
+                step.done.set()
         if not task.done():
             try:
                 await asyncio.shield(task)                      # the body's cleanup completes first
@@ -271,6 +338,9 @@ async def _drive(inv: context.Invocation, pool: str, fn: Callable[..., Any], tar
                 else:
                     logger.warning("lex.ui handler %s: the body's cleanup failed after the run was stopped type=%s",
                                    inv.handler, type(exc).__name__)
+        if reports:
+            with _REPORTERS_LOCK:
+                _REPORTERS.pop(id(target), None)
     value = await task
     yield _Return(None if value is _STOPPED else value)
 
@@ -431,6 +501,20 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
     per tab and set of arguments at a time; a repeat is ignored. ``yield ui.progress(...)``
     reports progress; a cancel, or leaving the page with ``stop_on_leave=True``, takes effect at
     a yield.
+
+    A library that reports progress through a callback gets ``self.progress``, which shows the
+    progress as ``yield ui.progress(fraction, message)`` would, also when the library calls it from
+    a thread of its own::
+
+        @ui.job
+        def build(self, values):
+            report = reports.build(values["year"], on_progress=self.progress)
+            return ui.download(data=report, filename="report.pdf")
+
+    ``self.progress`` writes only the progress: the job's other fields are written at its next
+    ``yield`` and at its end. Once the job is stopped, the next ``self.progress(...)`` raises the
+    stop its next ``yield`` would (``GeneratorExit``), so the library stops too. Anywhere but a
+    running job it raises an error.
     """
 
     def decorate(fn: Callable[..., Any]) -> Any:
@@ -495,10 +579,12 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                                              loop=asyncio.get_running_loop(), live=self,
                                              orm=requirements is not None)
                     inv.drafts[own] = draft
-                    async with contextlib.aclosing(_drive(inv, "jobs", fn, draft, args, kwargs)) as steps:
+                    async with contextlib.aclosing(_drive(inv, "jobs", fn, draft, args, kwargs, reports=True)) as steps:
                         async for step in steps:
                             final = isinstance(step, _Return)
-                            found, report = results.split(step.value, handler=key, state=self.get_full_name())
+                            only_progress = isinstance(step, _Report)     # self.progress(): the other fields wait
+                            found, report = ([], step.value) if only_progress else results.split(
+                                step.value, handler=key, state=self.get_full_name())
                             async with self:
                                 left = self.ui_visit != visit
                                 # Once stopped, what the body changed since its last merge is discarded for good.
@@ -508,7 +594,8 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                                         step.stop = True
                                         stopped = True
                                 else:
-                                    await _merge(inv, self)
+                                    if not only_progress:
+                                        await _merge(inv, self)
                                     if report is not None:
                                         runs.mark_progress(self, key, report)
                             if not discard:

@@ -43,6 +43,13 @@ def check_app_routes(app: Any) -> None:
     links.check_reflex_pages(routes)   # a link to a raw page leads to a page the app has
 
 
+def _progress(state: Any) -> Any:
+    """``self.progress``: report a running job's progress (see :func:`handlers.reporter`)."""
+    from lex.lex_app.reflex.ui import handlers
+
+    return handlers.reporter(state)
+
+
 def _page_permitted(state: Any, requires: str) -> bool:
     """Whether the signed-in user holds the page's permission string ('' = no requirement)."""
     if not requires:
@@ -59,8 +66,8 @@ class State(rx.State):
     """The base class of a page state: handler status for views, and the body's helpers.
 
     Inside a handler body: ``self.user``, ``self.api``, ``self.params``, ``self.can(Model, scope)``
-    and ``self.state(Other)``. They are properties, so the browser cannot call them. Their names are
-    reserved: a subclass declaring a field, computed var or method with one of them is refused
+    and ``self.state(Other)``; in a job, ``self.progress(fraction, message)``. They are properties,
+    so the browser cannot call them. Their names are reserved: a subclass declaring a field, computed var or method with one of them is refused
     when the class is defined.
     """
 
@@ -119,6 +126,8 @@ class State(rx.State):
     state = property(lambda self: context.current().state_of)
     #: The browser tab the handler runs for (Reflex's client token): for a project's own per-tab store.
     tab_id = property(lambda self: context.current().session.tab)
+    #: A running job's progress, shown in the page: from its body or a thread it started (``@ui.job``).
+    progress = property(_progress)
 
     @rx.event
     async def ui_open(self, page: str):

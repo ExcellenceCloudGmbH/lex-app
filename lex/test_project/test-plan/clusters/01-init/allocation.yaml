@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 855
+max_scenario: 859
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2498,3 +2498,13 @@ letters:
       xfail: 0
     note: >-
       `ui.field(kind="choices", options=...)`: RFDS's checkbox group up to 12 fixed options, its multi-select above or for options from the state; the handler gets a `list[str]` in the order of the options, `[]` for none, checked on the server; in a form, a step and a button's ask=; `ui.fact` shows the kind joined by commas. These tests fail on a text where a list was promised, a value that is no option reaching the body, a required field passing with nothing ticked, or a field that calls the server on every tick.
+  dm:
+    title: 'lex.ui: a job reports progress from a callback -- self.progress(fraction, message)'
+    scenarios: 1.856-1.859
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      `reports.build(year, on_progress=self.progress)` through Reflex's event processor: each report from the library's own thread reaches the page like a yield's, and writes only the progress; after Stop or leaving a stop_on_leave page the next call raises GeneratorExit in the calling thread and the run ends stopped, not failed; an action, a load or an ended job get a RuntimeError naming @ui.job; `progress` is reserved like `user`. These tests fail on a progress bar frozen while a library works, a Stop the library never hears, fields written from a foreign thread, or a field called progress that hides the helper.
