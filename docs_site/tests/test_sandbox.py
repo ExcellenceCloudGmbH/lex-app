@@ -88,3 +88,43 @@ def test_an_unknown_model_is_refused():
 
     with pytest.raises(LexApiError):
         _api().list(Elsewhere)
+
+
+import asyncio
+from types import SimpleNamespace
+
+from docs_site import sandbox
+from docs_site.sandbox.store import STORE
+
+
+def _fake_state(tab: str):
+    router = SimpleNamespace(session=SimpleNamespace(client_token=tab), url="/pages/record", page=SimpleNamespace(params={}))
+    return SimpleNamespace(router=router)
+
+
+def test_the_resolver_gives_the_tab_its_data_and_role():
+    STORE.reset("tab-r")
+    STORE.tab("tab-r").role = "viewer"
+    session = asyncio.run(sandbox.resolve(_fake_state("tab-r")))
+    grants = asyncio.run(session.permissions())
+    assert session.tab == "tab-r"
+    assert session.user.username == "demo"
+    assert {"rsname": "docs.Fund", "scopes": ["read"]} in grants
+    assert all(g["scopes"] == ["read"] for g in grants)
+    assert session.api.list(Fund).count == 6
+
+
+def test_a_lex_ui_handler_reads_the_sandbox():
+    from lex import ui
+    from lex.lex_app.reflex.ui import testing
+
+    class OpenFunds(ui.State):
+        names: list[str] = []
+
+        @ui.load
+        def open(self):
+            self.names = [r["name"] for r in self.api.list(Fund, filters={"status": "investing"})]
+
+    result = testing.run(OpenFunds, "open", api=SandboxApi(Store().tab("h")))
+    assert result.fields["names"] == ["Northbridge Growth II", "Harbour Infrastructure",
+                                      "Alder Credit Opportunities"]
