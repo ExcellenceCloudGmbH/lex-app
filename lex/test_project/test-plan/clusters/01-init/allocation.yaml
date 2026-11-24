@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1013
+max_scenario: 1015
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2738,3 +2738,13 @@ letters:
       xfail: 0
     note: >-
       The entries' keys are `user_menu#<n>` in `ui_frame_shown`. These tests fail on a lost entry, entries out of order or below Sign out, an entry drawn for a user who may not open it, or a button, a text, a count or a state value accepted in the menu.
+  en:
+    title: 'lex.ui frame: a banner across the top of every page'
+    scenarios: 1.1014-1.1015
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      The banner's words from a function of the user are `ui_frame_values["banner"]`. These tests fail on a banner lost, an empty banner shown, a banner for the wrong user, a failing function shown as an error, or a banner given as anything but one message.

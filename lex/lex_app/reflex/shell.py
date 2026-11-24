@@ -405,6 +405,28 @@ def header_actions() -> tuple:
     return (with_overlays(ctx, rx.fragment(*drawn)),) if drawn else ()
 
 
+def frame_banner() -> Any:
+    """``ui.frame(banner=)`` as RFDS's banner, shown while its sentence is not empty; ``None`` without one."""
+    import reflex as rx
+    import rfds
+
+    from lex.lex_app.reflex.ui.pages import frame
+    from lex.lex_app.reflex.ui.pages.parts import Build, say
+
+    message = frame.current().banner
+    if message is None:
+        return None
+    sentence = message.sentence
+    if frame._plain_function(sentence):
+        words: Any = frame_value("banner")
+    else:
+        words = say(sentence, **message.values)
+    drawn = rfds.banner(tone=message.tone, title=words)
+    if isinstance(words, rx.Var):
+        drawn = rx.cond(words.to(str) != "", drawn)
+    return message._wrap(Build(page="ui.frame", slot="banner"), drawn)
+
+
 def user_menu_items() -> tuple:
     """``ui.frame(user_menu=)`` as RFDS's user menu entries, each drawn on the server's answer."""
     from rfds.components.actions.menu import menu_item
@@ -564,6 +586,7 @@ def lex_chrome(body, *, embedded=None, route=None):
             header=header,
             side_nav=side,
             main=body,
+            banner=frame_banner(),
             class_name=rx.cond(embedded, EMBEDDED_CLASS, ""),
             **deciding,
         ),

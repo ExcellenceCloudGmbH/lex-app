@@ -33,6 +33,7 @@ class Frame:
     search: tuple[str, str] | None = None   # the search page's route and the parameter it reads
     actions: tuple = ()                 # parts in the header band, before the user menu
     user_menu: tuple = ()               # ui.links in the user menu, above "Sign out"
+    banner: Any = None                  # a ui.message above every page
     module: str = ""
 
     def section(self, title: str) -> "NavLinks | None":
@@ -70,7 +71,7 @@ class OpenedPage:
 
 def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign_out: Any = None,
           opened: Any = None, nav_footer: Any = None, search: Any = None, actions: Any = (),
-          user_menu: Any = ()) -> None:
+          user_menu: Any = (), banner: Any = None) -> None:
     """Configure lex-app's frame for this project: call it once, in the dashboard module.
 
     ``nav`` is the navigation's areas in the order they are listed: the same words a page names
@@ -133,6 +134,14 @@ def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign
         ui.frame(user_menu=[ui.link("Account", to=account),
                             ui.link("Settings", to=settings, requires=ui.edit(Setting))])
 
+    ``banner`` is one ``ui.message`` in RFDS's banner above every page, in the message's tone, shown while
+    its sentence is not empty; the sentence is fixed, a state value, or a function of the user::
+
+        def config_problem(user):
+            return "Some configuration could not be loaded." if not settings_loaded() else None
+
+        ui.frame(banner=ui.message(config_problem, tone="warning"))
+
     ``sign_out`` is where the user menu's "Sign out" leads: a page (``@ui.page`` or
     ``ui.reflex_page``) or an ``https://`` address. By default it is lex-app's ``/logout``, which
     ends the dashboard's sign-in and lex-app's; a project's address should end there too, or the
@@ -155,7 +164,7 @@ def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign
     areas, sections = _areas(nav)
     _FRAME = Frame(nav=areas, sections=sections, nav_footer=_footer(nav_footer), opened=opened,
                    search=None if search is None else _search(search), actions=_actions(actions),
-                   user_menu=_menu(user_menu), sign_out="" if sign_out is None else target(sign_out, argument="sign_out"),
+                   user_menu=_menu(user_menu), banner=_banner(banner), sign_out="" if sign_out is None else target(sign_out, argument="sign_out"),
                    denied=denied or "",
                    request_access="" if request_access is None else target(request_access, argument="request_access",
                                                                            mail=True),
@@ -270,6 +279,20 @@ def _menu(items: Any) -> tuple:
                             "Put the count beside a link in the header (actions=) or the navigation.")
         entry_link(link, "user_menu=")
     return links
+
+
+def _banner(message: Any) -> Any:
+    from lex.lex_app.reflex.ui.pages.vocab import Message
+
+    if message is None:
+        return None
+    if not isinstance(message, Message):
+        many = " one: RFDS shows one banner at a time" if isinstance(message, (list, tuple)) else ""
+        raise TypeError(f"ui.frame(banner=) takes{many or ' one'} ui.message, such as "
+                        f"banner=ui.message(config_problem, tone=\"warning\"); got {_named(message)}.")
+    if _plain_function(message.sentence):
+        of_user(message.sentence, "banner=, the message")
+    return message
 
 
 def _footer(part: Any) -> Any:
@@ -524,6 +547,8 @@ def entries() -> list[Entry]:
         found.append(Entry("nav_footer", link_guard(configured.nav_footer), configured.nav_footer.badge))
     found += _placed("actions", configured.actions)
     found += _placed("user_menu", configured.user_menu)
+    if configured.banner is not None and _plain_function(configured.banner.sentence):
+        found.append(Entry("banner", value=configured.banner.sentence))
     return found
 
 

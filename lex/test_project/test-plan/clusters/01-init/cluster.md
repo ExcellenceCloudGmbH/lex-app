@@ -1999,3 +1999,16 @@ does not remove user launch configurations.
 | 1.1013 | The user menu takes links | a button, a text, a link with badge=, a link with a state value refused with what to write |
 
 **Scenario range:** 1.1012 – 1.1013. **Test file:** `lex/test_project/tests/init/test_1em_ui_frame_user_menu.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1em](batches.md).
+
+### 1en. lex.ui frame: a banner across the top of every page ✅
+
+**What it tests:** `ui.frame(banner=ui.message(...))`: RFDS's banner in the shell's banner region on every page, in the message's tone, shown while its sentence -- fixed, a state value, or a function of the user decided on the server -- is not empty; not hidden inside lex-app's frame.
+
+**Why a regression matters:** A banner that never shows, one shown to a user it is not about, an empty banner, or a failing function that breaks the page.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1014 | The banner says what the project says, to whom it concerns | RFDS's banner in the shell's banner region, tone warning; anna's sentence; carl none; ben's failing function logged, none; a state value and a fixed sentence; not hidden in lex-app's frame |
+| 1.1015 | The banner is one message | text, ui.text, a list, a function without the user refused with what to write |
+
+**Scenario range:** 1.1014 – 1.1015. **Test file:** `lex/test_project/tests/init/test_1en_ui_frame_banner.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1en](batches.md).
