@@ -242,6 +242,13 @@ def test_open_then_close():
 returns something to `await` until it has run; `fields` reads a state; `h.updates` and `h.results`
 hold what the browser was sent and what the handlers returned.
 
+Some events start others that run in the background: a [searched
+choice](/pages/forms#a-choice-searched-on-the-server)'s search, the `ui_search` event, runs its rows
+handler that way. Awaiting what `send` returns waits for the event itself only; await its
+`.wait_all()` to wait for those too: `await (await h.send(...)).wait_all()`. To test which
+matches a searched choice offers, call its rows handler directly:
+`ui.testing.rows(Orders.customers, search="acme")`.
+
 `ui.testing.run` and `ui.testing.rows` start their own event loop, so call them from ordinary
 test functions, not from `async def` tests.
 

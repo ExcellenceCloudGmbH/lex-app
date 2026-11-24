@@ -82,6 +82,8 @@ host configured, any `http://localhost` port). More in [Inside lex-app](/look-an
 | `LEX_API_URL` | where `self.api` reaches lex-app's API |
 | `LEX_UI_ACTION_THREADS` | threads for `@ui.action`, `@ui.load` and `@ui.rows` bodies; 16 by default |
 | `LEX_UI_JOB_THREADS` | threads for `@ui.job` bodies; 8 by default |
+| `LEX_UI_PRIVATE_MB_PER_USER` | megabytes of [`ui.private`](/state-and-actions/private) values one user may hold in each process; 100 by default |
+| `LEX_UI_PRIVATE_VALUES` | how many `ui.private` values each process keeps at most; 5000 by default |
 | `LEX_UI_LOG_ERROR_TEXT` | `false` keeps an unexpected error's text out of the log, leaving its type; on by default |
 | `REFLEX_USE_SINGLE_PORT` | a development run behind one port (below); production needs no setting for it |
 

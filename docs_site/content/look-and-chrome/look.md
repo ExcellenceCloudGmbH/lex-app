@@ -58,16 +58,9 @@ in every instance.
 ## The frame around a page
 
 Opened on its own, every page sits in lex-app's frame: a header with the dashboard's name, the
-signed-in user and the way to sign out, and a side navigation listing the pages declared with
-`nav=`, grouped under their headings. Two settings change the header:
-
-| Setting | Does |
-| --- | --- |
-| `LEX_DASHBOARD_TITLE` | the name in the header; without it, the project's name |
-| `LEX_ENVIRONMENT` | a badge for `prod`, `uat` or `dev`; `none` (the default) shows none |
-
-Inside lex-app the header and the navigation are hidden, because lex-app shows its own; see
-[Inside lex-app](/look-and-chrome/embedding).
+signed-in user and the way to sign out, a side navigation listing the pages in their areas, and
+breadcrumbs above the page. You do not draw it; `ui.frame(...)` sets how it behaves in your project.
+See [The frame](/look-and-chrome/frame).
 
 ## What you should not style
 
@@ -85,5 +78,5 @@ RFDS checks a dashboard's pages when they are compiled - that they use its compo
 style values. On a developer's machine a finding is a warning; in CI it fails the build.
 `LEX_RFDS_CONFORMANCE` (`off`, `warn` or `error`) sets this yourself.
 
-Next: [Inside lex-app](/look-and-chrome/embedding), a dashboard in lex-app and lex-app in a
-dashboard.
+Next: [The frame](/look-and-chrome/frame), the navigation, breadcrumbs and no-access notice
+around every page.

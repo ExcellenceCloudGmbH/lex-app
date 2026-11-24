@@ -125,8 +125,9 @@ ui.column("signed_on", label="Signed", kind="date")
 - **`tones=`** goes with `kind="status"`: which tone each word gets.
 - **`show=`** draws a cell no kind describes: a function of the row that returns `ui.text`,
   `ui.status` or `ui.link`.
-- **`pin=True`** keeps the column in place while the table scrolls sideways. Only the first
-  column, the one that names the row, can be pinned.
+
+The first column stays in place while the table scrolls sideways, on every table, with nothing to
+write: it names the row, so the reader never loses track of which row they are reading.
 
 ## Wide tables and long ones
 
@@ -161,31 +162,35 @@ class Register(ui.State):
 ```python demo
 ui.table(
     Register.rows,
-    columns=[ui.column("investor", kind="name", pin=True), ui.column("reference", kind="code"), "fund",
+    columns=[ui.column("investor", kind="name"), ui.column("reference", kind="code"), "fund",
              ui.column("signed_on", label="Signed", kind="date"),
              ui.column("amount", kind="money", currency="currency")],
     search=True,
-    totals={"amount": "sum of all rows"},
-    page_size=None,
+    totals={"amount": "sum"},
+    totals_of_all=True,
+    page_size=5,
     choose_columns=True,
 )
 ```
 
-All ten commitments are on one page. Narrow the window and scroll the table sideways: the
-investor stays in place. Open **Columns** to hide a column, move it, or type its width. Search for
-"Rhine": two rows are left, and the totals row, now labelled "Total of all rows", still sums all
-ten, one total per currency.
+The ten commitments make two pages of five, so a pager sits under the table. Narrow the window and
+scroll the table sideways: the investor, the first column, stays in place. Open **Columns** to
+hide a column, move it, or type its width. Search for "Rhine": two rows are left, the pager goes
+away because they fit one page, and the totals row, now labelled "Total of all rows", still sums
+all ten, one total per currency.
 
-- **`page_size=None`** shows every row in one scroll, up to 200, the most a table holds in the
-  browser; past 200, the table pages again, so no row is out of reach. `page_size=50` opens at 50
-  rows a page (any number up to 200); the default is 25.
+- **`page_size=`** is how many rows a page shows: 25 by default, any number from 1 to 200. 200 is
+  the most a table holds in the browser, so `page_size=200` shows a file's rows in one scroll.
+- **The pager comes only when it is needed.** While the rows fit one page, the table shows no
+  pager and no choice of rows per page; once there are more, both appear under it, with 25, 50,
+  100 and 200 rows (and your `page_size=`) to choose from.
 - **`choose_columns=True`** adds a **Columns** menu where the user hides, orders and sizes the
   columns (a width from 40 to 1,200 pixels, typed in). The first column always shows and stays
   first, since it names the row. The choice lasts until the browser tab is closed.
-- **`totals=`** takes `"sum"`, the total of the rows the search and filters leave, or
-  `"sum of all rows"`, the total of every row whatever the user narrows. While a search or a
-  filter is on, the label says which: "Total of matching rows" or "Total of all rows"; otherwise
-  it reads "Total". All totals of one table are of the same kind.
+- **`totals={"amount": "sum"}`** totals the rows the search and filters leave. Add
+  **`totals_of_all=True`** to total every row instead, whatever the user narrows. While a search or
+  a filter is on, the label says which: "Total of matching rows" or "Total of all rows"; otherwise
+  it reads "Total". `totals_of_all=True` without `totals=` is refused when the page is built.
 
 ## Filters
 
@@ -309,7 +314,7 @@ on this site. The demos here use `@ui.rows` tables over sample data.
 
 A model table is shown only to users who may read the model. Its `filters=` work on fields with
 choices or yes/no fields, so a date range is not offered there, and it cannot export or total
-yet; for those, read the rows in a `@ui.rows` handler. `pin=`, `page_size=` and
-`choose_columns=True` work on a model table too.
+yet; for those, read the rows in a `@ui.rows` handler. Its first column stays in place too, and
+`page_size=` and `choose_columns=True` work on it as on any table.
 
 Next: [Buttons and links](/pages/buttons-and-links), what a user clicks.

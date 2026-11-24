@@ -42,13 +42,18 @@ What each argument does:
   `tone` or `icon`, the words a link or button uses itself; the error says what to rename. Nor
   may it share its name with a field of any state: see
   [A route argument and a state field](/pages/ui-page#a-route-argument-and-a-state-field).
-- **`nav=`** lists the page in the navigation under that heading, with the page's title as its
-  label. Leave it out and the page is reachable by link only. A page in the navigation needs a
-  fixed title, a string rather than a state value.
+- **`nav=`** names the page's area in the navigation: the page is listed under that heading, with
+  its title as its label, after the pages declared before it. A page with route arguments, such as
+  `fund` above, cannot be opened from the navigation: `nav=` puts it in the area, for its
+  breadcrumbs, without listing it. Leave `nav=` out and the page is reachable by link only. A page
+  listed in the navigation needs a fixed title, a string rather than a state value. How areas are
+  ordered and how breadcrumbs are made is on [The frame](/look-and-chrome/frame).
 - **`icon=`** is the icon of its navigation entry, one of RFDS's icon names such as `"dashboard"`.
-- **`requires=`** takes one permission: `ui.read(Model)`, `ui.create(Model)`, `ui.edit(Model)`,
-  `ui.delete(Model)` or `ui.permission(...)`. A user without it sees an access-denied page, and
-  the page's loads do not start. Leave it out for a page any signed-in user may see.
+- **`requires=`** takes what a handler's `requires=` takes: a permission such as
+  `ui.read(Model)`, `ui.signed_in`, a rule of your own marked [`@ui.rule`](/data-and-permissions/can#a-rule-of-your-own),
+  or a list of them. A user who does not meet it sees an access-denied notice instead of the page,
+  and the page's loads do not start. A permission also leaves the page out of that user's
+  navigation. Leave it out for a page any signed-in user may see.
 - **`params=`** lists the query parameters the page accepts besides its route's arguments, so
   that a link to it may pass them: `params=["tab"]`. How to link to a page is on
   [Buttons and links](/pages/buttons-and-links).
@@ -75,8 +80,12 @@ passed. lex-app checks every route when the app starts, and stops it with a sent
 the field, its state and the route:
 
 ```text
-route '/regions/[region_code]': its dynamic argument [region_code] has the name of the field RegionsBoard.region_code (in myproject.regions). Reflex makes a route argument a value of every state, and does not build the app's pages while a state has a field of that name. Rename the field, e.g. region_code_value.
+route '/regions/[region_code]': its dynamic argument [region_code] has the name of the field RegionsBoard.region_code (in myproject.regions). Reflex makes a route argument a value of every state, and does not build the app's pages while a state has a field of that name. Rename the route argument, e.g. /regions/[region_code_key], or the field, e.g. region_code_value.
 ```
+
+Renaming the route argument always works. When the field belongs to a state lex-app, RFDS or
+Reflex made - a table's own `page` or `sort`, say - the sentence says whose state it is instead of
+suggesting a new field name, since you cannot rename that field.
 
 A field whose name starts with `_`, or a handler, may share an argument's name: Reflex allows
 those, and so does the check.

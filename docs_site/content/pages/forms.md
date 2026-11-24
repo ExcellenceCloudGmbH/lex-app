@@ -75,8 +75,8 @@ The submit handler is an `@ui.action` (or an `@ui.job`, below) whose last argume
 | `datetime` | a day and a time | `datetime.datetime`, in the app's time zone |
 | `year` | four digits | `int` |
 | `bool` | a box to tick | `bool`; `False` when not ticked |
-| `choice` | one of `options=` | `str`, checked against the options |
-| `choices` | several of `options=` | `list[str]` in the order of the options, `[]` when none |
+| `choice` | one of `options=` | the option itself, checked against the options: `str` or `int` |
+| `choices` | several of `options=` | a `list` of the options in their order, `[]` when none |
 
 Other kinds arrive as `None` when nothing was entered. A field with `options=` is a choice even
 without `kind="choice"`. Values for fields the page did not declare never reach the handler.
@@ -87,6 +87,7 @@ without `kind="choice"`. Values for fields the page did not declare never reach 
 ui.field("name")                                     # a line of text, labelled "Name"
 ui.field("signed_on", label="Signed", kind="date", required=True)
 ui.field("currency", options=["EUR", "USD"])         # a dropdown
+ui.field("year", options=[2024, 2025, 2026])         # the handler gets an int
 ui.field("country", options={"DE": "Germany", "FR": "France"})  # value -> what the user reads
 ui.field("investor", options=Lookup.investor_names)  # options held in a field of the state
 ui.field("regions", kind="choices", options=["North", "South", "East", "West"])  # several
@@ -101,9 +102,11 @@ ui.field("customer", options=Orders.customers)       # a @ui.rows handler: searc
 - **`value=`** is what the field starts with: a value, or a field of the state your page's `load=`
   filled. A value that changes with each visit, such as today's date, belongs in the state: a
   value written in the page is fixed when the page is built.
-- **`options=`** with up to 12 fixed options is a dropdown; with more, or with options held in a
-  state field, it is a box that filters the options as the user types. Either way the chosen value
-  is checked on the server.
+- **`options=`** is a list of texts or whole numbers, each once, or a dict from each value to the
+  words the user reads. Up to 12 fixed options make a dropdown; with more, or with options held in
+  a state field, it is a box that filters the options as the user types. Either way the chosen
+  value is checked on the server, and the handler receives the option itself, of its own type:
+  `options=[2024, 2025]` gives an `int`, as does `{1: "Q1", 2: "Q2"}`.
 - **`kind="choices"`** lets the user choose several: boxes to tick for up to 12 fixed options, a
   list to pick from above that. `required=True` then means at least one.
 - **`lines=`** makes a text field that many lines high, 2 or more: see
@@ -317,7 +320,8 @@ receives the investor's `id`, a number, and lists their commitments.
 - The server accepts only a value it offered to this browser tab, so a value made up in the
   browser is refused at the field ("Choose one of the options."). A value offered by an earlier
   search stays valid while the user types on.
-- An `id` that is a whole number reaches the handler as a number; any other `id` as text.
+- The handler receives the row's `id` itself, of its own type: a number stays a number, a UUID
+  stays a UUID.
 - A searched choice starts empty and chooses one: `value=` and `kind="choices"` are refused when
   the page is built.
 - It works in a form, in a wizard's step and in a button's `ask=`, like every field.
@@ -403,7 +407,8 @@ Enter 2020-01-01 to 2021-12-31 and press **Build list**: the progress bar moves,
 appears with its totals. Send the form again and the old table goes until the new run succeeds.
 
 - The submit button is named after the handler: `build_list` reads **Build list**.
-- The result stays until the form is sent again or the user comes back to the page. With
+- The result stays until the form is sent again or the user opens the page again. A reload, or a
+  lost connection that comes back, is not opening it again: the result stays. With
   `ui.form(..., keep=True)` it is still there when the user comes back:
   [Keeping results private](/state-and-actions/private#a-result-that-waits-for-the-user).
 - Keep what the result shows in the state. Large data goes in a field whose name starts with `_`:
@@ -498,4 +503,4 @@ that is not text, a searched choice with `value=` or `kind="choices"`, `tabs=Tru
 sections, or one handler used by two forms with different fields (a handler receives one set of
 fields).
 
-Next: [Tables](/pages/tables), for what a result shows.
+Next: [`ui.calculation`](/pages/calculations), the page of a lex-app calculation model.

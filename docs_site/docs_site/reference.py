@@ -5,12 +5,13 @@ import inspect
 from lex import ui
 
 GROUPS: dict[str, tuple[str, ...]] = {
-    "pages": ("page", "dashboard", "reflex_page", "embed", "record", "list", "form", "field", "step"),
+    "pages": ("page", "dashboard", "reflex_page", "embed", "frame", "record", "list", "form", "calculation",
+              "field", "step"),
     "parts": ("section", "table", "column", "fact", "text", "each", "status", "custom", "custom_block",
               "button", "link", "switch", "address", "message", "progress", "progress_of"),
     "state": ("State", "private", "action", "job", "load", "rows", "running", "failed", "loaded", "cancel", "refresh"),
     "results": ("toast", "goto", "download", "Refuse", "ApiError", "PageError"),
-    "permissions": ("read", "create", "edit", "delete", "signed_in", "permission"),
+    "permissions": ("read", "create", "edit", "delete", "signed_in", "permission", "rule"),
     "testing": ("testing",),
 }
 TITLES = {"pages": "Pages and page kinds", "parts": "Parts", "state": "State and handlers",

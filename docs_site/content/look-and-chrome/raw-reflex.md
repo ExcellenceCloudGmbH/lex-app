@@ -162,7 +162,8 @@ ui.address(ORDER, key=row["id"])                                     # in a @ui.
 
 `params=` lists the query values the page accepts besides its route's arguments. When the app
 starts, lex-app checks that every declared route is a page of the app; one that is not stops the
-start with an error naming the route.
+start with an error naming the route. `nav=` with `title=` also lists the page in an area of the
+navigation: see [The frame](/look-and-chrome/frame#a-raw-reflex-page-in-an-area).
 
 ## Raw handlers
 

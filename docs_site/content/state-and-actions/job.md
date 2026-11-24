@@ -154,18 +154,21 @@ ui.section(
 Click **Find**: the message counts up while the library works, though the job never yields.
 Click **Cancel** while it runs and the library stops at its next report.
 
+- `self.progress` never waits: it returns at once, so a library that reports on every row is not
+  slowed down. The page gets the latest report, at most four a second, and always the last one.
 - `self.progress` writes only the progress. The job's other fields are written at its next
   `yield` or when it ends, never from the library's thread.
 - After a cancel, or when the user leaves a page with `stop_on_leave=True`, the next call to
   `self.progress` raises `GeneratorExit` in the thread that made it - what the job's next `yield`
   would raise - so the library stops. A job that ends with it was stopped, not failed.
-- Anywhere else - in an action, a load, or after the job has ended - `self.progress` raises an
-  error saying it belongs in a `@ui.job`.
+- In an action or a load, `self.progress` raises an error saying it belongs in a `@ui.job`. Called
+  after the job has ended - a library that kept the callback - it raises an error saying the job
+  has ended.
 
 ## At most a few at once
 
-`@ui.job(limit=2)` lets at most two runs of the job go at once, for all users together: for work
-that is expensive for another system.
+`@ui.job(limit=2)` lets at most two runs of the job go at once, for all users together, in each
+server process: for work that is expensive for another system.
 
 ```python
 @ui.job(limit=2)
@@ -175,11 +178,15 @@ def export(self, region):
 
 A press beyond the limit is refused at once, not queued: "Export is already running 2 times. Try
 again in a moment." (with `limit=1`, "Export is already running. Try again in a moment."), as a
-toast and in `ui.failed`. Nothing else on the page changes; for a form's job no field gets a
-message and the last result stays. The job is named as its button is: `export` reads "Export".
+toast and in `ui.failed`, also for a form's job, since it is about the press and not about what
+was entered. Nothing else on the page changes; for a form's job no field gets a message and the
+last result stays. The job is named as its button says it: the words of the first `ui.button`
+that runs it ("Export to CSV is already running 2 times."), else as a form's submit button is
+named, so `export` reads "Export".
 
-- The runs are counted in one server process, from the start of a run to its end, however it
-  ends. With several backend workers, each allows that many.
+- The runs are counted per job, in each server process, from the start of a run to its end,
+  however it ends. One user may hold every place. With several backend workers, each allows that
+  many.
 - `limit=` is a whole number, 1 or more; anything else is refused when the state is defined.
 
 ```md alert info

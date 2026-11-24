@@ -30,7 +30,7 @@ NAV: tuple[Section, ...] = (
     )),
     Section("pages", "Pages", "Where a page lives, and the page kinds that decide how it looks.", (
         Group("Declaring pages", ("pages/ui-page",)),
-        Group("Page kinds", ("pages/record", "pages/list", "pages/forms")),
+        Group("Page kinds", ("pages/record", "pages/list", "pages/forms", "pages/calculations")),
         Group("Parts", ("pages/tables", "pages/buttons-and-links")),
     )),
     Section("state-and-actions", "State & actions", "Plain Python handlers; lex-app does the plumbing.", (
@@ -43,7 +43,7 @@ NAV: tuple[Section, ...] = (
         Group("Permissions", ("data-and-permissions/can", "data-and-permissions/grants")),
     )),
     Section("look-and-chrome", "Look & chrome", "lex-app's design and frame, and dashboards inside lex-app.", (
-        Group("Look & chrome", ("look-and-chrome/look", "look-and-chrome/embedding",
+        Group("Look & chrome", ("look-and-chrome/look", "look-and-chrome/frame", "look-and-chrome/embedding",
                                   "look-and-chrome/raw-reflex")),
     )),
     Section("ship-it", "Ship it", "Sign-in, checks and deployment.", (

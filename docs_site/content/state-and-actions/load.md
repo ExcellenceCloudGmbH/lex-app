@@ -131,7 +131,12 @@ may read is decided by its own `requires=` and by lex-app's API.
   again - another fund, or the same one - starts its loads again and shows the skeleton again.
 - **The state starts clean.** The first load of a state in a visit puts the state's own fields
   back to their defaults before it runs, so a fund never shows the previous fund's values. List
-  fields that should survive in `keep=`: `@ui.load(keep=("filter_text",))`.
+  fields that should survive in `keep=`: `@ui.load(keep=("filter_text",))`. The state of a
+  [kept form](/state-and-actions/private#a-result-that-waits-for-the-user) is not reset at all.
+- **A reconnect is the same visit.** When the browser loses its connection and gets it back, or
+  the user reloads the page, Reflex asks for the page again: its loads run again, so the data is
+  fresh, but nothing is reset, no form starts over and no private value is dropped. Following a
+  link to the same page is a new visit.
 - **A result that arrives too late is dropped.** If the user has left the page by the time a load
   finishes, what it read is discarded, and so is its failure.
 - **On a page without an address** - a [`@ui.dashboard`](/pages/ui-page), or a part placed with

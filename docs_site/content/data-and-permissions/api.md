@@ -101,6 +101,9 @@ needs every matching record, so it reads page after page with `every`, the helpe
 | `self.api.create(Model, {...})` | the new record, as lex-app saved it |
 | `self.api.update(Model, pk, {...})` | the record after the change; only the fields you pass change |
 | `self.api.delete(Model, pk)` | nothing |
+| `self.api.calculate(Model, pk)` | starts a calculation record's run, as lex-app's Calculate button does; the record, `IN_PROGRESS` |
+| `self.api.log(Model, pk)` | the log of a calculation record's newest run, one Markdown text per entry |
+| `self.api.file(Model, pk, field)` | a record's file, downloaded as the user: `{"data": bytes}` or `{"url": ...}` |
 
 A record is a plain dict of the fields lex-app's API returns to this user. Each call is a request
 to lex-app's API: in a handler that runs often, ask for what you need in one `list` rather than

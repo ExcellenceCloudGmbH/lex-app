@@ -121,6 +121,10 @@ That route ends the dashboard's session, deletes the cookie and sends the browse
 sign-out, which signs the user out of lex-app and Keycloak too. The browser then comes back to the
 dashboard's home page, which sends it through sign-in again.
 
+`/logout` also drops every [private value](/state-and-actions/private) the user holds in the
+dashboard's server process. A project can send **Sign out** somewhere else with
+[`ui.frame(sign_out=...)`](/look-and-chrome/frame#where-sign-out-leads).
+
 Signing out works the other way round as well. When the user signs out of lex-app, or the sign-in
 ends for any other reason, the dashboard notices at its next check, within a minute, and the next
 event goes through sign-in again.

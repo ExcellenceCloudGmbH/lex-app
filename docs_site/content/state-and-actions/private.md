@@ -55,6 +55,10 @@ _draft: dict = ui.private(idle_minutes=30, max_hours=4, keep=True)
 - It is a field of a `ui.State`. A public name, a missing type, a plain Reflex state, a limit that
   is not a number above 0 or a `keep=` that is not `True` or `False` is refused when the class is
   defined, with a sentence saying what to write.
+- A computed var (`@rx.var`) may not read it, since Reflex works a computed var out whenever it
+  sends the page, when the value may be gone. A state whose computed var reads a private field is
+  refused when the class is defined. Read the value in a `@ui.rows` handler, or copy what the page
+  shows into an ordinary field where you write the private one.
 
 ## When the value is gone
 
@@ -62,9 +66,18 @@ The value is gone:
 
 - after **`idle_minutes`** (60 by default) without a read or a write;
 - **`max_hours`** (8 by default) after it was written, even if it was read meanwhile;
-- when the tab **opens a page again**, unless the field is declared `keep=True`;
+- when the tab **opens a page again**, unless the field is declared `keep=True`. A reconnect is
+  not opening it again: when the browser loses its connection and gets it back, or the user
+  reloads the page, the values stay;
+- when **the user signs out** of the dashboard: every value they hold in that process leaves at
+  once. Signing out of lex-app itself does not reach the dashboard's server, so those values leave
+  after their idle time;
 - when **another user** signs in on the tab, or the tab's events reach **another server
   process** - after a restart, or when the app runs several backend workers;
+- when the user holds more than the setting `LEX_UI_PRIVATE_MB_PER_USER` allows (100 megabytes by
+  default, in each server process): that user's own value used longest ago goes first, never
+  another user's. A single value larger than the whole allowance is not kept: writing it fails with
+  a sentence naming the setting, logged for you, and the user gets an error with a reference;
 - when the process keeps more values than the setting `LEX_UI_PRIVATE_VALUES` allows (5000 by
   default): the one used longest ago goes first.
 
@@ -92,9 +105,9 @@ from myproject.invoices import customer_names, invoices_of
 class ReportState(ui.State):
     customers: list[str] = []
     customer: str = ""
-    _lines: list[dict] = ui.private(keep=True)
+    _lines: list[dict] = ui.private()
 
-    @ui.load(keep=("customer",))
+    @ui.load
     def open(self):
         self.customers = customer_names(self.user.id)
 
@@ -125,9 +138,14 @@ def invoice_report():
     )
 ```
 
-- **The result shows only while what it shows is kept.** lex-app cannot see which fields a result
-  reads, so keep them yourself: a `ui.private` field needs `keep=True`, and a field the page's
-  `load=` resets needs that load's `keep=`.
+- **One `keep=True` is enough.** The result lives in the state the form submits to, here
+  `ReportState`, and in the states whose `@ui.rows` handlers the result's tables read. lex-app keeps
+  their private fields across visits as if they were declared `keep=True`, and a load of those
+  states, such as `ReportState.open`, no longer resets their fields: it still runs, and sets what it
+  sets.
+- **A field of another state** that the page's `load=` resets cannot be kept that way. A result that
+  shows one is refused when the page is built, with what to write: move the field into the state
+  the form submits to, or list it in that load's `keep=`, as in `@ui.load(keep=("note",))`.
 - **When a kept private value is gone**, the result does not show over nothing. The form says, under
   it: "The last result is no longer available: results are kept only for a while. Send the form
   again."
