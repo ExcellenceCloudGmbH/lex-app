@@ -3457,13 +3457,13 @@ What building settled is section 6.15 of `docs/superpowers/specs/2026-11-23-refl
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.940 – 1.946, 1.953, 1.954, 1.955 |
+| Scenario range | 1.940 – 1.946, 1.953, 1.954, 1.955, 1.956 |
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/pages/tables.py` (`column(kind="name"/"code", pin=)`, `table(page_size=, choose_columns=, totals=)`), `lex/lex_app/reflex/ui/pages/rows_table.py` (page size, totals of all rows, their label), `lex/lex_app/reflex/data.py` (`ChosenColumns`) |
 | Test file | `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py` |
-| Test classes | `TestCluster01dy_TableColumnsRows` (1.940–1.946, 1.953, 1.954, 1.955) |
+| Test classes | `TestCluster01dy_TableColumnsRows` (1.940–1.946, 1.953, 1.954, 1.955, 1.956) |
 | Fixtures | a neutral customers state (name, code, region, amount in two currencies); Django's `Group` as a model table |
-| Tests landed | **10 pass / 0 fail** |
+| Tests landed | **11 pass / 0 fail** |
 | Status | ✅ Complete |
 
 Table needs found while rewriting dashboards. What building settled is section 5.14 of
@@ -3481,6 +3481,7 @@ Table needs found while rewriting dashboards. What building settled is section 5
 | 1.953 | A total of every row is one table option, read once | totals={...: "sum"}, totals_of_all=True over a handler that searches itself: Total of all rows while searching, every row read once and not on each keystroke; the old "sum of all rows" sentence, totals_of_all without totals, and a non-bool refused with what to write |
 | 1.954 | The pager shows only when the rows do not fit one page | rows and model tables, default and page_size=200: no always-on pager; RFDS's pagination with its rows-per-page choice under a condition on total_rows > page_size; page_size=None refused saying to write page_size=200; 1.943 now checks 1-200 |
 | 1.955 | The first column always stays in place, and pin= is gone | rows and model tables with nothing written: the first column is RFDS's start-sticky column and no other; ui.column(pin=) is no argument; 1.940 and 1.941 rewritten without pin= |
+| 1.956 | The user's column choice lasts until the tab is closed | a choice from the Columns menu survives a new visit and the table appearing again; ChosenColumns' docstring says so (it claimed a new visit starts from the table as declared) |
 
 ### Batch 1dz — lex.ui pages: a section closed until the user opens it, saying how many rows it holds ✅
 

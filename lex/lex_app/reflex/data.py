@@ -373,7 +373,8 @@ class ChosenColumns(rx.State, mixin=True):
 
     Only the table's own columns are kept; the first column names the row, so it is always shown
     and stays first; a width is whole pixels from 40 to 1,200 (RFDS's column chooser's range).
-    They live in the browser tab's state: a new visit starts from the table as declared.
+    They live in the browser tab's state until the tab is closed: a new visit keeps them, and a
+    new tab starts from the table as declared.
     """
 
     view_columns: list[str] = []          # shown columns ([] = all)

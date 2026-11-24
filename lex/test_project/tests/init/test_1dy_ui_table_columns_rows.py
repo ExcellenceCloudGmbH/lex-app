@@ -11,7 +11,7 @@ whether it sums the rows the search left or every row. A regression is a name th
 a row that cannot be reached, a width that only breaks in the browser, a user's column choice
 that hides the row's name, or a total that silently changes meaning when the user searches.
 
-Cluster 1dy -- scenarios 1.940-1.946, 1.953-1.955. Type: U.
+Cluster 1dy -- scenarios 1.940-1.946, 1.953-1.956. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/tables.py (column kind="name"/"code", pin=; table page_size=,
 choose_columns=, totals=), lex/lex_app/reflex/ui/pages/rows_table.py (page size, totals over all
 rows, their label), lex/lex_app/reflex/data.py (ChosenColumns, the model table's page size).
@@ -385,3 +385,32 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
                          ["start", None], "a model table the same way")
         with self.assertRaises(TypeError):
             ui.column("name", pin=True)
+
+    # -- 1.956 ---------------------------------------------------------
+    def test_1_956_the_users_column_choice_lasts_until_the_tab_is_closed(self) -> None:
+        """
+        Scenario 1.956: how long the Columns menu's choice lasts, and what lex-app says about it.
+        Given: a rows table with choose_columns=True, and the user's choice of columns.
+        When:  the user opens another page and comes back (a new visit; the table appears again).
+        Then:  the choice is still there: it lives in the tab's state until the tab is closed;
+               ChosenColumns says so (it said a new visit starts from the table as declared).
+        """
+        from lex.lex_app.reflex.data import ChosenColumns
+        from lex.lex_app.reflex.ui.state import State
+
+        state, _ = built(ui.table(CustomersState.customers, columns=["name", "code", "region"], choose_columns=True))
+
+        async def scenario():
+            async with testing.Harness(user="ada") as h:
+                await h.open_tab("/customers")
+                await (await h.send(state, "open"))
+                await (await h.send(state, "set_view_columns", ids=["name", "region"]))
+                await (await h.send(State, "ui_open", page="/elsewhere"))
+                await (await h.send(state, "close"))
+                await (await h.send(State, "ui_open", page="/customers"))
+                await (await h.send(state, "open"))
+                return list((await h._state(state)).view_columns)
+
+        self.assertEqual(asyncio.run(scenario()), ["name", "region"], "the choice survives a new visit")
+        self.assertIn("until the tab is closed: a new visit keeps them", ChosenColumns.__doc__,
+                      "and the class says what it does")
