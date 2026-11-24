@@ -891,12 +891,13 @@ since the look is lex-app's (section 8).
 
   It returns `True`, `False`, or the sentence the user is refused with. It runs on the server, on a
   worker thread (it may query the database), once per event however often it is named, like the
-  user's permissions; a rule that raises, or answers anything but `True`, `False` or a sentence,
+  user's permissions; `False` or nothing (`None`) refuses with lex-app's sentence; a rule that raises, or
+  answers anything but `True`, `False`, `None` or a sentence,
   refuses -- on a handler as an unexpected failure (logged, a reference for the user), on a page with
   lex-app's no-access sentence (logged). As for any `requires=`, a handler that declares a rule may
   query the database directly. For a page the opener runs it: a
   refused page shows the no-access notice with the rule's sentence and starts no load; its navigation
-  entry stays (a rule cannot hide it in the browser). For a handler it is checked with the
+  entry is not drawn for a user the rule refuses -- decided on the server when a page opens (6.21; at first it stayed, since the browser cannot ask a rule). For a handler it is checked with the
   permissions; its sentence is the refusal. A page's `requires=` now takes a list, as a handler's does.
   `visible=` does not take a rule (it is decided in the browser); the message says to set a state field
   in the load instead, where the rule may be called: `region_team(self.user, self.params)`.
@@ -1105,7 +1106,236 @@ runs; 1ei a file of the result, and Stop.
   only while it is open on the run.
 - *Several records per run* (a batch's generated rows): a result's related table shows them.
 
+### 6.21 The rest of an application's frame (2026-11-24, batches 1ej-1ep)
+
+A need found while moving an application with several areas and real users onto lex.ui: its frame had
+more than 6.19 gives -- a search box, a status hint and a notifications bell in the header, "Account"
+and "Settings" in the user menu, a banner when something is wrong, navigation entries that are not
+declared pages (a search page, an outside wiki, the user's favourites, a count of requests waiting), a
+version label at the foot of the navigation, a navigation that only lists what the user may open, pages
+that a stranger must not learn exist, and the tenant's mark. Every one is a need of any application of
+that size, so every one is a part of lex-app's frame, configured in the same `ui.frame(...)`; nothing
+draws on its own.
+
+```python
+def waiting(user):                                  # a function of the user: lex-app calls it on the server
+    return Request.objects.filter(approver=user.id, state="open").count()
+
+def favourites(user):
+    return [ui.link(f.title, to=report, key=f.report_id) for f in Favourite.objects.filter(user=user.id)]
+
+ui.frame(
+    nav=[ui.section("Orders", ui.link("Search orders", to=search, icon="search")),
+         "Reports",
+         ui.section("Requests", ui.link("Waiting for you", to=approvals, badge=waiting)),
+         ui.section("Favourites", favourites),
+         ui.section("Help", ui.link("All workflows", href="https://wiki.example.com/workflows"))],
+    nav_footer=ui.link("Version 2.4.1", href="https://example.com/changes"),
+    search=search,
+    actions=[ui.status(sync_state, tone="info"),
+             ui.link("Notifications", to=inbox, icon="notification", badge=unread)],
+    user_menu=[ui.link("Account", to=account),
+               ui.link("Settings", to=settings, requires=ui.edit(Setting))],
+    banner=ui.message(config_problem, tone="warning"),
+    logo="/acme.svg",
+    refused_as_missing=True,
+)
+```
+
+**One rule for values: a function of the user.** Where a part of the frame shows a value -- a badge's
+count, a status's word, the banner's sentence, a section's entries -- it takes what a page's part takes
+(a fixed value or a state value) or *a function of the user*, `fn(user)`. lex-app calls the frame's
+functions on the server each time a page opens (the frame's mount, a background event: the page never
+waits for them), on worker threads -- they may query the database, as `opened=` and `@ui.rule` may --
+and the browser receives only the answers. A function that fails is logged and its part shows nothing
+(no badge, no banner), never an error. A word or sentence that comes back empty (`""` or `None`) hides
+its part; a count of 0 hides its badge. *Why a function, not a project state with a load:* the frame is on
+every page, so its state would need a load on every page -- a second opener; a function says the same in
+one line and needs no state. *Considered:* `@ui.load` on a frame state (above); a `ui.frame(load=)`
+(a second opener, and a state the project must keep in step with every page). The function takes only the
+user: what the frame shows is the same on every page.
+
+**What a user may see in the navigation is decided on the server** (the shell's usual rule: an entry
+the user may not open is not drawn). When a page opens, lex-app asks, for every guarded entry -- a
+listed page with `requires=` (permissions and `@ui.rule`s alike), a raw page with `requires=`, a
+`ui.link` with `requires=`, and a `ui.link` to a page that has one -- whether this user may open it:
+permissions from Keycloak's grants with the user's token (not what the browser was told), rules on a worker
+thread with the entry's own values (none for a listed page, the link's for a link). Only the answers
+reach the browser: `ui_frame_shown`, the keys of the entries that may be drawn. A guarded entry is not
+drawn until the answer has come, so the first page of a new tab is right, and an entry whose rule fails
+is not drawn (logged). An area all of whose entries are guarded is drawn, heading and all, only while one
+of them is: a heading without entries would only say that something is there. This replaces 6.19's "a rule cannot hide an entry": it now does, and a raw
+page's `requires=` may be a rule too (it still only hides the entry; lex-app does not guard a raw page).
+The same answers guard the user menu's and the header's links. *Considered:* RFDS's navigation
+permission checker over the browser's permissions (6.19; rules cannot be asked there, and the browser
+decides); asking in the opener (`ui_open`): a page in raw Reflex in lex-app's frame (`lex_chrome`) has
+no opener, and the opener holds the tab while it asks.
+
+- **`nav=` takes sections too.** An item of `nav=` is an area's name, as before, or
+  `ui.section("Title", ...)` -- the lex.ui word for a titled part. A section named like an area holds
+  the area's declared pages and then its links; any other title makes a section of links. Its content is
+  `ui.link`s (to a page, a raw page, a record or an `https://` address, with fixed values), or *one*
+  function of the user that returns `ui.link`s -- a per-user section ("Favourites", "Topics you may
+  see"), hidden while it has none. A per-user section's links are shown as they are: their words are the
+  data's, not translated, and they take no `icon=`, `badge=` or `requires=` (the function decides).
+- **`badge=`** -- a count beside an entry -- is a function of the user, or a whole-number state value, on
+  `ui.link`, `@ui.page(nav=...)` and `ui.reflex_page(nav=...)`: RFDS's navigation badge, read out as
+  "3 new items". It is the same word in the header. *Considered:* `count=` (RFDS's word is badge).
+- **`icon=`** on a `ui.link` is the entry's icon, as `icon=` is on `@ui.page` and `ui.button`.
+- **`nav_footer=`** is one `ui.link` or `ui.text` at the foot of the navigation (RFDS's navigation
+  footer): a version label, a link to help. *Considered:* RFDS's page footer (`app_shell(footer=)`,
+  "provenance": a different place); a link in `nav=` placed at the end (where it goes would be implicit).
+- **`search=`** is a page (`@ui.page` or `ui.reflex_page`) that takes exactly one query parameter
+  (`params=["q"]`): lex-app puts RFDS's search box in RFDS's search slot of the header, and Enter opens
+  that page with what was typed in that parameter. The route is the server's; only the text comes
+  from the browser. *Considered:* a `ui.custom_block` (every project would write the same box);
+  `search=(page, "q")` (the page already says which parameter it reads).
+- **`actions=`** are a few parts in the header band before the user menu, as RFDS's header has them:
+  `ui.link` (with `icon=`, `badge=`, `requires=`), `ui.button`, `ui.status`, `ui.text` and
+  `ui.custom_block` -- e.g. a bell `ui.link("Notifications", to=inbox, icon="notification",
+  badge=unread)`, or RFDS's full notification centre as a `ui.custom_block`. The word is the page kinds'
+  `actions=`.
+- **`user_menu=`** are `ui.link`s in the user menu, above "Sign out", each hidden by its `requires=`
+  (and by its page's) as a navigation entry is. RFDS's `user_menu(items=)`.
+- **`banner=`** is one `ui.message`, RFDS's banner above the header on every page of the dashboards,
+  inside lex-app's frame too (its message is about the dashboards, wherever they are shown): its tone is
+  the message's; its sentence a fixed sentence, a state value or a function of the user; it shows while
+  the sentence is not empty. *Considered:* a `ui.message` returned by the function (the tone would come
+  from the browser's data; the tone belongs to the configuration); several banners (RFDS: at most one).
+- **`requires=` on a `ui.link`** belongs to the frame, where it is decided on the server. In a page a
+  link's `requires=` and `badge=` are refused with what to write (`visible=`, a state value): the page
+  is the browser's to draw, and its handlers are what is guarded. `icon=` is a frame word too: in a page
+  a link is words, and a button has the icon.
+- **`refused_as_missing=True`**: a page the user may not open looks like a page that does not exist --
+  lex-app's not-found page, with the browser tab's title, the breadcrumbs and the navigation entry gone
+  too -- instead of the no-access notice. *Why the frame, not the rule* (`@ui.rule(hidden=True)`): not
+  revealing that pages exist is a policy of the application, and it has to hold for lex-app's
+  permissions as well as for rules (a page refused by a permission would still say "no access"); one
+  switch says it once. With it a guarded page is decided by the opener on the server (as a rule's
+  page is), and a refused load's `/ui-error` shows the same not-found page. `denied=` and
+  `request_access=` word a notice it never shows, so they are refused beside it. The opener tells the
+  browser only "yes" or "no" for such a page, never the rule's sentence. A page declared with `@lex_page`
+  before `ui.frame(...)` runs keeps its own tab title (the switch is read when the page is declared);
+  `@ui.page`s are declared after the module is loaded, so theirs always follow it. lex-app now adds its own
+  not-found page (Reflex's `404` route, in lex-app's frame, RFDS's empty state with a way to the
+  overview), so that a missing page and a refused one look the same. *Limit:* the page's code is in the
+  app's bundle like every page's; this hides the page from the user's screen, not from someone reading the
+  bundle. A project that adds its own `404` page keeps it, and a refused page then looks like lex-app's.
+- **`logo=`**: the address of the project's mark (`/acme.svg`, from the app's assets, or `https://`),
+  in RFDS's logo slot; the product's name beside it, and both a link home (the overview) -- the
+  product's name leads home without a mark too, in the chrome band's colours (lex-app's stylesheet). The look stays
+  lex-app's: RFDS's header has a logo slot for a tenant's mark, as its theme has the tenant's brand
+  colour -- a mark is content placed by RFDS, not a look; the colours, type and chrome are untouched.
+  It is decorative (`alt=""`), as RFDS says a logo is when the product's name is text beside it, so a
+  screen reader reads the name once; `logo_label=` names it for a mark that says something the
+  product's name does not (the tenant's name). The product's name is still `LEX_DASHBOARD_TITLE`.
+- **A loading indication: not built.** RFDS has no thin page-loading bar (its `progress_bar` is a
+  labelled bar in the page for one operation), and lex-app's page kinds already show RFDS's skeleton until
+  their loads have finished (6.4), sections with `load=` their own. A second indication would say the same.
+
+*Not added:* a free header part of the project's own (a `ui.custom_block` in `actions=` is the way out);
+a tenant switcher or RFDS's context bar (no lex-app project has tenants in one dashboard); several
+banners; per-page frames.
+
 ---
+
+### 6.22 What rewrites of real dashboards still needed (2026-11-24, batches 1eu onward)
+
+Gaps in pages and the frame found while rewriting dashboards onto lex.ui, each a need of any
+lex-app project. (The table gaps of the same round are section 5.15 of the tables design.)
+
+- **Areas the frame does not list follow the listed ones (batch 1eu).** `ui.frame(nav=[...])` refused
+  any page whose area it did not list, so a project that still had raw pages in areas of their own
+  ("Admin", "Tools") had to list every one of them or the app did not start. Now `nav=` orders the
+  areas it names; every other area follows, in the order its first page was declared. The typo check
+  stays for the pages the author writes now: a `@ui.page` whose area neither `nav=` nor any raw page
+  (`ui.reflex_page`, `lex_page`) has is refused, naming the listed areas and the raw pages' areas to
+  choose from. A raw page is never refused (its area is what the old app called it). A `@ui.page`
+  may join a raw page's area without listing it. *Not added:* refusing a listed area that no page has
+  -- raw pages may be listed after the frame is checked.
+
+- **`lex reflex check` follows the project's own imports (batch 1ev).** The check read only
+  `_reflex_structure.py` and `_dashboards/`, so a state or page moved into a module of its own and
+  imported from there went unchecked. It now follows every import from those files, transitively:
+  an absolute import is resolved against the project's root (where `lex start` runs it), a relative
+  one against the importing file's package, and only what is a file under the root is read -- never
+  lex-app, Reflex or another installed package, and never by importing (the files are parsed). The
+  followed files get lex.ui's checks and RFDS's `lint --strict`, as the dashboards always did.
+  *Not followed:* a module loaded by name at run time (`importlib.import_module("...")`).
+
+- **A closed section mounts what it holds when opened; a title from the state; actions (batch 1ew).**
+  RFDS's closed section is a native `<details>`, whose content the browser lays out at zero size: a
+  chart in it fits itself to nothing and never fits again. RFDS's section has no lazy body, so lex.ui
+  wraps what a closed section holds in a condition on a client state (`useState` in the browser, no
+  round trip) that a click on the section sets -- the only clickable part of a closed section is its
+  summary -- and the parts mount on first opening and stay. **Tables are the exception**: they mount at
+  once and read their rows, because the closed section's title says how many rows it holds (6.16).
+  No argument: it is how a closed section behaves. `ui.section(title=)` also takes a **state value**
+  (a title with a count, "Lines (12)", computed by a handler), as `ui.record(title=)` does, wherever
+  the section has a heading of its own (a form's result, `ui.embed`); a record page lists its
+  sections under "On this page" and a tab names its sections, both with fixed words, so a state
+  title there is refused. **`actions=[ui.button(...)]`** -- the word page kinds use -- puts buttons
+  in RFDS's section header; in a closed section RFDS shows them in the opened body, never in the
+  summary (an interactive control inside a summary is an accessibility fault). A section with
+  actions is drawn with its heading also when open on its own (`ui.embed`). On a record page and in
+  a tab, which have no section heading of their own, `actions=` is refused: "Put the buttons inside
+  the section, or give the page `actions=[...]`". A navigation section refuses both.
+
+- **`ui.scroll_to(part)`: a handler brings a part into view (batch 1ex).** Only `rx.scroll_to("<dom
+  id>")` in a `@ui.custom` handler could, with an id the author had to guess. A handler now returns
+  `ui.scroll_to("Errors found")` -- a section, named by its title as the page names it -- or
+  `ui.scroll_to(OrdersState.lines)` -- the table over that `@ui.rows` handler. lex-app gives the parts
+  those ids (a titled section: the anchor a record page already gives its sections, `section_anchor`;
+  a rows table: `table_anchor`, from its handler's name) and turns the result into Reflex's
+  `scroll_to` event, in order with the handler's other results. A part not on the page is not
+  scrolled to, and nothing fails. Two sections of one title on a page: the first is reached. *Not
+  added:* a model table by its model (several tables may show one model -- its section is named
+  instead), a section whose title is a state value (reached through its table). *Name:* Reflex's
+  own (`rx.scroll_to`); `ui.focus`, `ui.show` were considered.
+
+- **A tab shown by state (batch 1ey).** `visible=` on a section shown as a tab (`tabs=True` on a form's
+  result or a record page) took a permission only. It now also takes a state value (`visible=
+  ResultState.has_figures`): the tab's trigger and its panel are each drawn under `rx.cond` on it.
+  RFDS's `TabSpec` hides a tab by a permission only and has no such switch, so lex.ui wraps the two
+  components RFDS built for that tab, found by the tab's value (`hide_tabs`). The page opens on its
+  first tab, so a state value on the first tab is refused ("Put a tab that is always there first").
+  A record page without tabs still refuses a state value on a section (its heading stays in "On this
+  page"), now pointing to `tabs=True`. **Checked and not relaxed:** a closed section in a tab stays
+  refused (a tab is opened by its tab; a disclosure inside it would be a second way to hide it), and
+  a part after the sections stays refused (what every tab shares has one place, above the tabs) --
+  neither is a need of every project.
+
+- **More than four tables on a record page: RFDS's limit, said with the way out (batch 1fa).** RFDS's
+  object page refuses more than four tables (`MAX_GRID_TABLES`, rule n02) and suggests "tab navigation
+  or a sub-page"; it counts every section's tables whatever the navigation, so `tabs=True` does not
+  lift it. The limit is RFDS's design rule and is kept: hiding tables from its count (a closed
+  section, a deferred mount) would break the rule, not meet it. lex.ui counts the tables in a record
+  page's sections before RFDS does and refuses in its own words, naming how many, in which sections,
+  that tabs do not lift it, and the way that does: a page of their own (a `@ui.page` whose tables'
+  `where=` name the record) led to from a section by `ui.link(..., to=page, key=...)`. A form's result
+  and a list page are RFDS pages without that rule. 1cs's 1.800 expects the new words.
+
+- **A "Clear" beside several choices (batch 1ez).** `ui.field(..., kind="choices")` over more than twelve
+  options is RFDS's multi-select, which has no way to empty it at once. Its value is the browser's (a
+  client state, sent with the form), so lex.ui draws RFDS's tertiary button "Clear" beside the field,
+  which sets that value to the empty list -- no round trip, no change to RFDS -- shown only while
+  something is chosen. The same for the checkbox group of a short list (one rule for "several").
+  A single choice has none (it is changed by choosing another). No argument.
+
+- **`ui.testing`: a searched field, a gone private value, lex-app's API in-process (batch 1fb).**
+  `ui.testing.search(OrdersState.create, "customer", "acm")` returns the matches a searched choice
+  offers when the user types (`{"value", "label"}`, as the browser gets them), its rows handler run as
+  the user; `Harness.search(handler, key, text)` is the same step inside a longer test (as `run` is
+  `Harness.send`). The form's page must be built, as when lex-app starts; a key that is no searched
+  field is refused saying what one is. `fields={"_report": ui.testing.GONE}` now seeds a
+  `ui.private` field through its own store (`private.put`), never Reflex's typed setter, so nothing
+  is logged. **`ui.testing.lex_api(client)`** is `self.api` answered in this process by lex-app's own
+  views through Django's test client (signed in as the user the API acts for): permissions,
+  validation, hooks, audit and calculations are lex-app's, with no server and no HTTP; `.calls` lists
+  the requests. It is the aid the calculation page's own tests used (`ViewsClient`), now public, so
+  the two cannot drift. *Names:* `search` as the field's own word (`options=` "searched on the
+  server"); `lex_api` as `data.lex_api` -- lex-app's API as the user. A plain stand-in object
+  (`api=Stub()`) still works for a test that needs no database.
 
 ## 7. Order of building
 

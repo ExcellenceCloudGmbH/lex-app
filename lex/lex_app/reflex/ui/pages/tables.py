@@ -245,11 +245,12 @@ class Table(Part):
                 options["render"] = render
             if c.kind in _DRAWN or c.show is not None:
                 options["sortable"] = c.kind in ("status", "tag")
-            specs.append(rfds_column(c.key, header, kind=_RFDS_KIND[c.kind or "text"], **options))
+            field = (given or {}).get("field", c.key)       # a model's foreign key: its related record's name
+            specs.append(rfds_column(field, header, kind=_RFDS_KIND[c.kind or "text"], **options))
         return specs
 
     def _toolbar(self, ctx: Build, state: Any, cols: list[Column], specs: list[dict], *,
-                 choices: Any) -> rx.Component | None:
+                 choices: Any, dated: set | None = None) -> rx.Component | None:
         import rfds
 
         from lex.lex_app.reflex.ui.pages import rows_table
@@ -261,7 +262,7 @@ class Table(Part):
         if self.filters:
             labels = {c.key: (c.label or c.key.replace("_", " ").capitalize()) for c in cols}
             boxes = []
-            dated = {c.key for c in cols if c.kind in _DATE_KINDS}
+            dated = dated if dated is not None else {c.key for c in cols if c.kind in _DATE_KINDS}
             for name in self.filters:
                 label = say(labels[name])
                 if name in dated:           # a date column is filtered by a range of days, not a list of every day
@@ -354,19 +355,29 @@ class Table(Part):
                 raise ctx.fail(f"`where=` names {name}, which {model.__name__} does not have.",
                                f"Narrow by its fields: {', '.join(sorted(known))}.")
         if self.export or self.totals or self.totals_of_all:
-            raise ctx.fail("a model table cannot export or total yet.",
-                           "Leave `export=` and `totals=` out; they come with the model's export permission.")
+            what = "export=" if self.export else "totals="
+            raise ctx.fail(f"a model table cannot export or total (`{what}`): it reads one page at a time.",
+                           f"Read every row in a `@ui.rows` handler and table that: `@ui.rows def "
+                           f"{model._meta.model_name}s(self): return self.api.all({model.__name__}, filters={{...}})`, "
+                           f"then `ui.table(State.{model._meta.model_name}s, columns=[...], {what}...)`.")
         linked = [c.key for c in cols if c.open is not None]
         if linked:
             raise ctx.fail(f"column `{linked[0]}` has `open=`, which only a `@ui.rows` table's rows can carry.",
                            "A model's field is data and never becomes a link. Read the rows in a `@ui.rows` "
                            "handler that builds each address with `ui.address(...)`.")
+        dated: dict[str, str] = {}
         for name in self.filters:
             field = known.get(name)
-            if field is not None and not (field.choices or field.get_internal_type() == "BooleanField"):
+            kind = field.get_internal_type() if field is not None else ""
+            if kind in ("DateField", "DateTimeField"):        # a range of days, read as the API's lookups
+                dated[name] = f"{name}__date" if kind == "DateTimeField" else name
+                continue
+            if field is not None and not (field.choices or kind == "BooleanField"):
                 raise ctx.fail(f"`filters=` names {name}, whose values are not a fixed set.",
-                               "A model table filters on fields with choices, or yes/no fields; search the others.")
-        base = {c["field"]: dict(c) for c in data.lex_columns(model, [c.key for c in cols])}
+                               "A model table filters on fields with choices, yes/no fields, or dates (a range of "
+                               "days); search the others.")
+        # By the name the author wrote: a foreign key's spec shows the related record's name (`<fk>__short_description`).
+        base = {c.key: dict(spec) for c, spec in zip(cols, data.lex_columns(model, [c.key for c in cols]))}
         self._check(ctx, cols, first_kind=base.get(cols[0].key, {}).get("kind") if cols else None)
         specs = self._specs(ctx, cols, base)
         key = model._meta.pk.name
@@ -389,7 +400,10 @@ class Table(Part):
         if self.search and not texts:
             raise ctx.fail("`search=True`, and the table has no text column to search.",
                            "Add a text column, or leave search out.")
-        search_field = texts[0] if self.search else ""     # a shown column: the browser never searches a hidden one
+        # A shown column (the browser never searches a hidden one); the model's own before lex-app's created_by.
+        inherited = data._framework_fields(model)
+        texts = [name for name in texts if name not in inherited] + [name for name in texts if name in inherited]
+        search_field = texts[0] if self.search else ""
         used: set[str] = {key}
         for c in cols:
             if c.show is not None:
@@ -398,17 +412,22 @@ class Table(Part):
             used |= _record(self.row_actions)[1]
         state = data.table_state(model, columns=specs, search_field=search_field, filters=self.where,
                                  page_size=self.page_size,
-                                 row_fields=tuple(sorted(used)), choice_fields=tuple(self.filters),
-                                 scope_fields=tuple(dict(self.where or {})), ordering=self.ordering)
+                                 row_fields=tuple(sorted(used)),
+                                 choice_fields=tuple(name for name in self.filters if name not in dated),
+                                 scope_fields=tuple(dict(self.where or {})), ordering=self.ordering,
+                                 not_stored=True, date_lookups=dated)
         rows_table._CACHE_BY_TABLE[self] = state
+        rows_table.shown_on(ctx.route, state)
         options = {}
         for name in self.filters:
+            if name in dated:
+                continue
             field = known[name]
             pairs = field.choices or [(True, "Yes"), (False, "No")]
             options[name] = [{"value": rows_table.ALL, "label": "All"},
                              *({"value": str(v).lower() if isinstance(v, bool) else str(v), "label": str(label)}
                                for v, label in pairs if not isinstance(label, (list, tuple)))]
-        toolbar = self._toolbar(ctx, state, cols, specs, choices=options)
+        toolbar = self._toolbar(ctx, state, cols, specs, choices=options, dated=set(dated))
         if toolbar is not None:
             props["toolbar"] = toolbar
         props.update(self._paging(state))
@@ -481,6 +500,7 @@ class Table(Part):
         rows_table._CACHE_BY_TABLE[self] = state
         if not ctx.under_load:          # under a load the table appears again after it, and reads then
             rows_table.on_route(ctx.route, state)
+        rows_table.shown_on(ctx.route, state)
         props: dict[str, Any] = {"row_key": "id"}
         if self.open is not None and not isinstance(self.open, str):
             props["row_href"] = links.row_href(ctx, self.open, "id")
@@ -500,7 +520,10 @@ class Table(Part):
         props.update(self._paging(state))
         caption = say(ctx.caption) if ctx.caption else say(ctx.page.replace("_", " ").capitalize())
         table = rfds.data_table(state=state, columns=specs, caption=caption, **props)
-        return rx.box(table, on_mount=state.open, on_unmount=state.close, width="100%")
+        from lex.lex_app.reflex.ui.pages.kinds import table_anchor
+
+        return rx.box(table, on_mount=state.open, on_unmount=state.close, width="100%",
+                      id=table_anchor(self.source))          # ui.scroll_to(State.rows) brings it into view
 
 
 def _export_columns(cols: list[Column]) -> tuple[tuple[str, str], ...]:

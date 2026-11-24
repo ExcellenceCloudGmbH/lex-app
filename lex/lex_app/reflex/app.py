@@ -103,6 +103,14 @@ def create_app():
         on_load=[LexAccessState.load, LexDashboardState.resolve, UiState.ui_open("/")],
     )
     app.add_page(_signing_out, route="/logout", title="Signing out", on_load=LexUser.sign_out)
+    from reflex_base.constants.route import Page404
+
+    from lex.lex_app.reflex.shell import not_found_page
+
+    # lex-app's not-found page, in its frame: a page refused as missing (ui.frame(refused_as_missing=True))
+    # shows the same. A project that added its own "404" page keeps it.
+    if Page404.SLUG not in getattr(app, "_unevaluated_pages", {}):
+        app.add_page(not_found_page, route=Page404.SLUG, title=Page404.TITLE, on_load=[LexAccessState.load])
     return app
 
 

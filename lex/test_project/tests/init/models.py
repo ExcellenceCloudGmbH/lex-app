@@ -119,3 +119,52 @@ class UiRegionReportLine(LexModel):
 
 UI_CALC_MODELS = [UiRegionReport, UiRegionReportLine]
 UI_REGION_REPORT = "uiregionreport"
+
+
+# -- A calculation whose input is a foreign key (cluster 1es) ---------------------------------------
+
+
+class UiCustomer(LexModel):
+    """A customer a report is about: its name is what a foreign key to it shows."""
+
+    name = models.CharField(max_length=50)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:
+        return self.name
+
+    def permission_read(self, user_context):
+        return PermissionResult.allow_all("cluster 1es")
+
+    def permission_list(self, user_context):
+        return True
+
+
+class UiCustomerReport(CalculationModel):
+    """A report over one customer and year: its customer is a foreign key."""
+
+    customer = models.ForeignKey(UiCustomer, on_delete=models.CASCADE, related_name="reports")
+    year = models.IntegerField()
+
+    class Meta:
+        app_label = "lex_app"
+
+    def permission_create(self, user_context):
+        return True
+
+    def permission_read(self, user_context):
+        return PermissionResult.allow_all("cluster 1es")
+
+    def permission_edit(self, user_context):
+        return PermissionResult.allow_all("cluster 1es")
+
+    def permission_list(self, user_context):
+        return True
+
+    def calculate(self):
+        return None
+
+
+UI_FK_MODELS = [UiCustomer, UiCustomerReport]

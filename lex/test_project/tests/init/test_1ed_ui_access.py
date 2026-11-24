@@ -139,6 +139,23 @@ class RegionState(ui.State):
         self.done = "reopened"
 
 
+@ui.rule
+def report_reader(user, params):
+    """Granted to a reader who holds the report read permission, read from user.permissions."""
+    held = {(p.get("rsname"), scope) for p in user.permissions for scope in p.get("scopes", [])}
+    return True if ("init.Report", "read") in held else "Only report readers."
+
+
+class PermittedState(ui.State):
+    """An action guarded by a rule that reads the user's permissions."""
+
+    done: str = ""
+
+    @ui.action(requires=report_reader)
+    def close(self):
+        self.done = "closed"
+
+
 def _report():
     return ui.record(title="Region report", load=RegionState.open,
                      sections=[ui.section("Figures", ui.text("The figures."))])
@@ -275,9 +292,10 @@ class TestCluster01ed_Rules(FrameCase):
         """
         Scenario 1.973: mistakes.
         Given: a rule taking the wrong arguments, a plain function given as requires=, a rule given as
-               visible=, and a raw page whose entry would be hidden by a rule.
+               visible=, and a raw page given a plain function as requires=.
         When:  each is declared or built.
         Then:  each is refused with what to write; a rule stays a function the project can call itself.
+               (A raw page's requires= takes a rule since the navigation is decided on the server: 1.1001.)
         """
         with self.assertRaises(TypeError) as caught:
             @ui.rule
@@ -300,10 +318,37 @@ class TestCluster01ed_Rules(FrameCase):
             ui.text("Only for the team.", visible=region_team).build(Build(page="p", route="/p"))
         self.assertIn("self.params", str(caught.exception), "it says how to show something by a rule")
         with self.assertRaises(ValueError):
-            ui.reflex_page("/legacy", nav="Tools", title="Legacy", requires=region_team)
+            ui.reflex_page("/legacy", nav="Tools", title="Legacy", requires=plain)
         from lex.lex_app.reflex.ui.context import Params, User
 
         self.assertIs(region_team(User(id="anna"), Params({"region": "north"})), True, "still callable")
+
+
+    # -- 1.1090 --------------------------------------------------------
+    def test_1_1090_a_rule_reads_the_users_permissions(self) -> None:
+        """
+        Scenario 1.1090: a rule that decides by the user's Keycloak permissions.
+        Given: a rule granting a reader who holds `init.Report:read` among `user.permissions`.
+        When:  a reader with that grant and one without press an action that requires the rule.
+        Then:  the rule reads `user.permissions` on its worker thread (it is not a handler body, so
+               lex-app gives the user its permissions before the rule runs): the reader with the
+               grant is granted, the other refused with the rule's sentence - never a failure.
+        """
+        import asyncio
+
+        from lex.lex_app.reflex.ui import testing
+
+        async def scenario(grants):
+            async with testing.Harness(user="anna", grants=grants, params={"region": "north"}) as harness:
+                await harness.open_tab("/regions/north")
+                await (await harness.send(PermittedState, "close"))
+                return await harness.fields(PermittedState), list(harness.outcomes)
+
+        fields, outcomes = asyncio.run(scenario(["init.Report:read"]))
+        self.assertEqual((fields["done"], outcomes), ("closed", []), "granted by a permission the rule read")
+        fields, outcomes = asyncio.run(scenario([]))
+        self.assertEqual([(o.kind, o.message) for o in outcomes], [("denied", "Only report readers.")],
+                         "refused by the rule's own sentence, not a failure")
 
 
 async def _send(harness, name):

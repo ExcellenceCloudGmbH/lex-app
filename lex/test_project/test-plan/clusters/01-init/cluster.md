@@ -1802,6 +1802,7 @@ does not remove user launch configurations.
 | 1.971 | A rule is asked once per event and fails closed | named twice, asked once per press; raising or answering wrongly refuses with the standard error |
 | 1.972 | A page guarded by a rule is decided by the opener | compiled cond on ui_access with the notice; granted starts the load, refused none and keeps its sentence; a list with a permission hides the entry |
 | 1.973 | A rule written wrongly is refused with what to write | wrong arguments; a plain function in requires=; a rule in visible=; a raw page's requires=; still callable |
+| 1.1090 | A rule reads the user's permissions | `user.permissions` on the rule's worker thread: granted by a held permission, refused with the rule's sentence, never a failure |
 
 **Scenario range:** 1.968 – 1.973. **Test file:** `lex/test_project/tests/init/test_1ed_ui_access.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ed](batches.md).
 
@@ -1817,6 +1818,7 @@ does not remove user launch configurations.
 | 1.975 | Not for a refused or failed page, and a failure is only logged | a page without loads at once; a rule-refused page and a failed load not; a raising function logged with the route |
 | 1.976 | The function is checked when the frame is configured | text, one argument and async refused with what to write |
 | 1.977 | A reconnect of the same page does not open it again | with the frame's opened= and the review's same visit: a reconnect runs the page's load again but calls the function once a visit; a link to the same page is a new opening; a page without loads likewise |
+| 1.1091 | The project's function reads the user's permissions | `ui.frame(opened=)` gets `user.permissions` on its worker thread; no error in the log |
 
 **Scenario range:** 1.974 – 1.977. **Test file:** `lex/test_project/tests/init/test_1ee_ui_page_opened.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ee](batches.md).
 
@@ -1941,3 +1943,253 @@ does not remove user launch configurations.
 | 1.997 | The whole page declared with ui.page compiles | registered with lex-app's load; compiled with the form, the past runs, the progress and Stop asking Stop this run? behind the edit permission |
 
 **Scenario range:** 1.994 – 1.997. **Test file:** `lex/test_project/tests/init/test_1ei_ui_calculation_file_stop.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1ei](batches.md).
+
+### 1ej. lex.ui frame: what a user may see in the navigation, decided on the server ✅
+
+**What it tests:** Every guarded navigation entry -- a listed page's `requires=` (permissions and `@ui.rule`s), a raw page's `requires=` -- is drawn only on the server's answer, decided when a page opens (the shell's mount, a background event) from Keycloak's grants with the user's token and the rules on worker threads; compiled with Reflex's page compiler and through lex-app's start-up step.
+
+**Why a regression matters:** An entry the user may not open drawn anyway, a rule's page still listed, the browser deciding what is listed, or a failing rule that shows its entry.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1000 | A guarded entry is drawn only on the server's answer | every guarded entry carries its route as key; compiled under ui_frame_shown; the shell's mount asks; no permission string in the navigation; nothing to decide, nothing asked |
+| 1.1001 | The server decides permissions and rules for the user | anna: Reports, Reviews, Audit; carl: nothing; ben: a failing rule hides its entries, logged; the rule asked once per event, on a worker thread, without values |
+| 1.1002 | What the browser was told does not decide | the resolver behind the browser's permissions claims grants: nothing listed; a fresh tab's first page answered at once |
+| 1.1003 | lex-app's start-up draws the decided navigation | declare.install then compile: the answer's var and the mount's event; a raw page's requires= takes a list; a plain function refused naming @ui.rule |
+| 1.1022 | The whole frame through lex-app's start-up | every part configured at once in a dashboard module; declare.install; the compiled page holds each part and asks on mount; the server fills anna's counts, banner words and per-user links; a rule's page refused as missing |
+
+**Scenario range:** 1.1000 – 1.1003, 1.1022. **Test file:** `lex/test_project/tests/init/test_1ej_ui_frame_decided.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ej](batches.md).
+
+### 1ek. lex.ui frame: navigation beyond the declared pages -- sections of links, counts, per-user entries, a foot ✅
+
+**What it tests:** `ui.frame(nav=[ui.section(...), ...], nav_footer=)`: sections of `ui.link`s (a page, a raw page, a record page's address, an outside address) beside the areas or joining one; `badge=` on links, pages and raw pages from a function of the user; a per-user section from one function of the user; guarded links decided on the server; a link or text at the navigation's foot; the frame's link words refused in a page.
+
+**Why a regression matters:** A lost section, a count computed in the browser or shown to the wrong user, a per-user entry another user sees, a link the user may not open drawn anyway, or a frame word that silently does nothing in a page.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1004 | A section of links joins the navigation | sections in nav='s order; an area's section holds its pages then its link with its icon; outside, raw page and record address links; compiled; an area twice, an empty section, a state value, a part that is not a link, a function beside links, collapsed= refused |
+| 1.1005 | A count beside an entry is a function of the user | RFDS's badge from ui_frame_counts; anna 3, 3 and 1; one call per event on a worker thread; a failing function and a wrong answer logged, no count; badge= without nav= and a function without the user refused |
+| 1.1006 | A per-user section lists what its function returns | compiled under the heading from ui_frame_links; anna's page address with its value and an outside address, words as they are; a link with requires= left out and logged; carl: none |
+| 1.1007 | A link the user may not open is not drawn | a link's requires=, the page it leads to, a rule asked with the link's values: all three for anna, none for carl |
+| 1.1008 | A link at the foot, and the frame's words in a page | RFDS's navigation footer with a link or a text; a button refused; badge=, requires=, icon= on a link in a page refused with what to write |
+
+**Scenario range:** 1.1004 – 1.1008. **Test file:** `lex/test_project/tests/init/test_1ek_ui_frame_nav_links.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ek](batches.md).
+
+### 1el. lex.ui frame: the header band -- a search box, a status hint, a bell with a count ✅
+
+**What it tests:** `ui.frame(actions=[...])`: `ui.link` (icon, count, guard), `ui.button`, `ui.status` and `ui.text` (words from a function of the user), `ui.custom_block` in RFDS's header actions slot before the user menu; `ui.frame(search=page)`: RFDS's search box in the header's search slot, Enter opening the page with what was typed in its one query parameter.
+
+**Why a regression matters:** A header that drops them, a search that leads where the browser says, a count or a hint computed in the browser, or a header link drawn for a user who may not open it.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1009 | The header's actions are lex.ui parts | compiled in rfds-header-actions before the user menu; anna's status Sync delayed, count 4, the bell hers; ben's failing status logged, no bell; ui.fact and ui.section refused naming ui.custom_block |
+| 1.1010 | The search box opens the project's search page | RFDS's search box in the header's search slot; Enter redirects to /search?q=north%20east%20%26%20co; an empty box to the page without it |
+| 1.1011 | A search page must take one value | no parameter, two, a route argument, a route as text refused with what to write; a raw page with params= accepted |
+
+**Scenario range:** 1.1009 – 1.1011. **Test file:** `lex/test_project/tests/init/test_1el_ui_frame_header.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1el](batches.md).
+
+### 1em. lex.ui frame: the user menu's entries above Sign out ✅
+
+**What it tests:** `ui.frame(user_menu=[ui.link(...)])`: RFDS's user menu entries above Sign out, in their order, each drawn on the server's answer for its `requires=` and the page it leads to.
+
+**Why a regression matters:** A menu that drops the user's own pages, an entry below Sign out, or an entry drawn for a user who may not open it.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1012 | The user menu lists the project's entries above Sign out | Account, Settings, Help in order above Sign out; Settings (its page's permission) and Help (its own requires=) on the server's answer: anna both, carl neither |
+| 1.1013 | The user menu takes links | a button, a text, a link with badge=, a link with a state value refused with what to write |
+
+**Scenario range:** 1.1012 – 1.1013. **Test file:** `lex/test_project/tests/init/test_1em_ui_frame_user_menu.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1em](batches.md).
+
+### 1en. lex.ui frame: a banner across the top of every page ✅
+
+**What it tests:** `ui.frame(banner=ui.message(...))`: RFDS's banner in the shell's banner region on every page, in the message's tone, shown while its sentence -- fixed, a state value, or a function of the user decided on the server -- is not empty; not hidden inside lex-app's frame.
+
+**Why a regression matters:** A banner that never shows, one shown to a user it is not about, an empty banner, or a failing function that breaks the page.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1014 | The banner says what the project says, to whom it concerns | RFDS's banner in the shell's banner region, tone warning; anna's sentence; carl none; ben's failing function logged, none; a state value and a fixed sentence; not hidden in lex-app's frame |
+| 1.1015 | The banner is one message | text, ui.text, a list, a function without the user refused with what to write |
+
+**Scenario range:** 1.1014 – 1.1015. **Test file:** `lex/test_project/tests/init/test_1en_ui_frame_banner.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1en](batches.md).
+
+### 1eo. lex.ui frame: a page the user may not open looks like a missing one -- refused_as_missing ✅
+
+**What it tests:** `ui.frame(refused_as_missing=True)`: a page refused by a permission or a rule shows lex-app's not-found body, its breadcrumbs and its tab title waiting for the opener's server-side answer; an area whose entries are all guarded waits for one; a refused load's /ui-error says not found; lex-app adds its own not-found page at Reflex's 404 route in its frame, with the same body.
+
+**Why a regression matters:** A refused page that still says no access or shows its title or breadcrumbs, a permitted user who sees not found, or a missing page that looks different from a refused one.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1016 | A refused page is drawn as a missing one | no access-denied notice; the not-found body and the breadcrumbs under the opener's answer; the tab title a Var falling back to 404; an all-guarded area waits for one entry; without the switch the notice and the title stay |
+| 1.1017 | The opener decides a permission page on the server | carl refused: no, no load; anna granted: yes, her load ran; a rule's page refused for carl |
+| 1.1018 | lex-app's not-found page looks the same | the 404 page in lex-app's frame with the same body; /ui-error's refusal says not found, other failures keep Try again; create_app adds it unless the project has a 404 page |
+| 1.1019 | refused_as_missing written wrongly | a non-bool refused; beside denied= or request_access= refused, saying the notice is never shown |
+
+**Scenario range:** 1.1016 – 1.1019. **Test file:** `lex/test_project/tests/init/test_1eo_ui_frame_refused_as_missing.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1eo](batches.md).
+
+### 1ep. lex.ui frame: the project's mark in the header, leading home ✅
+
+**What it tests:** `ui.frame(logo=, logo_label=)`: the mark (an asset address or https://) in RFDS's header logo slot beside the product's name, decorative unless named; mark and name one link home, in the chrome band's colours; the product's name still the deployment's.
+
+**Why a regression matters:** A header without the mark, a mark that does not lead home, a screen reader reading the name twice, or an address lex-app did not check.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1020 | The project's mark leads home | without a logo the name leads home; with one, rfds-header-logo with alt="" and the name, one link home; named, read as its label; the name is LEX_DASHBOARD_TITLE; the stylesheet colours the brand on the band |
+| 1.1021 | The mark's address is checked | a relative address, http://, a label without a logo, a label that is not text refused with what to write |
+
+**Scenario range:** 1.1020 – 1.1021. **Test file:** `lex/test_project/tests/init/test_1ep_ui_frame_logo.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ep](batches.md).
+
+### 1eq. lex.ui: a search through self.api matches the model's own text, never created_by ✅
+
+**What it tests:** `self.api.list(Model, search=)` searches the first plain text field the model itself declares, never the `created_by` audit field every LexModel inherits; lex_table's default and a model table's search column follow; a model without its own text field is refused with what to write.
+
+**Why a regression matters:** Every search on a LexModel silently found nothing.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1023 | A search matches the model's own text, not created_by | customer/region/name icontains for a LexModel, a calculation, a LexModel and a Django model; lex_table's default; a model table showing created_by first searches customer; no own text field refused with filters= advice |
+
+**Scenario range:** 1.1023. **Test file:** `lex/test_project/tests/init/test_1eq_ui_api_search_field.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1eq](batches.md).
+
+### 1er. lex.ui tables: the rows a table shows reach the browser and are never stored with the state ✅
+
+**What it tests:** a table over a `ui.private` value shows its page; every state of the tab, serialised as Reflex stores it and pickled, holds no row value, total or filter choice, while the browser's updates carry them; a stored table is marked and reads its rows again on `restore` (sent by the page's opener); every `ui.table` (model tables too) is not stored, `lex_table` is; a row's own link still opens after its address was left out.
+
+**Why a regression matters:** Persons' names and amounts in Redis and in state pickles, defeating `ui.private`; or a table that shows nothing after its state was stored.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1024 | A table's rows reach the browser and no stored state | the browser's updates carry name, pay, team; no BaseStateToken.serialize or pickle of any state of the tab holds them or the total; stored: no rows, count kept, _rows_dropped; restore reads nothing when not dropped, reads again when dropped |
+| 1.1025 | Every ui.table is not stored; a row link survives the store | a ui.table model table is rows_not_stored and told to restore by its page; lex_table's state is not; a row's own address left out of the pickle, the click still redirects to it |
+
+**Scenario range:** 1.1024 – 1.1025. **Test file:** `lex/test_project/tests/init/test_1er_ui_table_rows_not_stored.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1er](batches.md).
+
+### 1es. lex.ui: a foreign key shows the related record's name, in a model table, a run's history and its facts ✅
+
+**What it tests:** a model table's foreign-key column shows `<fk>__short_description` from lex-app's real list view, keeps the id in the row, sorts by the key; lex_columns and the grid's columns too; `self.api.list(fields=[fk])` keeps the name; a calculation's past runs and its run's facts read the name.
+
+**Why a regression matters:** A bare id where a person reads a customer's name, or a sort the API refuses.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1026 | A model table's foreign key shows the related record's name | column field customer__short_description headed Customer; rows carry names and ids through the real list view; desc sort sends -customer and returns beta first; lex_columns/lex_grid_columns; Api.list(fields=[customer]) keeps the name |
+| 1.1027 | A calculation's history and run show the customer's name | the past runs' column is customer__short_description; the run's input fact and result fact read run[customer__short_description] |
+
+**Scenario range:** 1.1026 – 1.1027. **Test file:** `lex/test_project/tests/init/test_1es_ui_foreign_key_names.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1es](batches.md).
+
+### 1et. lex.ui: every record through self.api.all, and a model table filtered by a range of days ✅
+
+**What it tests:** `self.api.all` reads every row once across pages of 1,000 ordered by the asked order then the key, refuses past the ceiling after one page, and feeds a rows table with export and totals; a model table's refusal points to it; a model table's date filter sends the API's `__date__gte`/`__lte` and clears.
+
+**Why a regression matters:** Rows read twice or missed, an unbounded read into memory, or a date filter the API never receives.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1028 | self.api.all reads every record in a stable order up to a ceiling | 2,345 rows once and in order; pages 1-3 of 1,000 with ordering amount,id; count; ALL_LIMIT refusal after the first page with the count; a rows table over it builds with export and totals; a model table's totals refusal names self.api.all |
+| 1.1029 | A model table filters a date field by a range of days | date_lookups event_at -> event_at__date; the picker in the toolbar; event_at__date__gte/lte sent; a field that is no date filter ignored; a malformed day dropped; clear_filters removes the range |
+
+**Scenario range:** 1.1028 – 1.1029. **Test file:** `lex/test_project/tests/init/test_1et_ui_api_all_and_model_dates.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1et](batches.md).
+
+### 1eu. lex.ui frame: areas nav= does not list follow the listed ones; a typo is still refused ✅
+
+**What it tests:** with `ui.frame(nav=["Orders"])`, raw pages in Admin and Tools start the app and follow Orders in declaration order; a `@ui.page` joins a raw area; a `@ui.page` area neither listed nor a raw page's (with or without route arguments) is refused naming the choices.
+
+**Why a regression matters:** An app that does not start because an old page's area is unlisted, or a typo that silently makes a new area.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1030 | Unlisted areas follow; a typo is still refused | finalize goes on with raw areas Admin, Tools unlisted; sections Orders, Admin, Tools; a ui.page in Admin listed there; nav=Ordres and a record page in Reprots refused, naming Orders, Admin, Tools |
+
+**Scenario range:** 1.1030. **Test file:** `lex/test_project/tests/init/test_1eu_ui_frame_unlisted_areas.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1eu](batches.md).
+
+### 1ev. lex reflex check follows the project's own imports from its dashboards ✅
+
+**What it tests:** `check_paths` adds every project module the structure module and the dashboards import, transitively (absolute, relative, a package's `__init__`), and nothing outside the project or not imported; the imported module's undecorated public method is reported.
+
+**Why a regression matters:** A handler the browser can call without lex.ui's guard, in a module the check never read.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1031 | The check follows the project's imports | paths: _dashboards, _reflex_structure.py, helpers.py, orders/__init__.py, orders/pages/__init__.py, orders/pages/tickets.py (not unused.py, not os/reflex/lex); one error in tickets.py: TicketsState.approve has no lex.ui decorator |
+
+**Scenario range:** 1.1031. **Test file:** `lex/test_project/tests/init/test_1ev_reflex_check_follows_imports.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ev](batches.md).
+
+### 1ew. lex.ui pages: a closed section mounts what it holds when opened; a title from the state; actions ✅
+
+**What it tests:** a closed section's chart sits under a condition on its client-side opened state (set by a click), its table does not; an open section mounts at once; a state title and actions in a form's result compile into RFDS's section; a record page, a tab and the navigation refuse them with what to write.
+
+**Why a regression matters:** A chart drawn at zero size, a closed section's count lost, or a title or an action silently dropped.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1032 | A closed section mounts its content when opened, its table at once | the chart under a cond on rfdsLexopened; the data table not; onClick sets it; an open section's chart not under the cond |
+| 1.1033 | A section's title may be a state value, and it takes actions | form result: lines_title and rfds-section-actions with the button; record title, record actions, tab actions, a text in actions refused; nav section state title refused; a number title refused |
+
+**Scenario range:** 1.1032 – 1.1033. **Test file:** `lex/test_project/tests/init/test_1ew_ui_section_opened_title_actions.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ew](batches.md).
+
+### 1ex. lex.ui: a handler brings a section or a table into view -- ui.scroll_to ✅
+
+**What it tests:** the ids `ui.scroll_to(title)` and `ui.scroll_to(State.rows)` name are the ids the form's section, a record page's section and the rows table are built with; a handler's results keep their order; the events are Reflex's scroll_to of those ids; anything else is refused with what to write.
+
+**Why a regression matters:** A scroll that goes nowhere because the result's id and the part's id differ.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1034 | A handler brings a section or a table into view | errors-found on a form's section and a record page's; the table's box id; run() results Toast then ScrollTo; to_events are scroll events with those ids; empty string, a number, an action refused |
+
+**Scenario range:** 1.1034. **Test file:** `lex/test_project/tests/init/test_1ex_ui_scroll_to.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ex](batches.md).
+
+### 1ey. lex.ui pages: a tab shown only while the state says so -- visible= a state value on a tab ✅
+
+**What it tests:** a later tab with `visible=` a state value has its trigger and panel under a condition on it, on a form's result and on a record page with tabs; the first tab is never hidden; a record page without tabs still refuses, pointing to tabs=True.
+
+**Why a regression matters:** A tab shown with nothing to say, or a hidden tab the user can still open.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1035 | A tab is drawn only while its state value is true | form tabs: figures trigger and panel under cond on has_figures, summary not; compiles; record tabs the same; record without tabs refused pointing to tabs=True |
+
+**Scenario range:** 1.1035. **Test file:** `lex/test_project/tests/init/test_1ey_ui_tab_shown_by_state.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ey](batches.md).
+
+### 1fa. lex.ui pages: more than four tables on a record page refused in lex.ui's words, with the way out ✅
+
+**What it tests:** four tables on a record page compile; five, with or without tabs, are refused before RFDS is asked, naming the count, the sections, that tabs do not lift it, and a page of its own led to by a link; RFDS's pointer to tab navigation is not repeated.
+
+**Why a regression matters:** A page past RFDS's rule accepted, or a refusal that sends the author to tabs, which do not help.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1037 | More than four tables is refused with the way out | four compile; five refused with and without tabs: slot sections, 5 tables in Lines (2), Invoices, Payments, Shipments, at most 4, with tabs=True too, a page of their own, ui.link to order_invoices; no 'use tab navigation' |
+
+**Scenario range:** 1.1037. **Test file:** `lex/test_project/tests/init/test_1fa_ui_record_table_limit.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1fa](batches.md).
+
+### 1ez. lex.ui forms: a field of several choices can be emptied at once -- its Clear ✅
+
+**What it tests:** each several-choice field (multi-select past twelve options, checkbox group below) has a Clear under a condition on something being chosen, which sets the field's browser value to the empty list; a single choice has none.
+
+**Why a regression matters:** A long choice that can only be undone one option at a time, or a Clear that leaves values behind.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1036 | Several choices can be emptied at once | Clear for regions (multi-select) and kinds (checkbox group) under a cond, none for main; the multi-select compiled; onClick sets the client state to []; .length > 0 |
+
+**Scenario range:** 1.1036. **Test file:** `lex/test_project/tests/init/test_1ez_ui_choices_clear.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ez](batches.md).
+
+### 1fb. ui.testing: drive a searched field, seed a private value as gone, test against lex-app's API in-process ✅
+
+**What it tests:** `ui.testing.search` returns the matches a searched field offers, as the browser gets them, and refuses a field that is not searched; seeding `ui.testing.GONE` logs nothing and the handler is refused in plain words, a seeded value is read; `ui.testing.lex_api(client)` answers `self.api` with lex-app's real list view in-process.
+
+**Why a regression matters:** Project tests that reach into lex.ui's private modules, noisy logs, or a stand-in API that tests what lex-app does not do.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1038 | A test drives a searched field | matches Customer 001..009 with value and label only; an unsearched key refused |
+| 1.1039 | A private value is seeded as gone without a logged error | no WARNING log while seeding GONE; refused with the gone sentence; a seeded value read |
+| 1.1040 | self.api is answered by lex-app's views in-process | Acme Ltd, Gamma Ltd from a real list with search; calls == GET /api/model_entries/uicustomer/list |
+
+**Scenario range:** 1.1038 – 1.1040. **Test file:** `lex/test_project/tests/init/test_1fb_ui_testing_search_gone_api.py`. **Type:** U (1.1038-1.1039), E (1.1040). **Status:** ✅ Complete (2026-11-24). Batch: [1fb](batches.md).

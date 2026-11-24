@@ -153,9 +153,9 @@ class TestCluster01eb_FrameNav(FrameCase):
         Given: raw Reflex pages declared with ui.reflex_page, with nav=, title=, icon= and requires=.
         When:  the navigation is built.
         Then:  the page is listed in its area by its title, with its icon and the permission that
-               hides its entry; it is still somewhere a link may lead; nav= without a title, a title
-               or a permission without nav=, and a project rule as its requires= are refused with what
-               to write; declared again (a reload) it keeps its place.
+               hides its entry; it is still somewhere a link may lead; nav= without a title, and a title
+               or a permission without nav=, are refused with what to write; declared again (a reload)
+               it keeps its place. (A project rule as its requires= now hides the entry too: 1.1001.)
         """
         legacy = ui.reflex_page("/legacy", nav="Tools", title="Legacy export", icon="download",
                                 requires=ui.permission("lex_app.Order", "read"))
@@ -164,9 +164,11 @@ class TestCluster01eb_FrameNav(FrameCase):
                        requires=ui.permission("lex_app.Order", "read"))
         [tools] = shell.nav_sections()[1:]
         self.assertEqual(tools.label_default, "Tools")
+        # A guarded entry carries its key (its route) for the server's answer (1.1000), not the permission.
         self.assertEqual([(i.href, i.label_default, i.icon, i.permission) for i in tools.items],
-                         [("/legacy", "Legacy export", "download", "lex_app.Order:read"),
+                         [("/legacy", "Legacy export", "download", "/legacy"),
                           ("/other", "Other tool", None, None)], "declared again, it keeps its place")
+        self.assertEqual(shell.nav_entries()[0].permission, "lex_app.Order:read", "the permission that hides it")
         self.assertEqual(ui.address(legacy), "/legacy", "still somewhere a link may lead")
         with self.assertRaises(ValueError) as caught:
             ui.reflex_page("/untitled", nav="Tools")

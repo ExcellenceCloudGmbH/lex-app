@@ -10,56 +10,15 @@ nothing is stubbed between the page and the views.
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from typing import Any
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlsplit
 
 from lex.lex_app.reflex.ui import context, testing, workcopy
 
 
-class ViewsClient:
-    """An httpx-shaped async client for ``LexApi`` that answers from lex-app's views, as ``client`` signed in."""
-
-    def __init__(self, client: Any):
-        self.client = client
-        self.calls: list[tuple[str, str]] = []
-
-    async def request(self, method: str, url: str, *, params: Any = None, json: Any = None,  # noqa: A002
-                      headers: Any = None) -> Any:
-        parts = urlsplit(url)
-        query = urlencode(list(params or []))
-        path = parts.path + (f"?{query}" if query else "")
-        self.calls.append((method, parts.path))
-        body = "" if json is None else _dumps(json)
-
-        def call() -> Any:
-            from django.db import close_old_connections
-
-            try:
-                return self.client.generic(method, path, data=body, content_type="application/json")
-            finally:
-                close_old_connections()
-
-        response = await asyncio.to_thread(call)
-        if getattr(response, "streaming", False):          # a file: httpx reads the whole body
-            return _Read(response.status_code, dict(response.headers), b"".join(response.streaming_content))
-        return response
-
-
-class _Read:
-    """A streamed answer read whole, as httpx gives it."""
-
-    def __init__(self, status_code: int, headers: dict, content: bytes):
-        self.status_code, self.headers, self.content = status_code, headers, content
-        self.text = content.decode("utf-8", "replace")
-
-    def json(self) -> Any:
-        return json.loads(self.content)
-
-
-def _dumps(value: Any) -> str:
-    return json.dumps(value)
+#: lex-app's views answering lex.ui's API client in-process: ``ui.testing.lex_api``'s client, public now.
+ViewsClient = testing.LexViews
 
 
 class Session:

@@ -45,7 +45,8 @@
 ``@ui.custom``              a raw Reflex handler, marked for review
 ``ui.goto/toast/download``  what a handler returns; ``ui.toast(link=ui.link(...))`` offers to
                             open something; ``ui.refresh(State.rows)`` makes the tables of
-                            another state read again
+                            another state read again; ``ui.scroll_to("Errors")`` brings a
+                            section (by its title) or ``ui.scroll_to(State.rows)`` a table into view
 ``ui.progress``             what a job yields
 ``ui.private``              a state field kept in the server's memory only, for its user, for a
                             while: ``_report: dict = ui.private()``; a ``@ui.rows`` handler reads
@@ -54,7 +55,9 @@
                             a form above its submit button, elsewhere as a toast
 ``ui.ApiError``             lex-app's API refused a call (``.status``, ``.denied``,
                             ``.detail``); uncaught, it is shown to the user
-``self.api``                lex-app's API as the user: ``list/get/create/update/delete``, and for
+``self.api``                lex-app's API as the user: ``list/get/create/update/delete``;
+                            ``all(Model, filters=)`` every record, page after page (at most
+                            10,000; more is refused in words), for a ``@ui.rows`` table; and for
                             a calculation ``calculate(Model, pk)`` (as the Calculate button),
                             ``log(Model, pk)`` (its newest run's log); ``file(Model, pk, field)``
                             a record's file, downloaded as the user
@@ -66,16 +69,34 @@
 ``ui.running/failed/        a handler's status, for views; ``ui.cancel`` is the
 progress_of/cancel``        event of a Cancel button
 ``ui.loaded``               whether a load has finished since the page opened
-``ui.testing``              run a handler in a unit test
+``ui.testing``              run a handler in a unit test: ``run``, ``rows`` (a table's rows),
+                            ``search`` (what a searched field offers), ``GONE`` (a private value
+                            gone), ``lex_api(client)`` (``self.api`` answered by lex-app's views)
 ``@ui.page``                where a page lives: its route, its area of the navigation (``nav=``),
                             who may see it. lex-app's frame heads it with its breadcrumbs: the
-                            area, the listed page that opens it, the page
+                            area, the listed page that opens it, the page. The navigation lists
+                            only what the user may open, decided on the server when a page opens
 ``ui.frame``                lex-app's frame for this project, set once in the dashboard module:
-                            ``nav=[...]`` the areas' order; ``denied=`` the sentence a refused
-                            user reads, ``request_access=`` their way out (a page, https:// or
-                            mailto:); ``opened=`` a function lex-app calls, not awaited, when a
-                            page has opened: ``opened(user, page)``; ``sign_out=`` where the
-                            user menu signs out (a page or https://; lex-app's /logout by default)
+                            ``nav=[...]`` the areas' order, and sections of links
+                            (``ui.section("Help", ui.link(...))``, or ``ui.section("Favourites",
+                            favourites)`` filled by a function of the user); ``nav_footer=`` a
+                            link or text at the navigation's foot; ``search=`` a page taking one
+                            query parameter, opened by RFDS's search box in the header;
+                            ``actions=[...]`` links, buttons, statuses, texts, custom blocks in
+                            the header band; ``user_menu=[ui.link(...)]`` entries above "Sign
+                            out"; ``banner=`` one ``ui.message`` above every page while its
+                            sentence is not empty; ``logo=`` the project's mark beside the
+                            product's name, leading home; ``denied=`` the sentence a refused user
+                            reads, ``request_access=`` their way out (a page, https:// or
+                            mailto:), or ``refused_as_missing=True`` a refused page looks like
+                            lex-app's not-found page; ``opened=`` a function lex-app calls, not
+                            awaited, when a page has opened: ``opened(user, page)``;
+                            ``sign_out=`` where the user menu signs out (a page or https://;
+                            lex-app's /logout by default). A function of the user,
+                            ``def waiting(user)``, stands for any value the frame shows (a count,
+                            words, a section's links): lex-app calls it on the server when a page
+                            opens. What the user may open is decided there too; nothing else is
+                            drawn
 ``@ui.dashboard``           a page that is not a route (the project's ``main()``)
 ``ui.record/list/form``     the page kinds: named slots, placed by lex-app (``ui.list`` is
                             left out of ``import *``, which would hide Python's ``list``)
@@ -89,22 +110,27 @@ progress_of/cancel``        event of a Cancel button
 ``ui.field/step``           a form's inputs, and a wizard's steps; the handler gets ``values``.
                             ``options=`` a ``@ui.rows`` handler searches on the server as the user
                             types. ``ui.button(confirm=, ask=)`` asks before its handler runs
-``ui.section``              a titled part of a page; ``load=`` makes it load on its own;
-                            ``collapsed=True`` closes it until the user opens it; ``tabs=True``
+``ui.section``              a titled part of a page (a sentence, or a state value where it has a
+                            heading of its own); ``load=`` makes it load on its own; ``actions=``
+                            buttons in its heading; ``collapsed=True`` closes it until the user
+                            opens it, and mounts what it holds then (a table reads at once); ``tabs=True``
                             on ``ui.record`` or a ``ui.form``'s result shows one section at a time
-``ui.text/fact/status/      what fills the slots; none takes a styling argument
-message/column/
-button/link``
+``ui.text/fact/status/      what fills the slots; none takes a styling argument. In lex-app's
+message/column/             frame a ``ui.link`` is an entry: ``icon=``, ``badge=`` (a count),
+button/link``               ``requires=`` (drawn only for users who meet it, decided on the
+                            server); ``@ui.page(nav=, badge=)`` too
 ``ui.each/switch``          repetition and choice; ``visible=`` on every component
                             decides what is shown, never what is allowed
 ``ui.table``                rows from a model (``where=``) or a ``@ui.rows`` handler; ``search=``,
                             ``filters=``, ``export=``, ``totals=`` (``totals_of_all=True``: of
                             every row, whatever the search leaves), ``row_actions=``,
                             ``choose_columns=``, ``page_size=`` (up to 200; the pager shows
-                            only when the rows do not fit one page)
+                            only when the rows do not fit one page). The rows shown reach the
+                            browser and are never stored with the state (Redis, disk)
 ``ui.address``              a page's address, for a row that leads to a page of its own
 ``ui.reflex_page``          a page written in raw Reflex, as somewhere a link may lead;
-                            ``nav=``, ``title=`` list it in an area of the navigation
+                            ``nav=``, ``title=`` list it in an area of the navigation, ``requires=``
+                            (a permission or a rule) hides that entry
 ``ui.custom_block``         a raw component, marked for review with its reason
 ``ui.embed``                the other way round: one lex.ui part inside a raw Reflex page,
                             for moving a project a table at a time
@@ -129,7 +155,7 @@ from lex.lex_app.reflex.ui.pages.parts import PageError
 from lex.lex_app.reflex.ui.pages.tables import column, table
 from lex.lex_app.reflex.ui.pages.vocab import button, custom_block, each, fact, link, message, status, switch, text
 from lex.lex_app.reflex.ui.private import private
-from lex.lex_app.reflex.ui.results import Refuse, download, goto, progress, refresh, toast
+from lex.lex_app.reflex.ui.results import Refuse, download, goto, progress, refresh, scroll_to, toast
 from lex.lex_app.reflex.ui.rows import rows
 from lex.lex_app.reflex.ui.runs import cancel, failed, loaded, progress_of, running
 from lex.lex_app.reflex.ui.state import State
@@ -138,6 +164,6 @@ __all__ = [
     "ApiError", "PageError", "Refuse", "State", "action", "address", "button", "calculation", "cancel", "column",
     "create", "custom", "custom_block", "dashboard", "delete", "download", "each", "edit", "embed", "fact",
     "failed", "field", "form", "frame", "goto", "job", "link", "load", "loaded", "message", "page", "permission", "private", "progress",
-    "progress_of", "read", "record", "reflex_page", "refresh", "rows", "rule", "running", "section", "signed_in", "status",
+    "progress_of", "read", "record", "reflex_page", "refresh", "rows", "rule", "running", "scroll_to", "section", "signed_in", "status",
     "step", "switch", "table", "testing", "text", "toast",
 ]

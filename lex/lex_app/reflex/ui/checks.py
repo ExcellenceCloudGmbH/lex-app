@@ -19,6 +19,10 @@ The analysis is static (``ast``): project code is never imported or run.
 * A handler that reads ``.objects`` or ``._default_manager`` without ``requires=`` is a warning
   (best effort; the run-time block is the guarantee).
 
+The files are ``_reflex_structure.py`` and the dashboards package, and every module of the project
+they import, transitively (:func:`followed`): a page or a state moved into a module of its own is
+checked where it lives.
+
 What it does not follow: a public attribute assigned a function (``refresh = lambda self: ...``)
 is not seen as a method, and the methods a mixin brings in (a base that is not a ``ui.State``)
 are not checked, nor are its handlers known when a state calls them.
@@ -50,6 +54,70 @@ def _files(paths: list[str]) -> list[Path]:
         path = Path(item)
         out.extend(sorted(path.rglob("*.py")) if path.is_dir() else [path])
     return out
+
+
+def followed(paths: list[str], root: str | Path) -> list[str]:
+    """``paths`` and every module of the project under ``root`` that they import, transitively.
+
+    Only the project's own modules are followed: an import is resolved against ``root`` (the
+    project's top level, where ``lex start`` runs it) or, when relative, against the importing
+    file's package; anything that is no file under ``root`` (lex-app, Reflex, the standard library)
+    is left alone. The files are only parsed, never imported.
+    """
+    base = Path(root).resolve()
+    queue = [Path(path).resolve() for path in _files(paths)]
+    seen: list[Path] = []
+    while queue:
+        path = queue.pop(0)
+        if path in seen or not path.is_file():
+            continue
+        seen.append(path)
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 - reported by find() as unreadable
+            continue
+        for module in _imported(tree, path, base):
+            for found in _module_files(module, base):
+                if found not in seen:
+                    queue.append(found)
+    extra = [str(path) for path in seen if path not in {Path(p).resolve() for p in _files(paths)}]
+    return [*paths, *extra]
+
+
+def _imported(tree: ast.AST, path: Path, base: Path) -> list[str]:
+    """The dotted names ``tree`` imports, relative ones made absolute from ``path``'s package."""
+    try:
+        package = list(path.parent.relative_to(base).parts)
+    except ValueError:
+        package = []
+    out: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            out.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                if node.level - 1 > len(package):
+                    continue
+                head = package[:len(package) - (node.level - 1)]
+                module = ".".join([*head, *(node.module.split(".") if node.module else [])])
+            else:
+                module = node.module or ""
+            if module:
+                out.append(module)
+            out.extend(f"{module}.{alias.name}" if module else alias.name for alias in node.names if alias.name != "*")
+    return out
+
+
+def _module_files(module: str, base: Path) -> list[Path]:
+    """The project's file for ``module`` (and its packages' ``__init__.py``), or nothing outside ``base``."""
+    parts = module.split(".")
+    found: list[Path] = []
+    for size in range(1, len(parts) + 1):
+        stem = base.joinpath(*parts[:size])
+        for candidate in (stem.with_suffix(".py"), stem / "__init__.py"):
+            if candidate.is_file():
+                found.append(candidate.resolve())
+    return found
 
 
 def _dotted(node: ast.AST) -> str:

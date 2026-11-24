@@ -14,6 +14,9 @@ user reads the state, when its user signs out, when its user holds more than
 process restarts or keeps too many values. Reading a gone value
 raises :class:`Gone`, a refusal the user is shown in plain words; it never reads as stale data or
 as another user's.
+
+A table that shows a private value's rows does not store them either: every lex.ui table leaves its
+page of rows out of the state Reflex stores (``data.RowsNotStored``).
 """
 
 from __future__ import annotations

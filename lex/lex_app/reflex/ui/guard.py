@@ -75,7 +75,8 @@ def rule(fn: Any) -> Rule:
         @ui.action(requires=[ui.read(Report), region_team])
 
     lex-app asks it on the server, on a worker thread (it may query the database), at most once per
-    event; a rule that raises or answers anything else refuses. It stays a plain function: a load
+    event. ``False`` or nothing (``None``) refuses with lex-app's sentence; a rule that raises or
+    answers anything else refuses as a failure. It stays a plain function: a load
     may call it to decide what to show, ``region_team(self.user, self.params)``.
     """
     return Rule(fn)

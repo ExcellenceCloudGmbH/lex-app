@@ -662,6 +662,7 @@ async def _logout(scope: Mapping[str, Any]) -> Any:
             await run_orm(_revoke_handle, handle, "logout")
         except Exception:  # noqa: BLE001 - the cookie still goes
             logger.warning("Reflex dashboard sign-out could not revoke its binding", exc_info=True)
+        _forget_private_values(digest_of(handle))
         forget(digest_of(handle))
     back = frontend_origin(origin) + "/"
     app_origin = sites.pick_app_origin(urlsplit(origin).netloc)
@@ -669,6 +670,20 @@ async def _logout(scope: Mapping[str, Any]) -> Any:
     response = _no_store(RedirectResponse(target, status_code=303))
     _delete_cookie(response, HANDLE_COOKIE, secure)
     return response
+
+
+def _forget_private_values(digest: str) -> None:
+    """Drop the signed-out user's ``ui.private`` values held in this process.
+
+    ``LexUser.sign_out`` does it too, but a project may sign out through its own page, which
+    loads this route without that event.
+    """
+    known = cached(digest)
+    if known is None or known.identity is None:
+        return
+    from lex.lex_app.reflex.ui import context, private
+
+    private.forget(context.User.from_profile(known.profile).id)
 
 
 async def _blocked(scope: Mapping[str, Any]) -> Any:

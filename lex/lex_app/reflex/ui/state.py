@@ -191,6 +191,18 @@ class State(rx.State):
     #: "message": the refusal's sentence}``. A page with rules shows its content only on "yes".
     ui_access: dict[str, dict[str, str]] = {}
 
+    #: The keys of the frame's guarded entries this user may open, decided on the server when a page
+    #: opened (``ui.frame``): a guarded entry is drawn only once its key is here.
+    ui_frame_shown: list[str] = []
+    #: Entry key -> its count (``badge=`` a function of the user), as the server answered it.
+    ui_frame_counts: dict[str, int] = {}
+    #: Per-user section key -> its links for this user: ``{"label", "href", "outside", "initial"}``.
+    ui_frame_links: dict[str, list[dict[str, str]]] = {}
+    #: Part key -> its words (a status's, a text's, the banner's), as the server answered them.
+    ui_frame_values: dict[str, str] = {}
+    #: What is typed in the header's search box (``ui.frame(search=)``).
+    ui_frame_query: str = ""
+
     _ui_boots: dict[str, str] = {}
     _ui_pending_loads: list[str] = []
     _ui_optional_loads: list[str] = []
@@ -284,11 +296,20 @@ class State(rx.State):
         from lex.lex_app.reflex.ui.pages import rows_table
 
         tables = [] if again else rows_table.reopen_events(page)    # a table on screen: the new record's rows
+        # A table whose rows the stored state left out (a reconnect sent the browser the whole state again).
+        tables += [one for one in rows_table.restore_events(page) if one not in tables]
         refused = entry is None or not _page_permitted(self, entry.requires)
-        if not refused and entry.rules:                 # the project's rules, asked on the server
-            refusal = await _page_refusal(self, entry.rules)
+        from lex.lex_app.reflex.ui.pages import frame
+
+        # A page shown as missing when refused (ui.frame(refused_as_missing=True)) is decided here for its
+        # permissions too: the browser is told only yes or no.
+        concealed = entry is not None and frame.current().refused_as_missing and bool(
+            entry.rules or frame._strings(entry.requires))
+        if concealed or (not refused and entry.rules):  # the project's rules, asked on the server
+            refusal = "" if refused else (await _page_refusal(self, entry.rules) if entry.rules else None)
             self.ui_access = {**dict(self.ui_access),
-                              page: {"granted": "yes" if refusal is None else "no", "message": refusal or ""}}
+                              page: {"granted": "yes" if refusal is None else "no",
+                                     "message": "" if concealed else refusal or ""}}
             refused = refusal is not None
         if refused:
             self._ui_pending_loads, self._ui_optional_loads, self._ui_started = [], [], []
@@ -307,6 +328,49 @@ class State(rx.State):
 
             await frame.page_opened(self, page, handlers._location(self))
         return [*starting, *tables]
+
+    @rx.event(background=True)
+    async def ui_frame_open(self):
+        """A page in lex-app's frame opened: decide on the server what the frame shows this user.
+
+        Sent by the shell's mount, in the background: the page does not wait, and only the answers
+        reach the browser. A failure is logged; the frame keeps what it showed.
+        """
+        from lex.lex_app.reflex.ui.pages import frame
+
+        try:
+            answers = await frame.decide(self)
+        except Exception:  # noqa: BLE001 - the page is shown; the project reads the log
+            frame.logger.exception("lex.ui: the frame could not be decided for this page")
+            return
+        async with self:
+            self.ui_frame_shown = answers.shown
+            self.ui_frame_counts = answers.counts
+            self.ui_frame_links = answers.links
+            self.ui_frame_values = answers.values
+
+    @rx.event
+    def ui_frame_type(self, text: str = ""):
+        """The user typed in the header's search box."""
+        self.ui_frame_query = str(text)[:500]
+
+    @rx.event
+    def ui_frame_search(self, form_data: dict | None = None):
+        """Enter in the header's search box: the project's search page, with what was typed.
+
+        The page and its parameter are the server's (``ui.frame(search=)``); only the text comes from
+        the browser, encoded into the one value.
+        """
+        from urllib.parse import quote
+
+        from lex.lex_app.reflex.ui.pages import frame
+
+        search = frame.current().search
+        if search is None:
+            return None
+        route, name = search
+        text = self.ui_frame_query.strip()
+        return rx.redirect(f"{route}?{name}={quote(text, safe='')}" if text else route)
 
     @rx.event
     def ui_cancel(self, key: str):
@@ -358,7 +422,8 @@ def error_page() -> rx.Component:
     """What ``/ui-error`` shows: why the page could not be opened, a reference, and a way back."""
     import rfds
 
-    from lex.lex_app.reflex.shell import denied_notice, lex_chrome
+    from lex.lex_app.reflex.shell import denied_notice, lex_chrome, not_found_notice
+    from lex.lex_app.reflex.ui.pages import frame
 
     retry = rfds.link("Try again", href=State.ui_error.get("path", "/"))
     title = State.ui_error.get("title", "This page could not be opened")
@@ -367,7 +432,8 @@ def error_page() -> rx.Component:
         rfds.page_header(title="This page could not be opened", path=ERROR_ROUTE),
         rx.cond(
             State.ui_error.get("kind", "error") == "denied",
-            denied_notice(message=message.to(str)),        # the refusal's sentence, the project's way out
+            # the refusal's sentence and the project's way out; or, refused as missing, what a missing page says
+            not_found_notice() if frame.current().refused_as_missing else denied_notice(message=message.to(str)),
             rfds.empty_state(kind="error", title=title, description=message, primary_action=retry),
         ),
     ))

@@ -59,6 +59,13 @@ class Refresh(list):
 
 
 @dataclasses.dataclass(frozen=True)
+class ScrollTo:
+    """What ``ui.scroll_to`` returns: the page's element to bring into view."""
+
+    target: str
+
+
+@dataclasses.dataclass(frozen=True)
 class Progress:
     fraction: float
     message: str = ""
@@ -128,6 +135,25 @@ def refresh(*handlers: Any) -> Refresh:
     return out
 
 
+def scroll_to(part: Any) -> ScrollTo:
+    """Bring a part of the page into view: a section, named by its title (``ui.scroll_to("Lines")``),
+    or the table over a ``@ui.rows`` handler (``ui.scroll_to(OrdersState.lines)``).
+
+    ``return ui.scroll_to("Errors")`` after a check found problems shows the section that lists them.
+    A part that is not on the page is not scrolled to, and nothing fails.
+    """
+    from lex.lex_app.reflex.ui import rows
+    from lex.lex_app.reflex.ui.pages.kinds import section_anchor, table_anchor
+
+    if isinstance(part, str) and part.strip():
+        return ScrollTo(section_anchor(part))
+    if rows.is_rows(part):
+        return ScrollTo(table_anchor(part))
+    raise TypeError("ui.scroll_to() takes a section's title, `ui.scroll_to(\"Errors\")`, or a table's @ui.rows "
+                    f"handler, `ui.scroll_to(OrdersState.lines)`; got {part!r}. A section with a title from the "
+                    "state is reached through the table it holds.")
+
+
 def progress(fraction: float, message: str = "") -> Progress:
     """What a job yields to report progress: a fraction from 0 to 1 and a message."""
     return Progress(min(1.0, max(0.0, float(fraction))), str(message))
@@ -148,7 +174,7 @@ def split(value: Any, *, handler: str, state: str | None = None) -> tuple[list, 
             continue
         if isinstance(item, Progress):
             report = item
-        elif isinstance(item, (Goto, Toast, Download, Refresh)):
+        elif isinstance(item, (Goto, Toast, Download, Refresh, ScrollTo)):
             out.append(item)
         elif _is_state_handler(item):
             _check_hand_on(item, handler=handler, state=state)
@@ -156,7 +182,7 @@ def split(value: Any, *, handler: str, state: str | None = None) -> tuple[list, 
         else:
             raise TypeError(
                 f"{handler} returned {item!r}. A lex.ui handler returns ui.goto(), ui.toast(), ui.download(), "
-                "ui.refresh() or another state's handler (`Other.reload`, `Other.open(key)`), and a job may "
+                "ui.refresh(), ui.scroll_to() or another state's handler (`Other.reload`, `Other.open(key)`), and a job may "
                 "yield ui.progress(). Use @ui.custom for raw Reflex events such as rx.call_script()."
             )
     return out, report
@@ -223,6 +249,8 @@ def to_events(items: list) -> list:
                 label, where, outside = item.link
                 extra["action"] = ToastAction(label, rx.redirect(where, is_external=outside))
             events.append(getattr(rfds.toast, item.tone)(item.message, **extra))
+        elif isinstance(item, ScrollTo):
+            events.append(rx.scroll_to(item.target))
         elif _is_state_handler(item):
             events.append(item)
         else:

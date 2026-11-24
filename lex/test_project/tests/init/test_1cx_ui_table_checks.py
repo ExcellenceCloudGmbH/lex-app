@@ -123,7 +123,7 @@ class TestCluster01cx_TableChecks(SimpleTestCase):
             "model where": (lambda: ui.table(Group, columns=["name"], where={"colour": 1}),
                             "`where=` names colour, which Group does not have."),
             "model export": (lambda: ui.table(Group, columns=["name"], export=True),
-                             "a model table cannot export or total yet."),
+                             "a model table cannot export or total (`export=`): it reads one page at a time."),
             "model link from data": (lambda: ui.table(Group, columns=["name", ui.column("id", open="name")]),
                                      "A model's field is data and never becomes a link."),
             "id column beside another key": (lambda: ui.table(rows, columns=["name", "id"], key="code"),
