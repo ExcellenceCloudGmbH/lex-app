@@ -37,7 +37,7 @@ def mount_of(component) -> object:
     return None
 
 
-class CheckDesk(ui.State):
+class CheckState(ui.State):
     """A state with a rows handler and a field a model table is narrowed by."""
 
     group: int = 0
@@ -68,7 +68,7 @@ class TestCluster01cx_TableChecks(SimpleTestCase):
         for kind in ("text", "number", "money", "percent", "date", "datetime", "status", "tag", "tags"):
             with self.subTest(kind=kind):
                 self.assertEqual(ui.column("x", kind=kind).kind, kind, f"{kind} is a column kind")
-        table = ui.table(CheckDesk.holdings, columns=[
+        table = ui.table(CheckState.holdings, columns=[
             "name", ui.column("amount", kind="money", currency="EUR"), ui.column("net", kind="money", currency="ccy"),
             ui.column("state", kind="status", tones={"Open": "info"}), ui.column("fund", open="fund_page"),
             ui.column("portal", show=lambda row: ui.status(row["portal"], tone="success"))])
@@ -98,9 +98,9 @@ class TestCluster01cx_TableChecks(SimpleTestCase):
         Then:  each is a PageError naming the page and the slot, saying what it got and what to
                write.
         """
-        rows = CheckDesk.holdings
+        rows = CheckState.holdings
         cases = {
-            "not a source": (lambda: ui.table(CheckDesk.end, columns=["name"]),
+            "not a source": (lambda: ui.table(CheckState.end, columns=["name"]),
                              "Return the rows from a `@ui.rows` handler on the state"),
             "where on rows": (lambda: ui.table(rows, columns=["name"], where={"fund": 1}),
                               "Filter inside the handler."),
@@ -161,9 +161,9 @@ class TestCluster01cx_TableChecks(SimpleTestCase):
                filters, while lex_table's own state still filters on any field; search covers a
                shown text column only.
         """
-        component = ui.table(Group, columns=["name"], where={"id": CheckDesk.group}, search=True, visible=True).build(CTX)
+        component = ui.table(Group, columns=["name"], where={"id": CheckState.group}, search=True, visible=True).build(CTX)
         mount = str(mount_of(component))
-        self.assertIn("check_desk", mount, "the where= value is the state's field, read when the table appears")
+        self.assertIn("check_state", mount, "the where= value is the state's field, read when the table appears")
         self.assertIn("group", mount, "the field itself, not its value at build time")
         self.assertIn("set_query", str(component), "the toolbar has a search box")
         filtered = str(ui.table(User, columns=["username", "is_active"], filters=["is_active"]).build(CTX))
@@ -181,7 +181,7 @@ class TestCluster01cx_TableChecks(SimpleTestCase):
 
         def make():
             return ui.table(User, columns=["username", ui.column("is_active", kind="status", tones={"true": "success"})],
-                            row_actions=lambda row: [ui.button("Lock", CheckDesk.end, row["email"])], visible=True)
+                            row_actions=lambda row: [ui.button("Lock", CheckState.end, row["email"])], visible=True)
 
         make().build(CTX)
         before = len(data._STATE_CACHE)

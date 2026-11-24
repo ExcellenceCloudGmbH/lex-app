@@ -367,11 +367,11 @@ Built and tested the same day; these differ from, or add to, the sections above:
 ---
 
 - **A raw Reflex page can be where a link leads** (added 2026-11-24, from moving the reviewed customer
-  project's tables): `ui.reflex_page("/requests/[req]")` declares a page registered with
+  project's tables): `ui.reflex_page("/orders/[key]")` declares a page registered with
   `app.add_page` as a link target, so `ui.address`, a table's `open=`, `ui.link(to=)` and
   `ui.button(to=)` take it like a `@ui.page` function. A link still names a page, never a route
-  string typed into it. Nothing checks that the route exists: it is declared next to its
-  `app.add_page`.
+  string typed into it. When the app starts, each declared route is checked against the app's
+  pages.
 - **A table that leaves the screen keeps none of its rows** (added 2026-11-24): `close` drops the
   page, the count, the totals and the filter choices from the tab's state.
 
