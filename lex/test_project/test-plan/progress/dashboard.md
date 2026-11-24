@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 136 | 1011 | 949 | 3 | 0 |
+| 1. Init — Project Bootstrap | 137 | 1013 | 951 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -161,6 +161,7 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1ej | lex.ui frame: what a user may see in the navigation, decided on the server | 1.1000-1.1003 | complete | 4 | 0 | 0 | Guarded entries carry their route as the key of `ui_frame_shown`, the server's answer; the shell's mount sends `ui_frame_open` (background). A raw page's `requires=` now takes rules too. These tests fail on an entry the user may not open, a rule that cannot hide its entry, an answer taken from the browser's permissions, or a failing rule that fails open. |
 | 1ek | lex.ui frame: navigation beyond the declared pages -- sections of links, counts, per-user entries, a foot | 1.1004-1.1008 | complete | 5 | 0 | 0 | A function of the user stands for every value the frame shows; it runs on a worker thread when a page opens, once per event; its failure is logged and leaves its part empty. These tests fail on a section lost from the navigation, a count or a per-user entry decided in the browser, a link drawn for a user who may not open it, or `badge=`/`requires=`/`icon=` accepted in a page. |
 | 1el | lex.ui frame: the header band -- a search box, a status hint, a bell with a count | 1.1009-1.1011 | complete | 3 | 0 | 0 | The header's words and counts come from functions of the user, decided on the server when a page opens; the search page and its parameter are the server's, only the text comes from the browser. These tests fail on a header part lost, a count or status computed in the browser, a bell drawn for a user who may not open the inbox, or a search box that cannot reach the search page. |
+| 1em | lex.ui frame: the user menu's entries above Sign out | 1.1012-1.1013 | complete | 2 | 0 | 0 | The entries' keys are `user_menu#<n>` in `ui_frame_shown`. These tests fail on a lost entry, entries out of order or below Sign out, an entry drawn for a user who may not open it, or a button, a text, a count or a state value accepted in the menu. |
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |
 | 1h |  | 1.47-1.50 | complete | 15 | 0 | 0 | `requests.get` patched, network-free |

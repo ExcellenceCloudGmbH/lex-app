@@ -1986,3 +1986,16 @@ does not remove user launch configurations.
 | 1.1011 | A search page must take one value | no parameter, two, a route argument, a route as text refused with what to write; a raw page with params= accepted |
 
 **Scenario range:** 1.1009 – 1.1011. **Test file:** `lex/test_project/tests/init/test_1el_ui_frame_header.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1el](batches.md).
+
+### 1em. lex.ui frame: the user menu's entries above Sign out ✅
+
+**What it tests:** `ui.frame(user_menu=[ui.link(...)])`: RFDS's user menu entries above Sign out, in their order, each drawn on the server's answer for its `requires=` and the page it leads to.
+
+**Why a regression matters:** A menu that drops the user's own pages, an entry below Sign out, or an entry drawn for a user who may not open it.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1012 | The user menu lists the project's entries above Sign out | Account, Settings, Help in order above Sign out; Settings (its page's permission) and Help (its own requires=) on the server's answer: anna both, carl neither |
+| 1.1013 | The user menu takes links | a button, a text, a link with badge=, a link with a state value refused with what to write |
+
+**Scenario range:** 1.1012 – 1.1013. **Test file:** `lex/test_project/tests/init/test_1em_ui_frame_user_menu.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1em](batches.md).

@@ -80,7 +80,8 @@ progress_of/cancel``        event of a Cancel button
                             count, a section's links): lex-app calls it on the server when a page
                             opens. ``search=`` a page taking one query parameter: RFDS's search box
                             in the header opens it with what was typed; ``actions=[...]`` links,
-                            buttons, statuses, texts, custom blocks in the header band; ``denied=`` the sentence a refused
+                            buttons, statuses, texts, custom blocks in the header band;
+                            ``user_menu=[ui.link(...)]`` entries above "Sign out"; ``denied=`` the sentence a refused
                             user reads, ``request_access=`` their way out (a page, https:// or
                             mailto:); ``opened=`` a function lex-app calls, not awaited, when a
                             page has opened: ``opened(user, page)``; ``sign_out=`` where the

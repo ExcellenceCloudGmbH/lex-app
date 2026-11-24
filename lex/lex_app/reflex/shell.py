@@ -405,6 +405,21 @@ def header_actions() -> tuple:
     return (with_overlays(ctx, rx.fragment(*drawn)),) if drawn else ()
 
 
+def user_menu_items() -> tuple:
+    """``ui.frame(user_menu=)`` as RFDS's user menu entries, each drawn on the server's answer."""
+    from rfds.components.actions.menu import menu_item
+
+    from lex.lex_app.reflex.ui.pages import frame
+    from lex.lex_app.reflex.ui.pages.parts import say
+
+    entries: list[Any] = []
+    for index, link in enumerate(frame.current().user_menu):
+        href, _outside = frame.href_of(link)
+        entries.append(_shown_if_decided(frame.link_key("user_menu", index),
+                                         menu_item(say(link.label), href=href, icon=link.icon)))
+    return tuple(entries)
+
+
 def header_search() -> Any:
     """RFDS's search box in the header, when ``ui.frame(search=)`` names the project's search page:
     Enter opens it with what was typed (:meth:`State.ui_frame_search`)."""
@@ -525,7 +540,8 @@ def lex_chrome(body, *, embedded=None, route=None):
         # `?is_logout_enabled=false` leaves the user's name without the way out.
         user_menu=rx.cond(
             LexDashboardState.logout_enabled,
-            rfds.user_menu(name=LexUser.display_name, email=LexUser.email, sign_out_href=sign_out_href()),
+            rfds.user_menu(name=LexUser.display_name, email=LexUser.email, items=user_menu_items(),
+                           sign_out_href=sign_out_href()),
             rx.text(LexUser.display_name, size="2"),
         ),
     )

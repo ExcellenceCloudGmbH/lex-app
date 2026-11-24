@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1011
+max_scenario: 1013
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2728,3 +2728,13 @@ letters:
       xfail: 0
     note: >-
       The header's words and counts come from functions of the user, decided on the server when a page opens; the search page and its parameter are the server's, only the text comes from the browser. These tests fail on a header part lost, a count or status computed in the browser, a bell drawn for a user who may not open the inbox, or a search box that cannot reach the search page.
+  em:
+    title: 'lex.ui frame: the user menu''s entries above Sign out'
+    scenarios: 1.1012-1.1013
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      The entries' keys are `user_menu#<n>` in `ui_frame_shown`. These tests fail on a lost entry, entries out of order or below Sign out, an entry drawn for a user who may not open it, or a button, a text, a count or a state value accepted in the menu.

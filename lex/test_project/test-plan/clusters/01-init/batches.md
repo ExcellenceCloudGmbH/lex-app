@@ -3854,3 +3854,23 @@ Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | 1.1009 | The header's actions are lex.ui parts | compiled in rfds-header-actions before the user menu; anna's status Sync delayed, count 4, the bell hers; ben's failing status logged, no bell; ui.fact and ui.section refused naming ui.custom_block |
 | 1.1010 | The search box opens the project's search page | RFDS's search box in the header's search slot; Enter redirects to /search?q=north%20east%20%26%20co; an empty box to the page without it |
 | 1.1011 | A search page must take one value | no parameter, two, a route argument, a route as text refused with what to write; a raw page with params= accepted |
+
+### Batch 1em — lex.ui frame: the user menu's entries above Sign out ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1012 – 1.1013 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/frame.py` (`user_menu=`, `entries`), `lex/lex_app/reflex/shell.py` (`user_menu_items`, `lex_chrome`) |
+| Test file | `lex/test_project/tests/init/test_1em_ui_frame_user_menu.py` |
+| Test classes | `TestCluster01em_FrameUserMenu` (1.1012–1.1013) |
+| Fixtures | pages declared per test (`FrameCase` from 1eb); `decided` from 1ej (`ui.testing.Harness` per user) |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1012 | The user menu lists the project's entries above Sign out | Account, Settings, Help in order above Sign out; Settings (its page's permission) and Help (its own requires=) on the server's answer: anna both, carl neither |
+| 1.1013 | The user menu takes links | a button, a text, a link with badge=, a link with a state value refused with what to write |

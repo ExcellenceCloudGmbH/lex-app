@@ -32,6 +32,7 @@ class Frame:
     nav_footer: Any = None              # a ui.link or ui.text at the foot of the navigation
     search: tuple[str, str] | None = None   # the search page's route and the parameter it reads
     actions: tuple = ()                 # parts in the header band, before the user menu
+    user_menu: tuple = ()               # ui.links in the user menu, above "Sign out"
     module: str = ""
 
     def section(self, title: str) -> "NavLinks | None":
@@ -68,7 +69,8 @@ class OpenedPage:
 
 
 def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign_out: Any = None,
-          opened: Any = None, nav_footer: Any = None, search: Any = None, actions: Any = ()) -> None:
+          opened: Any = None, nav_footer: Any = None, search: Any = None, actions: Any = (),
+          user_menu: Any = ()) -> None:
     """Configure lex-app's frame for this project: call it once, in the dashboard module.
 
     ``nav`` is the navigation's areas in the order they are listed: the same words a page names
@@ -125,6 +127,12 @@ def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign
                  actions=[ui.status(sync_state, tone="warning"),
                           ui.link("Notifications", to=inbox, icon="notification", badge=unread)])
 
+    ``user_menu`` are ``ui.link``\\ s in the user menu, above "Sign out", each drawn only for users who
+    meet its ``requires=`` and may open the page it leads to (decided on the server)::
+
+        ui.frame(user_menu=[ui.link("Account", to=account),
+                            ui.link("Settings", to=settings, requires=ui.edit(Setting))])
+
     ``sign_out`` is where the user menu's "Sign out" leads: a page (``@ui.page`` or
     ``ui.reflex_page``) or an ``https://`` address. By default it is lex-app's ``/logout``, which
     ends the dashboard's sign-in and lex-app's; a project's address should end there too, or the
@@ -146,7 +154,8 @@ def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign
         _check_opened(opened)
     areas, sections = _areas(nav)
     _FRAME = Frame(nav=areas, sections=sections, nav_footer=_footer(nav_footer), opened=opened,
-                   search=None if search is None else _search(search), actions=_actions(actions), sign_out="" if sign_out is None else target(sign_out, argument="sign_out"),
+                   search=None if search is None else _search(search), actions=_actions(actions),
+                   user_menu=_menu(user_menu), sign_out="" if sign_out is None else target(sign_out, argument="sign_out"),
                    denied=denied or "",
                    request_access="" if request_access is None else target(request_access, argument="request_access",
                                                                            mail=True),
@@ -246,6 +255,21 @@ def _actions(actions: Any) -> tuple:
         elif not isinstance(part, (Button, CustomBlock)):
             raise TypeError(f"ui.frame(actions=) takes {_ACTION_PARTS}; got {_named(part)}.")
     return items
+
+
+def _menu(items: Any) -> tuple:
+    from lex.lex_app.reflex.ui.pages.vocab import Link
+
+    links = (items,) if not isinstance(items, (list, tuple)) else tuple(items)
+    for link in links:
+        if not isinstance(link, Link):
+            raise TypeError(f"ui.frame(user_menu=) takes ui.link(...)s -- the user's own pages: "
+                            f"ui.link(\"Account\", to=account); got {_named(link)}.")
+        if link.badge is not None:
+            raise TypeError(f"ui.frame(user_menu=): the entry {link.label!r} has badge=; a menu entry has no count. "
+                            "Put the count beside a link in the header (actions=) or the navigation.")
+        entry_link(link, "user_menu=")
+    return links
 
 
 def _footer(part: Any) -> Any:
@@ -499,6 +523,7 @@ def entries() -> list[Entry]:
     if configured.nav_footer is not None and hasattr(configured.nav_footer, "requires"):
         found.append(Entry("nav_footer", link_guard(configured.nav_footer), configured.nav_footer.badge))
     found += _placed("actions", configured.actions)
+    found += _placed("user_menu", configured.user_menu)
     return found
 
 
