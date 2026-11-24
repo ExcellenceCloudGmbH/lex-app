@@ -40,12 +40,10 @@ class Column:
     tones: tuple = ()
     open: str | None = None
     show: Callable[[Any], Any] | None = None
-    pin: bool = False
 
 
 def column(key: str, *, label: str | None = None, kind: str | None = None, currency: str | None = None,
-           tones: dict | None = None, open: str | None = None, show: Callable[[Any], Any] | None = None,
-           pin: bool = False) -> Column:
+           tones: dict | None = None, open: str | None = None, show: Callable[[Any], Any] | None = None) -> Column:
     """A table column that needs more than its name.
 
     ``kind`` says what the values are, and each kind is drawn the same way on every page: text,
@@ -63,8 +61,8 @@ def column(key: str, *, label: str | None = None, kind: str | None = None, curre
     ``ui.status`` or ``ui.link``. ``row["x"]`` there stands for the value in the browser, not the
     value itself: a Python ``if`` on it cannot work; use ``visible=`` or ``ui.switch``.
 
-    ``pin=True`` on the first column keeps it in place while the table scrolls sideways; RFDS
-    pins that one column only.
+    The first column of a table names the row: it stays in place while the table scrolls
+    sideways, with nothing to write.
     """
     from lex.lex_app.reflex.ui.pages.vocab import TONES
 
@@ -96,10 +94,7 @@ def column(key: str, *, label: str | None = None, kind: str | None = None, curre
         raise ValueError(f"{where}): give kind= or show=, not both. show= draws the cell itself.")
     if show is not None and not callable(show):
         raise TypeError(f"{where}, show=) takes a function of the row: `show=lambda row: ui.text(row[\"x\"])`")
-    if not isinstance(pin, bool):
-        raise TypeError(f"{where}, pin=) takes True or False; got {pin!r}. `pin=True` keeps the first column in "
-                        "place while the table scrolls sideways.")
-    return Column(key, label, kind, currency, tuple(dict(tones or {}).items()), open, show, pin)
+    return Column(key, label, kind, currency, tuple(dict(tones or {}).items()), open, show)
 
 
 class _Recorder:
@@ -171,11 +166,6 @@ class Table(Part):
             raise ctx.fail(f"the first column, `{first.key}`, is {what}.",
                            "The first column names the row and is the row's link, so it is shown as plain text. "
                            "Put a plain column first, such as the name.")
-        pinned = [c.key for c in cols[1:] if c.pin]
-        if pinned:
-            raise ctx.fail(f"column `{pinned[0]}` is pinned, and only the first column can be.",
-                           "RFDS keeps one column in place while the table scrolls sideways: the first, which "
-                           f"names the row. Pin it: `ui.column(\"{first.key}\", pin=True)`.")
         unknown = [name for name in self.filters if name not in keys]
         if unknown:
             raise ctx.fail(f"`filters=` names {', '.join(unknown)}, which is not a column.",
@@ -224,12 +214,12 @@ class Table(Part):
         from rfds.components.tables import column as rfds_column
 
         specs = []
-        for c in cols:
+        for index, c in enumerate(cols):
             given = base.get(c.key)
             layout: dict[str, Any] = {}
             if c.kind in _KIND_WIDTH:
                 layout["width"] = _KIND_WIDTH[c.kind]
-            if c.pin:
+            if index == 0:                      # it names the row: in place while the table scrolls sideways
                 layout["sticky"] = "start"
             if given is not None and c.kind is None and c.show is None and c.open is None and c.currency is None:
                 spec = dict(given)                       # a model's field: its own kind and label

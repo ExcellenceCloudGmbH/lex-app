@@ -384,15 +384,17 @@ it sums. Each is RFDS's own feature, exposed with the fewest new words:
 ```python
 ui.table(CustomersState.customers, page_size=200, choose_columns=True,
          totals={"amount": "sum"}, totals_of_all=True,
-         columns=[ui.column("name", kind="name", pin=True), ui.column("code", kind="code"),
+         columns=[ui.column("name", kind="name"), ui.column("code", kind="code"),
                   "region", ui.column("amount", kind="money", currency="currency")])
 ```
 
-- **One pinned column: the first.** `ui.column(..., pin=True)` is RFDS's `sticky="start"`. RFDS's
-  data table puts every start-sticky cell at the left edge and reserves scroll padding for one such
-  column, the identity cell, so only the first column -- the one that names the row -- may be
-  pinned ("RFDS keeps one column in place while the table scrolls sideways: the first, which names
-  the row. Pin it: ..."). Pinning several would need hand-made offsets; not added.
+- **One pinned column: the first, always.** RFDS's data table puts every start-sticky cell at the
+  left edge and reserves scroll padding for one such column, the identity cell, so only the first
+  column -- the one that names the row -- can stay in place. The first build asked for it with
+  `ui.column(..., pin=True)`, legal on the first column only. Review, 2026-11-24: an argument with
+  one legal place is a rule to learn and nothing to choose, so `pin=` is gone and the first column
+  of every lex.ui table, rows or model, is RFDS's `sticky="start"`: it stays in place whenever the
+  table scrolls sideways. Pinning several would need hand-made offsets; not added.
 - **No width argument; two kinds instead.** Rule 6.1(4) of the pages design forbids optional
   styling, and test 1.806 refuses a `width` argument on every component. The need is about the
   values, so two kinds say what they are: `kind="name"` (a person's or a company's name) is RFDS's

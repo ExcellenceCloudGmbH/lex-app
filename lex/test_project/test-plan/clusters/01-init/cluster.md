@@ -1706,23 +1706,24 @@ does not remove user launch configurations.
 
 ### 1dy. lex.ui tables: the name pinned and given room, a code kept narrow, the Columns menu, every row at once, totals that say what they sum ✅
 
-**What it tests:** `ui.column(kind="name"|"code", pin=True)`, `ui.table(choose_columns=True, page_size=N|None, totals={...: "sum of all rows"})` -- RFDS's sticky column, field widths, column chooser, pagination and totals, on rows and model tables.
+**What it tests:** `ui.column(kind="name"|"code")`, the first column always in place, `ui.table(choose_columns=True, page_size=N, totals={...: "sum"}, totals_of_all=True)` -- RFDS's sticky column, field widths, column chooser, pagination and totals, on rows and model tables.
 
 **Why a regression matters:** a name that scrolls away, a user's column choice that hides the row's name, a row beyond 200 out of reach, or a total whose meaning changes silently when the user searches.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.940 | The name stays in place and has room; a code stays narrow | sticky start, entity kind at the wide width, identifier at the narrow width; model fields too |
-| 1.941 | A pin written wrongly says what to write | not a bool; not the first column; no width argument |
+| 1.941 | A column takes no width | no width argument; the kinds name and code set the room (pin= removed: 1.955) |
 | 1.942 | The user chooses, orders and sizes the columns | RFDS's column chooser; the first column always shown and first; widths 40-1,200 px |
-| 1.943 | `page_size=` sets the rows a page, `None` shows every row | 50; default 25; `None`: 200, no size picker, pagination past 200; wrong sizes refused |
+| 1.943 | `page_size=` sets the rows a page, up to every row | 50; default 25; 200 for every row of a file; 0, 201, None and others refused (the pager: 1.954) |
 | 1.944 | Every row in one scroll, and past 200 the rest is reached | 150 on one page; 250 as 200 + 50 |
-| 1.945 | A totals row says what it sums and can sum every row | "Total", "Total of matching rows", "Total of all rows"; mixing refused |
+| 1.945 | A totals row says what it sums and can sum every row | "Total", "Total of matching rows", "Total of all rows" (totals_of_all=True, 1.953); another word refused |
 | 1.946 | A table with all of it compiles | Reflex's page compiler |
 | 1.953 | A total of every row is one table option, read once | totals={...: "sum"}, totals_of_all=True over a handler that searches itself: Total of all rows while searching, every row read once and not on each keystroke; the old "sum of all rows" sentence, totals_of_all without totals, and a non-bool refused with what to write |
 | 1.954 | The pager shows only when the rows do not fit one page | rows and model tables, default and page_size=200: no always-on pager; RFDS's pagination with its rows-per-page choice under a condition on total_rows > page_size; page_size=None refused saying to write page_size=200; 1.943 now checks 1-200 |
+| 1.955 | The first column always stays in place, and pin= is gone | rows and model tables with nothing written: the first column is RFDS's start-sticky column and no other; ui.column(pin=) is no argument; 1.940 and 1.941 rewritten without pin= |
 
-**Scenario range:** 1.940 – 1.946, 1.953, 1.954. **Test file:** `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dy](batches.md).
+**Scenario range:** 1.940 – 1.946, 1.953, 1.954, 1.955. **Test file:** `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dy](batches.md).
 
 ### 1dz. lex.ui pages: a section closed until the user opens it, saying how many rows it holds ✅
 

@@ -2560,14 +2560,14 @@ letters:
       `ui.toast(..., link=ui.link(...))`: a link's targets (a page, a raw page, a record, an outside address) and checks, run when the handler makes the toast; RFDS's toast with one action. These tests fail on a toast without its button, a button that leads to the wrong page, or a link whose mistake is found only when a user presses it.
   dy:
     title: 'lex.ui tables: the name pinned and given room, a code kept narrow, the Columns menu, every row at once, totals that say what they sum'
-    scenarios: 1.940-1.946, 1.953, 1.954
+    scenarios: 1.940-1.946, 1.953, 1.954, 1.955
     status: complete
     tests:
-      pass: 9
+      pass: 10
       skip: 0
       xfail: 0
     note: >-
-      `ui.column(kind="name"|"code", pin=True)`, `ui.table(choose_columns=True, page_size=N|None, totals={...: "sum of all rows"})` on rows and model tables, through Reflex's own event processor and its page compiler. These tests fail on a name that scrolls away, a pin RFDS cannot keep, a user's column choice that hides the row's name, a row beyond 200 out of reach, or a total whose label does not say whether it sums the matching rows or every row.
+      `ui.column(kind="name"|"code")`, the first column always in place, `ui.table(choose_columns=True, page_size=N, totals={...: "sum"}, totals_of_all=True)` on rows and model tables, through Reflex's own event processor and its page compiler. These tests fail on a name that scrolls away, a user's column choice that hides the row's name, a row beyond 200 out of reach, or a total whose label does not say whether it sums the matching rows or every row.
   dz:
     title: 'lex.ui pages: a section closed until the user opens it, saying how many rows it holds'
     scenarios: 1.947-1.949

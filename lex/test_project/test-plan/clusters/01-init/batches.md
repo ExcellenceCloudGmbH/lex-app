@@ -3455,13 +3455,13 @@ What building settled is section 6.15 of `docs/superpowers/specs/2026-11-23-refl
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.940 – 1.946, 1.953, 1.954 |
+| Scenario range | 1.940 – 1.946, 1.953, 1.954, 1.955 |
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/pages/tables.py` (`column(kind="name"/"code", pin=)`, `table(page_size=, choose_columns=, totals=)`), `lex/lex_app/reflex/ui/pages/rows_table.py` (page size, totals of all rows, their label), `lex/lex_app/reflex/data.py` (`ChosenColumns`) |
 | Test file | `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py` |
-| Test classes | `TestCluster01dy_TableColumnsRows` (1.940–1.946, 1.953, 1.954) |
+| Test classes | `TestCluster01dy_TableColumnsRows` (1.940–1.946, 1.953, 1.954, 1.955) |
 | Fixtures | a neutral customers state (name, code, region, amount in two currencies); Django's `Group` as a model table |
-| Tests landed | **9 pass / 0 fail** |
+| Tests landed | **10 pass / 0 fail** |
 | Status | ✅ Complete |
 
 Table needs found while rewriting dashboards. What building settled is section 5.14 of
@@ -3469,15 +3469,16 @@ Table needs found while rewriting dashboards. What building settled is section 5
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.940 | The name stays in place and has room; a code stays narrow | `pin=True`: RFDS's `sticky="start"`; `kind="name"`: RFDS's entity kind at its wide field width; `kind="code"`: RFDS's identifier at its narrow width; plain columns unchanged; model fields keep label and kind |
-| 1.941 | A pin written wrongly says what to write | not a bool; on another column than the first; no `width=` argument (rule 6.1.4), the kinds documented |
+| 1.940 | The name stays in place and has room; a code stays narrow | the first column: RFDS's `sticky="start"`; `kind="name"`: RFDS's entity kind at its wide field width; `kind="code"`: RFDS's identifier at its narrow width; plain columns unchanged; model fields keep label and kind |
+| 1.941 | A column takes no width | no `width=` argument (rule 6.1.4), the kinds documented (pin= removed: 1.955) |
 | 1.942 | The user chooses, orders and sizes the columns | RFDS's column chooser in the toolbar; the table follows; the first column always shown and first; only the table's columns; widths 40-1,200 px; model tables too |
-| 1.943 | `page_size=` sets the rows a page, `None` shows every row | 50 opens at 50 and is offered; default 25; `None` opens at 200 without the size picker, RFDS's pagination only past 200; model tables too; wrong sizes refused |
+| 1.943 | `page_size=` sets the rows a page, up to every row | 50 opens at 50 and is offered; default 25; 200 for every row of a file; model tables too; 0, 201, None and others refused (the pager: 1.954) |
 | 1.944 | Every row in one scroll, and past 200 the rest is reached | 150 rows on one page; of 250, 200 then 50 on the next page |
-| 1.945 | A totals row says what it sums and can sum every row | "Total" with nothing narrowing; "Total of matching rows" / "Total of all rows" while a filter or search is on, per currency; mixing or another word refused |
+| 1.945 | A totals row says what it sums and can sum every row | "Total" with nothing narrowing; "Total of matching rows" / "Total of all rows" while a filter or search is on, per currency; another word refused (all rows: `totals_of_all=True`, 1.953) |
 | 1.946 | A table with all of it compiles | Reflex's page compiler: sticky column, column chooser, pagination |
 | 1.953 | A total of every row is one table option, read once | totals={...: "sum"}, totals_of_all=True over a handler that searches itself: Total of all rows while searching, every row read once and not on each keystroke; the old "sum of all rows" sentence, totals_of_all without totals, and a non-bool refused with what to write |
 | 1.954 | The pager shows only when the rows do not fit one page | rows and model tables, default and page_size=200: no always-on pager; RFDS's pagination with its rows-per-page choice under a condition on total_rows > page_size; page_size=None refused saying to write page_size=200; 1.943 now checks 1-200 |
+| 1.955 | The first column always stays in place, and pin= is gone | rows and model tables with nothing written: the first column is RFDS's start-sticky column and no other; ui.column(pin=) is no argument; 1.940 and 1.941 rewritten without pin= |
 
 ### Batch 1dz — lex.ui pages: a section closed until the user opens it, saying how many rows it holds ✅
 

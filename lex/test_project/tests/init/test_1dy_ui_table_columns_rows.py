@@ -11,7 +11,7 @@ whether it sums the rows the search left or every row. A regression is a name th
 a row that cannot be reached, a width that only breaks in the browser, a user's column choice
 that hides the row's name, or a total that silently changes meaning when the user searches.
 
-Cluster 1dy -- scenarios 1.940-1.946, 1.953, 1.954. Type: U.
+Cluster 1dy -- scenarios 1.940-1.946, 1.953-1.955. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/tables.py (column kind="name"/"code", pin=; table page_size=,
 choose_columns=, totals=), lex/lex_app/reflex/ui/pages/rows_table.py (page size, totals over all
 rows, their label), lex/lex_app/reflex/data.py (ChosenColumns, the model table's page size).
@@ -81,19 +81,19 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
     # -- 1.940 ---------------------------------------------------------
     def test_1_940_the_name_stays_in_place_and_has_room_and_a_code_stays_narrow(self) -> None:
         """
-        Scenario 1.940: kind="name", kind="code" and pin= on a column.
-        Given: a rows table whose first column, the name, is pinned and of kind name, with a
-               column of kind code; and a model table whose first field is pinned, and one whose
-               field is of kind name.
+        Scenario 1.940: kind="name" and kind="code" on a column; the first column stays in place.
+        Given: a rows table whose first column, the name, is of kind name, with a column of kind
+               code; and a model table whose first field is the name, and one whose field is of
+               kind name.
         When:  they are built.
         Then:  RFDS's column spec of the name says sticky at the start, RFDS's entity kind and its
                wide field width; the code is RFDS's identifier kind at its narrow field width; a
                plain column has no width and is not pinned; the table's cells carry RFDS's sticky
-               marker; a pinned model field keeps its own label and kind; a model field of kind
-               name keeps its label and gets the room.
+               marker; the model table's first field keeps its own label and kind and stays in
+               place; a model field of kind name keeps its label and gets the room.
         """
         state, text = built(ui.table(CustomersState.customers, columns=[
-            ui.column("name", kind="name", pin=True), ui.column("code", kind="code"), "region"]))
+            ui.column("name", kind="name"), ui.column("code", kind="code"), "region"]))
         name, code, region = (spec_of(state, field) for field in ("name", "code", "region"))
         self.assertEqual((name.get("sticky"), name["kind"], name.get("width")),
                          ("start", "entity", "var(--rfds-size-field-md)"),
@@ -104,11 +104,11 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
                          "a plain column takes the room its values need and scrolls")
         self.assertIn('"data-rfds-sticky":"start"', text, "RFDS marks the pinned header and cells")
 
-        groups = ui.table(Group, columns=[ui.column("name", pin=True)])
+        groups = ui.table(Group, columns=["name"])
         text = str(groups.build(Build(page="groups", route="/groups", caption="Groups")))
         spec = spec_of(rows_table._CACHE_BY_TABLE[id(groups)], "name")
         self.assertEqual((spec.get("sticky"), spec["header"], spec["kind"]), ("start", "Name", "text"),
-                         "a model table's first field can be pinned and keeps its own label and kind")
+                         "a model table's first field stays in place and keeps its own label and kind")
         self.assertIn('"data-rfds-sticky":"start"', text, "RFDS marks it")
         named = ui.table(Group, columns=["id", ui.column("name", kind="name")])
         named.build(Build(page="groups", route="/groups", caption="Groups"))
@@ -117,28 +117,18 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
                          "a model's field of kind name keeps its label and gets the room")
 
     # -- 1.941 ---------------------------------------------------------
-    def test_1_941_a_pin_written_wrongly_says_what_to_write(self) -> None:
+    def test_1_941_a_column_takes_no_width(self) -> None:
         """
-        Scenario 1.941: pin= refused; a column takes no width.
-        Given: a pin that is not True or False, a pin on a column that is not the first, and a
-               width given to a column.
-        When:  the column or the table is declared and built.
-        Then:  each pin is refused with what to write -- on the second column, that RFDS keeps one
-               column in place, the one that names the row; a column has no width argument: its
-               kind says what the values are, and the kinds name and code set the room.
+        Scenario 1.941: a column takes no width.
+        Given: a width given to a column.
+        When:  the column is declared.
+        Then:  it is refused: a column has no width argument; its kind says what the values are,
+               and the kinds name and code set the room. (Which column stays in place is 1.955.)
         """
         with self.assertRaises(TypeError):
             ui.column("name", width="wide")
         self.assertIn("``name`` (a person's or a company's name: given room", ui.column.__doc__,
                       "the kinds that set a width are documented on ui.column")
-        with self.assertRaisesRegex(TypeError, r"pin=\) takes True or False"):
-            ui.column("name", pin="start")
-        table = ui.table(CustomersState.customers, columns=["name", ui.column("code", pin=True)])
-        with self.assertRaises(PageError) as raised:
-            table.build(CTX)
-        self.assertIn("column `code` is pinned, and only the first column can be.", str(raised.exception))
-        self.assertIn("RFDS keeps one column in place while the table scrolls sideways: the first, which names "
-                      "the row. Pin it: `ui.column(\"name\", pin=True)`.", str(raised.exception))
 
     # -- 1.942 ---------------------------------------------------------
     def test_1_942_the_user_chooses_orders_and_sizes_the_columns(self) -> None:
@@ -304,7 +294,7 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
         page = ui.list(title="Customers", table=ui.table(
             CustomersState.customers, search=True, choose_columns=True, page_size=200,
             totals={"amount": "sum"}, totals_of_all=True,
-            columns=[ui.column("name", kind="name", pin=True), ui.column("code", kind="code"),
+            columns=[ui.column("name", kind="name"), ui.column("code", kind="code"),
                      ui.column("amount", kind="money", currency="currency")]))
         _, module = compile_page("/customers/all", page.build(Build(page="customers", route="/customers/all")))
         for expected in ('"data-rfds-sticky":"start"', "column_chooser", "rfds-pagination"):
@@ -375,3 +365,23 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
         with self.assertRaisesRegex(ValueError, r"page_size=\) takes a number of rows from 1 to 200; got None\. "
                                                 r"For every row on one page write page_size=200"):
             ui.table(CustomersState.customers, columns=["name"], page_size=None)
+
+    # -- 1.955 ---------------------------------------------------------
+    def test_1_955_the_first_column_always_stays_in_place_and_pin_is_gone(self) -> None:
+        """
+        Scenario 1.955: the column that names the row stays in place, with nothing to write.
+        Given: a rows table and a model table whose columns say nothing about pinning; and
+               `ui.column(..., pin=True)`, the first build's way to ask for it.
+        When:  they are built.
+        Then:  the first column of each is RFDS's start-sticky column and no other is; `pin=` is
+               no argument of ui.column any more.
+        """
+        state, _ = built(ui.table(CustomersState.customers, columns=["name", "code", "region"]))
+        self.assertEqual([spec.get("sticky") for spec in state.table_columns], ["start", None, None],
+                         "the first column stays in place while the table scrolls sideways; the others scroll")
+        groups = ui.table(Group, columns=["name", "id"])
+        groups.build(Build(page="groups", route="/groups", caption="Groups"))
+        self.assertEqual([spec.get("sticky") for spec in rows_table._CACHE_BY_TABLE[id(groups)].table_columns],
+                         ["start", None], "a model table the same way")
+        with self.assertRaises(TypeError):
+            ui.column("name", pin=True)
