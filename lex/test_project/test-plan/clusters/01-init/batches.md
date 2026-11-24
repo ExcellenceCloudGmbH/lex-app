@@ -3943,3 +3943,237 @@ Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | --- | --- | --- |
 | 1.1020 | The project's mark leads home | without a logo the name leads home; with one, rfds-header-logo with alt="" and the name, one link home; named, read as its label; the name is LEX_DASHBOARD_TITLE; the stylesheet colours the brand on the band |
 | 1.1021 | The mark's address is checked | a relative address, http://, a label without a logo, a label that is not text refused with what to write |
+
+### Batch 1eq — lex.ui: a search through self.api matches the model's own text, never created_by ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1023 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/data.py` (`_default_search_field`, `_framework_fields`), `lex/lex_app/reflex/ui/context.py` (`Api.list(search=)`), `lex/lex_app/reflex/ui/pages/tables.py` (a model table's search column) |
+| Test file | `lex/test_project/tests/init/test_1eq_ui_api_search_field.py` |
+| Test classes | `TestCluster01eq_ApiSearchField` (1.1023) |
+| Fixtures | httpx `MockTransport`; `_session`/`_in_thread` from 1cf |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 5.15 of `docs/superpowers/specs/2026-11-23-reflex-ui-tables-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1023 | A search matches the model's own text, not created_by | customer/region/name icontains for a LexModel, a calculation, a LexModel and a Django model; lex_table's default; a model table showing created_by first searches customer; no own text field refused with filters= advice |
+
+### Batch 1er — lex.ui tables: the rows a table shows reach the browser and are never stored with the state ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1024 – 1.1025 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/data.py` (`RowsNotStored`, `rows_read`, `table_state(not_stored=)`), `lex/lex_app/reflex/ui/pages/rows_table.py` (`go`, `shown_on`, `restore_events`), `lex/lex_app/reflex/ui/pages/tables.py`, `lex/lex_app/reflex/ui/state.py` (`ui_open` sends `restore`) |
+| Test file | `lex/test_project/tests/init/test_1er_ui_table_rows_not_stored.py` |
+| Test classes | `TestCluster01er_TableRowsNotStored` (1.1024–1.1025) |
+| Fixtures | `ui.testing.Harness`; Reflex's `BaseStateToken.serialize` (what Redis and disk store) and `pickle` |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 5.15 of `docs/superpowers/specs/2026-11-23-reflex-ui-tables-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1024 | A table's rows reach the browser and no stored state | the browser's updates carry name, pay, team; no BaseStateToken.serialize or pickle of any state of the tab holds them or the total; stored: no rows, count kept, _rows_dropped; restore reads nothing when not dropped, reads again when dropped |
+| 1.1025 | Every ui.table is not stored; a row link survives the store | a ui.table model table is rows_not_stored and told to restore by its page; lex_table's state is not; a row's own address left out of the pickle, the click still redirects to it |
+
+### Batch 1es — lex.ui: a foreign key shows the related record's name, in a model table, a run's history and its facts ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1026 – 1.1027 |
+| Type | E |
+| Files covered | `lex/lex_app/reflex/data.py` (`shown_field`, `lex_columns`, `lex_grid_columns`, `LexTableState` ordering), `lex/lex_app/reflex/ui/pages/tables.py`, `lex/lex_app/reflex/ui/pages/calculation.py` (`_value`, `_inputs_shown`), `lex/lex_app/reflex/ui/context.py` (`Api.list(fields=)`) |
+| Test file | `lex/test_project/tests/init/test_1es_ui_foreign_key_names.py` |
+| Test classes | `TestCluster01es_ForeignKeyNames` (1.1026–1.1027) |
+| Fixtures | `E2ETestCase` with `UI_FK_MODELS` (`UiCustomer`, `UiCustomerReport`, new in `tests/init/models.py`); `ViewsClient` from `_ui_calc_aids` |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 5.15 of `docs/superpowers/specs/2026-11-23-reflex-ui-tables-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1026 | A model table's foreign key shows the related record's name | column field customer__short_description headed Customer; rows carry names and ids through the real list view; desc sort sends -customer and returns beta first; lex_columns/lex_grid_columns; Api.list(fields=[customer]) keeps the name |
+| 1.1027 | A calculation's history and run show the customer's name | the past runs' column is customer__short_description; the run's input fact and result fact read run[customer__short_description] |
+
+### Batch 1et — lex.ui: every record through self.api.all, and a model table filtered by a range of days ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1028 – 1.1029 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/context.py` (`Api.all`, `ALL_LIMIT`, `ALL_PAGE`), `lex/lex_app/reflex/data.py` (`LexTableState.set_dates`, `date_lookups`, `table_state(date_lookups=)`), `lex/lex_app/reflex/ui/pages/tables.py` (model date filters; the export/totals refusal) |
+| Test file | `lex/test_project/tests/init/test_1et_ui_api_all_and_model_dates.py` |
+| Test classes | `TestCluster01et_ApiAllAndModelDates` (1.1028–1.1029) |
+| Fixtures | httpx `MockTransport`; `_session`/`_in_thread` from 1cf; `ui.testing.Harness`; a recording API stand-in patched over `data.lex_api` |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 5.15 of `docs/superpowers/specs/2026-11-23-reflex-ui-tables-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1028 | self.api.all reads every record in a stable order up to a ceiling | 2,345 rows once and in order; pages 1-3 of 1,000 with ordering amount,id; count; ALL_LIMIT refusal after the first page with the count; a rows table over it builds with export and totals; a model table's totals refusal names self.api.all |
+| 1.1029 | A model table filters a date field by a range of days | date_lookups event_at -> event_at__date; the picker in the toolbar; event_at__date__gte/lte sent; a field that is no date filter ignored; a malformed day dropped; clear_filters removes the range |
+
+### Batch 1eu — lex.ui frame: areas nav= does not list follow the listed ones; a typo is still refused ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1030 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/shell.py` (`check_nav`, `check_area`, `_raw_areas`, `_areas`), `lex/lex_app/reflex/ui/pages/frame.py` (`nav=`), `lex/lex_app/reflex/ui/pages/declare.py` (`finalize`) |
+| Test file | `lex/test_project/tests/init/test_1eu_ui_frame_unlisted_areas.py` |
+| Test classes | `TestCluster01eu_FrameUnlistedAreas` (1.1030) |
+| Fixtures | `FrameCase` and `_record` from 1eb |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 6.22 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1030 | Unlisted areas follow; a typo is still refused | finalize goes on with raw areas Admin, Tools unlisted; sections Orders, Admin, Tools; a ui.page in Admin listed there; nav=Ordres and a record page in Reprots refused, naming Orders, Admin, Tools |
+
+### Batch 1ev — lex reflex check follows the project's own imports from its dashboards ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1031 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/checks.py` (`followed`, `_imported`, `_module_files`), `lex/lex_app/reflex/scaffold.py` (`check_paths`) |
+| Test file | `lex/test_project/tests/init/test_1ev_reflex_check_follows_imports.py` |
+| Test classes | `TestCluster01ev_CheckFollowsImports` (1.1031) |
+| Fixtures | a project written into a temporary folder |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 6.22 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1031 | The check follows the project's imports | paths: _dashboards, _reflex_structure.py, helpers.py, orders/__init__.py, orders/pages/__init__.py, orders/pages/tickets.py (not unused.py, not os/reflex/lex); one error in tickets.py: TicketsState.approve has no lex.ui decorator |
+
+### Batch 1ew — lex.ui pages: a closed section mounts what it holds when opened; a title from the state; actions ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1032 – 1.1033 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/kinds.py` (`section(title=, actions=)`, `Section.titled`, `_content`, `fixed`, `_render`), `lex/lex_app/reflex/ui/pages/forms.py` (a tab's section), `lex/lex_app/reflex/ui/pages/frame.py` (a navigation section) |
+| Test file | `lex/test_project/tests/init/test_1ew_ui_section_opened_title_actions.py` |
+| Test classes | `TestCluster01ew_SectionOpenedTitleActions` (1.1032–1.1033) |
+| Fixtures | none |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 6.22 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1032 | A closed section mounts its content when opened, its table at once | the chart under a cond on rfdsLexopened; the data table not; onClick sets it; an open section's chart not under the cond |
+| 1.1033 | A section's title may be a state value, and it takes actions | form result: lines_title and rfds-section-actions with the button; record title, record actions, tab actions, a text in actions refused; nav section state title refused; a number title refused |
+
+### Batch 1ex — lex.ui: a handler brings a section or a table into view -- ui.scroll_to ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1034 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/results.py` (`scroll_to`, `ScrollTo`, `split`, `to_events`), `lex/lex_app/reflex/ui/pages/kinds.py` (`section_anchor`, `table_anchor`, a titled section's id), `lex/lex_app/reflex/ui/pages/tables.py` (a rows table's id), `lex/ui.py` |
+| Test file | `lex/test_project/tests/init/test_1ex_ui_scroll_to.py` |
+| Test classes | `TestCluster01ex_ScrollTo` (1.1034) |
+| Fixtures | none |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 6.22 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1034 | A handler brings a section or a table into view | errors-found on a form's section and a record page's; the table's box id; run() results Toast then ScrollTo; to_events are scroll events with those ids; empty string, a number, an action refused |
+
+### Batch 1ey — lex.ui pages: a tab shown only while the state says so -- visible= a state value on a tab ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1035 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/kinds.py` (`hide_tabs`, `tab_visible`, `Record._sections`), `lex/lex_app/reflex/ui/pages/forms.py` (`Form._tabs`) |
+| Test file | `lex/test_project/tests/init/test_1ey_ui_tab_shown_by_state.py` |
+| Test classes | `TestCluster01ey_TabShownByState` (1.1035) |
+| Fixtures | none |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 6.22 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1035 | A tab is drawn only while its state value is true | form tabs: figures trigger and panel under cond on has_figures, summary not; compiles; record tabs the same; record without tabs refused pointing to tabs=True |
+
+### Batch 1fa — lex.ui pages: more than four tables on a record page refused in lex.ui's words, with the way out ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1037 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/kinds.py` (`Record._at_most_tables`) |
+| Test file | `lex/test_project/tests/init/test_1fa_ui_record_table_limit.py` |
+| Test classes | `TestCluster01fa_RecordTableLimit` (1.1037) |
+| Fixtures | none |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 6.22 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1037 | More than four tables is refused with the way out | four compile; five refused with and without tabs: slot sections, 5 tables in Lines (2), Invoices, Payments, Shipments, at most 4, with tabs=True too, a page of their own, ui.link to order_invoices; no 'use tab navigation' |
+
+### Batch 1ez — lex.ui forms: a field of several choices can be emptied at once -- its Clear ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1036 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/forms.py` (`Field` input for `kind="choices"`) |
+| Test file | `lex/test_project/tests/init/test_1ez_ui_choices_clear.py` |
+| Test classes | `TestCluster01ez_ChoicesClear` (1.1036) |
+| Fixtures | none |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 6.22 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1036 | Several choices can be emptied at once | Clear for regions (multi-select) and kinds (checkbox group) under a cond, none for main; the multi-select compiled; onClick sets the client state to []; .length > 0 |
+
+### Batch 1fb — ui.testing: drive a searched field, seed a private value as gone, test against lex-app's API in-process ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1038 – 1.1040 |
+| Type | U (1.1038-1.1039), E (1.1040) |
+| Files covered | `lex/lex_app/reflex/ui/testing.py` (`search`, `Harness.search`, `Harness.set_fields`, `lex_api`, `LexViews`), `lex/test_project/tests/init/_ui_calc_aids.py` (`ViewsClient` is now `testing.LexViews`) |
+| Test file | `lex/test_project/tests/init/test_1fb_ui_testing_search_gone_api.py` |
+| Test classes | `TestCluster01fb_TestingHelpers`, `TestCluster01fb_LexApiInProcess` (1.1038–1.1040) |
+| Fixtures | `E2ETestCase` with `UI_FK_MODELS` (1.1040) |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 6.22 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1038 | A test drives a searched field | matches Customer 001..009 with value and label only; an unsearched key refused |
+| 1.1039 | A private value is seeded as gone without a logged error | no WARNING log while seeding GONE; refused with the gone sentence; a seeded value read |
+| 1.1040 | self.api is answered by lex-app's views in-process | Acme Ltd, Gamma Ltd from a real list with search; calls == GET /api/model_entries/uicustomer/list |

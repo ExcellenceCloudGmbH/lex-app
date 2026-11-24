@@ -326,6 +326,21 @@ def visible_fields(model: Any) -> list[Any]:
     ]
 
 
+#: The key lex-app's API adds beside a foreign key with the related record's name (``str(record)``).
+NAME_SUFFIX = "__short_description"
+
+
+def shown_field(field: Any) -> str:
+    """The row field a column shows for ``field``: a foreign key's name beside it, else the field itself.
+
+    lex-app's API sends a foreign key as the related record's id, and beside it
+    ``<fk>__short_description``, the related record's name -- what lex-app's own grid shows.
+    """
+    if getattr(field, "many_to_one", False) or getattr(field, "one_to_one", False):
+        return f"{field.name}{NAME_SUFFIX}"
+    return field.name
+
+
 def lex_columns(model: Any, fields: Sequence[str] | None = None, **overrides: Mapping[str, Any]) -> list:
     """RFDS ``column`` specs for ``fields`` of a model (default: :func:`visible_fields`).
 
@@ -345,7 +360,7 @@ def lex_columns(model: Any, fields: Sequence[str] | None = None, **overrides: Ma
             raise ValueError(f"{model.__name__} has no field {name!r}")
         options = {"kind": column_kind(field), **dict(overrides.get(name, {}))}
         header = options.pop("header", None) or str(field.verbose_name).capitalize()
-        specs.append(column(name, header, **options))
+        specs.append(column(shown_field(field), header, **options))
     return specs
 
 
@@ -364,7 +379,7 @@ def lex_grid_columns(model: Any, fields: Sequence[str] | None = None, **override
         kind = column_kind(field)
         options = {"kind": kind if kind in grid_kinds else "text", **dict(overrides.get(name, {}))}
         header = options.pop("header", None) or str(field.verbose_name).capitalize()
-        specs.append(col(name, header, **options))
+        specs.append(col(shown_field(field), header, **options))
     return specs
 
 
@@ -413,6 +428,12 @@ def scope_params(scope: Mapping[str, Any]) -> list[tuple[str, str]]:
 # -- table and grid states ----------------------------------------------------
 
 
+def _iso_day(value: Any) -> str:
+    """``value`` as an ISO day (``YYYY-MM-DD``), or ``""`` when it is not one."""
+    text = str(value or "").strip()[:10]
+    return text if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text) else ""
+
+
 class ChosenColumns(rx.State, mixin=True):
     """The columns a user chose in RFDS's "Columns" menu (``ui.table(choose_columns=True)``).
 
@@ -456,7 +477,64 @@ class ChosenColumns(rx.State, mixin=True):
         self.column_widths = clean
 
 
-class LexTableState(DataTableMixin, ChosenColumns, mixin=True):
+class RowsNotStored(rx.State, mixin=True):
+    """A table whose rows reach the browser and are never written to the state store.
+
+    Reflex writes every state to its store -- Redis in production, a file in development -- after
+    each event. A table's page of rows, its totals and its filters' choices are the data itself
+    (names, amounts), so they are left out of what is written: the browser receives them in the
+    event's update, the server forgets them when the state is stored, and a project whose rows come
+    from a ``ui.private`` value keeps them out of every pickle. The count of rows, the page, the sort,
+    the search and the filters are kept: they say where the user is, and the rows are read again from
+    them. When the browser has to be sent the whole state again (a reconnect hydrates the page), the
+    page's opener sends each such table ``restore``, which reads its rows again.
+    """
+
+    #: Off for ``lex_table`` (a raw page has nothing to send ``restore``); every ``ui.table`` turns it on.
+    rows_not_stored: ClassVar[bool] = False
+    #: The rows were left out when the state was stored: the browser's copy is the only one.
+    _rows_dropped: bool = False
+
+    #: The fields that hold rows, and what they hold when the state is stored.
+    _NOT_STORED: ClassVar[dict] = {"page_rows": list, "totals_rows": list, "choices": dict, "_row_to": dict,
+                                   "_totals_all": list}
+
+    def __getstate__(self):
+        state = super().__getstate__()
+        if not type(self).rows_not_stored:
+            return state
+        backend = dict(state.get("_backend_vars") or {})        # Reflex keeps "_name" fields here too
+        places = (state, backend)
+        if any(where.get(name) for where in places for name in type(self)._NOT_STORED):
+            for where in places:
+                where["_rows_dropped"] = True
+        for where in places:
+            for name, empty in type(self)._NOT_STORED.items():
+                if name in where:
+                    where[name] = empty()
+            if "_totals_all_read" in where:
+                where["_totals_all_read"] = False
+        if "_backend_vars" in state:
+            state["_backend_vars"] = backend
+        return state
+
+    @rx.event
+    async def restore(self):
+        """The page opened, or reconnected: read the rows again if the stored state left them out."""
+        if not (getattr(self, "shown", True) and self._rows_dropped):
+            return
+        async for _ in self.load():
+            yield
+
+
+
+def rows_read(state: Any) -> None:
+    """``state`` has just read its rows: the browser's copy and the server's agree again."""
+    if isinstance(state, RowsNotStored):
+        state._rows_dropped = False
+
+
+class LexTableState(DataTableMixin, ChosenColumns, RowsNotStored, mixin=True):
     """RFDS's server-paged table over one model, read through the lex-app API as the user.
 
     ``resource`` names the model; ``search_field`` is the field the quick
@@ -477,6 +555,39 @@ class LexTableState(DataTableMixin, ChosenColumns, mixin=True):
     scope_fields: ClassVar[tuple[str, ...] | None] = None
     #: The order of the rows until the user sorts a column (``"-id"``: newest first); ``""``: the model's.
     default_ordering: ClassVar[str] = ""
+    #: The date filters (``ui.table(filters=["ordered"])`` on a date field): field -> the API's lookup
+    #: (``"ordered"`` for a date, ``"ordered__date"`` for a date and time).
+    date_lookups: ClassVar[dict] = {}
+    #: A date filter's range, as its picker shows it: ``{field: {"start": ..., "end": ...}}``.
+    dates: dict[str, dict[str, str]] = {}
+
+    @rx.event
+    async def set_dates(self, field: str, value: Mapping[str, Any]):
+        """A date filter's range, ``{"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}``; both empty remove it."""
+        if field not in type(self).date_lookups:
+            return
+        value = value if isinstance(value, Mapping) else {}
+        start, end = (_iso_day(value.get("start")), _iso_day(value.get("end")))
+        dates = {k: v for k, v in self.dates.items() if k != field}
+        if start or end:
+            dates[field] = {"start": start, "end": end}
+        self.dates, self.page = dates, 0
+        async for _ in self.load():
+            yield
+
+    def _date_params(self) -> list[tuple[str, str]]:
+        """The date filters' ranges as the API's ``__gte`` / ``__lte`` lookups."""
+        params = []
+        lookups = getattr(type(self), "date_lookups", {}) or {}
+        for field, chosen in dict(getattr(self, "dates", {}) or {}).items():
+            lookup = lookups.get(field)
+            if not lookup:
+                continue
+            if chosen.get("start"):
+                params.append((f"{lookup}__gte", chosen["start"]))
+            if chosen.get("end"):
+                params.append((f"{lookup}__lte", chosen["end"]))
+        return params
 
     def _store_filter(self, key: str, value: Mapping[str, Any]) -> bool:
         allowed = type(self).choice_fields
@@ -497,10 +608,10 @@ class LexTableState(DataTableMixin, ChosenColumns, mixin=True):
 
     @rx.event
     async def clear_filters(self):
-        """"Clear filters": every filter, and the dropdowns that show them."""
+        """"Clear filters": every filter, and the dropdowns and ranges that show them."""
         self.chosen = {}
-        if self.filters:
-            self.filters = {}
+        if self.filters or self.dates:
+            self.filters, self.dates = {}, {}
             await self._after_filter_change()
 
     @rx.event
@@ -521,14 +632,16 @@ class LexTableState(DataTableMixin, ChosenColumns, mixin=True):
             yield
 
     async def _fetch_page(self, *, offset, limit, sort, filters, query):
-        params = scope_params(self.scope) + filter_params(filters)
+        params = scope_params(self.scope) + filter_params(filters) + LexTableState._date_params(self)
         if query and type(self).search_field:
             params.append((f"{type(self).search_field}__icontains", query))
-        ordering = ",".join(("-" if level.get("sort") == "desc" else "") + str(level.get("col_id"))
+        # A foreign key's column shows the related record's name and sorts by the key, as lex-app's grid does.
+        ordering = ",".join(("-" if level.get("sort") == "desc" else "") + str(level.get("col_id")).removesuffix(NAME_SUFFIX)
                             for level in sort or [])
         api = await lex_api(self)
         data = await api.list(type(self).resource, page=offset // max(limit, 1) + 1, per_page=limit,
                               ordering=ordering or type(self).default_ordering or None, params=params)
+        rows_read(self)
         return [{k: wire_value(v) for k, v in row.items()} for row in data["results"]], data["count"]
 
 
@@ -645,7 +758,8 @@ def _filters_identity(filters: Mapping[str, Any] | None) -> tuple:
 def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_field: str = "",
                 page_size: int = 25, filters: Mapping[str, Any] | None = None,
                 row_fields: Sequence[str] = (), choice_fields: Sequence[str] | None = None,
-                scope_fields: Sequence[str] | None = None, ordering: str = "") -> type:
+                scope_fields: Sequence[str] | None = None, ordering: str = "", not_stored: bool = False,
+                date_lookups: Mapping[str, str] | None = None) -> type:
     """The :class:`LexTableState` for one table of ``model`` (one class per distinct table).
 
     The table opens at ``page_size`` rows, which is also among the sizes the
@@ -666,15 +780,37 @@ def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_fiel
         classvars["scope_fields"] = tuple(scope_fields)
     if ordering:
         classvars["default_ordering"] = str(ordering)
+    if not_stored:
+        classvars["rows_not_stored"] = True
+    if date_lookups:
+        classvars["date_lookups"] = dict(date_lookups)
     return _state_for(LexTableState, model, classvars, defaults={"page_size": int(page_size)},
                       identity=_filters_identity(filters))
 
 
+def _framework_fields(model: Any) -> set[str]:
+    """The fields lex-app gives every model of a kind (``created_by``, ``edited_by``...): declared by
+    lex-app's own abstract bases (``LexModel``, ``CalculationModel``), not by the model."""
+    names: set[str] = set()
+    for base in getattr(model, "__mro__", ())[1:]:
+        meta = getattr(base, "_meta", None)
+        if meta is not None and getattr(meta, "abstract", False) and base.__module__.startswith("lex.core."):
+            names.update(field.name for field in meta.local_fields)
+    return names
+
+
 def _default_search_field(model: Any) -> str:
+    """The field a search matches: the first plain text field the model itself declares.
+
+    Never a field lex-app adds to every model: on a LexModel the first text field would be the
+    audit field ``created_by`` (who created the record), and a search for a name would find nothing.
+    """
     from django.db import models
 
+    inherited = _framework_fields(model)
     for field in visible_fields(model):
-        if isinstance(field, (models.CharField, models.TextField)) and not field.choices:
+        if isinstance(field, (models.CharField, models.TextField)) and not field.choices \
+                and field.name not in inherited:
             return field.name
     return ""
 
@@ -700,7 +836,8 @@ def lex_table(
         fields: The fields to show (default: :func:`visible_fields`).
         columns: RFDS column specs, replacing ``fields`` entirely.
         caption: The table's accessible caption (default: the model's plural name).
-        search_field: The field the quick search matches (default: the first plain text field).
+        search_field: The field the quick search matches (default: the first plain text field the
+            model itself declares, never lex-app's ``created_by``).
         page_size: Rows per page (RFDS shows at most 200).
         row_fields: Fields kept in each row besides the columns' own (a key that is not shown).
         **table_props: Anything else ``rfds.data_table`` takes (``row_href``,

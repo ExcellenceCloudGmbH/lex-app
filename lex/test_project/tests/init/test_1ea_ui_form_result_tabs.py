@@ -127,8 +127,8 @@ class TestCluster01ea_FormResultTabs(SimpleTestCase):
         """
         Scenario 1.952: tabs= refused.
         Given: tabs on a form without a result, with one section, with a part after a section,
-               with two sections of one title, with a closed section, with a section shown by a
-               state value; and tabs= that is not True or False.
+               with two sections of one title, with a closed section, with the first tab shown by a
+               state value (1.1035: a later tab may be), with visible= neither; and tabs= that is not True or False.
         When:  the page is built, or the form declared.
         Then:  each is refused with the page, the slot and what to write.
         """
@@ -144,8 +144,11 @@ class TestCluster01ea_FormResultTabs(SimpleTestCase):
             "same title": (report(north(), north()), "two sections are both called `North`."),
             "closed": (report(north(), south(collapsed=True)),
                        "the section `South` is collapsed, and a tab is opened by its tab.\nLeave `collapsed=` out."),
-            "state visible": (report(north(), south(visible=RegionReportState.done_note != "")),
-                              "`visible=` on a tab takes a permission."),
+            "state visible first": (report(south(visible=RegionReportState.done_note != ""), north()),
+                                    "`visible=` on the first tab is a state value, and the page opens on the first "
+                                    "tab.\nPut a tab that is always there first."),
+            "visible not a permission": (report(north(), south(visible="editors")),
+                                         "`visible=` on a tab takes a permission or a state value."),
         }
         for name, (page, expected) in cases.items():
             with self.subTest(case=name), self.assertRaises(PageError) as raised:

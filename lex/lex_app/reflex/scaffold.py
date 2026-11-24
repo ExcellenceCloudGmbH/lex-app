@@ -230,12 +230,15 @@ def add_block(project_root: Path, block: str, model: str, *, route: str | None =
 
 
 def check_paths(project_root: Path) -> list[str]:
-    """What ``lex reflex check`` lints: the structure module and the dashboards package."""
+    """What ``lex reflex check`` lints: the structure module, the dashboards package, and every module
+    of the project they import (transitively; lex-app's, Reflex's and other packages' are not)."""
+    from lex.lex_app.reflex.ui.checks import followed
+
     paths = []
     for name in ("_reflex_structure.py", DASHBOARDS_DIR):
         if (project_root / name).exists():
             paths.append(str(project_root / name))
-    return paths
+    return followed(paths, project_root) if paths else paths
 
 
 def run_check(project_root: Path) -> int:

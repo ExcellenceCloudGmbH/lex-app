@@ -125,7 +125,7 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
                also two sections with one title, a section hidden by a state value, a blank
                title, a title that is not words, two badges, and an action called Save (one
                fact or one section given without brackets is a list of one); a limit of RFDS's
-               own (five tables on one page) names the page and quotes RFDS's sentence.
+               own (five tables on one page) names the page and the sections, in lex.ui's words (1.1037).
         """
         cases = {
             "facts": (dict(facts=[rx.text("raw")]),
@@ -150,7 +150,8 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
             dict(sections=[kinds.section("Notes", vocab.text("a"), visible=KindDesk.name != "")]),
             "Page `fund`, slot `sections[0]`: `visible=` on a section of a record page takes a permission.\n"
             "A section's heading always shows. To hide the section from some users write `visible=ui.read(Model)`; "
-            "to show different content by state, put `ui.switch(...)` inside the section.")
+            "to show different content by state, put `ui.switch(...)` inside the section, or give the record "
+            "`tabs=True`, where a state value hides a tab.")
         cases["blank title"] = (dict(title="   "), "Page `fund`: the page has no title.\n"
                                                     "Give the kind `title=\"...\"`, or a state value.")
         cases["title not words"] = (dict(title=5), "Page `fund`: the page's title is `5`.\n"
@@ -169,8 +170,8 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         crowded = [kinds.section(f"Table {n}", tables.table(Group, columns=["name"])) for n in "abcde"]
         with self.assertRaises(PageError) as limit:
             _record(sections=crowded).build(CTX)
-        self.assertTrue(str(limit.exception).startswith("Page `fund`: RFDS's page layout refuses this page: rfds."),
-                        f"a limit of RFDS's own names the page and quotes RFDS: {limit.exception}")
+        self.assertTrue(str(limit.exception).startswith("Page `fund`, slot `sections`: the page has 5 tables"),
+                        f"RFDS's limit of tables is said in lex.ui's words (1.1037): {limit.exception}")
 
     # -- 1.801 ---------------------------------------------------------
     def test_1_801_actions_are_placed_as_the_page_header_places_them(self) -> None:

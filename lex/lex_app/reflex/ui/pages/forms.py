@@ -211,7 +211,12 @@ class Field(Part):
         if kind == "choices":
             # RFDS: a checkbox group for several of a short list, its multi-select above 12 options.
             pick = rfds.checkbox_group if short else rfds.multi_select
-            return pick(options=options, value=held.value, on_change=held.set_value, **common)
+            # RFDS's multi-select has no way to empty it at once; the value is the browser's, so a
+            # "Clear" beside it empties it there, shown while something is chosen.
+            clear = rfds.button(say("Clear"), intent="tertiary", size="sm", on_click=held.set_value([]),
+                                custom_attrs={"data-lex-clear": self.key})
+            return rx.fragment(pick(options=options, value=held.value, on_change=held.set_value, **common),
+                               rx.cond(held.value.to(list).length() > 0, clear))
         if short:
             return rfds.select(options=options, value=held.value, on_change=held.set_value, **common)
         return rfds.combobox(options=options, value=held.value, on_change=held.set_value, **common)
@@ -466,9 +471,6 @@ class Form(kinds.Kind):
         from rfds.components.inputs._shared import client_state
         from rfds.components.navigation import TabSpec
 
-        from lex.lex_app.reflex.access import permission
-        from lex.lex_app.reflex.ui import guard
-
         sections = [part for part in parts if isinstance(part, kinds.Section)]
         if len(sections) < 2:
             raise ctx.fail(f"`tabs=True` shows the result's sections one at a time, and it has {len(sections)}.",
@@ -478,28 +480,28 @@ class Form(kinds.Kind):
         if after:
             raise ctx.fail(f"{called(after[0])} comes after a section, and with `tabs=True` the sections are the tabs.",
                            "Put what every tab shares first, then the sections.")
+        for index, part in enumerate(parts):
+            if isinstance(part, kinds.Section):
+                part.fixed(ctx.at(f"result[{index}]"), "a tab")
         titles = [part.title for part in sections]
         twice = sorted({title for title in titles if titles.count(title) > 1})
         if twice:
             raise ctx.fail(f"two sections are both called `{twice[0]}`.", "Give each tab's section its own title.")
         specs: list = []
+        shown: dict = {}
         for index, (part, ident) in enumerate(zip(sections, kinds._section_ids(titles)), start=first):
             at = ctx.at(f"result[{index}]")
             if part.collapsed:
                 raise at.fail(f"the section `{part.title}` is collapsed, and a tab is opened by its tab.",
                               "Leave `collapsed=` out.")
-            needs = None
-            if isinstance(part.visible, guard.Requirement):
-                needs = permission(part.visible.target, part.visible.scope)     # RFDS's tab permission
-            elif not (part.visible is None or part.visible is guard.signed_in):
-                raise at.fail("`visible=` on a tab takes a permission.",
-                              "A tab always shows. To hide it from some users write `visible=ui.read(Model)`; to "
-                              "show different content by state, put `ui.switch(...)` inside the section.")
+            needs, by_state = kinds.tab_visible(at, part, index == first)
+            if by_state is not None:
+                shown[ident] = by_state
             specs.append(TabSpec(value=ident, label_id=part.title, label_default=part.title,
                                  content=rx.el.div(part.body(at), id=ident), permission=needs))
         current = client_state("lexTab", specs[0].value)
-        tabs = kinds._rfds(ctx, lambda: rfds.tabs(*specs, value=current.value, on_change=current.set,
-                                                  label=say("Result")))
+        tabs = kinds.hide_tabs(kinds._rfds(ctx, lambda: rfds.tabs(*specs, value=current.value, on_change=current.set,
+                                                                  label=say("Result"))), shown)
         return [*kinds._stacked(ctx, parts[:first]), tabs]
 
     def _page(self, ctx: Build) -> rx.Component:

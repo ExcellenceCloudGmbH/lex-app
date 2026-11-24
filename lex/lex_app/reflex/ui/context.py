@@ -268,6 +268,12 @@ class Rows(list):
     count: int = 0
 
 
+#: The most rows ``self.api.all()`` reads: a ``@ui.rows`` handler holds them all in memory.
+ALL_LIMIT = 10_000
+#: How many rows ``self.api.all()`` asks lex-app's API for at once.
+ALL_PAGE = 1000
+
+
 class Api:
     """lex-app's API as the signed-in user, for a handler body (synchronous)."""
 
@@ -286,19 +292,64 @@ class Api:
     def list(self, model: Any, *, filters: Mapping[str, Any] | None = None, search: str | None = None,
              ordering: str | None = None, page: int = 1, per_page: int = 25,
              fields: Sequence[str] | None = None) -> Rows:
-        """One page of a model's records, as plain rows with ``.count``."""
+        """One page of a model's records, as plain rows with ``.count``.
+
+        ``search=`` matches the first plain text field the model itself declares (never the
+        ``created_by`` audit field every LexModel inherits); ``filters={"<field>__icontains": text}``
+        searches another field.
+        """
         from lex.lex_app.reflex.data import _default_search_field, scope_params, wire_value
 
         params = scope_params(filters or {})
         if search:
             field = _default_search_field(model) if not isinstance(model, str) else ""
             if not field:
-                raise ValueError(f"{model!r} has no text field to search; pass filters={{'<field>__icontains': ...}}")
+                name = getattr(model, "__name__", model)
+                raise ValueError(f"{name} declares no text field to search (lex-app's own created_by and edited_by "
+                                 f"are not searched); pass filters={{'<field>__icontains': text}} instead of search=")
             params.append((f"{field}__icontains", str(search)))
         data = self._call("list", model, page=page, per_page=per_page, ordering=ordering, params=params)
-        rows = Rows({name: wire_value(value) for name, value in row.items() if fields is None or name in fields}
+        # A foreign key asked for keeps its related record's name beside it (`<fk>__short_description`).
+        wanted = None if fields is None else {*fields, *(f"{name}__short_description" for name in fields)}
+        rows = Rows({name: wire_value(value) for name, value in row.items() if wanted is None or name in wanted}
                     for row in data["results"])
         rows.count = int(data["count"])
+        return rows
+
+    def all(self, model: Any, *, filters: Mapping[str, Any] | None = None, search: str | None = None,
+            ordering: str | None = None, fields: Sequence[str] | None = None) -> Rows:
+        """Every record of a model the user may read, as plain rows: for a ``@ui.rows`` handler.
+
+        Reads page after page in a stable order (``ordering``, then the key), so no row is read
+        twice or missed. More than :data:`ALL_LIMIT` rows is refused in words, asking the user to
+        narrow them: ``filters=`` is how a handler reads fewer. A table over the handler then
+        searches, filters by date, exports and totals every row::
+
+            @ui.rows
+            def orders(self):
+                return self.api.all(Order, filters={"region": self.params.key})
+        """
+        from lex.lex_app.reflex.ui import results
+
+        key = "id" if isinstance(model, str) else model._meta.pk.name
+        order = ordering or ""
+        if order.lstrip("-") not in (key, "pk"):
+            order = f"{order},{key}" if order else key
+        rows = Rows()
+        page = 1
+        while True:
+            got = self.list(model, filters=filters, search=search, ordering=order, page=page, per_page=ALL_PAGE,
+                            fields=fields)
+            if page == 1 and got.count > ALL_LIMIT:
+                name = model if isinstance(model, str) else str(model._meta.verbose_name_plural)
+                raise results.Refuse(results.message(
+                    "lex.ui.api.too_many", "There are {count} {what} here, more than can be shown at once "
+                    "({limit}). Narrow them down first.", count=f"{got.count:,}", what=name, limit=f"{ALL_LIMIT:,}"))
+            rows.extend(got)
+            if not got or len(rows) >= got.count or len(got) < ALL_PAGE:
+                break
+            page += 1
+        rows.count = len(rows)
         return rows
 
     def get(self, model: Any, pk: Any) -> dict:

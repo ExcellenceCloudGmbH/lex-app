@@ -12,7 +12,7 @@ from lex.lex_app.reflex.ui.private import GONE
 
 #: What a ``ui.private`` field holds once its value is gone: seed it with ``fields={"_name": GONE}``
 #: to test what a handler does then, and find it in ``result.fields["_name"]``.
-__all__ = ["GONE", "Harness", "Result", "rows", "run"]
+__all__ = ["GONE", "Harness", "Result", "lex_api", "rows", "run", "search"]
 
 
 class _NoApi:
@@ -23,6 +23,66 @@ class _NoApi:
             f"the handler used self.api.{name}(), and ui.testing.run() was given no api=. "
             "Pass a stand-in object with the methods the handler calls."
         )
+
+
+class LexViews:
+    """``self.api`` answered in-process by lex-app's own views: see :func:`lex_api`."""
+
+    def __init__(self, client: Any):
+        self.client = client
+        self.calls: list[tuple[str, str]] = []
+
+    async def request(self, method: str, url: str, *, params: Any = None, json: Any = None,  # noqa: A002
+                      headers: Any = None) -> Any:
+        """What lex-app's views answer, in the shape lex.ui's API client reads (httpx's)."""
+        import asyncio
+        import json as json_mod
+        from urllib.parse import urlencode, urlsplit
+
+        parts = urlsplit(url)
+        query = urlencode(list(params or []))
+        path = parts.path + (f"?{query}" if query else "")
+        self.calls.append((method, parts.path))
+        body = "" if json is None else json_mod.dumps(json)
+
+        def call() -> Any:
+            from django.db import close_old_connections
+
+            try:
+                return self.client.generic(method, path, data=body, content_type="application/json")
+            finally:
+                close_old_connections()
+
+        response = await asyncio.to_thread(call)
+        if getattr(response, "streaming", False):          # a file: read whole, as httpx gives it
+            return _Read(response.status_code, dict(response.headers), b"".join(response.streaming_content))
+        return response
+
+
+class _Read:
+    """A streamed answer read whole, as httpx gives it."""
+
+    def __init__(self, status_code: int, headers: dict, content: bytes):
+        self.status_code, self.headers, self.content = status_code, headers, content
+        self.text = content.decode("utf-8", "replace")
+
+    def json(self) -> Any:
+        import json
+
+        return json.loads(self.content)
+
+
+def lex_api(client: Any) -> LexViews:
+    """``self.api`` as lex-app's real API, answered in this process by its views: no server, no HTTP.
+
+    ``client`` is Django's (or Django REST framework's) test client, signed in as the user the
+    handler acts for: ``ui.testing.run(OrdersState, "approve", api=ui.testing.lex_api(self.client),
+    key=7)``. Every call goes through lex-app's own views -- the model's permissions, validation,
+    lifecycle hooks, audit entries and calculations -- so a test checks what the page will really do.
+    The handler's ``user=`` names the user in ``self.user``; who the API acts as is the client's user.
+    ``.calls`` lists the requests made (method, path).
+    """
+    return LexViews(client)
 
 
 def _grants(grants: Any) -> list[dict]:
@@ -143,9 +203,11 @@ class Harness:
             async def permissions() -> list:
                 return list(grants)
 
+            views = api if isinstance(api, LexViews) else None
+            stand_in = None if views is not None else api if api is not None else _NoApi()
             return context.Session(user=context.User(id=user, name=user, username=user, email=f"{user}@example.test"),
                                    params=context.Params(params), token=token, permissions=permissions,
-                                   api=api if api is not None else _NoApi(), tab=self.token)
+                                   api=stand_in, api_client=views, tab=self.token)
 
         self._previous = (context.set_resolver(resolve), results.RECORDER, handlers.OUTCOMES,
                           context.set_user_id_of(lambda state: user))
@@ -252,9 +314,36 @@ class Harness:
         return future
 
     async def set_fields(self, state_cls: Any, **values: Any) -> None:
+        """Seed fields of ``state_cls``; a ``ui.private`` field takes a value, or :data:`GONE`."""
+        from lex.lex_app.reflex.ui import private, workcopy
+
         state = await self._state(state_cls)
+        kept = private.fields(type(workcopy.raw(state)))
         for name, value in values.items():
-            setattr(state, name, value)
+            if name in kept:                    # the field's own way in: never Reflex's typed setter
+                private.put(state, kept[name], value)
+            else:
+                setattr(state, name, value)
+
+    async def search(self, handler: Any, key: str, text: str) -> list[dict]:
+        """The user types ``text`` into the searched field ``key`` of the form ``handler`` receives.
+
+        Returns the matches the browser is offered (``{"value", "label"}``), after the field's
+        ``@ui.rows`` handler ran as the user. The form must be declared (its page built), as when
+        lex-app starts.
+        """
+        from lex.lex_app.reflex.ui import forms
+        from lex.lex_app.reflex.ui.state import State
+
+        field = f"{forms.ident(handler)}|{key}"
+        if field not in forms._SEARCHES:
+            raise ValueError(f"{forms.ident(handler)} has no searched field {key!r}: a searched field is "
+                             f"ui.field({key!r}, options=State.rows_handler) in the form whose submit= is that "
+                             "handler, and the form's page is built first")
+        if not self._opened:
+            await self.open_tab()
+        await (await self.send(State, "ui_search", field=field, text=text)).wait_all()
+        return [dict(one) for one in dict((await self._state(State)).ui_matches).get(field, [])]
 
 
 @dataclasses.dataclass
@@ -326,6 +415,24 @@ def run(state_cls: Any, handler: str, *, user: str = "tester", grants: Any = (),
             return Result(fields=await harness.fields(state_cls), updates=list(harness.updates),
                           update_times=list(harness.update_times), results=list(harness.results),
                           outcomes=list(harness.outcomes))
+
+    return asyncio.run(scenario())
+
+
+def search(handler: Any, key: str, text: str, *, user: str = "tester", grants: Any = (),
+           params: dict | None = None, api: Any = None) -> list[dict]:
+    """The matches a searched field offers when the user types ``text``: ``[{"value", "label"}]``.
+
+    ``ui.testing.search(OrdersState.create, "customer", "acm")`` -- the form whose ``submit=`` is
+    ``OrdersState.create`` has ``ui.field("customer", options=OrdersState.customers)``. Its rows
+    handler runs as ``user`` with ``grants`` and the page's ``params``, as when the user types. The
+    form's page must be built first (as when lex-app starts). For several steps in one test, use
+    ``Harness.search``.
+    """
+
+    async def scenario() -> list[dict]:
+        async with Harness(user=user, grants=grants, params=params, api=api) as harness:
+            return await harness.search(handler, key, text)
 
     return asyncio.run(scenario())
 

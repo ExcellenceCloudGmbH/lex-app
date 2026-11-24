@@ -149,7 +149,8 @@ def list_in_nav(entry: NavEntry) -> None:
 
 
 def _areas() -> list[str]:
-    """The areas in the order the navigation lists them: ``ui.frame(nav=)``'s, else first declared first."""
+    """The areas in the order the navigation lists them: ``ui.frame(nav=)``'s first, then every other area
+    (a raw page's) in the order its first page was declared."""
     from lex.lex_app.reflex.ui.pages import frame
 
     order = list(frame.current().nav)
@@ -157,25 +158,38 @@ def _areas() -> list[str]:
 
 
 def check_nav(names: dict[str, str] | None = None) -> None:
-    """Refuse a page listed in an area ``ui.frame(nav=)`` does not list (a typo would make a new area).
+    """Refuse a lex.ui page whose area is a typo: listed nowhere, neither by ``ui.frame(nav=)`` nor by a raw page.
 
-    ``names`` gives the page function's name for a route, for the message.
+    ``names`` gives the page function's name for the route of each lex.ui page. A raw page
+    (``ui.reflex_page``, ``lex_page``) is never refused: its area follows the listed ones, in the order
+    of its first page, so a project need not order the areas of pages it has not moved yet.
     """
     for entry in _NAV:
-        check_area(entry.route, entry.section, (names or {}).get(entry.route))
+        if names is not None and entry.route in names:
+            check_area(entry.route, entry.section, names.get(entry.route))
+
+
+def _raw_areas() -> list[str]:
+    """The areas of the raw pages listed in the navigation (pages not declared with ``@ui.page``)."""
+    from lex.lex_app.reflex.ui.pages import declare
+
+    return list(dict.fromkeys(entry.section for entry in _NAV if entry.route not in declare._DECLARED))
 
 
 def check_area(route: str, area: str, name: str | None = None) -> None:
-    """Refuse the area ``area`` of the page at ``route`` when ``ui.frame(nav=)`` does not list it."""
+    """Refuse the area ``area`` of the lex.ui page at ``route`` when neither ``ui.frame(nav=)`` nor a raw page has it."""
     from lex.lex_app.reflex.ui.pages import frame
     from lex.lex_app.reflex.ui.pages.parts import PageError
 
     order = frame.current().nav
-    if order and area not in order:
+    raw = _raw_areas()
+    if order and area not in order and area not in raw:
         page = f"Page `{name}` ({route})" if name else f"The page at {route}"
         listed = ", ".join(repr(one) for one in order)
-        raise PageError(f"{page} is in nav={area!r}, which ui.frame(nav=[{listed}]) does not list.\n"
-                        f"Write one of {listed}, or add {area!r} to ui.frame(nav=).")
+        others = [one for one in raw if one not in order]
+        also = f" or an area of a raw page ({', '.join(repr(one) for one in others)})" if others else ""
+        raise PageError(f"{page} is in nav={area!r}, which ui.frame(nav=[{listed}]) does not list, nor does any "
+                        f"raw page.\nWrite one of {listed}{also}, or add {area!r} to ui.frame(nav=).")
 
 
 def _slug(text: str) -> str:

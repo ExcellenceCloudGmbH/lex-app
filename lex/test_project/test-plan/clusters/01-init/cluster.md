@@ -2043,3 +2043,153 @@ does not remove user launch configurations.
 | 1.1021 | The mark's address is checked | a relative address, http://, a label without a logo, a label that is not text refused with what to write |
 
 **Scenario range:** 1.1020 – 1.1021. **Test file:** `lex/test_project/tests/init/test_1ep_ui_frame_logo.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ep](batches.md).
+
+### 1eq. lex.ui: a search through self.api matches the model's own text, never created_by ✅
+
+**What it tests:** `self.api.list(Model, search=)` searches the first plain text field the model itself declares, never the `created_by` audit field every LexModel inherits; lex_table's default and a model table's search column follow; a model without its own text field is refused with what to write.
+
+**Why a regression matters:** Every search on a LexModel silently found nothing.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1023 | A search matches the model's own text, not created_by | customer/region/name icontains for a LexModel, a calculation, a LexModel and a Django model; lex_table's default; a model table showing created_by first searches customer; no own text field refused with filters= advice |
+
+**Scenario range:** 1.1023. **Test file:** `lex/test_project/tests/init/test_1eq_ui_api_search_field.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1eq](batches.md).
+
+### 1er. lex.ui tables: the rows a table shows reach the browser and are never stored with the state ✅
+
+**What it tests:** a table over a `ui.private` value shows its page; every state of the tab, serialised as Reflex stores it and pickled, holds no row value, total or filter choice, while the browser's updates carry them; a stored table is marked and reads its rows again on `restore` (sent by the page's opener); every `ui.table` (model tables too) is not stored, `lex_table` is; a row's own link still opens after its address was left out.
+
+**Why a regression matters:** Persons' names and amounts in Redis and in state pickles, defeating `ui.private`; or a table that shows nothing after its state was stored.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1024 | A table's rows reach the browser and no stored state | the browser's updates carry name, pay, team; no BaseStateToken.serialize or pickle of any state of the tab holds them or the total; stored: no rows, count kept, _rows_dropped; restore reads nothing when not dropped, reads again when dropped |
+| 1.1025 | Every ui.table is not stored; a row link survives the store | a ui.table model table is rows_not_stored and told to restore by its page; lex_table's state is not; a row's own address left out of the pickle, the click still redirects to it |
+
+**Scenario range:** 1.1024 – 1.1025. **Test file:** `lex/test_project/tests/init/test_1er_ui_table_rows_not_stored.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1er](batches.md).
+
+### 1es. lex.ui: a foreign key shows the related record's name, in a model table, a run's history and its facts ✅
+
+**What it tests:** a model table's foreign-key column shows `<fk>__short_description` from lex-app's real list view, keeps the id in the row, sorts by the key; lex_columns and the grid's columns too; `self.api.list(fields=[fk])` keeps the name; a calculation's past runs and its run's facts read the name.
+
+**Why a regression matters:** A bare id where a person reads a customer's name, or a sort the API refuses.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1026 | A model table's foreign key shows the related record's name | column field customer__short_description headed Customer; rows carry names and ids through the real list view; desc sort sends -customer and returns beta first; lex_columns/lex_grid_columns; Api.list(fields=[customer]) keeps the name |
+| 1.1027 | A calculation's history and run show the customer's name | the past runs' column is customer__short_description; the run's input fact and result fact read run[customer__short_description] |
+
+**Scenario range:** 1.1026 – 1.1027. **Test file:** `lex/test_project/tests/init/test_1es_ui_foreign_key_names.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1es](batches.md).
+
+### 1et. lex.ui: every record through self.api.all, and a model table filtered by a range of days ✅
+
+**What it tests:** `self.api.all` reads every row once across pages of 1,000 ordered by the asked order then the key, refuses past the ceiling after one page, and feeds a rows table with export and totals; a model table's refusal points to it; a model table's date filter sends the API's `__date__gte`/`__lte` and clears.
+
+**Why a regression matters:** Rows read twice or missed, an unbounded read into memory, or a date filter the API never receives.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1028 | self.api.all reads every record in a stable order up to a ceiling | 2,345 rows once and in order; pages 1-3 of 1,000 with ordering amount,id; count; ALL_LIMIT refusal after the first page with the count; a rows table over it builds with export and totals; a model table's totals refusal names self.api.all |
+| 1.1029 | A model table filters a date field by a range of days | date_lookups event_at -> event_at__date; the picker in the toolbar; event_at__date__gte/lte sent; a field that is no date filter ignored; a malformed day dropped; clear_filters removes the range |
+
+**Scenario range:** 1.1028 – 1.1029. **Test file:** `lex/test_project/tests/init/test_1et_ui_api_all_and_model_dates.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1et](batches.md).
+
+### 1eu. lex.ui frame: areas nav= does not list follow the listed ones; a typo is still refused ✅
+
+**What it tests:** with `ui.frame(nav=["Orders"])`, raw pages in Admin and Tools start the app and follow Orders in declaration order; a `@ui.page` joins a raw area; a `@ui.page` area neither listed nor a raw page's (with or without route arguments) is refused naming the choices.
+
+**Why a regression matters:** An app that does not start because an old page's area is unlisted, or a typo that silently makes a new area.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1030 | Unlisted areas follow; a typo is still refused | finalize goes on with raw areas Admin, Tools unlisted; sections Orders, Admin, Tools; a ui.page in Admin listed there; nav=Ordres and a record page in Reprots refused, naming Orders, Admin, Tools |
+
+**Scenario range:** 1.1030. **Test file:** `lex/test_project/tests/init/test_1eu_ui_frame_unlisted_areas.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1eu](batches.md).
+
+### 1ev. lex reflex check follows the project's own imports from its dashboards ✅
+
+**What it tests:** `check_paths` adds every project module the structure module and the dashboards import, transitively (absolute, relative, a package's `__init__`), and nothing outside the project or not imported; the imported module's undecorated public method is reported.
+
+**Why a regression matters:** A handler the browser can call without lex.ui's guard, in a module the check never read.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1031 | The check follows the project's imports | paths: _dashboards, _reflex_structure.py, helpers.py, orders/__init__.py, orders/pages/__init__.py, orders/pages/tickets.py (not unused.py, not os/reflex/lex); one error in tickets.py: TicketsState.approve has no lex.ui decorator |
+
+**Scenario range:** 1.1031. **Test file:** `lex/test_project/tests/init/test_1ev_reflex_check_follows_imports.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ev](batches.md).
+
+### 1ew. lex.ui pages: a closed section mounts what it holds when opened; a title from the state; actions ✅
+
+**What it tests:** a closed section's chart sits under a condition on its client-side opened state (set by a click), its table does not; an open section mounts at once; a state title and actions in a form's result compile into RFDS's section; a record page, a tab and the navigation refuse them with what to write.
+
+**Why a regression matters:** A chart drawn at zero size, a closed section's count lost, or a title or an action silently dropped.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1032 | A closed section mounts its content when opened, its table at once | the chart under a cond on rfdsLexopened; the data table not; onClick sets it; an open section's chart not under the cond |
+| 1.1033 | A section's title may be a state value, and it takes actions | form result: lines_title and rfds-section-actions with the button; record title, record actions, tab actions, a text in actions refused; nav section state title refused; a number title refused |
+
+**Scenario range:** 1.1032 – 1.1033. **Test file:** `lex/test_project/tests/init/test_1ew_ui_section_opened_title_actions.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ew](batches.md).
+
+### 1ex. lex.ui: a handler brings a section or a table into view -- ui.scroll_to ✅
+
+**What it tests:** the ids `ui.scroll_to(title)` and `ui.scroll_to(State.rows)` name are the ids the form's section, a record page's section and the rows table are built with; a handler's results keep their order; the events are Reflex's scroll_to of those ids; anything else is refused with what to write.
+
+**Why a regression matters:** A scroll that goes nowhere because the result's id and the part's id differ.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1034 | A handler brings a section or a table into view | errors-found on a form's section and a record page's; the table's box id; run() results Toast then ScrollTo; to_events are scroll events with those ids; empty string, a number, an action refused |
+
+**Scenario range:** 1.1034. **Test file:** `lex/test_project/tests/init/test_1ex_ui_scroll_to.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ex](batches.md).
+
+### 1ey. lex.ui pages: a tab shown only while the state says so -- visible= a state value on a tab ✅
+
+**What it tests:** a later tab with `visible=` a state value has its trigger and panel under a condition on it, on a form's result and on a record page with tabs; the first tab is never hidden; a record page without tabs still refuses, pointing to tabs=True.
+
+**Why a regression matters:** A tab shown with nothing to say, or a hidden tab the user can still open.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1035 | A tab is drawn only while its state value is true | form tabs: figures trigger and panel under cond on has_figures, summary not; compiles; record tabs the same; record without tabs refused pointing to tabs=True |
+
+**Scenario range:** 1.1035. **Test file:** `lex/test_project/tests/init/test_1ey_ui_tab_shown_by_state.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ey](batches.md).
+
+### 1fa. lex.ui pages: more than four tables on a record page refused in lex.ui's words, with the way out ✅
+
+**What it tests:** four tables on a record page compile; five, with or without tabs, are refused before RFDS is asked, naming the count, the sections, that tabs do not lift it, and a page of its own led to by a link; RFDS's pointer to tab navigation is not repeated.
+
+**Why a regression matters:** A page past RFDS's rule accepted, or a refusal that sends the author to tabs, which do not help.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1037 | More than four tables is refused with the way out | four compile; five refused with and without tabs: slot sections, 5 tables in Lines (2), Invoices, Payments, Shipments, at most 4, with tabs=True too, a page of their own, ui.link to order_invoices; no 'use tab navigation' |
+
+**Scenario range:** 1.1037. **Test file:** `lex/test_project/tests/init/test_1fa_ui_record_table_limit.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1fa](batches.md).
+
+### 1ez. lex.ui forms: a field of several choices can be emptied at once -- its Clear ✅
+
+**What it tests:** each several-choice field (multi-select past twelve options, checkbox group below) has a Clear under a condition on something being chosen, which sets the field's browser value to the empty list; a single choice has none.
+
+**Why a regression matters:** A long choice that can only be undone one option at a time, or a Clear that leaves values behind.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1036 | Several choices can be emptied at once | Clear for regions (multi-select) and kinds (checkbox group) under a cond, none for main; the multi-select compiled; onClick sets the client state to []; .length > 0 |
+
+**Scenario range:** 1.1036. **Test file:** `lex/test_project/tests/init/test_1ez_ui_choices_clear.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ez](batches.md).
+
+### 1fb. ui.testing: drive a searched field, seed a private value as gone, test against lex-app's API in-process ✅
+
+**What it tests:** `ui.testing.search` returns the matches a searched field offers, as the browser gets them, and refuses a field that is not searched; seeding `ui.testing.GONE` logs nothing and the handler is refused in plain words, a seeded value is read; `ui.testing.lex_api(client)` answers `self.api` with lex-app's real list view in-process.
+
+**Why a regression matters:** Project tests that reach into lex.ui's private modules, noisy logs, or a stand-in API that tests what lex-app does not do.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1038 | A test drives a searched field | matches Customer 001..009 with value and label only; an unsearched key refused |
+| 1.1039 | A private value is seeded as gone without a logged error | no WARNING log while seeding GONE; refused with the gone sentence; a seeded value read |
+| 1.1040 | self.api is answered by lex-app's views in-process | Acme Ltd, Gamma Ltd from a real list with search; calls == GET /api/model_entries/uicustomer/list |
+
+**Scenario range:** 1.1038 – 1.1040. **Test file:** `lex/test_project/tests/init/test_1fb_ui_testing_search_gone_api.py`. **Type:** U (1.1038-1.1039), E (1.1040). **Status:** ✅ Complete (2026-11-24). Batch: [1fb](batches.md).

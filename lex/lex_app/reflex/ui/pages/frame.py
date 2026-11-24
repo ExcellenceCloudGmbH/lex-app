@@ -79,8 +79,10 @@ def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign
     """Configure lex-app's frame for this project: call it once, in the dashboard module.
 
     ``nav`` is the navigation's areas in the order they are listed: the same words a page names
-    its area with (``@ui.page(..., nav="Orders")``). A page whose area is not in the list stops the
-    start. Without it, areas come in the order their first page is declared::
+    its area with (``@ui.page(..., nav="Orders")``). Areas it does not list -- those of raw pages
+    not moved yet -- follow, in the order their first page is declared; a ``@ui.page`` whose area
+    neither the list nor a raw page has is a typo and stops the start. Without the list, areas come
+    in the order their first page is declared::
 
         ui.frame(nav=["Orders", "Reports", "Tools"])
 
@@ -233,7 +235,11 @@ def _section(section: Any) -> NavLinks:
 
     title = section.title
     content = tuple(section.content)
+    if not isinstance(title, str):
+        raise TypeError("ui.frame(nav=): a section of the navigation is named like an area, with fixed words: "
+                        "ui.section(\"Help\", ...); a count goes on a link, ui.link(..., badge=...).")
     extra = [name for name in ("load", "empty", "visible") if getattr(section, name) is not None]
+    extra += ["actions"] if section.actions else []
     if extra or section.collapsed:
         raise TypeError(f"ui.frame(nav=): the section {title!r} is a section of the navigation, which takes its "
                         f"title and its entries only; leave out {', '.join(extra or ['collapsed'])}=.")
