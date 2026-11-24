@@ -1,6 +1,7 @@
 """A content page as components, and its "On this page" list."""
 
 import reflex as rx
+import rfds
 
 from docs_site.content import Page
 from docs_site.render.blocks import LexDocTransformer
@@ -19,11 +20,13 @@ def render_page(page: Page) -> rx.Component:
 
 
 def toc(page: Page) -> rx.Component:
+    """RFDS's anchor nav (scroll-spy marks the heading in view) under a visible "On this page"
+    title; ``###`` entries carry a class the frame indents them by."""
     if not page.headings:
         return rx.fragment()
-    return rx.vstack(
-        rx.text("On this page", weight="bold", size="2"),
-        *[rx.link(text, href=f"#{anchor_id}", size="2", padding_left="12px" if level == 3 else "0")
-          for level, text, anchor_id in page.headings],
-        spacing="1", align="start", class_name="docs-toc",
+    entries = [(anchor_id, rx.el.span(text, class_name=f"docs-toc-h{level}"))
+               for level, text, anchor_id in page.headings]
+    return rx.fragment(
+        rx.el.p("On this page", class_name="docs-toc-title", custom_attrs={"aria-hidden": "true"}),
+        rfds.anchor_nav(*entries, label="On this page", sticky=False, id="docs-toc-nav"),
     )

@@ -10,7 +10,9 @@ from reflex_docgen.markdown.transformer import DocumentTransformer
 
 from docs_site.content import Page, plain, unique_anchor
 
-_HEADING_SIZE = {1: "7", 2: "6", 3: "5", 4: "4"}
+_HEADING_SIZE = {1: "7", 2: "6", 3: "4", 4: "3"}
+#: room above a heading, on top of the 16px between blocks: a heading starts a new part of the page
+_HEADING_SPACE = {1: "24px", 2: "24px", 3: "12px", 4: "4px"}
 _TONE = {"info": "info", "success": "success", "warning": "warning", "danger": "danger", "error": "danger"}
 
 
@@ -39,10 +41,12 @@ class LexDocTransformer(DocumentTransformer[rx.Component]):
     def heading(self, block: HeadingBlock) -> rx.Component:
         text = plain(block.children)
         return rx.heading(*self.transform_spans(block.children), as_=f"h{block.level}",
-                          size=_HEADING_SIZE.get(block.level, "3"), id=unique_anchor(text, self._anchors))
+                          size=_HEADING_SIZE.get(block.level, "3"), id=unique_anchor(text, self._anchors),
+                          margin_top=_HEADING_SPACE.get(block.level, "0"), letter_spacing="-0.01em",
+                          scroll_margin_top="72px")
 
     def text_block(self, block: TextBlock) -> rx.Component:
-        return rx.text(*self.transform_spans(block.children), as_="p")
+        return rx.text(*self.transform_spans(block.children), as_="p", size="3", line_height="1.7")
 
     def list_block(self, block: ListBlock) -> rx.Component:
         items = [self.transform_list_item(item) for item in block.items]

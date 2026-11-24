@@ -64,7 +64,7 @@ def demo_card(code: str | None, component: rx.Component) -> rx.Component:
 
     shown = [rx.hstack(reset.button(), rx.spacer(),
                        rx.text("Viewing as", size="1", color_scheme="gray"), switch(),
-                       align="center", width="100%"),
+                       align="center", width="100%", flex_wrap="wrap", row_gap="8px"),
              rx.box(component, class_name="docs-demo-frame", width="100%",
                     border="1px solid var(--gray-a6)", border_radius="var(--radius-3)",
                     padding="16px", background="var(--gray-a2)")]
