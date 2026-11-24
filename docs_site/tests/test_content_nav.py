@@ -22,3 +22,8 @@ def test_neighbours_follow_reading_order():
     assert nav.neighbours(order[0])[0] is None
     assert nav.neighbours(order[1]) == (order[0], order[2])
     assert nav.neighbours(order[-1])[1] is None
+
+
+def test_every_page_loads_with_a_title():
+    for slug in content.all_slugs():
+        assert content.load(slug).title, slug

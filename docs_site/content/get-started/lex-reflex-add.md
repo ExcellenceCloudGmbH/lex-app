@@ -1,6 +1,6 @@
 ---
-title: lex reflex add
-description: Write a dashboard page bound to one of your models.
+title: "lex reflex add"
+description: "Write a dashboard page bound to one of your models."
 ---
 
 This page is being written. Until then, the code is the reference:

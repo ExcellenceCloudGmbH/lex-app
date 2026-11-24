@@ -1,6 +1,6 @@
 ---
-title: @ui.page
-description: Declare a page at a route.
+title: "@ui.page"
+description: "Declare a page at a route."
 ---
 
 This page is being written. Until then, the code is the reference:

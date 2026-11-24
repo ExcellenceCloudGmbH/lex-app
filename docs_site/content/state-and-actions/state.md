@@ -1,6 +1,6 @@
 ---
-title: ui.State
-description: The state a page's handlers read and change.
+title: "ui.State"
+description: "The state a page's handlers read and change."
 ---
 
 This page is being written. Until then, the code is the reference:

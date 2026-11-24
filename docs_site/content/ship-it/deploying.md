@@ -1,6 +1,6 @@
 ---
-title: Deploying
-description: The configuration a dashboard project deploys with.
+title: "Deploying"
+description: "The configuration a dashboard project deploys with."
 ---
 
 This page is being written. Until then, the code is the reference:

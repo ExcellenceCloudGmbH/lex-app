@@ -1,6 +1,6 @@
 ---
-title: lex-app's look
-description: How the dashboards take lex-app's design.
+title: "lex-app's look"
+description: "How the dashboards take lex-app's design."
 ---
 
 This page is being written. Until then, the code is the reference:
