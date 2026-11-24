@@ -183,6 +183,8 @@ class State(rx.State):
     _ui_load_runs: dict[str, str] = {}
     #: Searched field id -> every value offered to this tab (as text) -> the row's id: what a form accepts.
     _ui_offered: dict[str, dict] = {}
+    #: The signed-in user the offers and the matches were for: another user of the tab starts without them.
+    _ui_offered_to: str = ""
     #: Searched field id -> [the number of its latest search, what was typed]: an older search's
     #: matches, arriving later, are dropped.
     _ui_searching: dict[str, list] = {}
@@ -225,6 +227,7 @@ class State(rx.State):
         if again:
             return self._ui_start(page, again=True)
         self.ui_visit += 1
+        forms.forget_offers(self, visit=True)       # the matches shown leave; another user's offers too
         private.leave(str(self.router.session.client_token or ""))   # private values not kept across visits
         kept = forms.kept()
         # A form starts over on a new visit: its field messages, its step, its result and its refusal leave.

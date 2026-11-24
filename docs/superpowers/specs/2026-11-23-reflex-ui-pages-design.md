@@ -623,6 +623,13 @@ Built on 2026-11-24 (batches 1ds-1du), on top of 6.14:
 - **Only a page of matches reaches the browser** (`forms.MATCHES`, 50), each `{value, label}`: none of
   a row's other fields. The first page is asked for when the field appears (`on_mount`), so the list is
   ready when it opens; RFDS debounces typing (250 ms).
+- **Offers belong to the user they were made to** (review, 2026-11-24). `_ui_offered` and
+  `ui_matches` used to grow for the life of the tab. They are now dropped when another user signs
+  in on the tab (checked when a search is asked, a form is sent and a page opens -- a value offered
+  to the previous user is refused at the field), and a new visit drops the matches the browser was
+  given (each searched field asks again when it appears). The offers themselves stay across the
+  same user's visits, so a kept form still accepts a value chosen before the user left (6.18),
+  bounded at 1,000 per field as before.
 - **A choice's value is the option's own value** (review, 2026-11-24). The first build gave a
   searched choice's `int` id as an `int` and anything else as text, and a fixed choice always as
   text (fixed options had to be texts). Now every kind of option reaches the handler as its own

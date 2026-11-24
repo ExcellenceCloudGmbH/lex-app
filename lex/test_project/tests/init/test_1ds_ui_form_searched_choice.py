@@ -11,7 +11,7 @@ is refused at the field. A regression is a list of every customer in the page, a
 fields (an e-mail address) in the browser, a forged id reaching the handler's body, or an empty
 box until the user types.
 
-Cluster 1ds -- scenarios 1.900-1.903, 1.912, 1.917. Type: U.
+Cluster 1ds -- scenarios 1.900-1.903, 1.912, 1.917, 1.918. Type: U.
 Covers: lex/lex_app/reflex/ui/forms.py (Expect.search, check, clean, search, MATCHES),
 lex/lex_app/reflex/ui/pages/forms.py (field, Field.check, Field.expect, Field.control),
 lex/lex_app/reflex/ui/state.py (ui_search, ui_matches).
@@ -460,3 +460,40 @@ class TestCluster01ds_SearchedChoice(SimpleTestCase):
         self.assertEqual(got, {"year": "2025", "quarter": "2", "budget_year": "2024", "months": "[1, 3]",
                                "account": repr(ACCOUNT)}, "each option's own value, of its own type")
         self.assertEqual(invalid, {"LedgerState.post|year": "Choose one of the options."}, "a value that is no option")
+
+    # -- 1.918 ---------------------------------------------------------
+    def test_1_918_what_was_offered_to_one_user_is_not_kept_for_the_next(self) -> None:
+        """
+        Scenario 1.918: the offers of a searched choice, and who they were for.
+        Given: anna searched the customers on a tab: matches shown, values offered.
+        When:  bob signs in on the same tab and sends a customer anna was offered; anna, on her
+               own tab, opens another page.
+        Then:  bob's value is refused at the field -- it was never offered to him -- and neither
+               anna's matches nor her offers are left in the tab's state; a new visit drops the
+               matches the browser was given (the field asks again when it appears).
+        """
+        from lex.lex_app.reflex.ui import context
+
+        field = _searched(OrdersState.place)
+
+        async def steps(harness):
+            await _search(harness, OrdersState.place, "Customer 00")
+            previous = context.set_user_id_of(lambda state: "bob")
+            try:
+                await (await harness.send(OrdersState, "place", values={"customer": "1"}))
+                ui = await harness._state(State)
+                bob = (dict((await harness.fields(OrdersState))["ui_invalid"]), dict(ui.ui_matches),
+                       dict(ui._ui_offered))
+            finally:
+                context.set_user_id_of(previous)
+            await _search(harness, OrdersState.place, "Customer 00")
+            await (await harness.send(State, "ui_open", page="/elsewhere"))
+            ui = await harness._state(State)
+            return bob, dict(ui.ui_matches), field in dict(ui._ui_offered)
+
+        (invalid, matches, offered), after_visit, still_offered = asyncio.run(_session(steps))
+        self.assertEqual(invalid, {"OrdersState.place|customer": "Choose one of the options."},
+                         "a value offered to anna is not bob's to send")
+        self.assertEqual((matches, offered), ({}, {}), "anna's matches and offers left with her")
+        self.assertEqual(after_visit, {}, "a new visit drops the matches the browser was given")
+        self.assertTrue(still_offered, "the offers stay for the same user (a kept form accepts them, 1.935)")

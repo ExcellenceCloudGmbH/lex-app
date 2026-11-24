@@ -3387,13 +3387,13 @@ such a collision.
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.900 – 1.903, 1.912, 1.917 |
+| Scenario range | 1.900 – 1.903, 1.912, 1.917, 1.918 |
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/forms.py` (`Expect.search`, `searched`, `search`, `check`, `clean`, `MATCHES`), `lex/lex_app/reflex/ui/pages/forms.py` (`field`, `Field.check`, `Field.expect`, `Field.control`), `lex/lex_app/reflex/ui/state.py` (`ui_search`, `ui_matches`, `_ui_offered`) |
 | Test file | `lex/test_project/tests/init/test_1ds_ui_form_searched_choice.py` |
-| Test classes | `TestCluster01ds_SearchedChoice` (1.900–1.903, 1.912, 1.917) |
+| Test classes | `TestCluster01ds_SearchedChoice` (1.900–1.903, 1.912, 1.917, 1.918) |
 | Fixtures | a neutral orders state: 120 customers (with an e-mail each), regions, rows without a label |
-| Tests landed | **6 pass / 0 fail** |
+| Tests landed | **7 pass / 0 fail** |
 | Status | ✅ Complete |
 
 `options=` a `@ui.rows` handler, on top of the forms of 1dh-1dl. What building settled is section 6.15 of
@@ -3407,6 +3407,7 @@ such a collision.
 | 1.903 | A searched choice declared wrongly | several from a search, a start value, an action as options, one field searching two rows handlers: each names page, slot and what to write |
 | 1.912 | Two searched fields on one form never cancel each other | through Reflex's event processor: a field's matches arrive while another field's slow search runs, another button works meanwhile, and the slow, older search ending after a newer one does not replace the newer matches |
 | 1.917 | A choice reaches the handler as the option's own value | fixed ints, a dict with int keys, a state field of ints, several ints and a searched row whose id is a UUID each reach the handler as their own value, of their own type; a value that is no option is refused; 1.8xx int-option refusals now refuse floats |
+| 1.918 | What was offered to one user is not kept for the next | another user on the tab is refused a value offered to the previous one, and finds neither its matches nor its offers in the state; a new visit drops the matches; the same user's offers stay (1.935) |
 
 ### Batch 1dt — lex.ui: a refusal shown above a form's submit button, with a title ✅
 

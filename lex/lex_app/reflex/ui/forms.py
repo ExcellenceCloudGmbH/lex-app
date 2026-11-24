@@ -134,6 +134,23 @@ def _offer(key: str, raw: Any, text: str) -> dict[str, tuple[Any, str]]:
     return found
 
 
+def forget_offers(state: Any, *, visit: bool = False) -> None:
+    """Drop what searched choices offered to another user of the tab; on a new visit, the matches shown.
+
+    ``state`` is the tab's ``ui.State`` (call while holding its lock). The offers stay for the same
+    user across visits: a kept form accepts a value chosen before the user left (1.935).
+    """
+    from lex.lex_app.reflex.ui import context
+
+    user = context.user_id_of(state)
+    if str(state._ui_offered_to or "") != user:
+        if state._ui_offered or state.ui_matches:
+            state._ui_offered, state.ui_matches = {}, {}
+        state._ui_offered_to = user
+    elif visit and state.ui_matches:
+        state.ui_matches = {}
+
+
 def ask(state: Any, field: str, text: Any) -> Any:
     """The user typed ``text`` into the searched field ``field`` (``""`` when it opens).
 
@@ -143,6 +160,7 @@ def ask(state: Any, field: str, text: Any) -> Any:
     """
     if str(field) not in _SEARCHES:
         return None
+    forget_offers(state)
     text = " ".join(str(text or "").split())[:200]
     held = dict(state._ui_searching)
     number = int((held.get(field) or [0])[0]) + 1
@@ -363,6 +381,8 @@ def check(receives: Receives, raw: Any, state: Any = None) -> tuple[dict, dict]:
     for expect in receives.fields:
         options = getattr(state, expect.options_field, None) if expect.options_field and state is not None else None
         if expect.search:
+            if state is not None:
+                forget_offers(state)                # offered to another user of the tab: not this one's
             held = getattr(state, "_ui_offered", None) if state is not None else None
             options = dict(dict(held or {}).get(expect.search) or {})
         values[expect.key], problem = clean(expect, given.get(expect.key), options)
