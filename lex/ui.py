@@ -57,7 +57,8 @@ progress_of/cancel``        event of a Cancel button
 ``ui.loaded``               whether a load has finished since the page opened
 ``ui.testing``              run a handler in a unit test
 ``@ui.page``                where a page lives: its route, its area of the navigation (``nav=``),
-                            who may see it
+                            who may see it. lex-app's frame heads it with its breadcrumbs: the
+                            area, the listed page that opens it, the page
 ``ui.frame``                lex-app's frame for this project, set once in the dashboard module:
                             ``nav=[...]`` the areas' order; ``sign_out=`` where the user menu
                             signs out (a page or an https:// address; lex-app's /logout by default)

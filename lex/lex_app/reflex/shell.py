@@ -61,6 +61,53 @@ class NavEntry:
 _NAV: list[NavEntry] = []
 
 
+@dataclasses.dataclass(frozen=True)
+class Place:
+    """Where a page sits, for its breadcrumbs: its area, its title, and the listed page it opens from."""
+
+    area: str
+    title: Any                          # a sentence, or a state value (a record's name)
+    parent: str | None = None           # the parent page's route
+    parent_title: str | None = None
+
+
+#: Route -> where the page sits; a page without an area has no entry, and no breadcrumbs.
+_PLACES: dict[str, Place] = {}
+
+
+def set_place(route: str, place: Place) -> None:
+    _PLACES[route] = place
+
+
+def place_of(route: str | None) -> Place | None:
+    """Where the page at ``route`` sits; ``None`` for a page outside every area."""
+    return _PLACES.get(route) if route else None
+
+
+def _crumb_label(text: Any) -> Any:
+    """A crumb's words, translated as every sentence is; a state value as it stands."""
+    import reflex as rx
+
+    from lex.lex_app.reflex.ui.pages.parts import say
+
+    # RFDS's crumb takes text; a component carries a translated sentence or a state value as well.
+    return rx.fragment(say(text))
+
+
+def breadcrumbs(route: str | None) -> Any:
+    """RFDS's breadcrumbs for the page at ``route``: its area, its parent, itself; ``None`` without an area."""
+    place = place_of(route)
+    if place is None:
+        return None
+    import rfds
+
+    crumbs: list[dict] = [{"label": _crumb_label(place.area)}]          # an area is not a page: text
+    if place.parent:
+        crumbs.append({"label": _crumb_label(place.parent_title), "href": place.parent})
+    crumbs.append({"label": _crumb_label(place.title)})
+    return rfds.page(rfds.breadcrumbs(*crumbs))
+
+
 def nav_entries() -> list[NavEntry]:
     """The pages registered with ``nav=``, in registration order."""
     return list(_NAV)
@@ -166,10 +213,11 @@ def nav_sections() -> tuple:
     return tuple(sections)
 
 
-def lex_chrome(body, *, embedded=None):
+def lex_chrome(body, *, embedded=None, route=None):
     """``body`` in lex-app's chrome: RFDS's shell standalone, the bare page inside lex-app.
 
-    The shell is always compiled; inside lex-app's frame it carries
+    With the page's ``route``, the page is headed by its breadcrumbs (:func:`breadcrumbs`), inside
+    lex-app's frame too: there they are the way back up. The shell is always compiled; inside lex-app's frame it carries
     :data:`EMBEDDED_CLASS`, which hides its header and navigation. Compiling the
     page once, rather than once per mode, keeps exactly one main landmark and
     one page heading on it, which RFDS's conformance checks count.
@@ -196,6 +244,9 @@ def lex_chrome(body, *, embedded=None):
     )
     sections = nav_sections()
     side = rfds.side_nav(*sections) if sections else None
+    trail = breadcrumbs(route)
+    if trail is not None:
+        body = rx.fragment(trail, body)
     return rx.fragment(
         theme_follower(),
         auth_notice("restored"),
@@ -255,6 +306,7 @@ def lex_page(
             # A page registered again -- a hot reload re-imports its module --
             # keeps its place in the navigation.
             list_in_nav(NavEntry(route=route, label=title, section=nav, icon=icon, permission=requires))
+            set_place(route, Place(nav, title))
 
         def page():
             body = page_fn()
@@ -263,7 +315,7 @@ def lex_page(
                 from rfds.patterns.security import access_denied
 
                 body = can(requires, body, fallback=access_denied(inline=True))
-            return lex_chrome(body)
+            return lex_chrome(body, route=route)
 
         page.__name__ = page_fn.__name__
         page.__qualname__ = page_fn.__qualname__

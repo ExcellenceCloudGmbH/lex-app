@@ -6,6 +6,8 @@ import dataclasses
 import os
 from typing import Any, Callable
 
+import reflex as rx
+
 from lex.lex_app.reflex.ui.pages import kinds, links
 from lex.lex_app.reflex.ui.pages.parts import Build, PageError, called
 
@@ -18,6 +20,7 @@ class Declared:
     icon: str | None
     permission: str | None
     done: bool = False
+    kind: Any = None                    # what the function returned when lex-app registered it
 
 
 #: Route -> the page declared for it, until :func:`finalize` hands it to lex-app.
@@ -161,7 +164,7 @@ def finalize() -> None:
         if declared.done:
             continue
         name = declared.fn.__name__
-        kind = _kind_of(declared.fn)
+        kind = declared.kind = _kind_of(declared.fn)
         title = kind.title
         listed = declared.nav if not declared.info.arguments else None
         if listed and not isinstance(title, str):
@@ -185,6 +188,57 @@ def finalize() -> None:
     for route, declared in _DECLARED.items():
         if declared.nav and declared.info.arguments:
             check_area(route, declared.nav, declared.fn.__name__)
+    _place_pages()
+
+
+def leads_to(kind: Any) -> tuple[list, list]:
+    """The pages ``kind`` leads to: (those a table opens, those a button or link leads to)."""
+    from lex.lex_app.reflex.ui.pages import tables, vocab
+
+    opens: list = []
+    led: list = []
+    seen: set[int] = set()
+
+    def walk(part: Any) -> None:
+        if isinstance(part, (list, tuple)):
+            for one in part:
+                walk(one)
+            return
+        if (not dataclasses.is_dataclass(part) or isinstance(part, (type, rx.Var, rx.Component))
+                or id(part) in seen):
+            return
+        seen.add(id(part))
+        if isinstance(part, tables.Table) and links.page_info(part.open) is not None:
+            opens.append(part.open)
+        if isinstance(part, (vocab.Button, vocab.Link)) and links.page_info(part.to) is not None:
+            led.append(part.to)
+        for field in dataclasses.fields(part):
+            walk(getattr(part, field.name))
+
+    walk(kind)
+    return opens, led
+
+
+def _place_pages() -> None:
+    """Where each declared page sits, for its breadcrumbs: a listed page in its area; any other page
+    under the first listed page whose table opens it, else whose button or link leads to it."""
+    from lex.lex_app.reflex.shell import Place, set_place
+
+    listed = [d for d in _DECLARED.values() if d.nav and not d.info.arguments and d.kind is not None]
+    led = {id(d): leads_to(d.kind) for d in listed}
+    for route, declared in _DECLARED.items():
+        if declared.kind is None:
+            continue
+        title = declared.kind.title
+        if any(d is declared for d in listed):
+            set_place(route, Place(declared.nav, title))
+            continue
+        parent = (next((d for d in listed if any(t is declared.fn for t in led[id(d)][0])), None)
+                  or next((d for d in listed if any(t is declared.fn for t in led[id(d)][1])), None))
+        area = declared.nav or (parent.nav if parent is not None else None)
+        if area:
+            set_place(route, Place(area, title, parent.info.route if parent else None,
+                                   parent.kind.title if parent else None))
 
 
 def install(app: Any) -> None:

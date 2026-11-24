@@ -47,6 +47,7 @@ class FrameCase(SimpleTestCase):
         self.pages: list = []
         for target in (patch.dict(declare._DECLARED, clear=True), patch.dict(handlers._PAGES),
                        patch.dict(links._REFLEX_PAGES, clear=True), patch.object(shell, "_NAV", []),
+                       patch.dict(shell._PLACES, clear=True),
                        patch.object(frame, "_FRAME", None),
                        patch.object(rx, "page", lambda **kwargs: (lambda fn: self.pages.append((kwargs, fn)) or fn))):
             target.start()
