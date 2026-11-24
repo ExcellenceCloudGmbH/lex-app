@@ -197,3 +197,82 @@ class TestCluster01ej_FrameDecidedOnTheServer(FrameCase):
         with self.assertRaises(ValueError) as caught:
             ui.reflex_page("/wrong", nav="Tools", title="Wrong", requires=lambda user, params: True)
         self.assertIn("@ui.rule", str(caught.exception))
+
+
+class TestCluster01ej_WholeFrame(FrameCase):
+    """1.1022: every part of the frame, through lex-app's start-up, in one compiled page."""
+
+    # -- 1.1022 --------------------------------------------------------
+    def test_1_1022_the_whole_frame_through_lex_apps_start_up(self) -> None:
+        """
+        Scenario 1.1022: everything at once.
+        Given: a dashboard module that configures every part of the frame -- areas and sections, a count,
+               a per-user section, a foot, the search page, header actions, user menu entries, a banner,
+               the mark and refused_as_missing -- beside its pages.
+        When:  lex-app's start-up step hands the pages to an app (declare.install, as create_app runs it),
+               a page is compiled, and the frame is decided for a user.
+        Then:  the compiled page holds every part, the shell asks the server when it mounts, and the
+               server's answer fills the counts, the words and the user's links.
+        """
+        def waiting(user):
+            return 2
+
+        def favourites(user):
+            return [ui.link("Report 7", to=report, key=7)]
+
+        def problem(user):
+            return "Some configuration could not be loaded."
+
+        @ui.page("/orders", nav="Orders", badge=waiting)
+        def orders():
+            return _about("Orders")
+
+        @ui.page("/reports/[key]", nav="Orders")
+        def report():
+            return _about("Report")
+
+        @ui.page("/search", params=["q"])
+        def search():
+            return _about("Search")
+
+        @ui.page("/account")
+        def account():
+            return _about("Account")
+
+        @ui.page("/admin", nav="Admin", requires=reviewers)
+        def admin():
+            return _about("Administration")
+
+        ui.frame(nav=[ui.section("Orders", ui.link("Search orders", to=search, icon="search")), "Admin",
+                      ui.section("Favourites", favourites)],
+                 nav_footer=ui.text("Version 2.4.1"), search=search,
+                 actions=[ui.link("Notifications", to=account, icon="notification", badge=waiting)],
+                 user_menu=[ui.link("Account", to=account)],
+                 banner=ui.message(problem, tone="warning"), logo="/acme.svg", refused_as_missing=True)
+        install(self)
+        _, module = compile_page("/orders", self.page_named("/orders")())
+        for expected in ("Search orders", "rfds-side-nav-badge", "ui_frame_links", "Version 2.4.1",
+                         "rfds-header-search", "Notifications", '"/account"', "rfds-banner", '"/acme.svg"',
+                         "ui_frame_open", "ui_frame_shown"):
+            self.assertIn(expected, module, f"compiled: {expected}")
+        self.assertIn("This page does not exist", compile_page("/admin", self.page_named("/admin")())[1])
+
+        async def decide():
+            from lex.lex_app.reflex.ui import testing
+            from lex.lex_app.reflex.ui.state import State
+
+            async with testing.Harness(user="anna") as harness:
+                await harness.open_tab("/orders")
+                await (await harness.send(State, "ui_frame_open"))
+                deadline = time.monotonic() + 5
+                while not (await harness._state(State)).ui_frame_values and time.monotonic() < deadline:
+                    await asyncio.sleep(0.01)
+                state = await harness._state(State)
+                return (list(state.ui_frame_shown), dict(state.ui_frame_counts), dict(state.ui_frame_values),
+                        {key: [dict(one) for one in value] for key, value in dict(state.ui_frame_links).items()})
+
+        shown, counts, values, links = asyncio.run(decide())
+        self.assertEqual(shown, ["/admin"])
+        self.assertEqual(sorted(counts.values()), [2, 2])
+        self.assertEqual(values, {"banner": "Some configuration could not be loaded."})
+        self.assertEqual([one["href"] for one in links["Favourites#"]], ["/reports/7"])

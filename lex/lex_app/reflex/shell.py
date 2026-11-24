@@ -385,7 +385,7 @@ def header_actions() -> tuple:
     import rfds
 
     from lex.lex_app.reflex.ui.pages import frame
-    from lex.lex_app.reflex.ui.pages.parts import Build, say, with_overlays
+    from lex.lex_app.reflex.ui.pages.parts import Build, with_overlays
     from lex.lex_app.reflex.ui.pages.vocab import Link, Status, Text
 
     ctx = Build(page="ui.frame", slot="actions")

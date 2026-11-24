@@ -72,24 +72,26 @@ progress_of/cancel``        event of a Cancel button
                             area, the listed page that opens it, the page. The navigation lists
                             only what the user may open, decided on the server when a page opens
 ``ui.frame``                lex-app's frame for this project, set once in the dashboard module:
-                            ``nav=[...]`` the areas' order, and sections of links:
-                            ``ui.section("Help", ui.link(...))``, or ``ui.section("Favourites",
-                            favourites)`` filled by a function of the user; ``nav_footer=`` a link
-                            or text at the navigation's foot. A function of the user,
-                            ``def waiting(user)``, stands for a value the frame shows (a badge's
-                            count, a section's links): lex-app calls it on the server when a page
-                            opens. ``search=`` a page taking one query parameter: RFDS's search box
-                            in the header opens it with what was typed; ``actions=[...]`` links,
-                            buttons, statuses, texts, custom blocks in the header band;
-                            ``user_menu=[ui.link(...)]`` entries above "Sign out"; ``banner=``
-                            one ``ui.message`` above every page while its sentence is not empty;
-                            ``refused_as_missing=True`` a page the user may not open looks like
-                            lex-app's not-found page; ``logo=`` the project's mark beside the
-                            product's name, leading home; ``denied=`` the sentence a refused
-                            user reads, ``request_access=`` their way out (a page, https:// or
-                            mailto:); ``opened=`` a function lex-app calls, not awaited, when a
-                            page has opened: ``opened(user, page)``; ``sign_out=`` where the
-                            user menu signs out (a page or https://; lex-app's /logout by default)
+                            ``nav=[...]`` the areas' order, and sections of links
+                            (``ui.section("Help", ui.link(...))``, or ``ui.section("Favourites",
+                            favourites)`` filled by a function of the user); ``nav_footer=`` a
+                            link or text at the navigation's foot; ``search=`` a page taking one
+                            query parameter, opened by RFDS's search box in the header;
+                            ``actions=[...]`` links, buttons, statuses, texts, custom blocks in
+                            the header band; ``user_menu=[ui.link(...)]`` entries above "Sign
+                            out"; ``banner=`` one ``ui.message`` above every page while its
+                            sentence is not empty; ``logo=`` the project's mark beside the
+                            product's name, leading home; ``denied=`` the sentence a refused user
+                            reads, ``request_access=`` their way out (a page, https:// or
+                            mailto:), or ``refused_as_missing=True`` a refused page looks like
+                            lex-app's not-found page; ``opened=`` a function lex-app calls, not
+                            awaited, when a page has opened: ``opened(user, page)``;
+                            ``sign_out=`` where the user menu signs out (a page or https://;
+                            lex-app's /logout by default). A function of the user,
+                            ``def waiting(user)``, stands for any value the frame shows (a count,
+                            words, a section's links): lex-app calls it on the server when a page
+                            opens. What the user may open is decided there too; nothing else is
+                            drawn
 ``@ui.dashboard``           a page that is not a route (the project's ``main()``)
 ``ui.record/list/form``     the page kinds: named slots, placed by lex-app (``ui.list`` is
                             left out of ``import *``, which would hide Python's ``list``)

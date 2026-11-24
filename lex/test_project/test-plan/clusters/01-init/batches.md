@@ -3793,13 +3793,13 @@ Fourth piece of the calculation page (section 6.20 of `docs/superpowers/specs/20
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.1000 – 1.1003 |
+| Scenario range | 1.1000 – 1.1003, 1.1022 |
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/pages/frame.py` (`guards`, `decide`), `lex/lex_app/reflex/shell.py` (`nav_sections`, `lex_chrome`), `lex/lex_app/reflex/ui/state.py` (`ui_frame_open`, `ui_frame_shown`), `lex/lex_app/reflex/ui/pages/links.py` (`reflex_page(requires=)`), `lex/lex_app/reflex/ui/pages/declare.py` (`install`) |
 | Test file | `lex/test_project/tests/init/test_1ej_ui_frame_decided.py` |
-| Test classes | `TestCluster01ej_FrameDecidedOnTheServer` (1.1000–1.1003) |
+| Test classes | `TestCluster01ej_FrameDecidedOnTheServer` (1.1000–1.1003), `TestCluster01ej_WholeFrame` (1.1022) |
 | Fixtures | pages declared per test (`FrameCase` from 1eb); `ui.testing.Harness` with grants per user; a rule recording its calls |
-| Tests landed | **4 pass / 0 fail** |
+| Tests landed | **5 pass / 0 fail** |
 | Status | ✅ Complete |
 
 Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
@@ -3810,6 +3810,7 @@ Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | 1.1001 | The server decides permissions and rules for the user | anna: Reports, Reviews, Audit; carl: nothing; ben: a failing rule hides its entries, logged; the rule asked once per event, on a worker thread, without values |
 | 1.1002 | What the browser was told does not decide | the resolver behind the browser's permissions claims grants: nothing listed; a fresh tab's first page answered at once |
 | 1.1003 | lex-app's start-up draws the decided navigation | declare.install then compile: the answer's var and the mount's event; a raw page's requires= takes a list; a plain function refused naming @ui.rule |
+| 1.1022 | The whole frame through lex-app's start-up | every part configured at once in a dashboard module; declare.install; the compiled page holds each part and asks on mount; the server fills anna's counts, banner words and per-user links; a rule's page refused as missing |
 
 ### Batch 1ek — lex.ui frame: navigation beyond the declared pages -- sections of links, counts, per-user entries, a foot ✅
 
@@ -3903,9 +3904,9 @@ Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/pages/frame.py` (`refused_as_missing=`), `lex/lex_app/reflex/shell.py` (`lex_page`, `lex_chrome`, `side_nav`, `not_found_body`, `not_found_page`), `lex/lex_app/reflex/ui/state.py` (`_ui_start`, `error_page`), `lex/lex_app/reflex/app.py` (`create_app` adds lex-app's 404 page) |
 | Test file | `lex/test_project/tests/init/test_1eo_ui_frame_refused_as_missing.py` |
-| Test classes | `TestCluster01eo_RefusedAsMissing` (1.1016–1.1019) |
+| Test classes | `TestCluster01eo_RefusedAsMissing` (1.1016–1.1019; 1.1016 in two tests, with and without the switch) |
 | Fixtures | pages declared per test (`FrameCase` from 1eb); `ui.testing.Harness` for the opener, with the opener's permission answer patched (RFDS's resolver needs a signed-in identity) |
-| Tests landed | **4 pass / 0 fail** |
+| Tests landed | **5 pass / 0 fail** |
 | Status | ✅ Complete |
 
 Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
