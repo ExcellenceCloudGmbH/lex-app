@@ -44,3 +44,47 @@ def test_an_idle_tab_is_dropped():
     now[0] = 11.0
     store.tab("b")                       # any access sweeps
     assert store.tab("a").role == "editor"
+
+
+import pytest
+
+from docs_site.sandbox.api import SandboxApi
+from docs_site.sandbox.models import Commitment, Fund
+from lex.lex_app.reflex.data import LexApiError
+
+
+def _api():
+    return SandboxApi(Store().tab("t"))
+
+
+def test_list_filters_searches_orders_and_pages():
+    api = _api()
+    rows = api.list(Fund, filters={"status": "investing"}, ordering="-size", per_page=2)
+    assert [r["name"] for r in rows] == ["Harbour Infrastructure", "Northbridge Growth II"]
+    assert rows.count == 3
+    assert [r["name"] for r in api.list(Fund, search="birch")] == ["Birch Secondaries"]
+    assert [r["id"] for r in api.list(Commitment, filters={"amount__gte": 60_000_000})] == [3, 5, 6]
+    assert [r["id"] for r in api.list(Fund, filters={"id__in": [1, 5]})] == [1, 5]
+    assert set(api.list(Fund, fields=["id", "name"])[0]) == {"id", "name"}
+
+
+def test_create_update_delete_change_only_this_tab():
+    store = Store()
+    api = SandboxApi(store.tab("t"))
+    made = api.create(Fund, {"name": "New", "vintage": 2024, "status": "fundraising",
+                             "size": 1, "currency": "EUR"})
+    assert made["id"] == 7
+    assert api.update(Fund, 7, {"status": "investing"})["status"] == "investing"
+    api.delete(Fund, 7)
+    with pytest.raises(LexApiError) as missing:
+        api.get(Fund, 7)
+    assert missing.value.status == 404
+    assert len(SandboxApi(store.tab("other")).list(Fund)) == 6
+
+
+def test_an_unknown_model_is_refused():
+    class Elsewhere:
+        pass
+
+    with pytest.raises(LexApiError):
+        _api().list(Elsewhere)
