@@ -716,6 +716,7 @@ class PageLoads:
     optional: tuple = ()
     requires: Any = ""                  # a permission string, or a tuple of them
     rules: tuple = ()                   # the project's rules (``@ui.rule``) the page requires
+    title: Any = None                   # the page's title: a sentence, or a state value
 
 
 #: Route -> the page's loads and permission, filled by ``lex_page`` on the server. The opener
@@ -723,9 +724,9 @@ class PageLoads:
 _PAGES: dict[str, PageLoads] = {}
 
 
-def register_page(route: str, required: Any, optional: Any, requires: Any, rules: Any = ()) -> None:
+def register_page(route: str, required: Any, optional: Any, requires: Any, rules: Any = (), title: Any = None) -> None:
     """Record which loads ``route`` starts, and the permissions and rules its user must meet for them to start."""
-    _PAGES[route] = PageLoads(tuple(required), tuple(optional), requires or "", tuple(rules))
+    _PAGES[route] = PageLoads(tuple(required), tuple(optional), requires or "", tuple(rules), title)
 
 
 def page_of(route: str) -> PageLoads | None:
@@ -867,6 +868,10 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                     elif current and succeeded and page_bound:
                         pending = [other for other in self._ui_pending_loads if other != ident]
                         self._ui_pending_loads = pending
+                        if not pending:           # the page is shown: the project's opened(), not awaited
+                            from lex.lex_app.reflex.ui.pages import frame
+
+                            await frame.page_opened(self, self._ui_page, opened_on, session)
                         if not pending and self._ui_optional_loads:
                             entry = page_of(self._ui_page)
                             waiting = set(self._ui_optional_loads)

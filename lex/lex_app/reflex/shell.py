@@ -366,7 +366,7 @@ def lex_page(
         # grants are loaded. So they are started by the opener, the page's last load event,
         # which names only the route; the loads and the permission stay on the server.
         required, optional, others = page_loads(on_load)
-        register_page(route, required, optional, needed[0] if len(needed) == 1 else needed, _rules)
+        register_page(route, required, optional, needed[0] if len(needed) == 1 else needed, _rules, title)
         loads: list[Any] = [LexAccessState.load, *others, UiState.ui_open(route)]
         rx.page(route=route, title=title, on_load=loads, **page_kwargs)(page)
         return page_fn

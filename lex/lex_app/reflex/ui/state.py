@@ -249,6 +249,10 @@ class State(rx.State):
         self._ui_optional_loads = [handlers.load_id(h) for h in entry.optional] if entry.required else []
         starting = list(entry.required or entry.optional)
         self._ui_started = [handlers.load_id(h) for h in starting]
+        if not entry.required:                          # shown now: the project's opened(), not awaited
+            from lex.lex_app.reflex.ui.pages import frame
+
+            await frame.page_opened(self, page, handlers._location(self))
         return [*starting, *tables]
 
     @rx.event

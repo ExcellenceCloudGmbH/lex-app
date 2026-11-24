@@ -186,7 +186,7 @@ def finalize() -> None:
         body.__qualname__ = declared.fn.__qualname__
         lex_page(route, title=title if isinstance(title, str) else name.replace("_", " ").capitalize(),
                  nav=listed, icon=declared.icon, requires=declared.permission, _rules=declared.rules)(body)
-        handlers.register_page(route, required, optional, declared.permission or "", declared.rules)
+        handlers.register_page(route, required, optional, declared.permission or "", declared.rules, title)
         declared.done = True
     from lex.lex_app.reflex.shell import check_area, check_nav
 
