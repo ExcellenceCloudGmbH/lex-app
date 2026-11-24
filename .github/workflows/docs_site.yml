@@ -1,0 +1,57 @@
+name: Docs site
+
+on:
+  pull_request:
+    paths:
+      - "lex/ui.py"
+      - "lex/lex_app/reflex/**"
+      - "docs_site/**"
+      - "requirements.txt"
+      - ".github/workflows/docs_site.yml"
+  workflow_dispatch:
+
+jobs:
+  docs-site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      # The docs tests do not query the database, but lex's pytest plugin
+      # sets up Django's test database before collecting anything, so a
+      # Postgres must be reachable. Same service as showcase_tests.yml and
+      # copilot_pr_gate.yml; the credentials are lex_app.settings' defaults.
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: django
+          POSTGRES_PASSWORD: lundadminlocal
+          POSTGRES_DB: db_lex
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 3
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: System libraries (pycairo)
+        run: sudo apt-get update && sudo apt-get install -y libcairo2-dev pkg-config
+      - name: Install lex-app and the docs site
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install --prefer-binary -r requirements.txt
+          pip install -e . -r docs_site/requirements.txt pytest
+      - name: Build and check every page
+        working-directory: docs_site
+        env:
+          CI: "true"
+          DJANGO_SETTINGS_MODULE: lex_app.settings
+          DATABASE_DEPLOYMENT_TARGET: default
+          CELERY_ACTIVE: "False"
+        run: python -m pytest -q
