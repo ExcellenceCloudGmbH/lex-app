@@ -3284,3 +3284,27 @@ section 6.14 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | 1.849 | Ask opens a small dialog and hands its values to the handler | RFDS's dialog with RFDS's form; empty: stays open with the message; filled: closes and the body gets the key and the values; wrong handler or fields refused |
 | 1.850 | A button shows its handler running | action and job buttons load while running; a row's button only for its key; a raw handler or a page link not |
 | 1.851 | The dialog is opened and closed on the server | asking records the dialog and values; dismissing forgets them |
+
+### Batch 1dl — lex.ui forms: a field where the user chooses several of a list of options ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.852 – 1.855 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/forms.py` (`KINDS`, `clean`, `check`), `lex/lex_app/reflex/ui/pages/forms.py` (`field`, `Field.check`, `Field.control`), `lex/lex_app/reflex/ui/pages/vocab.py` (`shape`: `choices`), `lex/lex_app/reflex/ui/testing.py` (`run` with a list among the values) |
+| Test file | `lex/test_project/tests/init/test_1dl_ui_form_choices.py` |
+| Test classes | `TestCluster01dl_FormChoices` (1.852–1.855) |
+| Fixtures | a neutral funds state (regions, funds, orders) |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+`kind="choices"` on top of the forms of 1dh-1dk. What building settled is in section 6.14 of
+`docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`. Existing tests 1.836 and 1.846 follow: the list of
+kinds gains `choices`, and the message for options on a field that is no choice names it.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.852 | Several choices reach the handler as a list of the options | a list of texts in the options' order, each once; one value alone, `[]`, `None`, `""`, `False`; required: at least one; no option, or not texts: refused; options from the state |
+| 1.853 | The field is RFDS's input for several and sends nothing while picking | checkbox group up to 12 fixed options, multi-select above or from the state; label, help, required mark, the server's message; `value=` a list or a state value; one event: the submit; compiled with Reflex's page compiler; in a step and in ask= |
+| 1.854 | A run hands the body the checked list | through Reflex's event processor and `ui.testing.run`: the list in option order; nothing ticked or no option is a message at the field and no run; a wizard's last step; a dialog's row key and list |
+| 1.855 | Several choices declared wrongly, and shown | no options, non-text options, a start that is no list, options on another kind, the kinds listed; `ui.fact(kind="choices")` joined by commas |

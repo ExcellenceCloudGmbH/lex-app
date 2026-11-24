@@ -1598,3 +1598,18 @@ does not remove user launch configurations.
 | 1.851 | The dialog is opened and closed on the server | asking records the dialog and values; dismissing forgets them |
 
 **Scenario range:** 1.847 – 1.851. **Test file:** `lex/test_project/tests/init/test_1dk_ui_button_confirm_ask.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dk](batches.md).
+
+### 1dl. lex.ui forms: a field where the user chooses several of a list of options ✅
+
+**What it tests:** `ui.field(kind="choices", options=...)` -- RFDS's checkbox group or multi-select, a `list[str]` in the order of the options checked on the server, in a form, a step and a button's ask=; `ui.fact` shows the kind.
+
+**Why a regression matters:** a text where a list was promised, a value that is no option reaching the body, a required field passing with nothing ticked, or a field that calls the server on every tick.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.852 | Several choices reach the handler as a list of the options | a list of texts in the options' order, each once; one value alone, `[]`, `None`, `""`, `False`; required: at least one; no option, or not texts: refused; options from the state |
+| 1.853 | The field is RFDS's input for several and sends nothing while picking | checkbox group up to 12 fixed options, multi-select above or from the state; label, help, required mark, the server's message; `value=` a list or a state value; one event: the submit; compiled with Reflex's page compiler; in a step and in ask= |
+| 1.854 | A run hands the body the checked list | through Reflex's event processor and `ui.testing.run`: the list in option order; nothing ticked or no option is a message at the field and no run; a wizard's last step; a dialog's row key and list |
+| 1.855 | Several choices declared wrongly, and shown | no options, non-text options, a start that is no list, options on another kind, the kinds listed; `ui.fact(kind="choices")` joined by commas |
+
+**Scenario range:** 1.852 – 1.855. **Test file:** `lex/test_project/tests/init/test_1dl_ui_form_choices.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dl](batches.md).

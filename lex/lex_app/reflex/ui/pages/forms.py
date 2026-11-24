@@ -20,8 +20,10 @@ from lex.lex_app.reflex.ui import runs
 from lex.lex_app.reflex.ui.pages import kinds, tables, vocab
 from lex.lex_app.reflex.ui.pages.parts import Build, Part, called, say, shown, slug, take
 
-#: Up to this many fixed options are a dropdown; more, or options from the state, a box to type in.
+#: Up to this many fixed options are a dropdown (several: boxes to tick); more, or options from the
+#: state, a box to type in (several: RFDS's multi-select). RFDS draws the line at the same number.
 DROPDOWN_OPTIONS = 12
+_CHOICES = ("choice", "choices")
 
 _FIELD = "`ui.field(key, label=, kind=, options=, required=, help=, value=)`"
 _DIALOGS = itertools.count(1)
@@ -58,10 +60,11 @@ class Field(Part):
         if kind not in rules.KINDS:
             raise ctx.fail(f"field `{self.key}` has the kind `{kind}`.",
                            f"`kind=` is one of {', '.join(rules.KINDS)}.")
-        if self.options is not None and kind != "choice":
+        if self.options is not None and kind not in _CHOICES:
             raise ctx.fail(f"field `{self.key}` has `options=` and the kind `{kind}`.",
-                           "Only a choice has options: leave `kind=` out, or write `kind=\"choice\"`.")
-        if kind == "choice" and self.options is None:
+                           "Only a choice has options: leave `kind=` out for one of them, or write "
+                           "`kind=\"choices\"` for several.")
+        if kind in _CHOICES and self.options is None:
             raise ctx.fail(f"field `{self.key}` is a choice without `options=`.",
                            "Give what can be chosen: `options=[\"open\", \"closed\"]`, or "
                            "`options={\"open\": \"Open\", \"closed\": \"Closed\"}` to word them.")
@@ -71,6 +74,10 @@ class Field(Part):
         if kind == "bool" and not (self.value is None or isinstance(self.value, (bool, rx.Var))):
             raise ctx.fail(f"field `{self.key}` is a yes/no and starts as {called(self.value)}.",
                            "`value=` is `True`, `False` or a state value.")
+        if kind == "choices" and not (self.value is None or isinstance(self.value, rx.Var) or (
+                isinstance(self.value, (list, tuple)) and all(isinstance(one, str) for one in self.value))):
+            raise ctx.fail(f"field `{self.key}` chooses several and starts as {called(self.value)}.",
+                           "`value=` is a list of options, such as `value=[\"north\"]`, or a state value.")
 
     def choices(self, ctx: Build, handler: Any) -> tuple[Any, tuple | None, str]:
         """A choice's options as (RFDS takes them, the fixed values the server accepts, the state field holding them)."""
@@ -96,12 +103,14 @@ class Field(Part):
 
     def expect(self, ctx: Build, handler: Any) -> rules.Expect:
         """The field as the server checks it."""
-        fixed, field = self.choices(ctx, handler)[1:] if self.is_a == "choice" else (None, "")
+        fixed, field = self.choices(ctx, handler)[1:] if self.is_a in _CHOICES else (None, "")
         return rules.Expect(self.key, self.is_a, bool(self.required), fixed, field)
 
     def _start(self) -> Any:
         """The value the field starts with, as its input takes it."""
         value = self.value
+        if self.is_a == "choices":
+            return value.to(list[str]) if isinstance(value, rx.Var) else [str(one) for one in value or ()]
         if isinstance(value, rx.Var):
             return value if self.is_a == "bool" else value.to(str)
         if self.is_a == "bool":
@@ -156,7 +165,12 @@ class Field(Part):
         if kind == "bool":
             return rfds.checkbox(checked=held.value, on_change=held.set_value, **common)
         options = self.choices(ctx, handler)[0]
-        if isinstance(options, list) and len(options) <= DROPDOWN_OPTIONS:
+        short = isinstance(options, list) and len(options) <= DROPDOWN_OPTIONS
+        if kind == "choices":
+            # RFDS: a checkbox group for several of a short list, its multi-select above 12 options.
+            pick = rfds.checkbox_group if short else rfds.multi_select
+            return pick(options=options, value=held.value, on_change=held.set_value, **common)
+        if short:
             return rfds.select(options=options, value=held.value, on_change=held.set_value, **common)
         return rfds.combobox(options=options, value=held.value, on_change=held.set_value, **common)
 
@@ -182,14 +196,17 @@ def field(key: str, *, label: Any = None, kind: str | None = None, options: Any 
     ``year``       four digits                                 ``int``
     ``bool``       a box to tick                               ``bool``
     ``choice``     one of ``options=``                         ``str``
+    ``choices``    several of ``options=``: boxes to tick,     ``list[str]``, in the order
+                   or a list to pick from above 12 options     of the options
     =============  ==========================================  ==========================
 
-    Nothing entered arrives as ``None`` (``""`` for text, ``False`` for a box). ``options=`` is a
-    list of texts, a dict of value to wording, or a field of the handler's own state; a field with
-    options is a choice. ``label`` defaults to the key with a capital; ``help`` is a sentence under
-    it; ``value`` is what the field starts with (a value, or a state value the page's load filled).
-    ``required=True`` and the kind are checked before the handler runs, and the message is shown at
-    the field.
+    Nothing entered arrives as ``None`` (``""`` for text, ``False`` for a box, ``[]`` for
+    several). ``options=`` is a list of texts, a dict of value to wording, or a field of the
+    handler's own state; a field with options is a choice, and ``kind="choices"`` lets the user
+    choose several of them. ``label`` defaults to the key with a capital; ``help`` is a sentence
+    under it; ``value`` is what the field starts with (a value -- a list for several -- or a
+    state value the page's load filled). ``required=True`` (for several: at least one) and the
+    kind are checked before the handler runs, and the message is shown at the field.
     """
     if not isinstance(key, str) or not key.isidentifier() or key.startswith("_"):
         raise TypeError(f"ui.field() takes the key first, the name the handler finds the value under: "

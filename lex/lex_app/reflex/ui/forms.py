@@ -17,7 +17,7 @@ from typing import Any
 from lex.lex_app.reflex.ui import results, runs
 
 #: What a field can be: the words ``ui.fact`` takes for showing a value.
-KINDS = ("text", "number", "money", "percent", "date", "datetime", "year", "bool", "choice")
+KINDS = ("text", "number", "money", "percent", "date", "datetime", "year", "bool", "choice", "choices")
 
 #: The name of the handler argument that receives a form's values.
 VALUES = "values"
@@ -32,8 +32,8 @@ class Expect:
     key: str
     kind: str = "text"
     required: bool = False
-    options: tuple | None = None        # a fixed choice's values
-    options_field: str = ""             # a choice from the state: the field of the handler's state holding them
+    options: tuple | None = None        # a fixed choice's values (one or several)
+    options_field: str = ""             # options from the state: the field of the handler's state holding them
 
 
 @dataclasses.dataclass(frozen=True)
@@ -98,13 +98,41 @@ def _zone() -> datetime.tzinfo:
         return datetime.timezone.utc
 
 
+def _several(expect: Expect, raw: Any, options: Any) -> tuple[list, str]:
+    """Several of the options: a list of texts in the order of the options, each once; ``[]`` for none.
+
+    A form sends one chosen value alone as a text, and an unticked box group as ``False``.
+    """
+    if raw is None or raw is False or (isinstance(raw, str) and not raw.strip()):
+        chosen: list = []
+    elif isinstance(raw, str):
+        chosen = [raw]
+    elif isinstance(raw, (list, tuple)) and all(isinstance(one, str) for one in raw):
+        chosen = list(raw)
+    else:
+        return [], _say("options", "Choose from the options.")
+    allowed = expect.options if expect.options is not None else options
+    if allowed is not None:
+        allowed = [str(one) for one in allowed]
+        if any(one not in allowed for one in chosen):
+            return [], _say("options", "Choose from the options.")
+        chosen = [one for one in allowed if one in chosen]
+    chosen = list(dict.fromkeys(chosen))
+    if expect.required and not chosen:
+        return [], _say("several", "Choose at least one.")
+    return chosen, ""
+
+
 def clean(expect: Expect, raw: Any, options: Any = None) -> tuple[Any, str]:
     """``raw`` (what the browser sent for one field) as (the Python value, the problem or '').
 
-    Nothing entered is ``""`` for text, ``False`` for a yes/no and ``None`` for every other kind.
-    A value that is already of its kind (a test passing a ``Decimal``) is kept.
+    Nothing entered is ``""`` for text, ``False`` for a yes/no, ``[]`` for several choices and
+    ``None`` for every other kind. A value that is already of its kind (a test passing a
+    ``Decimal``) is kept.
     """
     kind = expect.kind
+    if kind == "choices":
+        return _several(expect, raw, options)
     if kind == "bool":
         value = raw in _YES
         return value, (_say("tick", "Tick this box to continue.") if expect.required and not value else "")
