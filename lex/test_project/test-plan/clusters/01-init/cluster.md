@@ -1498,3 +1498,27 @@ does not remove user launch configurations.
 | 1.827 | A handler from a mixin is each states own | each state keeps the handler under its own name, so a view of one state's running export does not show the other's; the second export runs too instead of being ignored as a repeat; a handler written on the state itself keeps its name |
 
 **Scenario range:** 1.827. **Test file:** `lex/test_project/tests/init/test_1dc_ui_mixin_handlers.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dc](batches.md).
+
+### 1dd. lex.ui tables: a date column is filtered by a range of days ✅
+
+**What it tests:** `filters=` names columns; a `date` or `datetime` column of a `@ui.rows` table is filtered by a range of days, any other by a dropdown of its values - on the server, over every row, only on the fields the table offers.
+
+**Why a regression matters:** a list that cannot be narrowed to a month, a range that drops its last day, or a filter on a field the table does not offer.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.828 | A date column is filtered by a range of days | the kind column has a dropdown and the date column a date-range picker; a month keeps its first to last day (a datetime on the last evening included, an undated row never); an open start or end; the range and the dropdown together; clearing empties the picker; a range for a field that is no date filter and a date that is not a day change nothing |
+
+**Scenario range:** 1.828. **Test file:** `lex/test_project/tests/init/test_1dd_ui_table_filters.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dd](batches.md).
+
+### 1de. lex.ui handlers may hand on to another state's handler ✅
+
+**What it tests:** A handler body returns or yields another state's handler among its lex.ui results; the browser runs it in order. Reflex's own raw events stay in the custom region.
+
+**Why a regression matters:** a handler that cannot chain to another state, a result order the browser does not keep, or a browser script slipping out of an ordinary handler.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.829 | A handler hands on to another states handler | the other state's handlers are results like the toast, in the order written, and reach the browser as they are; a browser script, a redirect and a plain object are refused with the handler's name and where raw events go |
+
+**Scenario range:** 1.829. **Test file:** `lex/test_project/tests/init/test_1de_ui_reflex_events.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1de](batches.md).

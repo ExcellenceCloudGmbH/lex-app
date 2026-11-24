@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 827
+max_scenario: 829
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2412,3 +2412,28 @@ letters:
     note: >-
       A lex.ui handler that a state takes from a mixin is decorated again under the state's own name. These tests fail
       on a button that stays busy, or a press ignored as a repeat, because another state runs the same handler.
+  dd:
+    title: 'lex.ui tables: a date column is filtered by a range of days'
+    scenarios: '1.828'
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      A date or datetime column named in `filters=` is filtered by a range of days, on the server, only on the fields
+      the table offers. These tests fail on a list that cannot be narrowed to a month, a range that drops its last
+      day, or a filter on a field the table does not offer.
+  de:
+    title: 'lex.ui handlers may hand on to another state''s handler'
+    scenarios: '1.829'
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      A handler body may return or yield another state's handler among its results; raw Reflex events stay in the
+      custom region. These tests fail on a handler that cannot chain to another state, or a browser script slipping
+      out of an ordinary handler, or a hand-on that could only fail later in the browser (a @ui.rows
+      handler, or a handler of the running handler's own state).

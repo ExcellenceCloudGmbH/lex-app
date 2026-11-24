@@ -105,6 +105,10 @@ def _record(fn: Callable[[Any], Any]) -> tuple[Any, set[str]]:
     return fn(_Recorder(rx.Var("row").to(dict), seen)), seen
 
 
+#: Column kinds whose filter is a date range instead of a dropdown of the column's values.
+_DATE_KINDS = ("date", "datetime")
+
+
 @dataclasses.dataclass(eq=False)
 class Table(Part):
     source: Any
@@ -217,11 +221,19 @@ class Table(Part):
         if self.filters:
             labels = {c.key: (c.label or c.key.replace("_", " ").capitalize()) for c in cols}
             boxes = []
+            dated = {c.key for c in cols if c.kind in _DATE_KINDS}
             for name in self.filters:
+                label = say(labels[name])
+                if name in dated:           # a date column is filtered by a range of days, not a list of every day
+                    boxes.append(rfds.date_range_picker(
+                        value=state.dates.get(name, {"start": "", "end": ""}).to(dict),
+                        on_change=lambda value, name=name: state.set_dates(name, value),
+                        label=label, name=f"filter_{name}", width="sm", recent_key=None))
+                    continue
                 options = state.choices.get(name, []).to(list[dict]) if choices is True else choices[name]
                 boxes.append(rfds.select(options=options, value=state.chosen.get(name, rows_table.ALL).to(str),
                                          on_change=lambda value, name=name: state.set_choice(name, value),
-                                         label=say(labels[name]), name=f"filter_{name}", width="sm"))
+                                         label=label, name=f"filter_{name}", width="sm"))
             filters = rfds.cluster(*boxes, gap="2")
         export = export_menu(on_export=state.export, kinds=("csv", "xlsx"), loading=state.exporting) if self.export else None
         if search is None and filters is None and export is None:
@@ -384,7 +396,9 @@ class Table(Part):
         state = rows_table.state_for(
             self.source, columns=specs, row_fields=sorted(fields),
             key_field=key, needed=needed, open_fields=tuple(open_fields), row_open=row_open,
-            tags_fields=tuple(c.key for c in cols if c.kind == "tags"), choice_fields=tuple(self.filters),
+            tags_fields=tuple(c.key for c in cols if c.kind == "tags"),
+            choice_fields=tuple(name for name in self.filters if kinds_by_key.get(name) not in _DATE_KINDS),
+            date_fields=tuple(name for name in self.filters if kinds_by_key.get(name) in _DATE_KINDS),
             search_fields=tuple(c.key for c in cols if c.kind in ("text", None, "status", "tag") and c.show is None),
             totals_spec=totals_spec, totals_currency=money[0].currency if money and self.totals else "",
             export_columns=_export_columns(cols),
@@ -472,7 +486,8 @@ def table(source: Any, *, columns: Any = (), key: str | None = None, where: dict
       ``ui.table(FundState.holdings, ...)`` -- a ``@ui.rows`` handler's list of dicts.
 
     What the user can do:
-      ``search=True`` a search box; ``filters=["kind"]`` a dropdown per column; ``export=True``
+      ``search=True`` a search box; ``filters=["kind", "created"]`` a filter per column - a dropdown of
+      its values, or a range of days for a ``date`` or ``datetime`` column; ``export=True``
       CSV and Excel of every matching row; ``open=`` a page (the row's key goes into its one
       argument, a real link), or the name of a field holding each row's ``ui.address`` (the row is
       a button that opens it); ``row_actions=lambda row: [ui.button(...)]``.
