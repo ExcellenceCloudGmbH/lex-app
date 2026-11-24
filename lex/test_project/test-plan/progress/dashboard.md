@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 113 | 855 | 829 | 3 | 0 |
+| 1. Init — Project Bootstrap | 114 | 926 | 836 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -137,6 +137,7 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1dj | lex.ui pages: the form kind -- fields, one submit, a result; a wizard; a tool | 1.842-1.846 | complete | 5 | 0 | 0 | the form page built from RFDS's page header, form and inputs; a tool with a job and a result; a wizard; load= and @ui.page; every build-time error. These tests fail on a field sent while the user types, a submit button that can be pressed twice, a result shown before there is one, or an error that does not say the page, the slot and what to write. |
 | 1dk | lex.ui: a button that asks first -- confirm=, ask= -- and that shows its handler running | 1.847-1.851 | complete | 5 | 0 | 0 | RFDS's confirmation and dialog opened from a button, one per button as written; a dangerous button must ask; ask= values checked like a form's; every button shows its handler running. These tests fail on a dangerous action that runs on one click, a dialog per table row, a reason reaching the handler unchecked, or a button pressable again while its handler runs. |
 | 1dl | lex.ui forms: a field where the user chooses several of a list of options | 1.852-1.855 | complete | 4 | 0 | 0 | `ui.field(kind="choices", options=...)`: RFDS's checkbox group up to 12 fixed options, its multi-select above or for options from the state; the handler gets a `list[str]` in the order of the options, `[]` for none, checked on the server; in a form, a step and a button's ask=; `ui.fact` shows the kind joined by commas. These tests fail on a text where a list was promised, a value that is no option reaching the body, a required field passing with nothing ticked, or a field that calls the server on every tick. |
+| 1dv | lex.ui: a result held privately on the server -- ui.private | 1.920-1.926 | complete | 7 | 0 | 0 | `_report: dict = ui.private(idle_minutes=, max_hours=, keep=)`: read and written like a backend field, kept in the server process's memory only, bound to the tab and the user who wrote it; gone after its idle time, its maximum age, a new visit (unless keep=True), another process or user; reading it then is a plain refusal; ui.testing seeds it and GONE. These tests fail on personal data in a state pickle or the browser, one user's value read by another, a value that outlives its limits, or a page that shows nothing or old data where the value was. |
 | 1e |  | 1.30-1.43 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |

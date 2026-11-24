@@ -139,6 +139,31 @@ async def resolve(state: Any) -> Session:
     return await _resolver(state)
 
 
+def _profile_user_id(state: Any) -> str:
+    from lex.lex_app.reflex import session
+
+    return User.from_profile(session.profile(workcopy.raw(state))).id
+
+
+_user_id_of: Callable[[Any], str] = _profile_user_id
+
+
+def set_user_id_of(fn: Callable[[Any], str] | None) -> Callable[[Any], str]:
+    """Replace how the signed-in user's id is found without waiting (tests); returns the previous."""
+    global _user_id_of
+    previous = _user_id_of
+    _user_id_of = fn or _profile_user_id
+    return previous
+
+
+def user_id_of(state: Any) -> str:
+    """The id of the user signed in on ``state``'s tab, found at once (a private value is bound to it)."""
+    try:
+        return str(_user_id_of(state) or "")
+    except Exception:  # noqa: BLE001 - nobody known: bound to nobody, so it matches no signed-in user
+        return ""
+
+
 @dataclasses.dataclass
 class Invocation:
     """One run of one handler."""

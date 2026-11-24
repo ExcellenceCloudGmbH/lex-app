@@ -3308,3 +3308,28 @@ kinds gains `choices`, and the message for options on a field that is no choice 
 | 1.853 | The field is RFDS's input for several and sends nothing while picking | checkbox group up to 12 fixed options, multi-select above or from the state; label, help, required mark, the server's message; `value=` a list or a state value; one event: the submit; compiled with Reflex's page compiler; in a step and in ask= |
 | 1.854 | A run hands the body the checked list | through Reflex's event processor and `ui.testing.run`: the list in option order; nothing ticked or no option is a message at the field and no run; a wizard's last step; a dialog's row key and list |
 | 1.855 | Several choices declared wrongly, and shown | no options, non-text options, a start that is no list, options on another kind, the kinds listed; `ui.fact(kind="choices")` joined by commas |
+
+### Batch 1dv — lex.ui: a result held privately on the server -- ui.private ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.920 – 1.926 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/private.py`, `lex/lex_app/reflex/ui/workcopy.py` (`fields_of`, `snapshot`, `restore`, `reset`, `Draft`), `lex/lex_app/reflex/ui/state.py` (`_ui_private`, `ui_open`), `lex/lex_app/reflex/ui/context.py` (`user_id_of`), `lex/lex_app/reflex/ui/testing.py` (`GONE`), `lex/lex_app/reflex/ui/runs.py` (the clock's sweep) |
+| Test file | `lex/test_project/tests/init/test_1dv_ui_private.py` |
+| Test classes | `TestCluster01dv_Private` (1.920–1.926) |
+| Fixtures | a neutral payroll state (a report not kept, a draft kept) |
+| Tests landed | **7 pass / 0 fail** |
+| Status | ✅ Complete |
+
+`ui.private` for personal data in a tool's result. What building settled is section 6.11 of `docs/superpowers/specs/2026-11-23-reflex-ui-action-state-layer-design.md`. Test 1.783 follows: `ui.private` is a public name.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.920 | The value stays in memory, never in a pickle or the browser | an action, a job and a table's rows read it; every state pickled as Reflex's Redis and disk managers do, the state as the browser gets it, and every update hold no part of it; only a stamp; nothing kept is the empty value |
+| 1.921 | Another user or another process never sees it | another user signed in on the tab is refused with the sentence and gets nothing; a process that never held it says the same; the page keeps what it had |
+| 1.922 | It leaves after its idle time and its maximum age | reads within the idle time keep it; past the maximum age or the idle time it is gone; the lex.ui clock drops it from memory; LEX_UI_PRIVATE_VALUES bounds memory, least recently used first |
+| 1.923 | A new visit drops it unless kept | the opener drops a value not kept (reading says so); keep=True stays; a load resets the one not kept and keeps the kept; a kept value that is gone is reset by the load: no error-page loop |
+| 1.924 | What the user sees when it is gone | an action and a job are refused with the sentence (toast; ui.failed for a job); a table's message is the sentence; a failed action leaves it gone, and restores a kept value |
+| 1.925 | ui.testing seeds and reads it like any field | fields= seeds it; result.fields reads it; ui.testing.GONE seeds a gone value and is what result.fields holds; GONE copies and pickles as itself |
+| 1.926 | A private field declared wrongly says what to write | a public name, no type, a plain Reflex state, a limit of 0 or True, keep= not a bool; the empty value from the type; neither a backend var nor a var |

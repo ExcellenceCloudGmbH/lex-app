@@ -42,6 +42,8 @@
 ``ui.goto/toast/download``  what a handler returns; ``ui.refresh(State.rows)`` makes the
                             tables of another state read again
 ``ui.progress``             what a job yields
+``ui.private``              a state field kept in the server's memory only, for its user, for a
+                            while: ``_report: dict = ui.private()``
 ``ui.Refuse``               an expected refusal, shown in its own words
 ``ui.ApiError``             lex-app's API refused a call (``.status``, ``.denied``,
                             ``.detail``); uncaught, it is shown to the user
@@ -88,6 +90,7 @@ from lex.lex_app.reflex.ui.pages.kinds import record, section
 from lex.lex_app.reflex.ui.pages.parts import PageError
 from lex.lex_app.reflex.ui.pages.tables import column, table
 from lex.lex_app.reflex.ui.pages.vocab import button, custom_block, each, fact, link, message, status, switch, text
+from lex.lex_app.reflex.ui.private import private
 from lex.lex_app.reflex.ui.results import Refuse, download, goto, progress, refresh, toast
 from lex.lex_app.reflex.ui.rows import rows
 from lex.lex_app.reflex.ui.runs import cancel, failed, loaded, progress_of, running
@@ -96,7 +99,7 @@ from lex.lex_app.reflex.ui.state import State
 __all__ = [
     "ApiError", "PageError", "Refuse", "State", "action", "address", "button", "cancel", "column",
     "create", "custom", "custom_block", "dashboard", "delete", "download", "each", "edit", "embed", "fact",
-    "failed", "field", "form", "goto", "job", "link", "load", "loaded", "message", "page", "permission", "progress",
+    "failed", "field", "form", "goto", "job", "link", "load", "loaded", "message", "page", "permission", "private", "progress",
     "progress_of", "read", "record", "reflex_page", "refresh", "rows", "running", "section", "signed_in", "status",
     "step", "switch", "table", "testing", "text", "toast",
 ]

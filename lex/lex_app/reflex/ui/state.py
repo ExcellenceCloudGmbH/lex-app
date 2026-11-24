@@ -111,6 +111,9 @@ class State(rx.State):
     _ui_started: list[str] = []
     #: Load id -> the token of its latest run in this tab; an older run on mount is stale.
     _ui_load_runs: dict[str, str] = {}
+    #: "State.field" -> the stamp of the value a ``ui.private`` field holds in the server's memory.
+    #: Only the stamp is part of the state: the value itself is never stored with it.
+    _ui_private: dict[str, str] = {}
 
     user = property(lambda self: context.current().session.user)
     api = property(lambda self: context.api_of(context.current()))
@@ -133,9 +136,10 @@ class State(rx.State):
         from lex.lex_app.reflex.ui import handlers
 
         self.ui_visit += 1
-        from lex.lex_app.reflex.ui import runs
+        from lex.lex_app.reflex.ui import private, runs
 
         await runs.sweep(self)
+        private.leave(str(self.router.session.client_token or ""))   # private values not kept across visits
         self.ui_invalid, self.ui_step, self.ui_done = {}, {}, {}      # a form starts over on a new visit
         self.ui_asking, self.ui_asking_args = "", []
         self._ui_page = page

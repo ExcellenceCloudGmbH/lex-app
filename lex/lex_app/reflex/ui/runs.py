@@ -266,11 +266,18 @@ async def _close(client: Any) -> None:
 
 @contextlib.asynccontextmanager
 async def heartbeat(app: Any):
-    """A lifespan task: while the backend runs, keep this process's heartbeat in Redis."""
+    """A lifespan task: while the backend runs, keep this process's heartbeat in Redis.
+
+    The same clock drops the ``ui.private`` values that are past their idle time or maximum age.
+    """
     global _CLIENT
 
     async def beat() -> None:
+        from lex.lex_app.reflex.ui import private
+
         while True:
+            with contextlib.suppress(Exception):
+                private.sweep()         # private values past their idle time or age leave memory
             try:
                 redis = _redis()
                 if redis is not None:

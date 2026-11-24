@@ -1613,3 +1613,21 @@ does not remove user launch configurations.
 | 1.855 | Several choices declared wrongly, and shown | no options, non-text options, a start that is no list, options on another kind, the kinds listed; `ui.fact(kind="choices")` joined by commas |
 
 **Scenario range:** 1.852 – 1.855. **Test file:** `lex/test_project/tests/init/test_1dl_ui_form_choices.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dl](batches.md).
+
+### 1dv. lex.ui: a result held privately on the server -- ui.private ✅
+
+**What it tests:** `ui.private()` -- a state field whose value stays in the server process's memory, bound to its tab and user, for a while; never in a state pickle or the browser; a plain refusal once it is gone.
+
+**Why a regression matters:** personal data in Redis or the browser, one user's value read by another, a value that outlives its limits, or a page that shows nothing or old data where it was.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.920 | The value stays in memory, never in a pickle or the browser | an action, a job and a table's rows read it; every state pickled as Reflex's Redis and disk managers do, the state as the browser gets it, and every update hold no part of it; only a stamp; nothing kept is the empty value |
+| 1.921 | Another user or another process never sees it | another user signed in on the tab is refused with the sentence and gets nothing; a process that never held it says the same; the page keeps what it had |
+| 1.922 | It leaves after its idle time and its maximum age | reads within the idle time keep it; past the maximum age or the idle time it is gone; the lex.ui clock drops it from memory; LEX_UI_PRIVATE_VALUES bounds memory, least recently used first |
+| 1.923 | A new visit drops it unless kept | the opener drops a value not kept (reading says so); keep=True stays; a load resets the one not kept and keeps the kept; a kept value that is gone is reset by the load: no error-page loop |
+| 1.924 | What the user sees when it is gone | an action and a job are refused with the sentence (toast; ui.failed for a job); a table's message is the sentence; a failed action leaves it gone, and restores a kept value |
+| 1.925 | ui.testing seeds and reads it like any field | fields= seeds it; result.fields reads it; ui.testing.GONE seeds a gone value and is what result.fields holds; GONE copies and pickles as itself |
+| 1.926 | A private field declared wrongly says what to write | a public name, no type, a plain Reflex state, a limit of 0 or True, keep= not a bool; the empty value from the type; neither a backend var nor a var |
+
+**Scenario range:** 1.920 – 1.926. **Test file:** `lex/test_project/tests/init/test_1dv_ui_private.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dv](batches.md).
