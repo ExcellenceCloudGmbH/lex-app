@@ -2520,10 +2520,10 @@ letters:
       `ui.field("notes", lines=6)`: RFDS's text area, that many rows high and as wide as the form, sending nothing while the user types; the handler gets a `str` with its line breaks, trimmed at the ends, in a form, a wizard step and a button's ask=; `lines=` on any other kind, or not a whole number of 2 or more, is refused with what to write. These tests fail on a pasted list squashed onto one line, a field that calls the server on every keystroke, or lines= silently ignored on a number.
   do:
     title: 'lex.ui: a state field named like a route argument stops the app at start-up, not the frontend build'
-    scenarios: 1.863-1.865
+    scenarios: 1.863-1.865, 1.916
     status: complete
     tests:
-      pass: 3
+      pass: 4
       skip: 0
       xfail: 0
     note: >-

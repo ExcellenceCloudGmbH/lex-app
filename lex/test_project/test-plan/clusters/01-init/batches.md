@@ -3360,13 +3360,13 @@ settled is in the `@ui.job` part of section 6.4 of `docs/superpowers/specs/2026-
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.863 – 1.865 |
+| Scenario range | 1.863 – 1.865, 1.916 |
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/state.py` (`check_app_routes`, `check_route_fields`), `lex/lex_app/reflex/app.py` (`create_app` docstring) |
 | Test file | `lex/test_project/tests/init/test_1do_ui_route_argument_fields.py` |
-| Test classes | `TestCluster01do_RouteArgumentFields` (1.863–1.865) |
+| Test classes | `TestCluster01do_RouteArgumentFields` (1.863–1.865, 1.916) |
 | Fixtures | a neutral regions state (lex.ui) and orders states (plain Reflex) |
-| Tests landed | **3 pass / 0 fail** |
+| Tests landed | **4 pass / 0 fail** |
 | Status | ✅ Complete |
 
 Reflex refuses a dynamic route argument named like a field or computed var of any state
@@ -3381,6 +3381,7 @@ such a collision.
 | 1.863 | A field named like a route argument stops the app with a sentence | a lex.ui field and computed var, a plain Reflex field, an inherited one; a page the app added, a declared one, an optional argument, a route without its leading slash: a `ValueError` naming the field, its state and module and the route, saying to rename the field; Reflex itself refuses each name |
 | 1.864 | What Reflex lets through starts | an argument named like a backend field, an event handler, a static part of a path, or nothing any state has: the app starts; Reflex lets each through too |
 | 1.865 | The route check runs before the pages are built | `ui.install` calls `check_app_routes`, which checks the state fields; a helper's name (`[user]`) is still refused first, with its own sentence |
+| 1.916 | A route argument named like a table's field says to rename the argument | a ui.table's own state (page, view_columns) seen at start-up: the sentence says to rename the route argument (/regions/[page_key]) and whose the field is, never to rename it; @ui.page pages are built before the check; 1.863's sentence now offers the argument first |
 
 ### Batch 1ds — lex.ui forms: a choice searched on the server ✅
 

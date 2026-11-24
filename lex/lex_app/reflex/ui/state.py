@@ -32,8 +32,11 @@ def check_route_fields(routes: list[str]) -> None:
     the page while any state -- a ``ui.State`` or a plain Reflex one -- has a field or a computed
     var of that name (``BaseState._check_overwritten_dynamic_args``). It finds out only when it
     adds the pages declared with a decorator, which is when it builds the frontend: this finds the
-    same collisions at start-up, among the states defined by then. A backend field (``_name``) or
-    an event handler of that name is not refused by Reflex, nor here.
+    same collisions at start-up, among the states defined by then -- the states of the tables of
+    every ``@ui.page`` included, since ``ui.install`` builds those pages first (a ``ui.embed`` in a
+    raw Reflex page is built only when Reflex compiles the page: Reflex finds those). A backend field
+    (``_name``) or an event handler of that name is not refused by Reflex, nor here. The sentence
+    says to rename the route argument, and the field only when it is the project's own.
     """
     from reflex.route import get_route_args
     from reflex.state import DynamicRouteVar
@@ -52,12 +55,25 @@ def check_route_fields(routes: list[str]) -> None:
                 computed = cls.computed_vars.get(name)
                 if name in cls.base_vars or (computed is not None and not isinstance(computed, DynamicRouteVar)):
                     what = "field" if name in cls.base_vars else "computed var"
+                    shown = '/' + route.lstrip('/')
+                    instead = f"Rename the route argument, e.g. {shown.replace(f'[{name}]', f'[{name}_key]')}"
+                    whose = _maker(cls.__module__)
+                    instead += (f". {cls.__name__} belongs to {whose} (a table's or a component's own state), and "
+                                f"its fields keep their names." if whose else f", or the field, e.g. {name}_value.")
                     raise ValueError(
-                        f"route {'/' + route.lstrip('/')!r}: its dynamic argument [{name}] has the name of the "
+                        f"route {shown!r}: its dynamic argument [{name}] has the name of the "
                         f"{what} {cls.__name__}.{name} (in {cls.__module__}). Reflex makes a route argument a value "
                         f"of every state, and does not build the app's pages while a state has a field of that "
-                        f"name. Rename the field, e.g. {name}_value."
+                        f"name. {instead}"
                     )
+
+
+def _maker(module: str) -> str:
+    """Who wrote a state of ``module`` when it is not the project: lex-app, RFDS or Reflex ('' for the project)."""
+    for prefix, name in (("lex.lex_app.", "lex-app"), ("rfds", "RFDS"), ("reflex", "Reflex")):
+        if module == prefix.rstrip(".") or module.startswith(prefix):
+            return name
+    return ""
 
 
 def check_app_routes(app: Any) -> None:

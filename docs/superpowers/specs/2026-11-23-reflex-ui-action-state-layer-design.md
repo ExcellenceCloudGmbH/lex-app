@@ -235,7 +235,12 @@ field `region`): Reflex refuses that collision too, but only when it adds the de
 builds the frontend -- after the project's tests have passed. The check mirrors Reflex's own
 (`BaseState._check_overwritten_dynamic_args`: a field or a computed var other than a route argument's own, on any
 state; not a backend field, not an event handler), names the field, its state and the route, and says to rename
-the field. Added 2026-11-24 (batch 1do). Outside a handler body the helpers
+the route argument (`/regions/[page_key]`) -- and the field only when it is the project's own: a field of a
+state lex-app, RFDS or Reflex made (a table's `page`, `sort`, `query`, `view_columns`, `column_order`,
+`column_widths`) cannot be renamed by the author, so the sentence says whose it is instead (review,
+2026-11-24). The tables of every `@ui.page` are built before the check (`ui.install` builds the declared
+pages first), so their states are seen; a `ui.embed` in a raw Reflex page is built only when Reflex
+compiles that page, and Reflex's own check finds those. Added 2026-11-24 (batch 1do). Outside a handler body the helpers
 raise a `RuntimeError` saying where they work.
 
 ### 6.3 Data access
