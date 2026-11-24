@@ -1720,8 +1720,9 @@ does not remove user launch configurations.
 | 1.945 | A totals row says what it sums and can sum every row | "Total", "Total of matching rows", "Total of all rows"; mixing refused |
 | 1.946 | A table with all of it compiles | Reflex's page compiler |
 | 1.953 | A total of every row is one table option, read once | totals={...: "sum"}, totals_of_all=True over a handler that searches itself: Total of all rows while searching, every row read once and not on each keystroke; the old "sum of all rows" sentence, totals_of_all without totals, and a non-bool refused with what to write |
+| 1.954 | The pager shows only when the rows do not fit one page | rows and model tables, default and page_size=200: no always-on pager; RFDS's pagination with its rows-per-page choice under a condition on total_rows > page_size; page_size=None refused saying to write page_size=200; 1.943 now checks 1-200 |
 
-**Scenario range:** 1.940 – 1.946, 1.953. **Test file:** `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dy](batches.md).
+**Scenario range:** 1.940 – 1.946, 1.953, 1.954. **Test file:** `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dy](batches.md).
 
 ### 1dz. lex.ui pages: a section closed until the user opens it, saying how many rows it holds ✅
 

@@ -11,7 +11,7 @@ whether it sums the rows the search left or every row. A regression is a name th
 a row that cannot be reached, a width that only breaks in the browser, a user's column choice
 that hides the row's name, or a total that silently changes meaning when the user searches.
 
-Cluster 1dy -- scenarios 1.940-1.946, 1.953. Type: U.
+Cluster 1dy -- scenarios 1.940-1.946, 1.953, 1.954. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/tables.py (column kind="name"/"code", pin=; table page_size=,
 choose_columns=, totals=), lex/lex_app/reflex/ui/pages/rows_table.py (page size, totals over all
 rows, their label), lex/lex_app/reflex/data.py (ChosenColumns, the model table's page size).
@@ -179,50 +179,44 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
         self.assertIn("column_chooser", model, "a model table offers the Columns menu too")
 
     # -- 1.943 ---------------------------------------------------------
-    def test_1_943_page_size_sets_the_rows_a_page_and_none_shows_every_row(self) -> None:
+    def test_1_943_page_size_sets_the_rows_a_page_up_to_every_row(self) -> None:
         """
         Scenario 1.943: page_size=.
-        Given: rows tables with page_size=50, page_size=None and none given; model tables with
-               page_size=None; and page sizes that are not a number of rows up to 200.
+        Given: rows tables with page_size=50, page_size=200 and none given; a model table with
+               page_size=200; and page sizes that are not a number of rows from 1 to 200.
         When:  they are built.
         Then:  50 opens at 50 rows, among the sizes the user can pick; none given is 25 as before;
-               None opens at 200 -- RFDS's limit for a table in the browser -- without the rows
-               per page picker, and with RFDS's pagination only while there are more rows than
-               that; a model table does the same; a wrong size is refused with what to write.
+               200 opens at 200 -- RFDS's limit for a table in the browser, every row of a file in
+               one scroll; a model table does the same; a wrong size is refused with what to write
+               (the pager is 1.954's).
         """
         fifty, _ = built(ui.table(CustomersState.customers, columns=["name"], page_size=50))
-        default, default_text = built(ui.table(CustomersState.customers, columns=["name", "code"]))
-        every, every_text = built(ui.table(CustomersState.customers, columns=["name", "region"], page_size=None))
+        default, _ = built(ui.table(CustomersState.customers, columns=["name", "code"]))
+        every, _ = built(ui.table(CustomersState.customers, columns=["name", "region"], page_size=200))
+
         def opens_at(state: type) -> int:
             return state.get_fields()["page_size"].default
 
         self.assertEqual((opens_at(fifty), 50 in fifty.page_size_options), (50, True), "50 a page, and offered")
         self.assertEqual(opens_at(default), 25, "the default stays 25 a page")
-        self.assertIn("rfds-pager", default_text, "a paged table has RFDS's pager")
         self.assertEqual(opens_at(every), 200, "every row: as many as RFDS lets a table hold in the browser")
-        self.assertNotIn('"data-slot":"rfds-pager-size"', every_text, "no rows per page picker")
-        self.assertIn(".total_rows", every_text, "the pagination depends on the number of rows")
-        self.assertIn("rfds-pagination", every_text, "RFDS's pagination, for more than 200 rows")
-
-        groups = ui.table(Group, columns=["name"], page_size=None)
-        model = str(groups.build(Build(page="groups", route="/groups", caption="Groups")))
+        groups = ui.table(Group, columns=["name"], page_size=200)
+        groups.build(Build(page="groups", route="/groups", caption="Groups"))
         self.assertEqual(opens_at(rows_table._CACHE_BY_TABLE[id(groups)]), 200, "a model table the same way")
-        self.assertNotIn('"data-slot":"rfds-pager-size"', model, "without the rows per page picker")
-
-        for wrong in (0, 201, "all", True, 2.5):
-            with self.assertRaisesRegex(ValueError, r"page_size=\) takes a number of rows up to 200, or None"):
+        for wrong in (0, 201, "all", True, 2.5, None):
+            with self.assertRaisesRegex(ValueError, r"page_size=\) takes a number of rows from 1 to 200"):
                 ui.table(CustomersState.customers, columns=["name"], page_size=wrong)
 
     # -- 1.944 ---------------------------------------------------------
     def test_1_944_every_row_in_one_scroll_and_past_200_the_rest_is_still_reached(self) -> None:
         """
-        Scenario 1.944: reading a table with page_size=None.
+        Scenario 1.944: reading a table with page_size=200.
         Given: a file of 150 rows, then one of 250.
         When:  the table appears, and the user moves to the next page of the second.
         Then:  the 150 rows are on one page; of the 250, the first 200 are on the first page and
                the last 50 on the next: no row is out of reach.
         """
-        state, _ = built(ui.table(CustomersState.customers, columns=["name", "amount"], page_size=None))
+        state, _ = built(ui.table(CustomersState.customers, columns=["name", "amount"], page_size=200))
 
         async def scenario():
             async with testing.Harness(user="ada") as h:
@@ -308,7 +302,7 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
         Then:  the module is built, with RFDS's sticky column, column chooser and pagination.
         """
         page = ui.list(title="Customers", table=ui.table(
-            CustomersState.customers, search=True, choose_columns=True, page_size=None,
+            CustomersState.customers, search=True, choose_columns=True, page_size=200,
             totals={"amount": "sum"}, totals_of_all=True,
             columns=[ui.column("name", kind="name", pin=True), ui.column("code", kind="code"),
                      ui.column("amount", kind="money", currency="currency")]))
@@ -356,3 +350,28 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
         self.assertIn("`totals_of_all=True` and no `totals=`", str(raised.exception))
         with self.assertRaisesRegex(TypeError, r"ui.table\(totals_of_all=\) takes True or False"):
             ui.table(CustomersState.customers, totals={"amount": "sum"}, totals_of_all="yes", columns=["name"])
+
+    # -- 1.954 ---------------------------------------------------------
+    def test_1_954_the_pager_shows_only_when_the_rows_do_not_fit_one_page(self) -> None:
+        """
+        Scenario 1.954: `page_size=` is a number; the pager comes when it is needed.
+        Given: rows and model tables with the default page size, and `page_size=200`; the old
+               `page_size=None`.
+        When:  they are built and Reflex compiles them.
+        Then:  no table carries RFDS's always-on pager; each has RFDS's pagination, with its
+               rows-per-page choice, shown only while there are more rows than a page holds;
+               `page_size=None` is refused saying to write `page_size=200`.
+        """
+        for table, ctx in ((ui.table(CustomersState.customers, columns=["name"]), CTX),
+                           (ui.table(CustomersState.customers, columns=["name"], page_size=200), CTX),
+                           (ui.table(Group, columns=["name"]), Build(page="groups", route="/groups", caption="Groups"))):
+            with self.subTest(table=table.page_size, source=str(table.source)):
+                text = str(table.build(ctx))
+                self.assertNotIn('"data-slot":"rfds-pager-size"', text, "no pager when every row fits")
+                self.assertIn("rfds-pagination", text, "RFDS's pagination")
+                self.assertRegex(text, r"\.total_rows_rx_state_ > [\w.]+\.page_size_rx_state_",
+                                 "shown only while the rows do not fit one page")
+                self.assertIn("Rows per page", text, "with its rows-per-page choice")
+        with self.assertRaisesRegex(ValueError, r"page_size=\) takes a number of rows from 1 to 200; got None\. "
+                                                r"For every row on one page write page_size=200"):
+            ui.table(CustomersState.customers, columns=["name"], page_size=None)

@@ -27,7 +27,7 @@ _FIELD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _KIND_WIDTH = {"name": "var(--rfds-size-field-md)", "code": "var(--rfds-size-field-xs)"}
 #: What ``totals=`` does with a column: its sum (``totals_of_all=True``: of every row, not the matching ones).
 TOTALS = ("sum",)
-#: The most rows RFDS lets a table hold in the browser (DA-09): ``page_size=None`` shows up to this many.
+#: The most rows RFDS lets a table hold in the browser (DA-09): the largest ``page_size=``.
 MAX_PAGE = 200
 
 
@@ -139,7 +139,7 @@ class Table(Part):
     export: bool = False
     totals: dict | None = None
     row_actions: Callable[[Any], Any] | None = None
-    page_size: int | None = 25
+    page_size: int = 25
     choose_columns: bool = False
     totals_of_all: bool = False
 
@@ -291,18 +291,22 @@ class Table(Part):
                                   density_toggle=False, result_count=state.total_rows)
 
     def _paging(self, state: Any) -> dict[str, Any]:
-        """The data table's paging and column choice: RFDS's pager, or every row with a pager only past 200."""
+        """The data table's paging and column choice.
+
+        RFDS's pagination, with its rows-per-page choice, only while the rows do not fit one page:
+        a table whose rows all fit shows no pager and no choice that would change nothing.
+        """
         import rfds
 
         props: dict[str, Any] = {}
         if self.choose_columns:
             props.update(visible_columns=state.view_columns, column_order=state.column_order,
                          column_widths=state.column_widths)
-        if self.page_size is None:
-            props["pager"] = False
-            props["footer"] = rx.cond(state.total_rows > state.page_size, rfds.pagination(
-                page=state.page, page_count=state.page_count, on_page_change=state.set_page,
-                page_size=state.page_size, total=state.total_rows))
+        props["pager"] = False
+        props["footer"] = rx.cond(state.total_rows > state.page_size, rfds.pagination(
+            page=state.page, page_count=state.page_count, on_page_change=state.set_page,
+            page_size=state.page_size, page_size_options=tuple(state.page_size_options),
+            on_page_size_change=state.set_page_size, total=state.total_rows))
         return props
 
     def _row_actions(self, ctx: Build) -> Any:
@@ -395,7 +399,7 @@ class Table(Part):
         if self.row_actions is not None:
             used |= _record(self.row_actions)[1]
         state = data.table_state(model, columns=specs, search_field=search_field, filters=self.where,
-                                 page_size=MAX_PAGE if self.page_size is None else self.page_size,
+                                 page_size=self.page_size,
                                  row_fields=tuple(sorted(used)), choice_fields=tuple(self.filters),
                                  scope_fields=tuple(dict(self.where or {})))
         rows_table._CACHE_BY_TABLE[id(self)] = state
@@ -469,7 +473,7 @@ class Table(Part):
                                 and c.show is None),
             totals_spec=totals_spec, totals_currency=money[0].currency if money and self.totals else "",
             totals_of_all=bool(self.totals_of_all),
-            page_size=MAX_PAGE if self.page_size is None else self.page_size,
+            page_size=self.page_size,
             export_columns=_export_columns(cols),
             export_kinds={label: _EXPORT_KIND[kinds_by_key[field]] for field, label in _export_columns(cols)
                           if kinds_by_key.get(field) in _EXPORT_KIND},
@@ -547,7 +551,7 @@ def _renderer(ctx: Build, c: Column) -> Callable[[Any], rx.Component] | None:
 def table(source: Any, *, columns: Any = (), key: str | None = None, where: dict | None = None, open: Any = None,
           search: bool = False, filters: Any = (), export: bool = False, totals: dict | None = None,
           row_actions: Callable[[Any], Any] | None = None, empty: Any = None, visible: Any = None,
-          page_size: int | None = 25, choose_columns: bool = False, totals_of_all: bool = False) -> Table:
+          page_size: int = 25, choose_columns: bool = False, totals_of_all: bool = False) -> Table:
     """Rows from a model, or from a ``@ui.rows`` handler, paged on the server and read as the user.
 
     Where the rows come from:
@@ -566,9 +570,9 @@ def table(source: Any, *, columns: Any = (), key: str | None = None, where: dict
       the first column always shows and stays first; kept until the tab is closed).
 
     What lex-app does by itself:
-      25 rows a page (``page_size=50`` another number, up to 200; ``page_size=None`` every row in
-      one scroll, up to 200 -- RFDS's limit for a table in the browser -- with a pager only past
-      that), sorting by column, loading rows, the error in place, ``empty=`` when there are no
+      25 rows a page (``page_size=50`` another number, up to 200, RFDS's limit for a table in the
+      browser: ``page_size=200`` for every row of a file in one scroll), a pager with a choice of
+      rows per page only while the rows do not fit one page, sorting by column, loading rows, the error in place, ``empty=`` when there are no
       rows, "No rows match" with a way to clear the search; ``totals={"amount": "sum"}`` adds a
       totals row over every matching row (``totals_of_all=True``: over every row, whatever the
       search and filters leave), one per currency; while a search or filter is on, its label says
@@ -592,10 +596,9 @@ def table(source: Any, *, columns: Any = (), key: str | None = None, where: dict
                         "row_actions=lambda row: [ui.button(\"Approve\", State.approve, row[\"id\"])]")
     if key is not None and not (isinstance(key, str) and _FIELD.fullmatch(key)):
         raise ValueError(f"ui.table(key=) names the field that tells rows apart; got {key!r}")
-    if page_size is not None and (isinstance(page_size, bool) or not isinstance(page_size, int)
-                                  or not 1 <= page_size <= MAX_PAGE):
-        raise ValueError(f"ui.table(page_size=) takes a number of rows up to {MAX_PAGE}, or None for every row in one "
-                         f"scroll (up to {MAX_PAGE}, RFDS's limit for a table in the browser); got {page_size!r}")
+    if isinstance(page_size, bool) or not isinstance(page_size, int) or not 1 <= page_size <= MAX_PAGE:
+        raise ValueError(f"ui.table(page_size=) takes a number of rows from 1 to {MAX_PAGE}; got {page_size!r}. For "
+                         f"every row on one page write page_size={MAX_PAGE}, RFDS's limit for a table in the browser.")
     if not isinstance(totals_of_all, bool):
         raise TypeError(f"ui.table(totals_of_all=) takes True or False; got {totals_of_all!r}. "
                         "`totals_of_all=True` sums every row, whatever the search and filters leave.")

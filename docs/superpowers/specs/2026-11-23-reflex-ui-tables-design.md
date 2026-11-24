@@ -382,7 +382,7 @@ different widths, columns the user sizes, a file's rows in one scroll, a totals 
 it sums. Each is RFDS's own feature, exposed with the fewest new words:
 
 ```python
-ui.table(CustomersState.customers, page_size=None, choose_columns=True,
+ui.table(CustomersState.customers, page_size=200, choose_columns=True,
          totals={"amount": "sum"}, totals_of_all=True,
          columns=[ui.column("name", kind="name", pin=True), ui.column("code", kind="code"),
                   "region", ui.column("amount", kind="money", currency="currency")])
@@ -409,13 +409,19 @@ ui.table(CustomersState.customers, page_size=None, choose_columns=True,
   (RFDS's range), and the first column always shown and first, because it names the row and is
   its link. It lasts until the tab is closed; saving it needs RFDS's saved views and a store (not
   added). Name: like `search=`, `filters=` and `export=`, it names what the user gets.
-- **Every row: `page_size=None`, up to 200.** RFDS's rule DA-09: at most 200 rows reach the
-  browser in a data table (`DataTableMixin.page_size_options` must be 1-200). `page_size=None`
-  opens the table at 200 rows in one scroll, without the rows-per-page picker; past 200, RFDS's
-  `pagination` appears below the table, so no row is out of reach. More than 200 rows in one
-  scroll is RFDS's AG Grid (virtualised), a different engine; not added. `page_size=50` sets the
-  rows a page (1-200), offered with 25, 50, 100 and 200. Name: `page_size`, as `lex_table()` and
-  RFDS's state call it; `rows_per_page=` and `paged=False` were considered.
+- **Every row: `page_size=200`.** RFDS's rule DA-09: at most 200 rows reach the browser in a data
+  table (`DataTableMixin.page_size_options` must be 1-200). `page_size=50` sets the rows a page
+  (1-200), offered with 25, 50, 100 and 200; `page_size=200` shows every row of a file in one scroll.
+  More than 200 rows in one scroll is RFDS's AG Grid (virtualised), a different engine; not added.
+  Name: `page_size`, as `lex_table()` and RFDS's state call it; `rows_per_page=` and `paged=False`
+  were considered.
+- **The pager comes only when it is needed** (review, 2026-11-24). The first build had
+  `page_size=None` meaning "200, no rows-per-page picker, a pager only past 200" -- a second way to
+  write 200, with its own pager rule. Now every lex.ui table, rows or model, draws RFDS's
+  `pagination` (with its rows-per-page choice) under the table only while there are more rows than
+  a page holds, instead of RFDS's always-on pager: a table whose rows all fit shows neither, since
+  neither would change anything. `page_size=None` is refused: "For every row on one page write
+  page_size=200".
 - **A totals row says what it sums.** `totals={"amount": "sum"}` totals the rows the search and
   filters leave, as before; `totals_of_all=True` beside it totals every row the handler returns,
   whatever the user narrows (a migrated page had a total over all rows, with a note saying so).
