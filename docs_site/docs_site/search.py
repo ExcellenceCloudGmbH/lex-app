@@ -78,21 +78,26 @@ class SearchState(rx.State):
                 for e in find(build_index(), self.query)]
 
 
+#: the search box's id: Ctrl/Cmd+K focuses it (layout._hotkeys)
+INPUT_ID = "docs-search-input"
+
+
 def box() -> rx.Component:
     return rx.box(
         rx.input(
+            rx.input.slot(rfds.icon("search", size="sm"), side="left"),
             rx.input.slot(
                 rx.cond(
                     SearchState.query != "",
                     rfds.icon_button("x", label="Clear search", size="sm", tooltip=False,
                                      on_click=SearchState.clear),
-                    rx.fragment(),
+                    rx.el.kbd("Ctrl K", class_name="docs-kbd", custom_attrs={"aria-hidden": "true"}),
                 ),
                 side="right",
             ),
             placeholder="Search the docs", value=SearchState.query, on_change=SearchState.set_query,
-            on_key_down=SearchState.key, width=rx.breakpoints(initial="150px", sm="260px"),
-            aria_label="Search",
+            on_key_down=SearchState.key, width=rx.breakpoints(initial="132px", sm="220px", lg="280px"),
+            aria_label="Search", id=INPUT_ID, custom_attrs={"aria-keyshortcuts": "Control+K Meta+K"},
         ),
         rx.cond(
             SearchState.results.length() > 0,
@@ -101,15 +106,14 @@ def box() -> rx.Component:
                     rx.vstack(rx.text(r["title"], weight="medium", size="2"),
                               rx.text(r["heading"], size="1", color_scheme="gray"), spacing="0"),
                     href=r["href"], underline="none", on_click=SearchState.clear, display="block",
-                    padding="6px 8px", border_radius="var(--radius-2)", _hover={"background": "var(--gray-a3)"})),
+                    padding="6px 8px", border_radius="8px")),
                 ),
-                aria_label="Search results",
+                aria_label="Search results", class_name="docs-results",
                 position="absolute", top="100%", right="0", z_index="50", width="320px", max_width="90vw",
-                background="var(--color-panel-solid)", border="1px solid var(--gray-a5)",
-                border_radius="var(--radius-3)", padding="8px", list_style="none", margin="4px 0 0 0",
+                border_radius="12px", padding="8px", list_style="none", margin="6px 0 0 0",
                 box_shadow="var(--shadow-4)",
             ),
             rx.fragment(),
         ),
-        position="relative",
+        position="relative", class_name="docs-search",
     )

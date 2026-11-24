@@ -81,13 +81,24 @@ def test_rendering_a_page_twice_runs_its_code_once():
     assert docs_site._t_g_runs == [1]
 
 
-def test_the_demo_frame_is_bordered_and_the_card_has_a_reset_button():
+def test_a_demo_card_has_preview_and_code_tabs_and_the_toolbar():
+    """The toolbar: Preview / Code tabs (both panes stay mounted, so switching keeps the example as
+    the reader left it), and "Viewing as" Editor/Viewer and Reset on the right; a demo-only card has
+    no Code tab."""
+    from docs_site.layout import _STYLE
     from docs_site.render.live import demo_card
 
     card = str(demo_card("1", rx.text("hi")))
-    assert "1px solid var(--gray-a6)" in card
-    assert "var(--radius-3)" in card
-    assert "Reset sample data" in card
+    assert '"aria-label":"Live example"' in card and "docs-demo-bar" in card
+    assert 'jsx(RadixThemesTabs.Trigger,{className:"docs-demo-tab",value:"preview"},"Preview")' in card
+    assert 'jsx(RadixThemesTabs.Trigger,{className:"docs-demo-tab",value:"code"},"Code")' in card
+    assert card.count("forceMount:true") == 2 and 'defaultValue:"preview"' in card
+    assert '"aria-label":"Viewing as"' in card and '"Viewing as"' in card
+    assert '"aria-label":"Reset sample data"' in card and '"Reset"' in card
+    assert _STYLE["& .docs-demo-pane[data-state='inactive']"]["display"] == "none"
+    assert _STYLE["& .docs-demo-frame"]["padding"] == "22px"
+    only = str(demo_card(None, rx.text("hi")))
+    assert "RadixThemesTabs" not in only and "docs-demo-tab-static" in only and '"Reset sample data"' in only
 
 
 def test_reset_empties_the_tab_and_rereads_the_page_tables():

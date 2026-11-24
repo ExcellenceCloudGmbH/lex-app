@@ -63,16 +63,28 @@ def test_the_current_page_is_highlighted_and_only_its_section_open(compiled):
     out = _page(slug)
     current = re.findall(r'"aria-current":"page",asChild:true,className:"docs-nav-link".{0,400}?to:"([^"]+)"', out)
     assert current == ["/pages/record"], current
-    opened = re.findall(r'open:true\},jsx\("summary",\{className:"docs-nav-summary"\},jsx\("span",\{\},"([^"]+)"', out)
+    opened = re.findall(r'open:true\},jsx\("summary",\{className:"docs-nav-summary"\}.{0,400}?'
+                        r'className:"docs-nav-title"\},"([^"]+)"', out)
     assert opened == ["Pages"], opened
     assert out.count("open:false") == len(nav.NAV) - 1
+    # each section's button carries its icon and its page count; the chevron turns when open
+    assert out.count('className:"docs-nav-icon"') == len(nav.NAV)
+    assert 'className:"docs-nav-count"},"7"' in out
+    from docs_site.layout import _STYLE
+
+    assert _STYLE["& .docs-nav-section[open] > .docs-nav-summary .docs-nav-chevron"]["transform"] == "rotate(90deg)"
+    current_style = _STYLE["& .docs-nav-link[aria-current='page']"]
+    assert current_style["border_left_color"] == "var(--docs-accent)" and current_style["background"] == "var(--docs-pill-bg)"
 
 
 def test_a_page_has_breadcrumbs_actions_and_previous_next_cards(compiled):
     out = _page("pages/record")
     assert 'rfdsI18n.t("breadcrumbs.label", "Breadcrumb"' in out
     assert 'className:"rfds-breadcrumbs-current"},"ui.record"' in out
-    assert "Copy page" in out and "View Markdown" in out and "/md/pages/record.md" in out
+    assert "Copy page" in out and '"Markdown"' in out and "/md/pages/record.md" in out
+    # the two page actions are one joined group, as the design draws them
+    assert '"aria-label":"Page actions"' in out and 'role:"group"' in out
+    assert '"aria-label":"View this page as Markdown"' in out
     assert '"Previous"' in out and '"Next"' in out and "docs-pager-card" in out
     # the first page has no "Previous" card, only an empty cell keeping "Next" on the right
     first = _page(nav.ordered()[0])
@@ -98,31 +110,101 @@ def test_the_header_has_a_colour_mode_toggle(compiled):
     assert "toggleColorMode" in out and "resolvedColorMode" in out
 
 
-def test_the_header_is_light_page_coloured_through_tokens():
-    """RFDS's chrome band and lex-app's header paint take the page's colour and grays, so the
-    header is light in light mode and dark in dark mode."""
+def test_the_header_has_the_section_tabs_and_the_current_one_marked(compiled):
+    """Guide / Components / API reference: Components is the Pages section (lex.ui's page kinds and
+    parts), API reference the reference section, Guide the landing; the tab of the page's section is marked."""
+    import re
+
+    from docs_site import layout
+
+    def tabs(slug: str) -> list[tuple[str, str, bool]]:
+        out = str(layout._header(slug))
+        return [(label, href, bool(cur)) for cur, href, label in re.findall(
+            r'RadixThemesLink,\{("aria-current":"true",)?asChild:true,className:"docs-tab".{0,200}?to:"([^"]+)"\},"([^"]+)"',
+            out)]
+
+    reference = next(sec for sec in nav.NAV if sec.slug == "reference").groups[0].pages[0]
+    assert tabs("pages/record") == [("Guide", "/", False), ("Components", "/pages/ui-page", True),
+                                    ("API reference", "/" + reference, False)]
+    assert [cur for _, _, cur in tabs("get-started/first-dashboard")] == [True, False, False]
+    assert [cur for _, _, cur in tabs(nav.ordered()[-1])] == [False, False, True]
+    assert [cur for _, _, cur in tabs("index")] == [True, False, False]
+    out = str(layout._header("index"))
+    assert '"aria-label":"Sections"' in out and '"dashboards"' in out and "docs-mark" in out
+    # the search box keeps its name and shows its shortcut; the shortcut is registered on every page
+    assert '"aria-label":"Search"' in out and '"Ctrl K"' in out and 'id:"docs-search-input"' in out
+    assert "palette.open" in _page("pages/record") or "mod+K" in _page("pages/record")
+
+
+def test_the_header_is_page_coloured_through_the_sites_tokens():
+    """RFDS's chrome band and lex-app's header paint take the site's tokens, so the header is light
+    (translucent, blurred) in light mode and dark in dark mode; it is 60px high."""
     from docs_site.layout import _STYLE
 
-    assert "var(--color-background)" in _STYLE["--lex-header-bg"]
-    assert _STYLE["--rfds-color-chrome-bg"] == "var(--color-background)"
-    assert _STYLE["--rfds-color-chrome-fg"] == "var(--gray-12)"
-    assert "var(--gray-a5)" in _STYLE["--lex-header-shadow"]
+    assert _STYLE["--lex-header-bg"] == "var(--docs-header)"
+    assert _STYLE["--rfds-color-chrome-bg"] == "var(--docs-bg)"
+    assert _STYLE["--rfds-color-chrome-fg"] == "var(--docs-ink)"
+    assert "var(--docs-border)" in _STYLE["--lex-header-shadow"]
+    assert _STYLE["--rfds-size-shell-header"] == "60px"
+    assert "blur(" in _STYLE["& .rfds-header"]["backdrop_filter"]
 
 
-def test_no_hardcoded_colours_in_the_sites_python():
-    """Colours are Radix/RFDS tokens only, so both colour modes read well."""
+def test_every_colour_token_has_a_light_and_a_dark_value_and_follows_the_colour_mode():
+    """One token set per mode, in theme.py; the frame carries the light set and, under Reflex's
+    ``.dark`` class, the dark one. Every var(--docs-x) the frame uses is a token that exists."""
+    import re
+
+    from docs_site import theme
+    from docs_site.layout import _STYLE
+
+    assert set(theme.LIGHT) == set(theme.DARK)
+    assert _STYLE["--docs-bg"] == theme.LIGHT["bg"]
+    assert _STYLE[".dark &"]["--docs-bg"] == theme.DARK["bg"]
+    used = set(re.findall(r"var\(--docs-([a-z-]+)\)", repr(_STYLE) + repr(theme.CODE_THEME)))
+    assert used and used <= set(theme.LIGHT) | {"mono", "sidebar-w", "toc-w"}, used - set(theme.LIGHT)
+
+
+def test_callout_tones_meet_contrast_in_both_modes():
+    """Each callout's text on its background is at least 4.5:1, light and dark (WCAG 1.4.3)."""
+    from docs_site import theme
+
+    def luminance(hex_colour: str) -> float:
+        channels = [int(hex_colour[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        lin = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+    def ratio(a: str, b: str) -> float:
+        hi, lo = sorted((luminance(a), luminance(b)), reverse=True)
+        return (hi + 0.05) / (lo + 0.05)
+
+    for palette in (theme.LIGHT, theme.DARK):
+        for tone in theme.TONES:
+            assert ratio(palette[f"{tone}-ink"], palette[f"{tone}-bg"]) >= 4.5, tone
+        assert ratio(palette["muted"], palette["bg"]) >= 4.5
+        assert ratio(palette["link"], palette["bg"]) >= 4.5
+        assert ratio(palette["pill-ink"], palette["pill-bg"]) >= 4.5
+
+
+def test_colours_are_written_only_in_the_token_module():
+    """Every colour value lives in docs_site/theme.py (one set per mode); the rest of the site's
+    Python says var(--docs-...) or uses Radix/RFDS tokens, so both colour modes read well."""
     import re
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1] / "docs_site"
-    files = sorted(root.glob("*.py")) + sorted((root / "render").glob("*.py"))
-    found = []
+    files = sorted(root.glob("*.py")) + sorted((root / "render").glob("*.py")) + sorted((root / "sandbox").glob("*.py"))
+    colour = re.compile(r"#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\(")
+    found, in_theme = [], 0
     for path in files:
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            code = re.sub(r"(^|\s)#(?![0-9a-fA-F]{3,6}\b).*$", "", line)    # drop comments
-            if re.search(r"#[0-9a-fA-F]{3,6}\b", code) or "rgb(" in code:
-                found.append(f"{path.name}:{n}: {line.strip()}")
+            code = re.sub(r"(^|\s)#(?![0-9a-fA-F]{3,8}\b).*$", "", line)    # drop comments
+            if colour.search(code):
+                if path.name == "theme.py":
+                    in_theme += 1
+                else:
+                    found.append(f"{path.name}:{n}: {line.strip()}")
     assert files and not found, found
+    assert in_theme > 20        # the palettes are there
 
 
 def test_the_app_module_sets_django_up_as_lex_apps_own_does():

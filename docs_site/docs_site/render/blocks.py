@@ -1,7 +1,8 @@
-"""reflex-docgen's blocks as components in lex-app's look (RFDS components and tokens)."""
+"""reflex-docgen's blocks as components in the site's look (RFDS components, the site's tokens)."""
 
 import reflex as rx
 import rfds
+from reflex_components_code.code import Theme
 from reflex_docgen.markdown import (
     CodeBlock, DirectiveBlock, Document, HeadingBlock, ListBlock, QuoteBlock, TableBlock, TextBlock,
     ThematicBreakBlock,
@@ -9,11 +10,58 @@ from reflex_docgen.markdown import (
 from reflex_docgen.markdown.transformer import DocumentTransformer
 
 from docs_site.content import Page, plain, unique_anchor
+from docs_site.theme import CODE_THEME
 
 _HEADING_SIZE = {1: "7", 2: "6", 3: "4", 4: "3"}
 #: room above a heading, on top of the 16px between blocks: a heading starts a new part of the page
-_HEADING_SPACE = {1: "24px", 2: "24px", 3: "12px", 4: "4px"}
-_TONE = {"info": "info", "success": "success", "warning": "warning", "danger": "danger", "error": "danger"}
+_HEADING_SPACE = {1: "24px", 2: "32px", 3: "16px", 4: "4px"}
+_TONE = {"info": "info", "note": "info", "success": "success", "tip": "success", "warning": "warning",
+         "danger": "danger", "error": "danger"}
+#: a callout's icon, and the name it gives the callout for a screen reader
+_TONE_ICON = {"info": ("info", "Note"), "success": ("circle_check", "Tip"),
+              "warning": ("triangle_alert", "Warning"), "danger": ("octagon_alert", "Danger")}
+#: rx.code_block accepts no "text"-like language, so plain text is highlighted as "log"
+_PLAIN = (None, "", "text", "txt", "plaintext")
+_CODE_THEME = rx.Var.create(CODE_THEME).to(Theme)
+
+
+def fence_title(flags: tuple[str, ...]) -> str | None:
+    """A fence's file name: ```python title=funds/state.py```."""
+    for flag in flags:
+        if flag.startswith(("title=", "file=")):
+            return flag.split("=", 1)[1].strip("\"'") or None
+    return None
+
+
+def highlighted(code: str, language: str | None) -> rx.Component:
+    """The code alone, highlighted in the site's colours (theme.CODE_THEME), on no background of its own."""
+    return rx.code_block(code, language="log" if language in _PLAIN else language, theme=_CODE_THEME,
+                         show_line_numbers=False, can_copy=False,
+                         code_tag_props={"style": {"fontFamily": "var(--docs-mono)"}})
+
+
+def code_figure(code: str, language: str | None, title: str | None = None) -> rx.Component:
+    """A code block: a header strip with an icon and the file name (or the language) and a copy
+    button, over the code."""
+    text = code.rstrip("\n")
+    label = title or (language if language not in _PLAIN else "text")
+    head = rx.el.figcaption(
+        rx.el.span(rfds.icon("file_text" if title else "code", size="sm"), label, class_name="docs-code-label"),
+        rfds.icon_button("copy", label="Copy code", tooltip=False, size="sm", on_click=rx.set_clipboard(text),
+                         class_name="docs-code-copy"),
+        class_name="docs-code-head",
+    )
+    return rx.el.figure(head, highlighted(text, language), class_name="docs-code")
+
+
+def callout(content: rx.Component, tone: str) -> rx.Component:
+    """A ```md alert``` block: a tinted panel with the tone's icon (info, success, warning, danger)."""
+    icon, name = _TONE_ICON[tone]
+    return rx.el.div(
+        rx.el.span(rfds.icon(icon, size="md", label=name), class_name="docs-callout-icon"),
+        rx.el.div(content, class_name="docs-callout-body"),
+        class_name=f"docs-callout docs-callout-{tone}", custom_attrs={"role": "note"},
+    )
 
 
 class LexDocTransformer(DocumentTransformer[rx.Component]):
@@ -69,35 +117,31 @@ class LexDocTransformer(DocumentTransformer[rx.Component]):
         return rx.separator()
 
     def code_block(self, block: CodeBlock) -> rx.Component:
-        if self.live and block.language == "python" and block.flags:
-            return self.live_block(block)
-        # rx.code_block accepts no "text"-like language, so plain text gets "log"
-        language = block.language if block.language not in (None, "", "text", "txt", "plaintext") else "log"
-        return rx.code_block(block.content.rstrip("\n"), language=language,
-                             show_line_numbers=False, can_copy=True)
+        kinds = [f for f in block.flags if "=" not in f]
+        if self.live and block.language == "python" and kinds:
+            return self.live_block(block, kinds[0])
+        return code_figure(block.content, block.language, fence_title(block.flags))
 
-    def live_block(self, block: CodeBlock) -> rx.Component:
+    def live_block(self, block: CodeBlock, kind: str) -> rx.Component:
         from docs_site.render.live import demo_card, to_component
 
-        kind = block.flags[0]
         if kind == "exec":
             self.module.run(block.content)
             return rx.fragment()
         if kind in ("demo", "demo-only"):
             self._demos += 1
             shown = to_component(self.module.value(block.content), f"{self.page.slug}#{self._demos}")
-            return demo_card(None if kind == "demo-only" else block.content, shown)
+            return demo_card(None if kind == "demo-only" else block.content, shown,
+                             title=fence_title(block.flags))
         raise ValueError(f"{self.page.slug}: ```python {kind}``` is not a fence this site knows "
                          "(exec, demo, demo-only)")
 
     def directive(self, block: DirectiveBlock) -> rx.Component:
         if not self.live:
-            return rx.code_block(block.content.rstrip("\n"), language="markdown",
-                                 show_line_numbers=False, can_copy=True)
+            return code_figure(block.content, "markdown")
         if block.name == "alert":
             tone = _TONE.get(block.args[0] if block.args else "info", "info")
-            return rfds.inline_message(rx.vstack(*self.transform_blocks(block.children), spacing="2"),
-                                       tone=tone)
+            return callout(rx.fragment(*self.transform_blocks(block.children)), tone)
         if block.name == "tabs":
             return self._tabs(block)
         raise ValueError(f"{self.page.slug}: no ```md {block.name}``` directive on this site "
@@ -132,7 +176,7 @@ class LexDocTransformer(DocumentTransformer[rx.Component]):
         return rx.text(*self.transform_spans(span.children), as_="s")
 
     def code_span(self, span) -> rx.Component:
-        return rx.code(span.code)
+        return rx.el.code(span.code, class_name="docs-code-span")
 
     def link(self, span) -> rx.Component:
         return rx.link(*self.transform_spans(span.children), href=span.target,

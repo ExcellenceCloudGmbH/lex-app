@@ -45,6 +45,8 @@ class SampleData(rx.State):
 
 
 def button() -> rx.Component:
-    return rfds.tooltip(rfds.button("Reset sample data", intent="tertiary", size="sm", icon="rotate-ccw",
-                                    on_click=SampleData.reset_sample_data),
+    """"Reset", named "Reset sample data" for a screen reader; the tooltip says what it does."""
+    return rfds.tooltip(rfds.button("Reset", intent="secondary", size="sm", icon="rotate-ccw",
+                                    on_click=SampleData.reset_sample_data, class_name="docs-demo-reset",
+                                    custom_attrs={"aria-label": "Reset sample data"}),
                         content=HELP)
