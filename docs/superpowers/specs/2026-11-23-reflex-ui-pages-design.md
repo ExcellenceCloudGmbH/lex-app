@@ -498,6 +498,7 @@ Built on 2026-11-24 after a spike against RFDS 1.0.0 (`ui.form`, `ui.field`, `ui
   | `year` | `text_input`, numeric, four digits | `int` | `None` |
   | `bool` | `checkbox` | `bool` (`required=True`: must be ticked) | `False` |
   | `choice` | `select` up to 12 fixed options; else `combobox` | `str`, one of the options | `None` |
+  | `choices` | `checkbox_group` up to 12 fixed options; else `multi_select` | `list[str]`, in the order of the options | `[]` |
 
 - **Nothing reaches the server while the user types.** Text, number, year and date-time inputs are
   uncontrolled (`default_value`); RFDS's controlled inputs (money, percent, date, box, choice) hold
@@ -540,7 +541,7 @@ Built on 2026-11-24 after a spike against RFDS 1.0.0 (`ui.form`, `ui.field`, `ui
 - **Every button shows its handler running**, not only a row's button: an action's or a job's button
   is loading while it has a run.
 - **`kind=` is one list for showing and for entering.** `ui.fact` now takes `date`, `year` (no
-  thousands separator), `bool` (the words Yes and No) and `choice` too.
+  thousands separator), `bool` (the words Yes and No), `choice` and `choices` (joined by commas) too.
 - **A choice among many is a type-ahead box over a list the page holds; a server-searched choice is
   not built.** `options=` takes a list, a dict of value to wording, or a field of the handler's own
   state (filled by the page's load), checked against that field on the server. RFDS's `combobox`
@@ -548,6 +549,12 @@ Built on 2026-11-24 after a spike against RFDS 1.0.0 (`ui.form`, `ui.field`, `ui
   would be a sixth handler kind or a generated state per field, for one input. Left out rather than
   half built: a choice among thousands loads its options with the page (RFDS's own guidance is server
   search above 200 and a value-help dialog above 1,000).
+- **Several of a list is `kind="choices"`, the same field as a choice.** It takes `options=` as a choice does
+  and gives the handler a `list[str]` in the order of the options, `[]` when none is chosen; `required=True` means
+  at least one ("Choose at least one."), and a value that is no option is refused at the field ("Choose from the
+  options."). The input follows RFDS's own rule, at the same line as the dropdown: its checkbox group up to 12
+  options, its multi-select above them or for options from the state. *Cost:* none chosen is `[]`, not `None`; no
+  `max=`.
 - **A file field is not built** (`kind="file"` says to use `ui.custom_block`).
 - **A new visit starts every form over**: the opener clears the messages, the wizard steps, the
   results and an open dialog.

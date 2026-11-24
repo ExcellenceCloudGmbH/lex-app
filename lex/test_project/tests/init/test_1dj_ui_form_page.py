@@ -296,13 +296,14 @@ class TestCluster01dj_FormPage(SimpleTestCase):
                       "The handler finds each value under its field's key: give each field its own."),
             "kind": (dict(fields=[ui.field("colour", kind="colour")]),
                      "Page `new_invoice`, slot `fields`: field `colour` has the kind `colour`.\n`kind=` is one of text, "
-                     "number, money, percent, date, datetime, year, bool, choice."),
+                     "number, money, percent, date, datetime, year, bool, choice, choices."),
             "file": (dict(fields=[ui.field("scan", kind="file")]),
                      "Page `new_invoice`, slot `fields`: field `scan` is a file.\nA file field is not built yet: an "
                      "upload is a `ui.custom_block(..., reason=\"...\")`."),
             "options": (dict(fields=[ui.field("amount", kind="money", options=["1", "2"])]),
                         "Page `new_invoice`, slot `fields`: field `amount` has `options=` and the kind `money`.\n"
-                        "Only a choice has options: leave `kind=` out, or write `kind=\"choice\"`."),
+                        "Only a choice has options: leave `kind=` out for one of them, or write "
+                        "`kind=\"choices\"` for several."),
             "choice": (dict(fields=[ui.field("status", kind="choice")]),
                        "Page `new_invoice`, slot `fields`: field `status` is a choice without `options=`.\n"
                        "Give what can be chosen: `options=[\"open\", \"closed\"]`, or "

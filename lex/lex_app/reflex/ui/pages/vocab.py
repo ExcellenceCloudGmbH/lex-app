@@ -12,7 +12,7 @@ from lex.lex_app.reflex.ui.pages.parts import Build, NotASentence, Part, called,
 
 TONES = ("neutral", "info", "success", "warning", "danger")
 #: What a value can be, for display and for input alike (a form's fields take the same words).
-KINDS = ("text", "number", "money", "percent", "date", "datetime", "year", "bool", "choice")
+KINDS = ("text", "number", "money", "percent", "date", "datetime", "year", "bool", "choice", "choices")
 
 
 def _tone(tone: str) -> str:
@@ -34,6 +34,10 @@ def shape(value: Any, kind: str, currency: Any = None) -> Any:
 
     if kind in ("text", "choice"):
         return value
+    if kind == "choices":               # several chosen: "north, south"
+        if isinstance(value, rx.Var):
+            return value.to(list[str]).join(", ")
+        return ", ".join(str(one) for one in value or ())
     if kind == "year":                  # a year is not a quantity: no thousands separator
         return value.to(str) if isinstance(value, rx.Var) else str(value)
     if kind == "bool":
@@ -94,7 +98,8 @@ def fact(label: Any, value: Any, *, kind: str = "text", currency: Any = None, vi
     ``currency=``, a code such as ``"EUR"`` or a state value; else the home currency),
     ``"percent"`` (a ratio: 0.6 shows 60%), ``"date"``, ``"datetime"`` (an instant with its time
     zone, shown in the user's), ``"year"`` (no thousands separator), ``"bool"`` (Yes or No),
-    ``"choice"`` or ``"text"`` (shown as they are). A form's fields take the same words.
+    ``"choice"`` or ``"text"`` (shown as they are), ``"choices"`` (a list, shown joined by commas).
+    A form's fields take the same words.
     """
     if kind not in KINDS:
         raise ValueError(f"kind= must be one of {', '.join(KINDS)}; got {kind!r}")

@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 851
+max_scenario: 855
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2488,3 +2488,13 @@ letters:
       xfail: 0
     note: >-
       RFDS's confirmation and dialog opened from a button, one per button as written; a dangerous button must ask; ask= values checked like a form's; every button shows its handler running. These tests fail on a dangerous action that runs on one click, a dialog per table row, a reason reaching the handler unchecked, or a button pressable again while its handler runs.
+  dl:
+    title: 'lex.ui forms: a field where the user chooses several of a list of options'
+    scenarios: 1.852-1.855
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.field(kind="choices", options=...)`: RFDS's checkbox group up to 12 fixed options, its multi-select above or for options from the state; the handler gets a `list[str]` in the order of the options, `[]` for none, checked on the server; in a form, a step and a button's ask=; `ui.fact` shows the kind joined by commas. These tests fail on a text where a list was promised, a value that is no option reaching the body, a required field passing with nothing ticked, or a field that calls the server on every tick.

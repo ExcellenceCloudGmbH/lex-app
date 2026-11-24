@@ -165,4 +165,4 @@ class TestCluster01dh_FormValues(SimpleTestCase):
         with self.assertRaises(ValueError) as unknown:
             ui.fact("Colour", "red", kind="colour")
         self.assertEqual(str(unknown.exception), "kind= must be one of text, number, money, percent, date, datetime, "
-                                                 "year, bool, choice; got 'colour'")
+                                                 "year, bool, choice, choices; got 'colour'")
