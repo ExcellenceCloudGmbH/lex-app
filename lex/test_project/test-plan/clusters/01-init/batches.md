@@ -3677,13 +3677,13 @@ What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-refl
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.974 – 1.976 |
+| Scenario range | 1.974 – 1.977 |
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/pages/frame.py` (`opened=`, `OpenedPage`, `page_opened`), `lex/lex_app/reflex/ui/state.py` (`ui_open`), `lex/lex_app/reflex/ui/handlers.py` (load wind-up, `register_page`) |
 | Test file | `lex/test_project/tests/init/test_1ee_ui_page_opened.py` |
-| Test classes | `TestCluster01ee_PageOpened` (1.974–1.976) |
+| Test classes | `TestCluster01ee_PageOpened` (1.974–1.977) |
 | Fixtures | neutral orders, reports and regions pages; the frame's registries emptied per test |
-| Tests landed | **3 pass / 0 fail** |
+| Tests landed | **4 pass / 0 fail** |
 | Status | ✅ Complete |
 
 What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
@@ -3693,3 +3693,4 @@ What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-refl
 | 1.974 | The project's function runs after the loads and never holds the page | not before the load; the load finishes while it waits; route, address, state title, area, values; worker thread |
 | 1.975 | Not for a refused or failed page, and a failure is only logged | a page without loads at once; a rule-refused page and a failed load not; a raising function logged with the route |
 | 1.976 | The function is checked when the frame is configured | text, one argument and async refused with what to write |
+| 1.977 | A reconnect of the same page does not open it again | with the frame's opened= and the review's same visit: a reconnect runs the page's load again but calls the function once a visit; a link to the same page is a new opening; a page without loads likewise |

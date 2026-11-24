@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 976
+max_scenario: 977
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2650,10 +2650,10 @@ letters:
       `ui.frame(denied=, request_access=)` words RFDS's access-denied notice on refused pages and /ui-error; `@ui.rule` in `requires=` on pages and handlers, asked on the server on a worker thread once per event, failing closed. These tests fail on a refused page that strands the user, lex-app's sentence where the project gave one, a rule the browser decides, a rule asked twice per event, or a rule that fails open.
   ee:
     title: 'lex.ui frame: a project''s function runs when a page has opened -- ui.frame(opened=)'
-    scenarios: 1.974-1.976
+    scenarios: 1.974-1.977
     status: complete
     tests:
-      pass: 3
+      pass: 4
       skip: 0
       xfail: 0
     note: >-

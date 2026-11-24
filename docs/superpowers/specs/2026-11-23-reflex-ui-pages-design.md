@@ -871,7 +871,9 @@ since the look is lex-app's (section 8).
   as it stands after the load), `page.area`, `page.params`. For a "recently used" list or an audit
   entry. It runs after the page's required loads succeeded (at once on a page without them), on a
   worker thread, not awaited: the page never waits for it. A failure is logged, never shown. It is not
-  called for a refused page or one whose load failed.
+  called for a refused page or one whose load failed. It is called once a visit: when the socket
+  reconnects on the same page (section 6.18's same visit), the page's loads run again but it is not
+  called again.
 - **A project's rule in `requires=`: `@ui.rule`.** `requires=` took lex-app's permissions; a project
   also has rules of its own ("only the team of the order's region"). A function of the user and the
   page's values, marked `@ui.rule`, is accepted wherever `requires=` is -- `@ui.page` and every

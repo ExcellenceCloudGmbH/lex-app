@@ -141,8 +141,14 @@ async def page_opened(state: Any, route: str, address: str, session: Any = None)
     """Hand the page ``route`` -- now shown -- to the project's ``opened`` function, without waiting for it.
 
     Called by the opener and by a page's last required load, holding the user's lock: it reads the
-    page's title from the state and starts the call on a worker thread.
+    page's title from the state and starts the call on a worker thread. Once a visit: a reconnect of
+    the same page (its loads run again) is not a new opening.
     """
+    visit = getattr(state, "ui_visit", None)
+    if visit is not None:
+        if getattr(state, "_ui_opened", 0) == visit:
+            return
+        state._ui_opened = visit
     hook = current().opened
     if hook is None:
         return

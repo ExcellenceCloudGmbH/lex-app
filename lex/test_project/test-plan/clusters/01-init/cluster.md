@@ -1815,8 +1815,9 @@ does not remove user launch configurations.
 | 1.974 | The project's function runs after the loads and never holds the page | not before the load; the load finishes while it waits; route, address, state title, area, values; worker thread |
 | 1.975 | Not for a refused or failed page, and a failure is only logged | a page without loads at once; a rule-refused page and a failed load not; a raising function logged with the route |
 | 1.976 | The function is checked when the frame is configured | text, one argument and async refused with what to write |
+| 1.977 | A reconnect of the same page does not open it again | with the frame's opened= and the review's same visit: a reconnect runs the page's load again but calls the function once a visit; a link to the same page is a new opening; a page without loads likewise |
 
-**Scenario range:** 1.974 – 1.976. **Test file:** `lex/test_project/tests/init/test_1ee_ui_page_opened.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ee](batches.md).
+**Scenario range:** 1.974 – 1.977. **Test file:** `lex/test_project/tests/init/test_1ee_ui_page_opened.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ee](batches.md).
 
 ### 1dv. lex.ui: a result held privately on the server -- ui.private ✅
 

@@ -7,7 +7,7 @@ not awaited -- and its failure is the project's to read in the log, never the us
 is a page that waits for the bookkeeping, a page left broken by it, an entry for a page the user
 was refused or that failed to load, or a recently-used entry without the record's name.
 
-Cluster 1ee -- scenarios 1.974-1.976. Type: U.
+Cluster 1ee -- scenarios 1.974-1.977. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/frame.py (opened=, OpenedPage, page_opened),
 lex/lex_app/reflex/ui/state.py (ui_open), lex/lex_app/reflex/ui/handlers.py (load wind-up, register_page).
 Run: python -m lex pytest lex/test_project/tests/init/test_1ee_ui_page_opened.py -v
@@ -73,7 +73,7 @@ async def _until(condition, failure: str) -> None:
 
 
 class TestCluster01ee_PageOpened(FrameCase):
-    """1.974-1.976: after the loads, with the record's name; not for a refused or failed page; checked."""
+    """1.974-1.977: after the loads, with the record's name; not for a refused or failed page; checked; once a visit."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -183,3 +183,53 @@ class TestCluster01ee_PageOpened(FrameCase):
             with self.assertRaises(TypeError, msg=repr(wrong)) as caught:
                 ui.frame(opened=wrong)
             self.assertIn("(user, page)", str(caught.exception))
+
+    # -- 1.977 ---------------------------------------------------------
+    def test_1_977_a_reconnect_of_the_same_page_does_not_open_it_again(self) -> None:
+        """
+        Scenario 1.977: opened= and the same visit (merge of the frame with the review's reconnect fix).
+        Given: ui.frame(opened=remember); the order page with a load, and the list without one.
+        When:  anna opens /orders/7; the socket drops and Reflex reconnects (``hydrate`` and the page's
+               ``on_load`` again, on a new connection, for the same address), so the load runs again;
+               then anna follows a link to the same page; then she opens /orders and it reconnects.
+        Then:  remember is called once for the visit and the reconnect -- though the load ran again --
+               and again for the link, which is a new visit; the list without loads likewise once
+               for its visit and its reconnect.
+        """
+        import reflex as rx
+
+        GATE["hook"].set()
+        ui.frame(opened=remember)
+
+        def at(url: str, route: str, query: dict, sid: str) -> dict:
+            return {"pathname": route, "asPath": url, "query": query, "sid": sid}
+
+        async def visit(harness, url, route, query, sid, *, reconnect: bool) -> int:
+            if reconnect:
+                await (await harness.send(rx.State, "hydrate", _router_data=at(url, route, query, sid)))
+            await (await harness.send(State, "ui_open", page=route, _router_data=at(url, route, query, sid)))
+            await asyncio.sleep(0.1)
+            return (await harness.fields(State))["ui_visit"]
+
+        async def scenario():
+            async with testing.Harness(user="anna", params={"key": "7"}) as harness:
+                await harness.open_tab("/orders/7")
+                GATE["load"].set()
+                first = await visit(harness, "/orders/7", "/orders/[key]", {"key": "7"}, "socket-1", reconnect=True)
+                await harness.set_fields(OpenedOrderState, name="")
+                again = await visit(harness, "/orders/7", "/orders/[key]", {"key": "7"}, "socket-2", reconnect=True)
+                reloaded = (await harness.fields(OpenedOrderState))["name"]
+                calls_after_reconnect = len(OPENED)
+                linked = await visit(harness, "/orders/7", "/orders/[key]", {"key": "7"}, "socket-2", reconnect=False)
+                calls_after_link = len(OPENED)
+                await visit(harness, "/orders", "/orders", {}, "socket-3", reconnect=True)
+                await visit(harness, "/orders", "/orders", {}, "socket-4", reconnect=True)
+                return first, again, reloaded, calls_after_reconnect, linked, calls_after_link
+
+        first, again, reloaded, after_reconnect, linked, after_link = asyncio.run(scenario())
+        self.assertEqual(again, first, "the reconnect is the same visit")
+        self.assertEqual(reloaded, "Order 7", "whose load ran again")
+        self.assertEqual(after_reconnect, 1, "yet the page was opened once")
+        self.assertEqual((linked, after_link), (first + 1, 2), "a link to the same page is a new opening")
+        self.assertEqual([entry[1] for entry in OPENED], ["/orders/[key]", "/orders/[key]", "/orders"],
+                         "the list without loads: once for its visit and its reconnect")

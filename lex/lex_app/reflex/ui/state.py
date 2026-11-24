@@ -200,6 +200,9 @@ class State(rx.State):
     #: new connection is Reflex reconnecting, not a new visit.
     _ui_location: str = ""
     _ui_connection: str = ""
+    #: The visit (``ui_visit``) the project's ``ui.frame(opened=)`` was last called for: a reconnect of
+    #: the same visit runs its loads again but does not open the page again.
+    _ui_opened: int = 0
     _ui_reset: list[str] = []
     #: The ids of the loads the opener started that have not begun yet: a load not listed here
     #: was started on mount.
