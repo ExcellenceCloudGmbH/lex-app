@@ -3609,3 +3609,27 @@ The calculation page kind of section 6.19 of `docs/superpowers/specs/2026-11-23-
 | 1.982 | A user the model does not let create is refused above the button | no record; the refusal in ui_refused of the form's handler; the browser stays |
 | 1.983 | With Celery on the run goes to a worker and the page does not wait | dispatched once, never in-process; the record IN_PROGRESS; the browser already at the run |
 | 1.984 | self.api.calculate and self.api.log are the grid's Calculate and log | [] before a run; IN_PROGRESS at once; the run's Markdown log after; its newest line |
+
+### Batch 1eg — lex.ui calculation pages: one run, followed until it ends -- its result, its error, its log ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.985 – 1.990 |
+| Type | E |
+| Files covered | `lex/lex_app/reflex/ui/pages/calculation.py` (the run's view, the result written with the model's fields), `lex/lex_app/reflex/ui/calculations.py` (`open`, `follow`, `error_words`, `newest_line`) |
+| Test file | `lex/test_project/tests/init/test_1eg_ui_calculation_run.py` |
+| Test classes | `TestCluster01eg_CalculationRun` (1.985–1.990) |
+| Fixtures | the 1ef models and `_ui_calc_aids.Session`; lex-app's log cache left running (`e2e_unpatch`); a recorded worker whose report is lex-app's own task success callback |
+| Tests landed | **6 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Second piece of the calculation page (section 6.19 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`). Found while building: lex-app answers a record outside the reader's permission_read with 404, so the page says "There is no run N." for both.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.985 | The run's view shows the model's fields as the run's values | compiles; a field alone is a fact with the model's label; no descriptor reaches the page; badge, progress that follows, error, log; another model's field refused |
+| 1.986 | A run in lex-app's process is followed until it ends | IN_PROGRESS then SUCCESS; the newest logged line or Running as progress; the run's values and log; the following ends by itself |
+| 1.987 | A run on a worker is followed until the worker reports | still IN_PROGRESS and followed while the worker has not reported; SUCCESS and the worker's values after its success callback |
+| 1.988 | A failed run shows its error in its own words | ERROR; the exception's text without the traceback; the failed run's log kept |
+| 1.989 | A run the reader may not read is no run to them | nothing of the run in the state; the error page says There is no run N., as for a missing key |
+| 1.990 | Leaving stops the watching, never the run | the follow job ends on a new visit; the run still ends in SUCCESS |

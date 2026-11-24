@@ -86,8 +86,19 @@ class Session:
         """The browser opens ``url`` on this page: the opener runs, and with it the page's load."""
         from lex.lex_app.reflex.ui.state import State
 
+        from lex.lex_app.reflex.ui import handlers, runs
+
         await self.harness.navigate(url)
         await (await self.harness.send(State, "ui_open", page=urlsplit(url).path))
+        entry = handlers.page_of(urlsplit(url).path)
+        keys = [runs.key_of(load) for load in (entry.required if entry else ())]
+
+        async def loaded() -> bool:
+            seen = await self.harness.fields(State)
+            return seen["ui_error"] != {} or all(seen["ui_loaded"].get(key) or seen["ui_failed"].get(key)
+                                                 for key in keys)
+
+        await self.until(loaded, f"the page's load never finished on {url}")
 
     async def until(self, condition: Any, failure: str, seconds: float = 10) -> None:
         deadline = time.monotonic() + seconds

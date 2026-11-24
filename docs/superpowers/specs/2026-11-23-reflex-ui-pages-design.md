@@ -892,8 +892,11 @@ grid's log panel shows), else "Running". A project that wants a message per phas
 | `ABORTED` | "The calculation was interrupted: lex-app found it unfinished after a restart. Start it again." |
 | a log exists | a closed section "Log" with the run's log, rendered as the grid renders it (Markdown, by RFDS's `safe_markdown`), whatever the status |
 
-A run the user may not read is the error page with lex-app's refusal (the run's load reads it through
-the API, as the user); a key that is no run says so ("There is no run 42.").
+The run's load reads it through the API, as the user. A run the reader may not read is, to them, no
+run: lex-app answers a record outside the reader's `permission_read` as one that does not exist, and
+the page says the same as for a key that is no run, on lex-app's error page: "There is no run 42."
+(found while building 1eg: the refusal is a 404, not a 403, so nothing tells a reader that the run
+exists). The run's log is lex-app's: a failed atomic run's lines are kept from lex-app's log cache.
 
 **The past runs are a `ui.table` over the model: `history=ui.table(RegionReport, columns=[...])`.** All
 of a table's words work (`search=`, `filters=`, `page_size=`, `choose_columns=`); lex-app adds the run's

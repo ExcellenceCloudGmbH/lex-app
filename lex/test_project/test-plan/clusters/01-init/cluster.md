@@ -1811,3 +1811,20 @@ does not remove user launch configurations.
 | 1.984 | self.api.calculate and self.api.log are the grid's Calculate and log | [] before a run; IN_PROGRESS at once; the run's Markdown log after; its newest line |
 
 **Scenario range:** 1.980 – 1.984. **Test file:** `lex/test_project/tests/init/test_1ef_ui_calculation_start.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1ef](batches.md).
+
+### 1eg. lex.ui calculation pages: one run, followed until it ends -- its result, its error, its log ✅
+
+**What it tests:** a calculation page's run view: following a run with Celery off and on, its result with the model's fields, its error, its log, a reader the model refuses, leaving.
+
+**Why a regression matters:** a page that says running for ever, a result shown before the run ended, a traceback shown to a user, or a run shown to a reader the model refuses.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.985 | The run's view shows the model's fields as the run's values | compiles; a field alone is a fact with the model's label; no descriptor reaches the page; badge, progress that follows, error, log; another model's field refused |
+| 1.986 | A run in lex-app's process is followed until it ends | IN_PROGRESS then SUCCESS; the newest logged line or Running as progress; the run's values and log; the following ends by itself |
+| 1.987 | A run on a worker is followed until the worker reports | still IN_PROGRESS and followed while the worker has not reported; SUCCESS and the worker's values after its success callback |
+| 1.988 | A failed run shows its error in its own words | ERROR; the exception's text without the traceback; the failed run's log kept |
+| 1.989 | A run the reader may not read is no run to them | nothing of the run in the state; the error page says There is no run N., as for a missing key |
+| 1.990 | Leaving stops the watching, never the run | the follow job ends on a new visit; the run still ends in SUCCESS |
+
+**Scenario range:** 1.985 – 1.990. **Test file:** `lex/test_project/tests/init/test_1eg_ui_calculation_run.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1eg](batches.md).

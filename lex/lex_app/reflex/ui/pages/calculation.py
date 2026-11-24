@@ -15,8 +15,8 @@ import reflex as rx
 
 from lex.lex_app.reflex.ui import calculations as runtime
 from lex.lex_app.reflex.ui import guard
-from lex.lex_app.reflex.ui.pages import forms, kinds
-from lex.lex_app.reflex.ui.pages.parts import Build, called, say, shown
+from lex.lex_app.reflex.ui.pages import forms, kinds, vocab
+from lex.lex_app.reflex.ui.pages.parts import Build, Part, called, say, shown
 
 #: The fields of every lex-app model and of every calculation, which a form does not set.
 _MANAGED = ("is_calculated", "created_at", "created_by", "edited_at", "edited_by")
@@ -27,6 +27,52 @@ def _settable(model: Any) -> dict:
     return {field.name: field for field in model._meta.concrete_fields
             if field.editable and not field.primary_key and not field.auto_created and field.name not in _MANAGED
             and not field.name.startswith("_")}
+
+
+#: A run's status as its badge says it: the words, and RFDS's tone.
+_BADGES = {
+    runtime.NOT_CALCULATED: ("Not started", "neutral"), runtime.IN_PROGRESS: ("Running", "info"),
+    runtime.SUCCESS: ("Done", "success"), runtime.ERROR: ("Failed", "danger"),
+    runtime.CANCELLED: ("Stopped", "neutral"), runtime.ABORTED: ("Interrupted", "warning"),
+}
+
+
+def _field_of(value: Any) -> Any:
+    """The Django field ``value`` names when it is a model's field as the class holds it (``Model.name``)."""
+    from django.db import models
+
+    if isinstance(value, (type, rx.Var, Part)) or not hasattr(value, "__get__"):
+        return None
+    field = getattr(value, "field", None)
+    return field if isinstance(field, models.Field) and getattr(field, "model", None) is not None else None
+
+
+def _whole(field: Any) -> bool:
+    from django.db import models
+
+    return isinstance(field, (models.IntegerField, models.BigIntegerField, models.SmallIntegerField,
+                              models.PositiveIntegerField, models.PositiveSmallIntegerField, models.AutoField))
+
+
+def _kind(field: Any) -> str:
+    """How a fact shows the model's ``field``: the kind its Django field implies."""
+    from django.db import models
+
+    if isinstance(field, models.BooleanField):
+        return "bool"
+    if _whole(field) or isinstance(field, (models.DecimalField, models.FloatField)):
+        return "number"
+    if isinstance(field, models.DateTimeField):
+        return "datetime"
+    if isinstance(field, models.DateField):
+        return "date"
+    return "text"
+
+
+def _shown_kind(one: Any, field: Any) -> str:
+    """How the run's view shows an input: as its form field's kind, a choice as the value chosen."""
+    kind = one.is_a
+    return "text" if kind in ("choice", "choices") else kind
 
 
 def _needed(field: Any) -> bool:
@@ -80,13 +126,93 @@ class Calculation(kinds.Kind):
         form = forms.Form(self.title, None, self.fields, self.steps, self.state.calculate, (), self.actions)
         return shown(ctx, form._page(ctx), guard.create(self.model))
 
-    def _run(self, ctx: Build) -> rx.Component:
-        """One run, as it stands."""
+    def _value(self, field: Any) -> Any:
+        """This run's value of the model's ``field``, typed for how it is shown."""
+        value = self.state.run[field.name]
+        kind = _kind(field)
+        if kind == "number":
+            return value.to(int) if _whole(field) else value.to(float)
+        return value.to(bool) if kind == "bool" else value.to(str)
+
+    def _swap(self, ctx: Build, value: Any, top: bool = False) -> Any:
+        """``value`` with each of the model's fields (``RegionReport.orders``) made this run's value of it.
+
+        ``top``: a slot's own item, where a field alone is a fact with the model's label.
+        """
+        field = _field_of(value)
+        if field is not None:
+            if field.model is not self.model and not issubclass(self.model, field.model):
+                raise ctx.fail(f"`{field.model.__name__}.{field.name}` is a field of {field.model.__name__}; this page is "
+                               f"about {self.model.__name__}.",
+                               f"A run's value is written as the model's field: `{self.model.__name__}.<field>`. For "
+                               f"records of another model, give the section a `ui.table({field.model.__name__}, "
+                               f"where={{...: {self.model.__name__}.id}})`.")
+            if top:
+                return vocab.Fact(str(field.verbose_name).capitalize(), self._value(field), _kind(field))
+            return self._value(field)
+        if isinstance(value, Part) and dataclasses.is_dataclass(value):
+            changed = {one.name: self._swap(ctx, getattr(value, one.name)) for one in dataclasses.fields(value)
+                       if one.init}
+            return dataclasses.replace(value, **changed)
+        if isinstance(value, (list, tuple)):
+            return type(value)(self._swap(ctx, one, top) for one in value)
+        if isinstance(value, dict):
+            return {key: self._swap(ctx, one) for key, one in value.items()}
+        return value
+
+    def _result(self, ctx: Build) -> list:
+        """What a run that succeeded shows: ``result=``, with the run's values in place of the model's fields."""
+        at = dataclasses.replace(ctx.at("result"), under_load=True,
+                                 caption=self.title if isinstance(self.title, str) else "")
+        given = self._swap(at, list(self.result), top=True)
+        return forms.Form(self.title, None, (), (), None, tuple(given))._result(at)
+
+    def _inputs_shown(self, ctx: Build) -> rx.Component:
+        """The run's inputs, as facts labelled as the form's fields."""
         import rfds
 
+        by_name = {field.name: field for field in self.model._meta.concrete_fields}
+        every = [*self.fields, *(one for step in self.steps for one in step.fields)]
+        facts = [vocab.Fact(one.label if one.label is not None else one.key.replace("_", " ").capitalize(),
+                            self._value(by_name[one.key]) if one.is_a not in ("choice", "choices", "text")
+                            else self.state.run[one.key].to(str),
+                            _shown_kind(one, by_name[one.key]))
+                 for one in every]
+        return rfds.key_value(*vocab.build_all(ctx.at("fields"), facts), columns=min(3, len(facts)))
+
+    def _run(self, ctx: Build) -> rx.Component:
+        """One run, as it stands: its status, its inputs; its progress, its result or its error; its log."""
+        import rfds
+
+        from lex.lex_app.reflex.ui import runs
+        from lex.lex_app.reflex.ui.state import State
+
+        S = self.state
+        status = S.run_status
+        badge = rx.match(status, *((word, rfds.lozenge(say(text), tone=tone)) for word, (text, tone) in _BADGES.items()),
+                         rfds.lozenge(say("Not started"), tone="neutral"))
         header = kinds._rfds(ctx, lambda: rfds.page_header(title=self._title(ctx), path=ctx.route or "/",
-                                                           subtitle=self.state.run_name, back_href=ctx.route or "/"))
-        return rfds.page(header, rfds.lozenge(self.state.run_status))
+                                                           subtitle=S.run_name, status=badge,
+                                                           back_href=ctx.route or "/"))
+        note = State.ui_progress_message.get(runs.key_of(S.follow), "")
+        # The progress part follows the run while it shows: it starts the job that reads the record.
+        progress = rx.box(rfds.progress_bar(None, label=rx.cond(note != "", note, say("Running")), indeterminate=True),
+                          on_mount=S.follow, width="100%")
+        problem = rx.match(
+            status,
+            (runtime.ERROR, rfds.inline_message(rx.cond(S.run_error != "", S.run_error,
+                                                        say("The calculation failed. Its log says what happened.")),
+                                                title=say("The calculation failed"), tone="danger")),
+            (runtime.CANCELLED, rfds.inline_message(say("The calculation was stopped before it finished."),
+                                                    tone="warning")),
+            (runtime.ABORTED, rfds.inline_message(say("The calculation was interrupted: lex-app found it unfinished "
+                                                      "after a restart. Start it again."), tone="warning")),
+            rx.fragment())
+        log = rx.cond(S.run_log.length() > 0, rfds.section(
+            rfds.stack(rx.foreach(S.run_log, lambda entry: rfds.safe_markdown(entry))),
+            title=say("Log"), collapsible=True, default_open=False))
+        return rfds.page(header, self._inputs_shown(ctx), rx.cond(status == runtime.IN_PROGRESS, progress), problem,
+                         rx.cond(status == runtime.SUCCESS, rfds.stack(*self._result(ctx))), log)
 
     def _page(self, ctx: Build) -> rx.Component:
         from lex.lex_app.reflex.ui.pages.vocab import Button, Link
