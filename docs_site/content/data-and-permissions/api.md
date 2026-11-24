@@ -223,7 +223,8 @@ ui.section(
     "Investors",
     ui.button("Add an investor", Investors.add),
     ui.table(Investors.rows, columns=["name", "country", "kind"],
-             row_actions=lambda row: [ui.button("Remove", Investors.remove, row["id"], tone="danger")]),
+             row_actions=lambda row: [ui.button("Remove", Investors.remove, row["id"], tone="danger",
+                                                       confirm="Remove this investor?")]),
 )
 ```
 

@@ -30,7 +30,7 @@ NAV: tuple[Section, ...] = (
     )),
     Section("pages", "Pages", "Where a page lives, and the page kinds that decide how it looks.", (
         Group("Declaring pages", ("pages/ui-page",)),
-        Group("Page kinds", ("pages/record", "pages/list")),
+        Group("Page kinds", ("pages/record", "pages/list", "pages/forms")),
         Group("Parts", ("pages/tables", "pages/buttons-and-links")),
     )),
     Section("state-and-actions", "State & actions", "Plain Python handlers; lex-app does the plumbing.", (

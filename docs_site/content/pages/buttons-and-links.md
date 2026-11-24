@@ -84,19 +84,20 @@ ui.table(
     Closing.rows,
     columns=["name", ui.column("status", kind="status")],
     row_actions=lambda row: [
-        ui.button("Close", Closing.close, row["id"], tone="danger", disabled=row["why_not"]),
+        ui.button("Close", Closing.close, row["id"], tone="danger",
+                  confirm="Close this fund?", disabled=row["why_not"]),
     ],
 )
 ```
 
-Click **Close** on a fund: while the action runs, that row's button shows it is busy, then a toast
+Click **Close** on a fund: it asks "Close this fund?" first. While the action runs, that row's button shows it is busy, then a toast
 confirms it and the fund's button turns grey. Point at a grey button, or reach it with the
 keyboard, and it says why it cannot be pressed.
 
 ## `ui.button`
 
 ```python
-ui.button(label, handler=None, *values, to=None, tone="neutral", icon=None, visible=None, disabled=None,
+ui.button(label, handler=None, *values, to=None, confirm=None, ask=(), tone="neutral", icon=None, visible=None, disabled=None,
           **page_values)
 ```
 
@@ -105,7 +106,13 @@ ui.button(label, handler=None, *values, to=None, tone="neutral", icon=None, visi
   browser, so check them in the handler.
 - **`to=`** opens a page instead of running a handler, with the page's values by name:
   `ui.button("New fund", to=new_fund)`. A button takes a handler or `to=`, not both.
-- **`tone="danger"`** marks an action that destroys or cannot be undone. In a page's `actions=`, a
+- **`confirm=`** asks a question before the handler runs, in a dialog with the button's label and
+  Cancel. Write the question so it names the action - `"Close this fund?"`; a question that does
+  not end in `?`, or "Are you sure?", stops the page with an error saying so.
+- **`ask=`** asks for values first: a list of [`ui.field`](/pages/forms)s in a dialog. They are
+  checked like a form's and passed to the handler as its last argument, `values`.
+- **`tone="danger"`** marks an action that destroys or cannot be undone. A dangerous button must
+  have `confirm=` or `ask=`; without one, the page stops with an error. In a page's `actions=`, a
   dangerous button is never the primary one. `tone=` takes the same tones as `ui.status`, but only
   `"danger"` changes how a button looks.
 - **`icon=`** puts an RFDS icon on the button, by its name.
