@@ -2607,14 +2607,14 @@ letters:
       skip: 0
       xfail: 0
     note: >-
-      `@ui.job(limit=2)`: at most two runs at once in the server process, for all users; a further press refused at once with a fixed sentence (toast and ui.failed), before a form's values are judged; the place given back however a run ends. These tests fail on a third run starting beside two, a refused press that changes the page, or a place never given back.
+      `@ui.job(limit=2)`: at most two runs at once in the server process, for all users; a further press refused at once with a fixed sentence (toast and ui.failed, also for a form's job), before a form's values are judged; the place given back however a run ends, also one reporting through self.progress. These tests fail on a third run starting beside two, a refused press that changes the page, or a place never given back.
   dx:
     title: 'lex.ui forms: a result kept across visits -- ui.form(keep=True)'
-    scenarios: 1.930-1.933
+    scenarios: 1.930-1.935
     status: complete
     tests:
-      pass: 4
+      pass: 6
       skip: 0
       xfail: 0
     note: >-
-      `ui.form(..., keep=True)`: the result flag survives a new visit; back while the job runs its progress, back after it the result; a kept private result that is gone is said under the form; a kept form shows its last failure in place; what was typed returns through value=. These tests fail on a kept form that comes back empty, a result shown over data that is gone, or a failure while away that is never shown.
+      `ui.form(..., keep=True)`: the result flag survives a new visit; back while the job runs its progress, back after it the result; a kept private result that is gone is said under the form; a kept form shows its last failure in place and keeps its refusal above its submit button, not twice; with tabs=True a tab's table reads the kept private value; a searched choice's earlier offer is still accepted; what was typed returns through value=. These tests fail on a kept form that comes back empty, a result shown over data that is gone, or a failure while away that is never shown.

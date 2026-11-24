@@ -739,10 +739,14 @@ def export(self, region):
 - **Counted in this server process, for all users and tabs together**, from the run's start (after
   `requires=`) to its wind-up, however it ends: success, failure, refusal, cancel, a form's wrong
   field. Like the job pool (`LEX_UI_JOB_THREADS`), it is per process: with several backend workers
-  each allows N. A run waiting for a pool thread holds its place.
+  each allows N. A run waiting for a pool thread holds its place. A run reporting through
+  `self.progress` (a library's callback, 6.4) holds it the same way, and gives it back however it ends,
+  also when the library's thread calls `self.progress` after the stop.
 - **A press beyond the limit is refused at once, not queued**: "Export is already running 2 times.
   Try again in a moment." ("Export is already running. Try again in a moment." for `limit=1`),
-  as a toast and in `ui.failed`; nothing else on the page changes -- the check comes before a
+  as a toast and in `ui.failed` -- for a form's job too, not above its submit button as a form's
+  refusal is (pages design 6.15): it is about the press, not about what was entered, and it no
+  longer holds once a run ends. Nothing else on the page changes -- the check comes before a
   form's values are judged, so no field message appears and the last result stays. The job is
   named as its submit button is named (6.14 of the pages design).
 - *Fixed sentence:* `limit=` takes the number only. A sentence of the project's own would be a

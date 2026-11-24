@@ -3560,20 +3560,20 @@ form's `result=`. What building settled is section 6.17 of `docs/superpowers/spe
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.927 | Beyond the limit a press is refused at once | two run at once; the third is refused before the others end, with the sentence, as a toast and in ui.failed; its body never runs; afterwards it runs |
-| 1.928 | A place is given back however the run ends | a failure, a body's refusal, a cancel and a form's wrong field each free the place; a refused press of a form's job leaves no field message; limit=1 has its own sentence |
+| 1.928 | A place is given back however the run ends | a failure, a body's refusal, a cancel and a form's wrong field each free the place; a run reporting through self.progress from a library's thread holds its place while it reports and gives it back when stopped; a refused press of a form's job leaves no field message and is a toast, not above the submit button; limit=1 has its own sentence |
 | 1.929 | The limit is declared as a whole number | 0, True, 2.5 and "2" refused with what to write; the handler carries its limit, also into a mixin's copy |
 
 ### Batch 1dx — lex.ui forms: a result kept across visits -- ui.form(keep=True) ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.930 – 1.933 |
+| Scenario range | 1.930 – 1.935 |
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/pages/forms.py` (`form` keep=, the failure under a kept form), `lex/lex_app/reflex/ui/forms.py` (`keep`, `kept`, `gone_message`), `lex/lex_app/reflex/ui/state.py` (`ui_open`) |
 | Test file | `lex/test_project/tests/init/test_1dx_ui_form_keep.py` |
-| Test classes | `TestCluster01dx_FormKeep` (1.930–1.933) |
+| Test classes | `TestCluster01dx_FormKeep` (1.930–1.935) |
 | Fixtures | a neutral invoice report state (a job held at a gate, a kept private result, a load that keeps the customer) |
-| Tests landed | **4 pass / 0 fail** |
+| Tests landed | **6 pass / 0 fail** |
 | Status | ✅ Complete |
 
 `keep=` on `ui.form`, after checking what `@ui.load(keep=)` already gave: the fields survived, the result flag did not. What building settled is section 6.18 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`. Test 1.841 (a new visit starts a form over) still holds for a form that is not kept.
@@ -3584,3 +3584,5 @@ form's `result=`. What building settled is section 6.17 of `docs/superpowers/spe
 | 1.931 | A kept result whose data is gone says so | within the private idle time the result shows; past it, no result and the sentence under the form; a private field not kept does not decide; a failure while away stays to be shown; sending again clears it |
 | 1.932 | The kept form page compiles and shows its failure in place | RFDS's inline message bound to ui.failed for a kept form only; the field's start from the state; compiled with Reflex's page compiler; registered with its state; keep= True or False only |
 | 1.933 | A kept form with a load keeps what the load keeps | after a revisit and the load: the kept private result and the field in the load's keep= survive; what the load does not keep is reset |
+| 1.934 | A kept form keeps its refusal above its submit button | a ui.Refuse with a title stays above the button across a visit for a kept form and leaves for a form not kept; the line under a kept form does not repeat it; sending again clears both |
+| 1.935 | A kept form with tabs and a searched choice | keep=True with tabs=True compiles with its search; back within the idle time the tab's table reads the kept private value; a customer offered before the visit is still accepted; past the idle time the form and the tab's table say it is gone |

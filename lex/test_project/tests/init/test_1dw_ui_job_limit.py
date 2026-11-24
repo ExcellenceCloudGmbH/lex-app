@@ -31,6 +31,8 @@ pytestmark = pytest.mark.init
 
 GATE = {"open": threading.Event()}
 RAN: list = []
+#: What stopped the crunch job's worker thread.
+STOPPED: list = []
 
 
 class ExportState(ui.State):
@@ -60,6 +62,25 @@ class ExportState(ui.State):
         for _ in range(100):
             yield
             time.sleep(0.02)
+
+    @ui.job(limit=1)
+    def crunch(self):
+        """Reports through a library's callback on its own thread (``self.progress``), never at a yield."""
+        failed: list = []
+
+        def work() -> None:
+            try:
+                for step in range(250):
+                    self.progress(step / 250, f"Step {step}")
+                    time.sleep(0.02)
+            except BaseException as exc:  # noqa: BLE001 - handed to the caller, as a library would
+                STOPPED.append(type(exc))
+                failed.append(exc)
+        worker = threading.Thread(target=work, name="crunch-worker")
+        worker.start()
+        worker.join()
+        if failed:
+            raise failed[0]
 
 
 async def _until(condition, failure: str) -> None:
@@ -141,11 +162,15 @@ class TestCluster01dw_JobLimit(SimpleTestCase):
         """
         Scenario 1.928: no place is lost.
         Given: `limit=1` and `limit=2` jobs.
-        When:  a run fails, one is refused by its own body, one is cancelled, a form's job is
-               sent with a wrong field, and a form's job is pressed while it runs.
-        Then:  after each the places are free again; a refused press of a form's job leaves the
-               page as it was -- the last result still shows and no field has a message -- and
-               a limit of one says "Build report is already running. Try again in a moment."
+        When:  a run fails, one is refused by its own body, one is cancelled, one reporting
+               through `self.progress` from a library's thread is stopped, a form's job is sent
+               with a wrong field, and a form's job is pressed while it runs.
+        Then:  after each the places are free again; the run reporting through `self.progress`
+               holds its place while it reports, its thread gets the stop at its next report,
+               and the next run starts; a refused press of a form's job leaves the page as it
+               was -- the last result still shows and no field has a message -- and a limit of
+               one says "Build report is already running. Try again in a moment." in a toast,
+               not above the submit button as a form's refusal is: it is about the press.
         """
         GATE["open"].set()
         for region in ("broken", "refused"):
@@ -162,6 +187,28 @@ class TestCluster01dw_JobLimit(SimpleTestCase):
 
         self.assertEqual(_session(cancelled), {}, "a cancelled run gives its place back")
 
+        async def crunched(harness):
+            key = runs.key_of(ExportState.crunch)
+
+            async def reporting():
+                return (await harness.fields(ExportState))["ui_progress"].get(key, 0) > 0
+
+            held = []
+            for _ in range(2):                                 # the second run starts: the place came back
+                running = await harness.send(ExportState, "crunch")
+                await _until(reporting, "the library never reported through self.progress")
+                held.append(dict(runs._PLACES))
+                await (await harness.send(ui.State, "ui_cancel", key=key))
+                await running
+                await _until(lambda: not runs._PLACES, "the stopped run kept its place")
+            return held
+
+        STOPPED.clear()
+        self.assertEqual(_session(crunched), [{"ExportState.crunch": 1}] * 2,
+                         "a run reporting through self.progress holds its place while it reports")
+        self.assertEqual((STOPPED, runs._PLACES), ([GeneratorExit] * 2, {}),
+                         "its thread got the stop at its next report, and the place was given back")
+
         wrong = ui.testing.run(ExportState, "build_report", values={"year": "abc"})
         self.assertEqual((wrong.invalid, runs._PLACES), ({"year": "Enter a year with four digits, such as 2026."}, {}),
                          "a form's wrong field: the body never ran, the place is free")
@@ -174,18 +221,24 @@ class TestCluster01dw_JobLimit(SimpleTestCase):
             first = await harness.send(ExportState, "build_report", values={"year": "2025"})
             await _until(lambda: runs._PLACES.get(key) == 1, "the first run never took its place")
             harness.outcomes.clear()
+            harness.results.clear()
             await (await harness.send(ExportState, "build_report", values={"year": "x"}))
             during = await harness.fields(ExportState)
             told = [outcome.message for outcome in harness.outcomes]
+            toasted = [toast.message for toast in harness.results if isinstance(toast, results.Toast)]
             GATE["open"].set()
             await first
-            return during, told
+            return during, told, toasted, await harness.fields(ExportState)
 
-        during, told = _session(pressed_twice)
-        self.assertEqual(told, ["Build report is already running. Try again in a moment."],
-                         "refused before its values are judged, named as its button")
+        during, told, toasted, after = _session(pressed_twice)
+        sentence = "Build report is already running. Try again in a moment."
+        self.assertEqual(told, [sentence], "refused before its values are judged, named as its button")
         self.assertEqual((during["ui_invalid"], during["ui_done"]), ({}, {key: False}),
                          "no field message; the running run's own start took the old result away, not the refusal")
+        self.assertEqual((toasted, during["ui_refused"]), ([sentence], {}),
+                         "a toast, not above the submit button: it is about the press, not what was entered")
+        self.assertEqual((after["ui_done"], after["ui_refused"]), ({key: True}, {}),
+                         "once the running run ends its result shows, under no stale refusal")
         self.assertEqual(runs._PLACES, {})
 
     # -- 1.929 ---------------------------------------------------------

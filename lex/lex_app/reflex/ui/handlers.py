@@ -543,7 +543,8 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
     ``limit=2`` lets at most two runs of the job go at once in this server process, for all users
     together (an expensive read of another system). A press beyond that is refused at once, not
     queued: "Export is already running 2 times. Try again in a moment." -- a toast, and
-    ``ui.failed``.
+    ``ui.failed``. A form's job is told so in a toast too, not above its submit button: it is about
+    the press, not about what was entered, and it no longer holds once a run ends.
     """
     if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or limit < 1):
         raise ValueError(f"@ui.job(limit=) is how many runs of the job may go at once: a whole number, 1 or "
@@ -568,6 +569,7 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
             started = False
             stopped = False
             placed = False                                 # holds one of the job's places under limit=
+            busy: Exception | None = None                  # refused for limit=: a toast, also for a form's job
             message = ""
             session: context.Session | None = None
 
@@ -591,7 +593,7 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                     if failure is None and limit is not None:
                         placed = runs.take_place(key, limit)
                         if not placed:                    # refused at once, before the values: nothing else changes
-                            failure = results.Refuse(_limit_message(fn, limit))
+                            failure = busy = results.Refuse(_limit_message(fn, limit))
                     if failure is None and receives is not None:
                         async with self:
                             try:
@@ -648,7 +650,7 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                 except Exception as exc:  # noqa: BLE001 - the body has finished here; reported to the user
                     outcome = _classify(key, exc, user=_user_id(session))
                     message = outcome.message
-                    if _in_place(outcome, receives, "job"):
+                    if _in_place(outcome, receives, "job") and exc is not busy:
                         async with self:
                             forms.refused(self, key, outcome.title, outcome.message)
                     else:

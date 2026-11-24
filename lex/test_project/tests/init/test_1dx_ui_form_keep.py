@@ -10,7 +10,7 @@ empty or old. What was typed comes back through ``value=`` on a field the handle
 regression is a kept form that comes back empty, a result shown over data that is gone, or a
 failure that happened while the user was away and was never shown.
 
-Cluster 1dx -- scenarios 1.930-1.933. Type: U.
+Cluster 1dx -- scenarios 1.930-1.935. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/forms.py (form keep=, the failure under a kept form),
 lex/lex_app/reflex/ui/forms.py (keep, kept, gone_message), lex/lex_app/reflex/ui/state.py (ui_open).
 Run: python -m lex pytest lex/test_project/tests/init/test_1dx_ui_form_keep.py -v
@@ -30,6 +30,7 @@ from reflex.compiler.compiler import compile_page
 from lex import ui
 from lex.lex_app.reflex.ui import forms as rules
 from lex.lex_app.reflex.ui import private, runs, testing
+from lex.lex_app.reflex.ui import rows as rows_mod
 from lex.lex_app.reflex.ui.pages.parts import Build
 from lex.lex_app.reflex.ui.state import State
 
@@ -54,6 +55,8 @@ class ReportState(ui.State):
     @ui.job
     def build(self, values):
         self.customer = values["customer"]
+        if values["customer"] == "nobody":
+            raise ui.Refuse("There are no invoices for that customer.", title="Nothing to report")
         if not GATE["open"].wait(5):
             raise RuntimeError("the gate was never opened")
         yield ui.progress(0.5, "Reading invoices")
@@ -69,7 +72,32 @@ class ReportState(ui.State):
 
     @ui.action
     def search(self, values):
+        if values["customer"] == "nobody":
+            raise ui.Refuse("Nobody is called that.")
         self.customer = values["customer"]
+
+
+class TallyState(ui.State):
+    """A kept tool whose result is two tabs, one reading a private field, chosen by a searched customer."""
+
+    _north: list[dict] = ui.private(keep=True, idle_minutes=30)
+
+    @ui.rows
+    def customers(self, search):
+        return [row for row in ({"id": 7, "label": "Acme"}, {"id": 8, "label": "Beta"})
+                if search.casefold() in row["label"].casefold()]
+
+    @ui.job
+    def tally(self, values):
+        self._north = [{"id": 1, "customer": values["customer"]}]
+
+    @ui.rows
+    def north(self):
+        return self._north
+
+    @ui.rows
+    def south(self):
+        return [{"id": 2, "name": "Order two"}]
 
 
 def report():
@@ -81,6 +109,13 @@ def report():
 def lookup():
     return ui.form(title="Look up", submit=ReportState.search, fields=[ui.field("customer")],
                    result=[ui.text("Found.")])
+
+
+def tally(*, keep=True):
+    return ui.form(title="Tally", submit=TallyState.tally, keep=keep, tabs=True,
+                   fields=[ui.field("customer", options=TallyState.customers, required=True)],
+                   result=[ui.section("North", ui.table(TallyState.north, columns=["customer"])),
+                           ui.section("South", ui.table(TallyState.south, columns=["name"]))])
 
 
 async def _until(condition, failure: str) -> None:
@@ -112,13 +147,14 @@ async def _open(harness, page: str) -> dict:
 
 
 class TestCluster01dx_FormKeep(SimpleTestCase):
-    """1.930-1.933: the result after a visit away; a private result; the page; with a load."""
+    """1.930-1.935: the result after a visit away; a private result; the page; with a load; its refusal;
+    with tabs and a searched choice."""
 
     def setUp(self) -> None:
         GATE["open"] = threading.Event()
         private.clear()
         self.addCleanup(private.clear)
-        for page in (report, lookup):
+        for page in (report, lookup, tally):
             page().build(Build(page=page.__name__, route=f"/{page.__name__}"))
 
     # -- 1.930 ---------------------------------------------------------
@@ -260,3 +296,104 @@ class TestCluster01dx_FormKeep(SimpleTestCase):
         self.assertEqual((fields["customer"], fields["_lines"][0]["customer"]), ("Acme", "Acme"),
                          "what was typed and the result survived the load")
         self.assertEqual(fields["regions"], ["north", "south"], "what the load does not keep is reset")
+
+    # -- 1.934 ---------------------------------------------------------
+    def test_1_934_a_kept_form_keeps_its_refusal_above_its_submit_button(self) -> None:
+        """
+        Scenario 1.934: a refusal (`ui.Refuse(title=)`) on a kept form.
+        Given: the kept form, whose job refuses a customer with a title, and the form that is
+               not kept, whose action refuses too.
+        When:  both refuse; the user opens the form that is not kept again and comes back to the
+               kept one; then sends the kept form again with a customer it accepts.
+        Then:  the refusal shows in one place, above the submit button with its title: kept
+               across the visit for the kept form, dropped for the form that is not kept (as
+               before); the line under the kept form does not repeat it (it shows only when no
+               refusal does); sending again clears both and the result shows.
+        """
+        key = runs.key_of(ReportState.build)
+        refusal = {"title": "Nothing to report", "message": "There are no invoices for that customer."}
+
+        async def steps(harness):
+            GATE["open"].set()
+            await (await harness.send(ReportState, "build", values={"customer": "nobody"}))
+            await (await harness.send(ReportState, "search", values={"customer": "nobody"}))
+            refused = await harness.fields(ReportState)
+            await _open(harness, "/lookup")
+            back = await _open(harness, "/report")
+            await (await harness.send(ReportState, "build", values={"customer": "Acme"}))
+            return refused, back, await harness.fields(ReportState)
+
+        refused, back, again = _session(steps)
+        self.assertEqual(refused["ui_refused"], {key: refusal, "ReportState.search": {
+            "title": "", "message": "Nobody is called that."}}, "each form shows its refusal above its button")
+        self.assertEqual(back["ui_refused"], {key: refusal}, "a new visit keeps the kept form's refusal only")
+        self.assertEqual(back["ui_failed"][key], refusal["message"],
+                         "ui.failed holds the same sentence: the line under the form must not repeat it")
+        self.assertEqual((again["ui_refused"], again["ui_failed"].get(key), again["ui_done"]), ({}, None, {key: True}),
+                         "sending again clears both, and the result shows")
+
+        under = 'ui_refused_rx_state_?.["ReportState.build"]'
+        kept_text = str(report().build(Build(page="report", route="/report")))
+        plain = ui.form(title="Invoice report", load=ReportState.open, submit=ReportState.build,
+                        fields=[ui.field("customer", required=True, value=ReportState.customer)],
+                        result=[ui.table(ReportState.lines, columns=["customer"])])
+        plain_text = str(plain.build(Build(page="report", route="/report")))
+        self.assertGreater(kept_text.count(under), plain_text.count(under),
+                           "the line under a kept form asks whether a refusal already shows")
+
+    # -- 1.935 ---------------------------------------------------------
+    def test_1_935_a_kept_form_with_tabs_and_a_searched_choice(self) -> None:
+        """
+        Scenario 1.935: `ui.form(keep=True, tabs=True)`, a private result read in a tab, and a
+        customer chosen by a search on the server.
+        Given: a kept tool whose result is two tabs, the first reading `ui.private(keep=True,
+               idle_minutes=30)`, its customer a searched choice.
+        When:  it is built and compiled; the user searches, chooses, sends, leaves and comes
+               back within the idle time; sends the customer chosen before the visit again;
+               comes back past the idle time.
+        Then:  the page compiles with its tabs, its failure line and the search; back within
+               the idle time the result shows and the tab's table reads what the job kept; the
+               customer offered before the visit is still accepted (what a tab was offered is
+               not part of the visit); past the idle time no result shows, the form says why,
+               and the tab's table says the value is gone.
+        """
+        key = runs.key_of(TallyState.tally)
+        page = tally().build(Build(page="tally", route="/tally"))
+        text = str(page)
+        self.assertIn('ui_failed_rx_state_?.["TallyState.tally"]', text, "the kept form's failure line")
+        self.assertIn("rfds-tabs", text, "its result as tabs")
+        _, module = compile_page("/tally", page)
+        self.assertIn("ui_search", module, "the searched choice is compiled")
+        field = next(one.search for one in rules.of(TallyState.tally.fn.__ui_fn__).fields if one.search)
+        now = [1000.0]
+
+        async def steps(harness):
+            with patch.object(private, "_now", lambda: now[0]):
+                await (await harness.send(State, "ui_search", field=field, text="ac"))
+                offered = list(dict((await harness._state(State)).ui_matches).get(field, []))
+                await (await harness.send(TallyState, "tally", values={"customer": "7"}))
+                await _open(harness, "/elsewhere")
+                now[0] += 10 * 60
+                back = await _open(harness, "/tally")
+                north = await rows_mod.read(TallyState.north, await harness._state(TallyState))
+                await (await harness.send(TallyState, "tally", values={"customer": "7"}))
+                resent = await harness.fields(TallyState)
+                now[0] += 31 * 60
+                gone = await _open(harness, "/tally")
+                try:
+                    await rows_mod.read(TallyState.north, await harness._state(TallyState))
+                    told = ""
+                except ui.Refuse as refused:
+                    told = rows_mod.describe(refused, "TallyState.north", "")
+            return offered, back, north, resent, gone, told
+
+        offered, back, north, resent, gone, told = _session(steps)
+        self.assertEqual(offered, [{"value": "7", "label": "Acme"}])
+        self.assertEqual(back["ui_done"], {key: True}, "back within the idle time: the tabs show")
+        self.assertEqual(north, [{"id": 1, "customer": 7}], "the tab's table reads what the job kept privately")
+        self.assertEqual((resent["ui_invalid"], resent["ui_done"]), ({}, {key: True}),
+                         "the customer offered before the visit is still accepted")
+        self.assertEqual((gone["ui_done"], gone["ui_failed"]), ({}, {key: GONE_FORM}),
+                         "past the idle time: no tabs over nothing, and the sentence")
+        self.assertEqual(told, "This is no longer available: it is kept only for a while. Start again.",
+                         "the tab's table says so too")
