@@ -16,7 +16,11 @@ _TONE = {"info": "info", "success": "success", "warning": "warning", "danger": "
 
 class LexDocTransformer(DocumentTransformer[rx.Component]):
     def __init__(self, page: Page):
+        from docs_site.render.live import PageModule
+
         self.page = page
+        self.module = PageModule(page.slug)
+        self._demos = 0
 
     # -- the page ---------------------------------------------------------------
     def transform(self, document: Document) -> rx.Component:
@@ -62,7 +66,18 @@ class LexDocTransformer(DocumentTransformer[rx.Component]):
                              show_line_numbers=False, can_copy=True)
 
     def live_block(self, block: CodeBlock) -> rx.Component:
-        raise NotImplementedError("python demo/exec fences come with render/live.py")
+        from docs_site.render.live import demo_card, to_component
+
+        kind = block.flags[0]
+        if kind == "exec":
+            self.module.run(block.content)
+            return rx.fragment()
+        if kind in ("demo", "demo-only"):
+            self._demos += 1
+            shown = to_component(self.module.value(block.content), f"{self.page.slug}#{self._demos}")
+            return demo_card(None if kind == "demo-only" else block.content, shown)
+        raise ValueError(f"{self.page.slug}: ```python {kind}``` is not a fence this site knows "
+                         "(exec, demo, demo-only)")
 
     def directive(self, block: DirectiveBlock) -> rx.Component:
         if block.name == "alert":

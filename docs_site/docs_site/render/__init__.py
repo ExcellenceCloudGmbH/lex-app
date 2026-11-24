@@ -6,8 +6,16 @@ from docs_site.content import Page
 from docs_site.render.blocks import LexDocTransformer
 
 
+_rendered: dict[tuple[str, str], rx.Component] = {}
+
+
 def render_page(page: Page) -> rx.Component:
-    return LexDocTransformer(page).transform(page.document)
+    """The page's components, built once per process: a second call runs none of its code again,
+    so the states its ```python exec``` blocks define are never redefined."""
+    key = (page.slug, page.source)
+    if key not in _rendered:
+        _rendered[key] = LexDocTransformer(page).transform(page.document)
+    return _rendered[key]
 
 
 def toc(page: Page) -> rx.Component:
