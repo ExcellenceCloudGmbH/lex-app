@@ -28,3 +28,8 @@ test_reports/
 # stops new ones appearing in diffs. Untracking the existing five is a separate
 # call, since it touches files outside any one change.
 .DS_Store
+
+.venv-docs/
+docs_site/.web/
+docs_site/.states/
+docs_site/assets/external/

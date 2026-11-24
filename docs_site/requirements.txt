@@ -1,0 +1,2 @@
+# 0.10.0 needs reflex>=0.10; rfds 1.0.0 needs reflex<0.10 (lex-app pins reflex==0.9.13).
+reflex-docgen==0.9.5
