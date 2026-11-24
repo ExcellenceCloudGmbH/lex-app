@@ -150,7 +150,8 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
             dict(sections=[kinds.section("Notes", vocab.text("a"), visible=KindDesk.name != "")]),
             "Page `fund`, slot `sections[0]`: `visible=` on a section of a record page takes a permission.\n"
             "A section's heading always shows. To hide the section from some users write `visible=ui.read(Model)`; "
-            "to show different content by state, put `ui.switch(...)` inside the section.")
+            "to show different content by state, put `ui.switch(...)` inside the section, or give the record "
+            "`tabs=True`, where a state value hides a tab.")
         cases["blank title"] = (dict(title="   "), "Page `fund`: the page has no title.\n"
                                                     "Give the kind `title=\"...\"`, or a state value.")
         cases["title not words"] = (dict(title=5), "Page `fund`: the page's title is `5`.\n"

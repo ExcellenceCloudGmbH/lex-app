@@ -1293,6 +1293,18 @@ lex-app project. (The table gaps of the same round are section 5.15 of the table
   instead), a section whose title is a state value (reached through its table). *Name:* Reflex's
   own (`rx.scroll_to`); `ui.focus`, `ui.show` were considered.
 
+- **A tab shown by state (batch 1ey).** `visible=` on a section shown as a tab (`tabs=True` on a form's
+  result or a record page) took a permission only. It now also takes a state value (`visible=
+  ResultState.has_figures`): the tab's trigger and its panel are each drawn under `rx.cond` on it.
+  RFDS's `TabSpec` hides a tab by a permission only and has no such switch, so lex.ui wraps the two
+  components RFDS built for that tab, found by the tab's value (`hide_tabs`). The page opens on its
+  first tab, so a state value on the first tab is refused ("Put a tab that is always there first").
+  A record page without tabs still refuses a state value on a section (its heading stays in "On this
+  page"), now pointing to `tabs=True`. **Checked and not relaxed:** a closed section in a tab stays
+  refused (a tab is opened by its tab; a disclosure inside it would be a second way to hide it), and
+  a part after the sections stays refused (what every tab shares has one place, above the tabs) --
+  neither is a need of every project.
+
 ## 7. Order of building
 
 One spec, four steps. Each ends by porting real pages of the reviewed project, in the scratchpad
