@@ -62,7 +62,7 @@ class LexDocTransformer(DocumentTransformer[rx.Component]):
     def code_block(self, block: CodeBlock) -> rx.Component:
         if block.language == "python" and block.flags:
             return self.live_block(block)
-        return rx.code_block(block.content.rstrip("\n"), language=block.language or "text",
+        return rx.code_block(block.content.rstrip("\n"), language=block.language or "log",  # "text" is not a language rx.code_block accepts
                              show_line_numbers=False, can_copy=True)
 
     def live_block(self, block: CodeBlock) -> rx.Component:

@@ -7,6 +7,8 @@ from pathlib import Path
 
 from reflex_docgen.markdown import Document, HeadingBlock, parse_document
 
+from docs_site import reference
+
 CONTENT = Path(__file__).resolve().parents[1] / "content"
 
 
@@ -38,12 +40,16 @@ class Page:
 
 
 def all_slugs() -> list[str]:
-    return sorted(str(p.relative_to(CONTENT).with_suffix("")) for p in CONTENT.rglob("*.md"))
+    files = sorted(str(p.relative_to(CONTENT).with_suffix("")) for p in CONTENT.rglob("*.md"))
+    return files + [f"reference/{group}" for group in reference.GROUPS]
 
 
 @cache
 def load(slug: str) -> Page:
-    source = (CONTENT / f"{slug}.md").read_text(encoding="utf-8")
+    if slug.startswith("reference/"):
+        source = reference.page_source(slug.split("/", 1)[1])
+    else:
+        source = (CONTENT / f"{slug}.md").read_text(encoding="utf-8")
     document = parse_document(source)
     meta = document.metadata or {}
     title = str(meta.get("title") or slug.rsplit("/", 1)[-1].replace("-", " ").capitalize())

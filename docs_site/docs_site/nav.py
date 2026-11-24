@@ -6,6 +6,8 @@ content/ that is not listed here, or a listed page with no file, fails the build
 
 from dataclasses import dataclass
 
+from docs_site import reference
+
 
 @dataclass(frozen=True)
 class Group:
@@ -45,6 +47,9 @@ NAV: tuple[Section, ...] = (
     Section("ship-it", "Ship it", "Sign-in, checks and deployment.", (
         Group("Ship it", ("ship-it/sign-in", "ship-it/deploying", "ship-it/check")),
     )),
+    Section("reference", "API reference", "Every name lex.ui exports, with its signature.", (
+        Group("API reference", tuple(f"reference/{g}" for g in reference.GROUPS)),
+    )),
 )
 
 
@@ -71,7 +76,8 @@ def problems() -> list[str]:
     listed = ordered()
     found = {slug for slug in content.all_slugs() if slug != "index" and not slug.startswith("reference/")}
     out = [f"listed twice: {s}" for s in sorted({s for s in listed if listed.count(s) > 1})]
-    out += [f"listed in nav.py, no file: content/{s}.md" for s in listed if s not in found]
+    out += [f"listed in nav.py, no file: content/{s}.md" for s in listed
+             if s not in found and not s.startswith("reference/")]
     out += [f"in content/, not in nav.py: {s}" for s in sorted(found - set(listed))]
     out += [f"{s} is not in its section's folder" for sec in NAV for g in sec.groups for s in g.pages
             if not s.startswith(sec.slug + "/")]
