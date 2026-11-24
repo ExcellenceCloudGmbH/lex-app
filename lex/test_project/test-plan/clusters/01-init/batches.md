@@ -3810,3 +3810,26 @@ Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | 1.1001 | The server decides permissions and rules for the user | anna: Reports, Reviews, Audit; carl: nothing; ben: a failing rule hides its entries, logged; the rule asked once per event, on a worker thread, without values |
 | 1.1002 | What the browser was told does not decide | the resolver behind the browser's permissions claims grants: nothing listed; a fresh tab's first page answered at once |
 | 1.1003 | lex-app's start-up draws the decided navigation | declare.install then compile: the answer's var and the mount's event; a raw page's requires= takes a list; a plain function refused naming @ui.rule |
+
+### Batch 1ek — lex.ui frame: navigation beyond the declared pages -- sections of links, counts, per-user entries, a foot ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1004 – 1.1008 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/frame.py` (`nav=` sections, `nav_footer=`, `entries`, `decide`), `lex/lex_app/reflex/shell.py` (`nav_layout`, `side_nav`, `lex_chrome`), `lex/lex_app/reflex/ui/pages/vocab.py` (`ui.link(icon=, badge=, requires=)`), `lex/lex_app/reflex/ui/pages/declare.py` (`ui.page(badge=)`), `lex/lex_app/reflex/ui/pages/links.py` (`ui.reflex_page(badge=)`), `lex/lex_app/reflex/ui/state.py` (`ui_frame_counts`, `ui_frame_links`) |
+| Test file | `lex/test_project/tests/init/test_1ek_ui_frame_nav_links.py` |
+| Test classes | `TestCluster01ek_FrameNavLinks` (1.1004–1.1008) |
+| Fixtures | pages declared per test (`FrameCase` from 1eb); `ui.testing.Harness` per user; functions of the user and a rule recording their calls |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1004 | A section of links joins the navigation | sections in nav='s order; an area's section holds its pages then its link with its icon; outside, raw page and record address links; compiled; an area twice, an empty section, a state value, a part that is not a link, a function beside links, collapsed= refused |
+| 1.1005 | A count beside an entry is a function of the user | RFDS's badge from ui_frame_counts; anna 3, 3 and 1; one call per event on a worker thread; a failing function and a wrong answer logged, no count; badge= without nav= and a function without the user refused |
+| 1.1006 | A per-user section lists what its function returns | compiled under the heading from ui_frame_links; anna's page address with its value and an outside address, words as they are; a link with requires= left out and logged; carl: none |
+| 1.1007 | A link the user may not open is not drawn | a link's requires=, the page it leads to, a rule asked with the link's values: all three for anna, none for carl |
+| 1.1008 | A link at the foot, and the frame's words in a page | RFDS's navigation footer with a link or a text; a button refused; badge=, requires=, icon= on a link in a page refused with what to write |

@@ -72,7 +72,13 @@ progress_of/cancel``        event of a Cancel button
                             area, the listed page that opens it, the page. The navigation lists
                             only what the user may open, decided on the server when a page opens
 ``ui.frame``                lex-app's frame for this project, set once in the dashboard module:
-                            ``nav=[...]`` the areas' order; ``denied=`` the sentence a refused
+                            ``nav=[...]`` the areas' order, and sections of links:
+                            ``ui.section("Help", ui.link(...))``, or ``ui.section("Favourites",
+                            favourites)`` filled by a function of the user; ``nav_footer=`` a link
+                            or text at the navigation's foot. A function of the user,
+                            ``def waiting(user)``, stands for a value the frame shows (a badge's
+                            count, a section's links): lex-app calls it on the server when a page
+                            opens; ``denied=`` the sentence a refused
                             user reads, ``request_access=`` their way out (a page, https:// or
                             mailto:); ``opened=`` a function lex-app calls, not awaited, when a
                             page has opened: ``opened(user, page)``; ``sign_out=`` where the
@@ -93,9 +99,10 @@ progress_of/cancel``        event of a Cancel button
 ``ui.section``              a titled part of a page; ``load=`` makes it load on its own;
                             ``collapsed=True`` closes it until the user opens it; ``tabs=True``
                             on ``ui.record`` or a ``ui.form``'s result shows one section at a time
-``ui.text/fact/status/      what fills the slots; none takes a styling argument
-message/column/
-button/link``
+``ui.text/fact/status/      what fills the slots; none takes a styling argument. In lex-app's
+message/column/             frame a ``ui.link`` is an entry: ``icon=``, ``badge=`` (a count),
+button/link``               ``requires=`` (drawn only for users who meet it, decided on the
+                            server); ``@ui.page(nav=, badge=)`` too
 ``ui.each/switch``          repetition and choice; ``visible=`` on every component
                             decides what is shown, never what is allowed
 ``ui.table``                rows from a model (``where=``) or a ``@ui.rows`` handler; ``search=``,

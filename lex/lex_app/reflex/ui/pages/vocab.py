@@ -164,6 +164,9 @@ class Link(Part):
     record: Any = None
     href: str | None = None
     visible: Any = None
+    icon: str | None = None             # in lex-app's frame: the entry's icon
+    badge: Any = None                   # in lex-app's frame: a count beside the entry
+    requires: tuple | None = None       # in lex-app's frame: who the entry is drawn for
 
     def target(self, ctx: Build) -> tuple[Any, bool]:
         """Where the link leads, and whether that is an outside site."""
@@ -178,8 +181,23 @@ class Link(Part):
         return self.href, True
 
     def click(self, ctx: Build) -> Any:
+        self.in_page(ctx)
         where, outside = self.target(ctx)
         return rx.redirect(where, is_external=outside)
+
+    def in_page(self, ctx: Build) -> None:
+        """Refuse the frame's words (``badge=``, ``requires=``, ``icon=``) on a link in a page."""
+        if self.badge is not None:
+            raise ctx.fail(f"the link `{self.label}` has `badge=`, a count beside an entry of lex-app's frame.",
+                           "Show a count in a page with a state value: `ui.text(\"{count} waiting\", count=State.waiting)`.")
+        if self.requires is not None:
+            raise ctx.fail(f"the link `{self.label}` has `requires=`, which decides an entry of lex-app's frame on the "
+                           "server.", "In a page, `visible=` decides what is shown -- `visible=ui.read(Model)` or a "
+                           "state value -- and the page's handlers what is allowed.")
+        if self.icon is not None:
+            raise ctx.fail(f"the link `{self.label}` has `icon=`, the icon of an entry of lex-app's frame.",
+                           "In a page a link is its words; a button has an icon: `ui.button(\"Search\", to=page, "
+                           "icon=\"search\")`.")
 
     def menu_entry(self, ctx: Build) -> rx.Component:
         return menu_entry(ctx, self.label, self.click(ctx), self.visible)
@@ -190,6 +208,7 @@ class Link(Part):
     def _render(self, ctx: Build) -> rx.Component:
         import rfds
 
+        self.in_page(ctx)
         where, outside = self.target(ctx)
         if ctx.place == "actions":
             return rfds.button(say(self.label), intent="secondary", on_click=rx.redirect(where, is_external=outside))
@@ -197,8 +216,16 @@ class Link(Part):
 
 
 def link(label: Any, *, to: Any = None, record: Any = None, href: str | None = None, visible: Any = None,
-         **values: Any) -> Link:
-    """Goes somewhere: ``to=`` a page (with its parameters by name), ``record=(Model, pk)``, or ``href=`` an outside site."""
+         icon: str | None = None, badge: Any = None, requires: Any = None, **values: Any) -> Link:
+    """Goes somewhere: ``to=`` a page (with its parameters by name), ``record=(Model, pk)``, or ``href=`` an outside site.
+
+    In lex-app's frame (``ui.frame``: the navigation, the user menu, the header) a link is an entry and
+    takes three words more: ``icon=`` (an RFDS icon), ``badge=`` (a count beside it: a function of the
+    user, or a whole-number state value) and ``requires=`` (what ``requires=`` takes everywhere: the
+    entry is drawn only for users who meet it, decided on the server; a link to a page that has a
+    ``requires=`` is guarded by it as well). In a page they are refused: there ``visible=`` decides what
+    is shown, and the handlers what is allowed.
+    """
     given = [name for name, value in (("to", to), ("record", record), ("href", href)) if value is not None]
     if len(given) != 1:
         raise ValueError("ui.link() takes exactly one of to=, record= or href=; got " + (", ".join(given) or "none")
@@ -211,7 +238,16 @@ def link(label: Any, *, to: Any = None, record: Any = None, href: str | None = N
     if record is not None and not (isinstance(record, tuple) and len(record) == 2 and hasattr(record[0], "_meta")
                                    and record[1] is not None):
         raise ValueError("ui.link(record=) takes (Model, pk): `record=(Fund, row.id)`.")
-    return Link(label, to, values, record, href, visible)
+    if icon is not None and (not isinstance(icon, str) or not icon):
+        raise ValueError(f"ui.link(icon=) takes the name of an RFDS icon, such as icon=\"search\"; got {icon!r}.")
+    if requires is not None:
+        from lex.lex_app.reflex.ui import guard
+
+        try:
+            requires = guard.normalise(requires)
+        except (TypeError, ValueError) as wrong:
+            raise TypeError(f"ui.link(requires=): {wrong}") from None
+    return Link(label, to, values, record, href, visible, icon, badge, requires)
 
 
 @dataclasses.dataclass(eq=False)

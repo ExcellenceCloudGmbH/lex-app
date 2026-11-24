@@ -24,7 +24,7 @@ class PageInfo:
 
 
 #: Words ``ui.link`` and ``ui.button`` take themselves: a page parameter of that name could not be passed.
-RESERVED = ("to", "record", "href", "visible", "label", "handler", "tone", "icon")
+RESERVED = ("to", "record", "href", "visible", "label", "handler", "tone", "icon", "badge", "requires")
 
 
 def info_of(route: str, name: str, params: Any = ()) -> PageInfo:
@@ -54,7 +54,7 @@ class ReflexPage:
 
 
 def reflex_page(route: str, *, params: Any = (), nav: str | None = None, title: str | None = None,
-                icon: str | None = None, requires: Any = None) -> ReflexPage:
+                icon: str | None = None, requires: Any = None, badge: Any = None) -> ReflexPage:
     """A page written in raw Reflex at ``route``, as somewhere a lex.ui link may lead.
 
     For a project that moves to lex.ui a table at a time: its pages are registered with
@@ -76,18 +76,23 @@ def reflex_page(route: str, *, params: Any = (), nav: str | None = None, title: 
 
     ``requires=`` (a permission: ``ui.read(Model)``..., a project's ``@ui.rule``, or a list of them) hides
     the entry from users who may not open the page, decided on the server when a page opens; it is not
-    access control -- lex-app does not frame or guard a raw page.
+    access control -- lex-app does not frame or guard a raw page. ``badge=`` is a count beside the entry,
+    as on ``@ui.page``.
     """
     if not isinstance(route, str) or not route.startswith("/"):
         raise ValueError(f"ui.reflex_page() takes the page's route as app.add_page registers it, starting with /, "
                          f"such as \"/orders/[key]\"; got {route!r}.")
     permission, rules = _entry_permission(route, nav, title, icon, requires)
+    from lex.lex_app.reflex.ui.pages.declare import _badge
+
+    _badge(f"ui.reflex_page({route!r})", nav, badge)
     page = ReflexPage(info_of(route, route, params))
     _REFLEX_PAGES[route] = page
     if nav:
         from lex.lex_app.reflex.shell import NavEntry, list_in_nav
 
-        list_in_nav(NavEntry(route=route, label=title, section=nav, icon=icon, permission=permission, rules=rules))
+        list_in_nav(NavEntry(route=route, label=title, section=nav, icon=icon, permission=permission, rules=rules,
+                             badge=badge))
     return page
 
 

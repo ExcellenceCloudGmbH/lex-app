@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1003
+max_scenario: 1008
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2708,3 +2708,13 @@ letters:
       xfail: 0
     note: >-
       Guarded entries carry their route as the key of `ui_frame_shown`, the server's answer; the shell's mount sends `ui_frame_open` (background). A raw page's `requires=` now takes rules too. These tests fail on an entry the user may not open, a rule that cannot hide its entry, an answer taken from the browser's permissions, or a failing rule that fails open.
+  ek:
+    title: 'lex.ui frame: navigation beyond the declared pages -- sections of links, counts, per-user entries, a foot'
+    scenarios: 1.1004-1.1008
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      A function of the user stands for every value the frame shows; it runs on a worker thread when a page opens, once per event; its failure is logged and leaves its part empty. These tests fail on a section lost from the navigation, a count or a per-user entry decided in the browser, a link drawn for a user who may not open it, or `badge=`/`requires=`/`icon=` accepted in a page.

@@ -60,6 +60,8 @@ class NavEntry:
     permission: Any = None
     #: A raw page's rules (``@ui.rule``) in its ``requires=``.
     rules: tuple = ()
+    #: A count beside the entry: a function of the user, or a whole-number state value.
+    badge: Any = None
 
 
 _NAV: list[NavEntry] = []
@@ -198,8 +200,30 @@ def environment() -> str:
     return value if value in ENVIRONMENTS else "none"
 
 
-def nav_sections() -> tuple:
-    """The side navigation: the overview first, then each area's pages, in ``ui.frame(nav=)``'s order.
+@dataclasses.dataclass(frozen=True)
+class PerUserSection:
+    """A section of the navigation whose links a function of the user gives (``ui.section(title, fn)``)."""
+
+    title: str
+    key: str
+
+
+def badge_of(key: str, badge: Any) -> Any:
+    """The count an entry shows: the server's answer for a function of the user, a state value as it is."""
+    import reflex as rx
+
+    from lex.lex_app.reflex.ui.state import State as UiState
+
+    if badge is None:
+        return None
+    if isinstance(badge, rx.Var):
+        return badge.to(int)
+    return UiState.ui_frame_counts.get(key, 0).to(int)
+
+
+def nav_layout() -> list:
+    """The side navigation, in order: the overview, then each area or section of ``ui.frame(nav=)`` --
+    RFDS's ``NavSection``\\ s, and :class:`PerUserSection`\\ s for sections a function of the user fills.
 
     A guarded entry carries its key as RFDS's ``permission``: :func:`lex_chrome` draws it only once the
     server has decided that this user may open it (:func:`_decided_on_the_server`).
@@ -208,34 +232,127 @@ def nav_sections() -> tuple:
 
     from lex.lex_app.reflex.ui.pages import frame
 
+    configured = frame.current()
+    if not _NAV and not configured.sections:
+        return []
     guarded = frame.guards()
-    if not _NAV:
-        return ()
-    sections = [
-        NavSection(
-            items=(NavItem("lex.nav.overview", "Overview", "/", icon="dashboard", exact=True),)
-        )
-    ]
+    layout: list = [NavSection(items=(NavItem("lex.nav.overview", "Overview", "/", icon="dashboard", exact=True),))]
     headings: dict[str, list[NavEntry]] = {area: [] for area in _areas()}
     for entry in _NAV:
         headings[entry.section].append(entry)
     for heading, entries in headings.items():
-        if not entries:
+        section = configured.section(heading)
+        if section is not None and section.of_user is not None:
+            layout.append(PerUserSection(heading, frame.per_user_key(heading)))
             continue
-        items = tuple(
-            NavItem(
-                f"lex.nav.{_slug(entry.route)}",
-                entry.label,
-                entry.route,
-                icon=entry.icon,
-                permission=entry.route if entry.route in guarded else None,
-            )
+        items = [
+            NavItem(f"lex.nav.{_slug(entry.route)}", entry.label, entry.route, icon=entry.icon,
+                    permission=entry.route if entry.route in guarded else None,
+                    badge=badge_of(entry.route, entry.badge))
             for entry in entries
-        )
-        sections.append(
-            NavSection(items=items, label_id=f"lex.nav.section.{_slug(heading)}", label_default=heading)
-        )
-    return tuple(sections)
+        ]
+        for index, link in enumerate(section.links if section is not None else ()):
+            key = frame.link_key(heading, index)
+            items.append(NavItem(f"lex.nav.link.{_slug(heading)}.{index}", link.label, frame.href_of(link)[0],
+                                 icon=link.icon, permission=key if key in guarded else None,
+                                 badge=badge_of(key, link.badge)))
+        if items:
+            layout.append(NavSection(items=tuple(items), label_id=f"lex.nav.section.{_slug(heading)}",
+                                     label_default=heading))
+    return layout
+
+
+def nav_sections() -> tuple:
+    """The side navigation's RFDS sections, in order (:func:`nav_layout` without the per-user sections)."""
+    from rfds.components.navigation.side_nav import NavSection
+
+    return tuple(one for one in nav_layout() if isinstance(one, NavSection))
+
+
+def _current(href: Any) -> Any:
+    """RFDS's ``aria-current`` for an entry whose address is a state value (RFDS's own takes text)."""
+    import reflex as rx
+    from reflex_base.vars.base import VarData
+
+    path = rx.State.router.url.path
+    return rx.Var(f"(((p, h) => (p === h || p.startsWith(h + '/')) ? 'page' : undefined)("
+                  f"String({path} ?? '').replace(/\\/$/, '') || '/', String({href} ?? '').replace(/\\/$/, '') || '/'))",
+                  _var_type=str, _var_data=VarData.merge(path._get_all_var_data(), href._get_all_var_data()))
+
+
+def _per_user(section: PerUserSection) -> Any:
+    """A section of links the server gave this user, drawn as RFDS draws its navigation's sections."""
+    import reflex as rx
+    import rfds
+    from rfds.components._base import with_tooltip
+
+    from lex.lex_app.reflex.ui.pages.parts import say
+    from lex.lex_app.reflex.ui.state import State as UiState
+
+    links = UiState.ui_frame_links.get(section.key, []).to(list[dict[str, str]])
+
+    def one(link: Any) -> Any:
+        label, href = link["label"].to(str), link["href"].to(str)
+        content = (rx.el.span(link["initial"].to(str), class_name="rfds-side-nav-icon rfds-side-nav-initial",
+                              custom_attrs={"aria-hidden": "true"}),
+                   rx.el.span(label, class_name="rfds-side-nav-label"))
+        attrs = {"aria-current": _current(href)}
+
+        def anchor(outside: bool) -> Any:
+            return with_tooltip(rfds.link(*content, href=href, external=outside, tone="neutral", underline="auto",
+                                          class_name="rfds-side-nav-link", custom_attrs=attrs),
+                                label, side="right", class_name="rfds-side-nav-tip")
+
+        return rx.el.li(rx.cond(link["outside"].to(str) == "yes", anchor(True), anchor(False)),
+                        class_name="rfds-side-nav-item", custom_attrs={"data-rfds-level": "1"})
+
+    heading = f"lex-nav-section-{_slug(section.title)}"
+    return rx.cond(links.length() > 0, rx.el.div(
+        rx.el.h2(say(section.title), id=heading, class_name="rfds-side-nav-heading"),
+        rx.el.ul(rx.foreach(links, one), class_name="rfds-side-nav-list",
+                 custom_attrs={"role": "list", "aria-labelledby": heading}),
+        class_name="rfds-side-nav-section"))
+
+
+def _nav_footer() -> Any:
+    """``ui.frame(nav_footer=)`` in RFDS's navigation footer; ``None`` without one."""
+    import reflex as rx
+    import rfds
+
+    from lex.lex_app.reflex.ui.pages import frame
+    from lex.lex_app.reflex.ui.pages.parts import say
+    from lex.lex_app.reflex.ui.pages.vocab import Link
+    from lex.lex_app.reflex.ui.state import State as UiState
+
+    part = frame.current().nav_footer
+    if part is None:
+        return None
+    if isinstance(part, Link):
+        href, outside = frame.href_of(part)
+        content: Any = rfds.link(say(part.label), href=href, external=outside, tone="neutral", underline="auto")
+        if "nav_footer" in frame.guards():
+            content = rx.cond(UiState.ui_frame_shown.contains("nav_footer"), content)
+    else:
+        content = rx.text(say(part.sentence, **part.values), size="1")
+    return rx.el.div(content, class_name="rfds-side-nav-footer lex-nav-footer")
+
+
+def side_nav() -> Any:
+    """RFDS's side navigation of this project: its sections in order, the per-user ones among them, and its foot."""
+    import rfds
+
+    with _decided_on_the_server():
+        layout = nav_layout()
+        if not layout:
+            return None
+        from rfds.components.navigation.side_nav import NavSection
+
+        drawn = rfds.side_nav(*(one for one in layout if isinstance(one, NavSection)))
+    built = iter(list(drawn.children))
+    children = [next(built) if isinstance(one, NavSection) else _per_user(one) for one in layout]
+    footer = _nav_footer()
+    drawn.children = [*children, *built, *([footer] if footer is not None else [])]
+    return drawn
 
 
 class _decided_on_the_server:
@@ -325,9 +442,7 @@ def lex_chrome(body, *, embedded=None, route=None):
             rx.text(LexUser.display_name, size="2"),
         ),
     )
-    with _decided_on_the_server():
-        sections = nav_sections()
-        side = rfds.side_nav(*sections) if sections else None
+    side = side_nav()
     trail = breadcrumbs(route)
     if trail is not None:
         body = rx.fragment(trail, body)
@@ -361,6 +476,7 @@ def lex_page(
     requires: Any = None,
     on_load: Any = None,
     _rules: tuple = (),
+    _badge: Any = None,
     **page_kwargs: Any,
 ) -> Callable[[Callable[[], Any]], Callable[[], Any]]:
     """Add a signed-in page to the dashboards, in lex-app's chrome.
@@ -399,7 +515,7 @@ def lex_page(
         if nav:
             # A page registered again -- a hot reload re-imports its module --
             # keeps its place in the navigation.
-            list_in_nav(NavEntry(route=route, label=title, section=nav, icon=icon,
+            list_in_nav(NavEntry(route=route, label=title, section=nav, icon=icon, badge=_badge,
                                  permission=needed[0] if needed else None))
             set_place(route, Place(nav, title))
 

@@ -194,6 +194,10 @@ class State(rx.State):
     #: The keys of the frame's guarded entries this user may open, decided on the server when a page
     #: opened (``ui.frame``): a guarded entry is drawn only once its key is here.
     ui_frame_shown: list[str] = []
+    #: Entry key -> its count (``badge=`` a function of the user), as the server answered it.
+    ui_frame_counts: dict[str, int] = {}
+    #: Per-user section key -> its links for this user: ``{"label", "href", "outside", "initial"}``.
+    ui_frame_links: dict[str, list[dict[str, str]]] = {}
 
     _ui_boots: dict[str, str] = {}
     _ui_pending_loads: list[str] = []
@@ -328,6 +332,8 @@ class State(rx.State):
             return
         async with self:
             self.ui_frame_shown = answers.shown
+            self.ui_frame_counts = answers.counts
+            self.ui_frame_links = answers.links
 
     @rx.event
     def ui_cancel(self, key: str):

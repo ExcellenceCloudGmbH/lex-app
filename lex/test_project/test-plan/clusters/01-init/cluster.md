@@ -1956,3 +1956,19 @@ does not remove user launch configurations.
 | 1.1003 | lex-app's start-up draws the decided navigation | declare.install then compile: the answer's var and the mount's event; a raw page's requires= takes a list; a plain function refused naming @ui.rule |
 
 **Scenario range:** 1.1000 – 1.1003. **Test file:** `lex/test_project/tests/init/test_1ej_ui_frame_decided.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ej](batches.md).
+
+### 1ek. lex.ui frame: navigation beyond the declared pages -- sections of links, counts, per-user entries, a foot ✅
+
+**What it tests:** `ui.frame(nav=[ui.section(...), ...], nav_footer=)`: sections of `ui.link`s (a page, a raw page, a record page's address, an outside address) beside the areas or joining one; `badge=` on links, pages and raw pages from a function of the user; a per-user section from one function of the user; guarded links decided on the server; a link or text at the navigation's foot; the frame's link words refused in a page.
+
+**Why a regression matters:** A lost section, a count computed in the browser or shown to the wrong user, a per-user entry another user sees, a link the user may not open drawn anyway, or a frame word that silently does nothing in a page.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1004 | A section of links joins the navigation | sections in nav='s order; an area's section holds its pages then its link with its icon; outside, raw page and record address links; compiled; an area twice, an empty section, a state value, a part that is not a link, a function beside links, collapsed= refused |
+| 1.1005 | A count beside an entry is a function of the user | RFDS's badge from ui_frame_counts; anna 3, 3 and 1; one call per event on a worker thread; a failing function and a wrong answer logged, no count; badge= without nav= and a function without the user refused |
+| 1.1006 | A per-user section lists what its function returns | compiled under the heading from ui_frame_links; anna's page address with its value and an outside address, words as they are; a link with requires= left out and logged; carl: none |
+| 1.1007 | A link the user may not open is not drawn | a link's requires=, the page it leads to, a rule asked with the link's values: all three for anna, none for carl |
+| 1.1008 | A link at the foot, and the frame's words in a page | RFDS's navigation footer with a link or a text; a button refused; badge=, requires=, icon= on a link in a page refused with what to write |
+
+**Scenario range:** 1.1004 – 1.1008. **Test file:** `lex/test_project/tests/init/test_1ek_ui_frame_nav_links.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ek](batches.md).

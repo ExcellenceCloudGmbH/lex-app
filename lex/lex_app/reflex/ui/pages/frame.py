@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import functools
 import inspect
 import logging
 import sys
@@ -26,7 +27,22 @@ class Frame:
     denied: str = ""                    # '' = RFDS's sentence
     request_access: str = ""            # '' = no "Request access" link
     opened: Any = None                  # the project's opened(user, page), or None
+    #: The sections of ``nav=`` given as ``ui.section``: their title, their links, or a function of the user.
+    sections: tuple["NavLinks", ...] = ()
+    nav_footer: Any = None              # a ui.link or ui.text at the foot of the navigation
     module: str = ""
+
+    def section(self, title: str) -> "NavLinks | None":
+        return next((one for one in self.sections if one.title == title), None)
+
+
+@dataclasses.dataclass(frozen=True)
+class NavLinks:
+    """A section of ``nav=``: its title, and its links or the function of the user that gives them."""
+
+    title: str
+    links: tuple = ()                   # ui.link parts, with fixed values
+    of_user: Any = None                 # fn(user) -> the user's links
 
 
 #: The project's frame, set by :func:`frame`; ``None`` until then (lex-app's defaults).
@@ -50,7 +66,7 @@ class OpenedPage:
 
 
 def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign_out: Any = None,
-          opened: Any = None) -> None:
+          opened: Any = None, nav_footer: Any = None) -> None:
     """Configure lex-app's frame for this project: call it once, in the dashboard module.
 
     ``nav`` is the navigation's areas in the order they are listed: the same words a page names
@@ -77,6 +93,25 @@ def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign
             RecentPage.objects.update_or_create(user_id=user.id, address=page.address,
                                                 defaults={"title": page.title})
 
+    An item of ``nav`` may also be a section, ``ui.section("Title", ...)``: named like an area it holds
+    the area's pages and then its links; any other title makes a section of links. Its content is
+    ``ui.link``\\ s -- to a page, a raw page, a record or an ``https://`` address, with fixed values; with
+    ``icon=``, ``badge=`` (a count beside it) and ``requires=`` (drawn only for users who meet it) -- or
+    one function of the user that returns the user's links (favourites, topics the user may see)::
+
+        ui.frame(nav=[ui.section("Orders", ui.link("Search orders", to=search, icon="search")),
+                      "Reports",
+                      ui.section("Requests", ui.link("Waiting for you", to=approvals, badge=waiting)),
+                      ui.section("Favourites", favourites)],
+                 nav_footer=ui.link("Version 2.4.1", href="https://example.com/changes"))
+
+    A function of the user, ``def waiting(user): ...``, stands wherever the frame shows a value (a
+    badge's count, a section's links): lex-app calls it on the server each time a page opens, on a worker
+    thread (it may query the database), and the page does not wait for it; its failure is logged and its
+    part shows nothing. An entry the user may not open -- a link's ``requires=``, the page it leads to, a
+    listed page's ``requires=`` -- is decided on the server too, and not drawn. ``nav_footer`` is one
+    ``ui.link`` or ``ui.text`` at the foot of the navigation: a version label, a link to help.
+
     ``sign_out`` is where the user menu's "Sign out" leads: a page (``@ui.page`` or
     ``ui.reflex_page``) or an ``https://`` address. By default it is lex-app's ``/logout``, which
     ends the dashboard's sign-in and lex-app's; a project's address should end there too, or the
@@ -96,28 +131,148 @@ def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign
                         f"denied=\"Ask your administrator for access.\"; got {denied!r}.")
     if opened is not None:
         _check_opened(opened)
-    _FRAME = Frame(nav=_areas(nav), opened=opened, sign_out="" if sign_out is None else target(sign_out, argument="sign_out"),
+    areas, sections = _areas(nav)
+    _FRAME = Frame(nav=areas, sections=sections, nav_footer=_footer(nav_footer), opened=opened, sign_out="" if sign_out is None else target(sign_out, argument="sign_out"),
                    denied=denied or "",
                    request_access="" if request_access is None else target(request_access, argument="request_access",
                                                                            mail=True),
                    module=module)
 
 
-def _areas(nav: Any) -> tuple[str, ...]:
+def _areas(nav: Any) -> tuple[tuple[str, ...], tuple[NavLinks, ...]]:
+    """The areas' titles in their order, and the sections given as ``ui.section``."""
+    from lex.lex_app.reflex.ui.pages.kinds import Section
+
     if isinstance(nav, str):
         raise TypeError(f"ui.frame(nav=) takes the areas as a list, in their order: nav=[{nav!r}].".replace("'", '"'))
     try:
-        areas = tuple(nav)
+        items = tuple(nav)
     except TypeError:
         raise TypeError(f"ui.frame(nav=) takes the areas as a list of names, such as nav=[\"Orders\", \"Reports\"]; "
                         f"got {nav!r}.") from None
-    for area in areas:
-        if not isinstance(area, str) or not area.strip():
-            raise TypeError(f"ui.frame(nav=) takes area names, the words pages give as nav=; got {area!r}.")
+    areas: list[str] = []
+    sections: list[NavLinks] = []
+    for item in items:
+        if isinstance(item, Section):
+            sections.append(_section(item))
+            areas.append(item.title)
+            continue
+        if not isinstance(item, str) or not item.strip():
+            raise TypeError(f"ui.frame(nav=) takes area names, the words pages give as nav=, or sections "
+                            f"ui.section(\"Help\", ui.link(...)); got {item!r}.")
+        areas.append(item)
     twice = sorted({area for area in areas if areas.count(area) > 1})
     if twice:
-        raise ValueError(f"ui.frame(nav=) lists {twice[0]!r} twice; list each area once.")
-    return areas
+        raise ValueError(f"ui.frame(nav=) lists {twice[0]!r} twice; list each area once -- a section named like an "
+                         "area holds its pages and its links.")
+    return tuple(areas), tuple(sections)
+
+
+def _section(section: Any) -> NavLinks:
+    """A section of ``nav=``, checked: ``ui.link``\\ s with fixed values, or one function of the user."""
+    from lex.lex_app.reflex.ui.pages.vocab import Link
+
+    title = section.title
+    content = tuple(section.content)
+    extra = [name for name in ("load", "empty", "visible") if getattr(section, name) is not None]
+    if extra or section.collapsed:
+        raise TypeError(f"ui.frame(nav=): the section {title!r} is a section of the navigation, which takes its "
+                        f"title and its entries only; leave out {', '.join(extra or ['collapsed'])}=.")
+    functions = [one for one in content if _plain_function(one)]
+    if functions:
+        if len(content) != 1:
+            raise TypeError(f"ui.frame(nav=): the section {title!r} holds one function of the user, which gives all "
+                            "its links, or links; not both: ui.section(\"Favourites\", favourites).")
+        return NavLinks(title, of_user=of_user(functions[0], f"the section {title!r}"))
+    if not content:
+        raise ValueError(f"ui.frame(nav=): the section {title!r} is empty. Give it its entries, "
+                         f"ui.section({title!r}, ui.link(\"Search\", to=search)), or a function of the user that "
+                         "returns them.")
+    for one in content:
+        if not isinstance(one, Link):
+            raise TypeError(f"ui.frame(nav=): the section {title!r} holds entries: ui.link(...), or one function of the "
+                            f"user that returns them; got {_named(one)}.")
+        entry_link(one, f"the section {title!r}")
+    return NavLinks(title, links=content)
+
+
+def _footer(part: Any) -> Any:
+    from lex.lex_app.reflex.ui.pages.vocab import Link, Text
+
+    if part is None:
+        return None
+    if isinstance(part, Link):
+        entry_link(part, "nav_footer=")
+        return part
+    if isinstance(part, Text):
+        return part
+    raise TypeError(f"ui.frame(nav_footer=) takes one ui.link or ui.text, such as "
+                    f"nav_footer=ui.link(\"Version 2.4.1\", href=\"https://example.com/changes\"); got {_named(part)}.")
+
+
+def _named(value: Any) -> str:
+    from lex.lex_app.reflex.ui.pages.parts import called
+
+    return called(value)
+
+
+def _plain_function(value: Any) -> bool:
+    """Whether ``value`` is a function the project wrote (not a state value, an event, a part or a class)."""
+    return inspect.isfunction(value) or inspect.ismethod(value) or (
+        isinstance(value, functools.partial))
+
+
+def of_user(fn: Any, where: str) -> Any:
+    """``fn``, checked to be a plain function of the user: ``def waiting(user): ...``."""
+    names: list = []
+    if _plain_function(fn) and not inspect.iscoroutinefunction(fn):
+        try:
+            names = [p.name for p in inspect.signature(fn).parameters.values()
+                     if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+        except (TypeError, ValueError):
+            names = []
+    if len(names) != 1:
+        raise TypeError(f"ui.frame(): {where} takes a function of the user, which lex-app calls on the server when a "
+                        f"page opens: def waiting(user): return ...; got {fn!r}.")
+    return fn
+
+
+def entry_link(link: Any, where: str) -> None:
+    """Refuse a frame link lex-app could not draw: a state value in it, a badge that is not a count."""
+    import reflex as rx
+
+    if not isinstance(link.label, str) or not link.label:
+        raise TypeError(f"ui.frame(): a link in {where} needs its words, a fixed sentence; got {link.label!r}.")
+    moving = [name for name, value in link.values.items() if isinstance(value, rx.Var)]
+    if moving or isinstance(link.record and link.record[1], rx.Var):
+        raise ValueError(f"ui.frame(): the link {link.label!r} in {where} takes fixed values; the frame is the same "
+                         f"on every page. For links that depend on the user, give the section a function of the user.")
+    if link.to is not None:
+        href_of(link)                                   # a page it can address, with its values
+    if link.badge is not None and not isinstance(link.badge, rx.Var):
+        of_user(link.badge, f"the badge= of the link {link.label!r}")
+
+
+def href_of(link: Any) -> tuple[str, bool]:
+    """Where a frame link leads, built in Python, and whether that is an outside site."""
+    from lex.lex_app.reflex.ui.pages import links
+
+    if link.to is not None:
+        if links.page_info(link.to) is None:
+            raise ValueError(f"ui.link({link.label!r}, to=) takes a page -- a function declared with @ui.page, or "
+                             f"ui.reflex_page(\"/route\"); got {link.to!r}.")
+        where = links.address(link.to, **link.values)
+        if not where:
+            raise ValueError(f"ui.link({link.label!r}): a value of the page's address is empty.")
+        return str(where), False
+    if link.record is not None:
+        from urllib.parse import quote
+
+        from lex.lex_app.reflex.embed import lex_app_base_url
+
+        model, pk = link.record
+        return f"{lex_app_base_url().rstrip('/')}/{model._meta.model_name}/{quote(str(pk), safe='')}/show", True
+    return str(link.href), True
 
 
 def _check_opened(fn: Any) -> None:
@@ -244,21 +399,74 @@ def page_guard(route: str, permission: Any = None, rules: tuple = ()) -> Guard:
     return Guard(_strings(permission), tuple(rules))
 
 
-def guards() -> dict[str, Guard]:
-    """Every guarded entry of the frame, by its key: a listed page's key is its route."""
+def target_guard(route: str) -> Guard:
+    """The guard of the page a link leads to: a declared page's, else a listed raw page's, else none."""
     from lex.lex_app.reflex import shell
 
-    found: dict[str, Guard] = {}
-    for entry in shell.nav_entries():
-        guard = page_guard(entry.route, entry.permission, entry.rules)
-        if guard:
-            found[entry.route] = guard
+    entry = next((one for one in shell.nav_entries() if one.route == route), None)
+    return page_guard(route, entry.permission if entry else None, entry.rules if entry else ())
+
+
+def link_guard(link: Any) -> Guard:
+    """Who a frame link is drawn for: its own ``requires=``, and the page it leads to's."""
+    from lex.lex_app.reflex.access import permission
+    from lex.lex_app.reflex.ui import guard
+    from lex.lex_app.reflex.ui.pages import links
+
+    items = tuple(link.requires or ())
+    strings = tuple(permission(one.target, one.scope) for one in items if isinstance(one, guard.Requirement))
+    rules = guard.rules_of(items)
+    info = links.page_info(link.to) if link.to is not None else None
+    if info is not None:
+        target = target_guard(info.route)
+        strings, rules = strings + target.permissions, tuple(dict.fromkeys(rules + target.rules))
+    params = tuple(sorted((name, str(value)) for name, value in link.values.items()))
+    return Guard(tuple(dict.fromkeys(strings)), rules, params)
+
+
+@dataclasses.dataclass(frozen=True)
+class Entry:
+    """One entry of the frame the server decides for: who it is drawn for, and its count."""
+
+    key: str
+    guard: Guard = Guard()
+    badge: Any = None                   # a function of the user, a state value, or None
+
+
+def entries() -> list[Entry]:
+    """Every entry of the frame, by its key: a listed page's key is its route, a link's its place."""
+    from lex.lex_app.reflex import shell
+
+    configured = current()
+    found = [Entry(entry.route, page_guard(entry.route, entry.permission, entry.rules), entry.badge)
+             for entry in shell.nav_entries()]
+    for section in configured.sections:
+        found += [Entry(link_key(section.title, index), link_guard(link), link.badge)
+                  for index, link in enumerate(section.links)]
+    if configured.nav_footer is not None and hasattr(configured.nav_footer, "requires"):
+        found.append(Entry("nav_footer", link_guard(configured.nav_footer), configured.nav_footer.badge))
     return found
+
+
+def link_key(place: str, index: int) -> str:
+    """The key of the link ``index`` of a section (or another place) of the frame."""
+    return f"{place}#{index}"
+
+
+def per_user_key(title: str) -> str:
+    """The key of a per-user section's links."""
+    return f"{title}#"
+
+
+def guards() -> dict[str, Guard]:
+    """Every guarded entry of the frame, by its key."""
+    return {entry.key: entry.guard for entry in entries() if entry.guard}
 
 
 def deciding() -> bool:
     """Whether the frame has anything the server decides when a page opens."""
-    return bool(guards())
+    return any(entry.guard or _plain_function(entry.badge) for entry in entries()) or any(
+        section.of_user is not None for section in current().sections)
 
 
 @dataclasses.dataclass
@@ -266,6 +474,8 @@ class Answers:
     """What the server decided for one user when a page opened; only this reaches the browser."""
 
     shown: list[str] = dataclasses.field(default_factory=list)
+    counts: dict[str, int] = dataclasses.field(default_factory=dict)
+    links: dict[str, list[dict[str, str]]] = dataclasses.field(default_factory=dict)
 
 
 async def decide(state: Any) -> Answers:
@@ -273,7 +483,9 @@ async def decide(state: Any) -> Answers:
 
     An entry is shown when the user holds its permissions -- Keycloak's grants, fetched with the user's
     token, not what the browser was told -- and every rule grants (on a worker thread, once per rule and
-    values in this event). A rule that fails hides its entry, and is logged.
+    values in this event). A rule that fails hides its entry, and is logged. The frame's functions of the
+    user run on worker threads, each once per event however many entries name it; one that fails, or
+    answers what its part cannot show, leaves its part empty, and is logged.
     """
     from lex.lex_app.reflex.access import permission_strings
     from lex.lex_app.reflex.ui import context, handlers, pools
@@ -281,6 +493,19 @@ async def decide(state: Any) -> Answers:
     session = await context.resolve(state)
     held: frozenset[str] | None = None
     asked: dict = {}
+
+    def ask(rule: Any, params: tuple) -> Any:
+        """A rule's answer for these values, asked once in this event."""
+        if (rule, params) not in asked:
+            asked[(rule, params)] = asyncio.ensure_future(
+                pools.run("interactive", handlers._ask, rule, session.user, context.Params(dict(params))))
+        return asked[(rule, params)]
+
+    def of(fn: Any) -> Any:
+        """A function of the user's answer, called once in this event."""
+        if (fn, None) not in asked:
+            asked[(fn, None)] = asyncio.ensure_future(pools.run("interactive", fn, session.user))
+        return asked[(fn, None)]
 
     async def may(key: str, guard: Guard) -> bool:
         nonlocal held
@@ -290,11 +515,8 @@ async def decide(state: Any) -> Answers:
             if any(one not in held for one in guard.permissions):
                 return False
         for rule in guard.rules:
-            if (rule, guard.params) not in asked:
-                asked[(rule, guard.params)] = asyncio.ensure_future(
-                    pools.run("interactive", handlers._ask, rule, session.user, context.Params(dict(guard.params))))
             try:
-                answer = await asked[(rule, guard.params)]
+                answer = await ask(rule, guard.params)
             except Exception:  # noqa: BLE001 - hidden, and logged
                 logger.exception("lex.ui: %r failed for the frame's entry %s; the entry is not shown", rule, key)
                 return False
@@ -302,11 +524,63 @@ async def decide(state: Any) -> Answers:
                 return False
         return True
 
-    entries = guards()
-    granted = await asyncio.gather(*(may(key, guard) for key, guard in entries.items()))
-    return Answers(shown=[key for key, yes in zip(entries, granted) if yes])
+    async def call(fn: Any, key: str) -> Any:
+        try:
+            return await of(fn)
+        except Exception:  # noqa: BLE001 - the part shows nothing; the project reads the log
+            logger.exception("lex.ui: the frame's function %s failed for %s", _name(fn), key)
+            return None
+
+    found = entries()
+    guarded = [entry for entry in found if entry.guard]
+    counted = [entry for entry in found if _plain_function(entry.badge)]
+    sections = [section for section in current().sections if section.of_user is not None]
+    results = await asyncio.gather(*(may(e.key, e.guard) for e in guarded), *(call(e.badge, e.key) for e in counted),
+                                   *(call(one.of_user, one.title) for one in sections))
+    granted = results[:len(guarded)]
+    counts = results[len(guarded):len(guarded) + len(counted)]
+    given = results[len(guarded) + len(counted):]
+    answers = Answers(shown=[entry.key for entry, yes in zip(guarded, granted) if yes])
+    for entry, count in zip(counted, counts):
+        if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+            answers.counts[entry.key] = count
+        elif count is not None:
+            logger.error("lex.ui: the frame's function %s answered %r for %s; a badge is a whole number, 0 or more",
+                         _name(entry.badge), count, entry.key)
+    for section, links in zip(sections, given):
+        answers.links[per_user_key(section.title)] = _user_links(section, links)
+    return answers
 
 
-__all__ = ["Answers", "Frame", "Guard", "OpenedPage", "current", "decide", "frame", "guards", "page_opened",
-           "target"]
+def _name(fn: Any) -> str:
+    return getattr(fn, "__qualname__", repr(fn))
+
+
+def _user_links(section: NavLinks, links: Any) -> list[dict[str, str]]:
+    """A per-user section's links as the browser shows them; a link lex-app cannot show is left out, logged."""
+    from lex.lex_app.reflex.ui.pages.vocab import Link
+
+    if links is None:
+        return []
+    shown: list[dict[str, str]] = []
+    for link in links if isinstance(links, (list, tuple)) else [links]:
+        try:
+            if not isinstance(link, Link):
+                raise TypeError(f"it returned {link!r}; a per-user section's function returns ui.link(...)s")
+            extra = [name for name in ("icon", "badge", "requires") if getattr(link, name) is not None]
+            if extra:
+                raise TypeError(f"the link {link.label!r} has {'=, '.join(extra)}=; a per-user section's links are "
+                                "shown as they are (the function decides who sees what)")
+            href, outside = href_of(link)
+            label = str(link.label)
+        except Exception:  # noqa: BLE001 - left out, and logged
+            logger.exception("lex.ui: a link of the frame's section %r is left out", section.title)
+            continue
+        shown.append({"label": label, "href": href, "outside": "yes" if outside else "",
+                      "initial": label[:1].upper()})
+    return shown
+
+
+__all__ = ["Answers", "Entry", "Frame", "Guard", "NavLinks", "OpenedPage", "current", "decide", "entries", "frame",
+           "guards", "page_opened", "target"]
 
