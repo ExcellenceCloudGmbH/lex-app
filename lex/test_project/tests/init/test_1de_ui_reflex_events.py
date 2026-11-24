@@ -31,7 +31,7 @@ pytestmark = pytest.mark.init
 class RawTable(rx.State):
     """A raw Reflex state a converted handler starts."""
 
-    key: str = ""
+    opened: str = ""
 
     @rx.event
     def reload(self):
@@ -39,7 +39,7 @@ class RawTable(rx.State):
 
     @rx.event
     def open(self, key: str):
-        self.key = key
+        self.opened = key
 
 
 class Orders(ui.State):

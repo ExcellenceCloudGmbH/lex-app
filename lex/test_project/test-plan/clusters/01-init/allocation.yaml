@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 862
+max_scenario: 865
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2518,3 +2518,13 @@ letters:
       xfail: 0
     note: >-
       `ui.field("notes", lines=6)`: RFDS's text area, that many rows high and as wide as the form, sending nothing while the user types; the handler gets a `str` with its line breaks, trimmed at the ends, in a form, a wizard step and a button's ask=; `lines=` on any other kind, or not a whole number of 2 or more, is refused with what to write. These tests fail on a pasted list squashed onto one line, a field that calls the server on every keystroke, or lines= silently ignored on a number.
+  do:
+    title: 'lex.ui: a state field named like a route argument stops the app at start-up, not the frontend build'
+    scenarios: 1.863-1.865
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      the start-up route check refuses a dynamic route argument with the name of a field or computed var of any state, lex.ui's or plain Reflex's, exactly as Reflex's `_check_overwritten_dynamic_args` refuses it when it adds the decorated pages at export; each refusal is pinned against Reflex's own check, and what Reflex lets through (a backend field, an event handler) starts. These tests fail on green tests and a red frontend build, or a start-up that refuses an app Reflex would build.

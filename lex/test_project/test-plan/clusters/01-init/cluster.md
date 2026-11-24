@@ -1642,3 +1642,17 @@ does not remove user launch configurations.
 | 1.862 | lines= belongs to text and is a number of lines | number, date, yes/no, choice and choices refuse it, naming the page, the slot and the field; `kind="text"` takes it; 1, 0, a text, `True`, 2.5 refused when declared, saying to leave it out for one line |
 
 **Scenario range:** 1.860 – 1.862. **Test file:** `lex/test_project/tests/init/test_1dn_ui_form_lines.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dn](batches.md).
+
+### 1do. lex.ui: a state field named like a route argument stops the app at start-up, not the frontend build ✅
+
+**What it tests:** the start-up route check refuses a dynamic route argument that has the name of a field or computed var of any state -- what Reflex refuses only when it builds the frontend -- with a sentence naming the field, the state and the route; and refuses nothing Reflex lets through.
+
+**Why a regression matters:** a project whose tests are green and whose deploy fails on a frontend build error, or a start-up that refuses an app Reflex would build.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.863 | A field named like a route argument stops the app with a sentence | a lex.ui field and computed var, a plain Reflex field, an inherited one; a page the app added, a declared one, an optional argument, a route without its leading slash: a `ValueError` naming the field, its state and module and the route, saying to rename the field; Reflex itself refuses each name |
+| 1.864 | What Reflex lets through starts | an argument named like a backend field, an event handler, a static part of a path, or nothing any state has: the app starts; Reflex lets each through too |
+| 1.865 | The route check runs before the pages are built | `ui.install` calls `check_app_routes`, which checks the state fields; a helper's name (`[user]`) is still refused first, with its own sentence |
+
+**Scenario range:** 1.863 – 1.865. **Test file:** `lex/test_project/tests/init/test_1do_ui_route_argument_fields.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1do](batches.md).

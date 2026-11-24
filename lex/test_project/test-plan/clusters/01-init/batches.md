@@ -3354,3 +3354,29 @@ settled is in the `@ui.job` part of section 6.4 of `docs/superpowers/specs/2026-
 | 1.860 | Lines makes the field RFDS's text area, and it sends nothing while typing | RFDS's textarea with that many rows, full width; label, help, required mark, the server's message; `value=` a text or a state value; without `lines=` still the one-line input; one event: the submit; compiled with Reflex's page compiler; in a step and in ask= |
 | 1.861 | The handler gets the text with its line breaks, trimmed at the ends | through Reflex's event processor and `ui.testing.run`: the lines as typed, blank space at the ends gone; only blank lines on a required field is a message and no run; a pasted list splits into its lines in a wizard; a dialog's row key and text |
 | 1.862 | lines= belongs to text and is a number of lines | number, date, yes/no, choice and choices refuse it, naming the page, the slot and the field; `kind="text"` takes it; 1, 0, a text, `True`, 2.5 refused when declared, saying to leave it out for one line |
+
+### Batch 1do — lex.ui: a state field named like a route argument stops the app at start-up, not the frontend build ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.863 – 1.865 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/state.py` (`check_app_routes`, `check_route_fields`), `lex/lex_app/reflex/app.py` (`create_app` docstring) |
+| Test file | `lex/test_project/tests/init/test_1do_ui_route_argument_fields.py` |
+| Test classes | `TestCluster01do_RouteArgumentFields` (1.863–1.865) |
+| Fixtures | a neutral regions state (lex.ui) and orders states (plain Reflex) |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Reflex refuses a dynamic route argument named like a field or computed var of any state
+(`reflex/state.py`, `BaseState._check_overwritten_dynamic_args`, called from `setup_dynamic_args` when `App.add_page`
+commits a page -- for `@rx.page` pages in `App._apply_decorated_pages`, at compile). The start-up check now finds the
+same collisions; see section 6.2 of `docs/superpowers/specs/2026-11-23-reflex-ui-action-state-layer-design.md`. The raw
+state of 1de renames its field `key` to `opened`: with 1da's `/orders/[key]` in the same process it is exactly
+such a collision.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.863 | A field named like a route argument stops the app with a sentence | a lex.ui field and computed var, a plain Reflex field, an inherited one; a page the app added, a declared one, an optional argument, a route without its leading slash: a `ValueError` naming the field, its state and module and the route, saying to rename the field; Reflex itself refuses each name |
+| 1.864 | What Reflex lets through starts | an argument named like a backend field, an event handler, a static part of a path, or nothing any state has: the app starts; Reflex lets each through too |
+| 1.865 | The route check runs before the pages are built | `ui.install` calls `check_app_routes`, which checks the state fields; a helper's name (`[user]`) is still refused first, with its own sentence |

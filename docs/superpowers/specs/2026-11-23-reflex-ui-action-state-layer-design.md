@@ -228,7 +228,13 @@ it reads before the helper, so `self.user` would be the route's text in every ha
 refuses such a route with a `ValueError`, and `create_app`, once the project's pages are declared,
 refuses any page route that has one, including a page added with plain `rx.page`. `lex reflex
 check` reports the field and method case as an error without starting the app (6.7). Each message
-names the state or the route, the name, and says to rename it. Outside a handler body the helpers
+names the state or the route, the name, and says to rename it. The same start-up check refuses a route whose dynamic argument
+has the name of a field or computed var of any state, lex.ui's or plain Reflex's (`/regions/[region]` beside a
+field `region`): Reflex refuses that collision too, but only when it adds the decorated pages, which is when it
+builds the frontend -- after the project's tests have passed. The check mirrors Reflex's own
+(`BaseState._check_overwritten_dynamic_args`: a field or a computed var other than a route argument's own, on any
+state; not a backend field, not an event handler), names the field, its state and the route, and says to rename
+the field. Added 2026-11-24 (batch 1do). Outside a handler body the helpers
 raise a `RuntimeError` saying where they work.
 
 ### 6.3 Data access

@@ -44,7 +44,9 @@ def create_app():
     imports, is added when the app compiles (``@ui.page`` pages are registered
     once that module is loaded, so a page may link to one declared after it). Once they are declared, no page route may have
     a dynamic argument named like a ``ui.State`` helper (``[user]``, ``[state]``...):
-    Reflex would make it a field of every state and hide the helper.
+    Reflex would make it a field of every state and hide the helper. Nor may it have one named
+    like a field of any state (``/regions/[region]`` beside a field ``region``), which Reflex
+    refuses only when it builds the frontend.
     """
     import reflex as rx
     import rfds

@@ -25,8 +25,44 @@ def check_route(route: str) -> None:
         )
 
 
+def check_route_fields(routes: list[str]) -> None:
+    """Refuse a route whose dynamic argument has the name of a state's field (``ValueError``).
+
+    Reflex makes every dynamic route argument a computed var of its root state, and refuses to add
+    the page while any state -- a ``ui.State`` or a plain Reflex one -- has a field or a computed
+    var of that name (``BaseState._check_overwritten_dynamic_args``). It finds out only when it
+    adds the pages declared with a decorator, which is when it builds the frontend: this finds the
+    same collisions at start-up, among the states defined by then. A backend field (``_name``) or
+    an event handler of that name is not refused by Reflex, nor here.
+    """
+    from reflex.route import get_route_args
+    from reflex.state import DynamicRouteVar
+    from reflex.state import State as Root
+
+    def every(cls: Any) -> list:
+        found = [cls]
+        for sub in sorted(cls.get_substates(), key=lambda one: one.get_full_name()):
+            found += every(sub)
+        return found
+
+    states = every(Root)
+    for route in routes:
+        for name in get_route_args(route):
+            for cls in states:
+                computed = cls.computed_vars.get(name)
+                if name in cls.base_vars or (computed is not None and not isinstance(computed, DynamicRouteVar)):
+                    what = "field" if name in cls.base_vars else "computed var"
+                    raise ValueError(
+                        f"route {'/' + route.lstrip('/')!r}: its dynamic argument [{name}] has the name of the "
+                        f"{what} {cls.__name__}.{name} (in {cls.__module__}). Reflex makes a route argument a value "
+                        f"of every state, and does not build the app's pages while a state has a field of that "
+                        f"name. Rename the field, e.g. {name}_value."
+                    )
+
+
 def check_app_routes(app: Any) -> None:
-    """Refuse an app that has a page route with a dynamic argument named like a ``ui.State`` helper.
+    """Refuse an app that has a page route with a dynamic argument named like a ``ui.State`` helper,
+    or like a field of any state.
 
     ``create_app`` calls it once the project's pages are registered: it sees the pages added to
     the app and those declared with ``@rx.page`` or ``@lex_page`` that the app adds when it compiles.
@@ -38,6 +74,7 @@ def check_app_routes(app: Any) -> None:
                if kwargs.get("route")]
     for route in routes:
         check_route(route)
+    check_route_fields(routes)          # Reflex would refuse them only when it builds the frontend
     from lex.lex_app.reflex.ui.pages import links
 
     links.check_reflex_pages(routes)   # a link to a raw page leads to a page the app has
