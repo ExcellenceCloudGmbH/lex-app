@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1019
+max_scenario: 1021
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2758,3 +2758,13 @@ letters:
       xfail: 0
     note: >-
       The switch is the frame's (the application's policy), not a rule's: it holds for permissions too. The page's code stays in the app's bundle; it is hidden from the screen. These tests fail on a refused page that reveals itself, a permitted user refused, or lex-app's not-found page looking different.
+  ep:
+    title: 'lex.ui frame: the project''s mark in the header, leading home'
+    scenarios: 1.1020-1.1021
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      The look stays lex-app's: RFDS's header has a logo slot for a tenant's mark. These tests fail on a lost mark, a brand that does not lead home, a decorative mark read out, or an unchecked address.

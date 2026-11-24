@@ -3916,3 +3916,23 @@ Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | 1.1017 | The opener decides a permission page on the server | carl refused: no, no load; anna granted: yes, her load ran; a rule's page refused for carl |
 | 1.1018 | lex-app's not-found page looks the same | the 404 page in lex-app's frame with the same body; /ui-error's refusal says not found, other failures keep Try again; create_app adds it unless the project has a 404 page |
 | 1.1019 | refused_as_missing written wrongly | a non-bool refused; beside denied= or request_access= refused, saying the notice is never shown |
+
+### Batch 1ep — lex.ui frame: the project's mark in the header, leading home ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1020 – 1.1021 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/frame.py` (`logo=`, `logo_label=`), `lex/lex_app/reflex/shell.py` (`brand`, `lex_chrome`), `lex/lex_app/reflex/_js/lex_rfds.css` |
+| Test file | `lex/test_project/tests/init/test_1ep_ui_frame_logo.py` |
+| Test classes | `TestCluster01ep_FrameLogo` (1.1020–1.1021) |
+| Fixtures | `FrameCase` from 1eb; `LEX_DASHBOARD_TITLE` patched |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1020 | The project's mark leads home | without a logo the name leads home; with one, rfds-header-logo with alt="" and the name, one link home; named, read as its label; the name is LEX_DASHBOARD_TITLE; the stylesheet colours the brand on the band |
+| 1.1021 | The mark's address is checked | a relative address, http://, a label without a logo, a label that is not text refused with what to write |

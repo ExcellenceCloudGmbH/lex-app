@@ -405,6 +405,24 @@ def header_actions() -> tuple:
     return (with_overlays(ctx, rx.fragment(*drawn)),) if drawn else ()
 
 
+def brand() -> Any:
+    """The header's brand: the project's mark (``ui.frame(logo=)``) in RFDS's logo slot and the product's
+    name, one link home (the overview)."""
+    import reflex as rx
+    import rfds
+
+    from lex.lex_app.reflex.ui.pages import frame
+
+    configured = frame.current()
+    parts: list[Any] = []
+    if configured.logo:
+        # Decorative beside the name, as RFDS says, unless the project names it.
+        parts.append(rx.el.span(rx.el.img(src=configured.logo, alt=configured.logo_label),
+                                class_name="rfds-header-logo"))
+    parts.append(rx.el.span(product_name(), class_name="rfds-header-product"))
+    return rfds.link(*parts, href="/", tone="neutral", underline="auto", class_name="lex-header-home")
+
+
 def frame_banner() -> Any:
     """``ui.frame(banner=)`` as RFDS's banner, shown while its sentence is not empty; ``None`` without one."""
     import reflex as rx
@@ -623,7 +641,7 @@ def lex_chrome(body, *, embedded=None, route=None, missing=False):
     if embedded is None:
         embedded = LexDashboardState.embedded
     header = rfds.header(
-        product=product_name(),
+        product=brand(),
         environment=environment(),
         search=header_search(),
         actions=header_actions(),

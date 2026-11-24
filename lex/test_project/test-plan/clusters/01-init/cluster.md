@@ -2027,3 +2027,16 @@ does not remove user launch configurations.
 | 1.1019 | refused_as_missing written wrongly | a non-bool refused; beside denied= or request_access= refused, saying the notice is never shown |
 
 **Scenario range:** 1.1016 – 1.1019. **Test file:** `lex/test_project/tests/init/test_1eo_ui_frame_refused_as_missing.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1eo](batches.md).
+
+### 1ep. lex.ui frame: the project's mark in the header, leading home ✅
+
+**What it tests:** `ui.frame(logo=, logo_label=)`: the mark (an asset address or https://) in RFDS's header logo slot beside the product's name, decorative unless named; mark and name one link home, in the chrome band's colours; the product's name still the deployment's.
+
+**Why a regression matters:** A header without the mark, a mark that does not lead home, a screen reader reading the name twice, or an address lex-app did not check.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1020 | The project's mark leads home | without a logo the name leads home; with one, rfds-header-logo with alt="" and the name, one link home; named, read as its label; the name is LEX_DASHBOARD_TITLE; the stylesheet colours the brand on the band |
+| 1.1021 | The mark's address is checked | a relative address, http://, a label without a logo, a label that is not text refused with what to write |
+
+**Scenario range:** 1.1020 – 1.1021. **Test file:** `lex/test_project/tests/init/test_1ep_ui_frame_logo.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ep](batches.md).

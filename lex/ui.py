@@ -84,7 +84,8 @@ progress_of/cancel``        event of a Cancel button
                             ``user_menu=[ui.link(...)]`` entries above "Sign out"; ``banner=``
                             one ``ui.message`` above every page while its sentence is not empty;
                             ``refused_as_missing=True`` a page the user may not open looks like
-                            lex-app's not-found page; ``denied=`` the sentence a refused
+                            lex-app's not-found page; ``logo=`` the project's mark beside the
+                            product's name, leading home; ``denied=`` the sentence a refused
                             user reads, ``request_access=`` their way out (a page, https:// or
                             mailto:); ``opened=`` a function lex-app calls, not awaited, when a
                             page has opened: ``opened(user, page)``; ``sign_out=`` where the

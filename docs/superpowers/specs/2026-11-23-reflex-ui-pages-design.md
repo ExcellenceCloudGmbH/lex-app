@@ -1222,7 +1222,8 @@ no opener, and the opener holds the tab while it asks.
   app's bundle like every page's; this hides the page from the user's screen, not from someone reading the
   bundle. A project that adds its own `404` page keeps it, and a refused page then looks like lex-app's.
 - **`logo=`**: the address of the project's mark (`/acme.svg`, from the app's assets, or `https://`),
-  in RFDS's logo slot; the product's name beside it, and both a link home (the overview). The look stays
+  in RFDS's logo slot; the product's name beside it, and both a link home (the overview) -- the
+  product's name leads home without a mark too, in the chrome band's colours (lex-app's stylesheet). The look stays
   lex-app's: RFDS's header has a logo slot for a tenant's mark, as its theme has the tenant's brand
   colour -- a mark is content placed by RFDS, not a look; the colours, type and chrome are untouched.
   It is decorative (`alt=""`), as RFDS says a logo is when the product's name is text beside it, so a

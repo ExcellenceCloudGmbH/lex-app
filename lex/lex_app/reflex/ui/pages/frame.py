@@ -35,6 +35,8 @@ class Frame:
     user_menu: tuple = ()               # ui.links in the user menu, above "Sign out"
     banner: Any = None                  # a ui.message above every page
     refused_as_missing: bool = False    # a refused page looks like a page that does not exist
+    logo: str = ""                      # the address of the project's mark ('' = none)
+    logo_label: str = ""                # what the mark says, read out ('' = decorative beside the name)
     module: str = ""
 
     def section(self, title: str) -> "NavLinks | None":
@@ -72,7 +74,8 @@ class OpenedPage:
 
 def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign_out: Any = None,
           opened: Any = None, nav_footer: Any = None, search: Any = None, actions: Any = (),
-          user_menu: Any = (), banner: Any = None, refused_as_missing: bool = False) -> None:
+          user_menu: Any = (), banner: Any = None, refused_as_missing: bool = False, logo: Any = None,
+          logo_label: Any = None) -> None:
     """Configure lex-app's frame for this project: call it once, in the dashboard module.
 
     ``nav`` is the navigation's areas in the order they are listed: the same words a page names
@@ -155,8 +158,15 @@ def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign
     ends the dashboard's sign-in and lex-app's; a project's address should end there too, or the
     dashboard's sign-in lasts until it expires.
 
+    ``logo`` is the address of the project's mark -- from the app's assets (``"/acme.svg"``) or
+    ``https://`` -- in RFDS's logo slot of the header, beside the product's name; mark and name lead home
+    (the overview). Beside the name it is decorative, as RFDS says; ``logo_label`` names it when it says
+    something the name does not (the tenant's name)::
+
+        ui.frame(logo="/acme.svg", logo_label="Acme")
+
     The product name in the header is ``LEX_DASHBOARD_TITLE`` and its badge ``LEX_ENVIRONMENT``: a
-    deployment's values. The look is lex-app's. Called again from the same module (a reload), the
+    deployment's values. The look is lex-app's: a mark in RFDS's logo slot is content, not a look. Called again from the same module (a reload), the
     new configuration replaces the old; from another module it is refused.
     """
     global _FRAME
@@ -176,10 +186,12 @@ def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign
         given = "denied=" if denied is not None else "request_access="
         raise ValueError(f"ui.frame(refused_as_missing=True) shows a refused page as a missing one, so it never shows "
                          f"the no-access notice that {given} words. Leave {given} out, or refused_as_missing out.")
+    _check_logo(logo, logo_label)
     areas, sections = _areas(nav)
     _FRAME = Frame(nav=areas, sections=sections, nav_footer=_footer(nav_footer), opened=opened,
                    search=None if search is None else _search(search), actions=_actions(actions),
-                   user_menu=_menu(user_menu), banner=_banner(banner), refused_as_missing=refused_as_missing, sign_out="" if sign_out is None else target(sign_out, argument="sign_out"),
+                   user_menu=_menu(user_menu), banner=_banner(banner), refused_as_missing=refused_as_missing,
+                   logo=logo or "", logo_label=logo_label or "", sign_out="" if sign_out is None else target(sign_out, argument="sign_out"),
                    denied=denied or "",
                    request_access="" if request_access is None else target(request_access, argument="request_access",
                                                                            mail=True),
@@ -241,6 +253,20 @@ def _section(section: Any) -> NavLinks:
                             f"user that returns them; got {_named(one)}.")
         entry_link(one, f"the section {title!r}")
     return NavLinks(title, links=content)
+
+
+def _check_logo(logo: Any, label: Any) -> None:
+    if logo is not None and not (isinstance(logo, str) and (logo.startswith("https://") or (
+            logo.startswith("/") and not logo.startswith("//"))) and len(logo) > 1):
+        raise ValueError(f"ui.frame(logo=) takes the address of the mark: from the app's assets, \"/acme.svg\", or "
+                         f"an https:// address; got {logo!r}.")
+    if label is not None:
+        if logo is None:
+            raise ValueError("ui.frame(logo_label=) names the mark, and there is none: give its address too, "
+                             "logo=\"/acme.svg\".")
+        if not isinstance(label, str) or not label.strip():
+            raise TypeError(f"ui.frame(logo_label=) takes what the mark says, read out to a screen reader, such as "
+                            f"logo_label=\"Acme\"; got {label!r}. Leave it out for a mark beside the product's name.")
 
 
 def _search(page: Any) -> tuple[str, str]:
