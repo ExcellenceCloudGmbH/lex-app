@@ -456,7 +456,64 @@ class ChosenColumns(rx.State, mixin=True):
         self.column_widths = clean
 
 
-class LexTableState(DataTableMixin, ChosenColumns, mixin=True):
+class RowsNotStored(rx.State, mixin=True):
+    """A table whose rows reach the browser and are never written to the state store.
+
+    Reflex writes every state to its store -- Redis in production, a file in development -- after
+    each event. A table's page of rows, its totals and its filters' choices are the data itself
+    (names, amounts), so they are left out of what is written: the browser receives them in the
+    event's update, the server forgets them when the state is stored, and a project whose rows come
+    from a ``ui.private`` value keeps them out of every pickle. The count of rows, the page, the sort,
+    the search and the filters are kept: they say where the user is, and the rows are read again from
+    them. When the browser has to be sent the whole state again (a reconnect hydrates the page), the
+    page's opener sends each such table ``restore``, which reads its rows again.
+    """
+
+    #: Off for ``lex_table`` (a raw page has nothing to send ``restore``); every ``ui.table`` turns it on.
+    rows_not_stored: ClassVar[bool] = False
+    #: The rows were left out when the state was stored: the browser's copy is the only one.
+    _rows_dropped: bool = False
+
+    #: The fields that hold rows, and what they hold when the state is stored.
+    _NOT_STORED: ClassVar[dict] = {"page_rows": list, "totals_rows": list, "choices": dict, "_row_to": dict,
+                                   "_totals_all": list}
+
+    def __getstate__(self):
+        state = super().__getstate__()
+        if not type(self).rows_not_stored:
+            return state
+        backend = dict(state.get("_backend_vars") or {})        # Reflex keeps "_name" fields here too
+        places = (state, backend)
+        if any(where.get(name) for where in places for name in type(self)._NOT_STORED):
+            for where in places:
+                where["_rows_dropped"] = True
+        for where in places:
+            for name, empty in type(self)._NOT_STORED.items():
+                if name in where:
+                    where[name] = empty()
+            if "_totals_all_read" in where:
+                where["_totals_all_read"] = False
+        if "_backend_vars" in state:
+            state["_backend_vars"] = backend
+        return state
+
+    @rx.event
+    async def restore(self):
+        """The page opened, or reconnected: read the rows again if the stored state left them out."""
+        if not (getattr(self, "shown", True) and self._rows_dropped):
+            return
+        async for _ in self.load():
+            yield
+
+
+
+def rows_read(state: Any) -> None:
+    """``state`` has just read its rows: the browser's copy and the server's agree again."""
+    if isinstance(state, RowsNotStored):
+        state._rows_dropped = False
+
+
+class LexTableState(DataTableMixin, ChosenColumns, RowsNotStored, mixin=True):
     """RFDS's server-paged table over one model, read through the lex-app API as the user.
 
     ``resource`` names the model; ``search_field`` is the field the quick
@@ -529,6 +586,7 @@ class LexTableState(DataTableMixin, ChosenColumns, mixin=True):
         api = await lex_api(self)
         data = await api.list(type(self).resource, page=offset // max(limit, 1) + 1, per_page=limit,
                               ordering=ordering or type(self).default_ordering or None, params=params)
+        rows_read(self)
         return [{k: wire_value(v) for k, v in row.items()} for row in data["results"]], data["count"]
 
 
@@ -645,7 +703,7 @@ def _filters_identity(filters: Mapping[str, Any] | None) -> tuple:
 def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_field: str = "",
                 page_size: int = 25, filters: Mapping[str, Any] | None = None,
                 row_fields: Sequence[str] = (), choice_fields: Sequence[str] | None = None,
-                scope_fields: Sequence[str] | None = None, ordering: str = "") -> type:
+                scope_fields: Sequence[str] | None = None, ordering: str = "", not_stored: bool = False) -> type:
     """The :class:`LexTableState` for one table of ``model`` (one class per distinct table).
 
     The table opens at ``page_size`` rows, which is also among the sizes the
@@ -666,6 +724,8 @@ def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_fiel
         classvars["scope_fields"] = tuple(scope_fields)
     if ordering:
         classvars["default_ordering"] = str(ordering)
+    if not_stored:
+        classvars["rows_not_stored"] = True
     return _state_for(LexTableState, model, classvars, defaults={"page_size": int(page_size)},
                       identity=_filters_identity(filters))
 

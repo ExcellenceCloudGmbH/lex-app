@@ -460,6 +460,26 @@ Gaps found while rewriting dashboards onto lex.ui, each a need of any lex-app pr
   what to write instead (`filters={"<field>__icontains": text}`). *Not added:* a per-model
   `search_field` setting -- one rule, nothing to configure.
 
+- **A table's rows are never stored with the state (privacy, batch 1er).** A table over a `@ui.rows`
+  handler that reads a `ui.private` value put the page it shows into its own state (`page_rows`),
+  and Reflex writes every state to Redis (to disk in development) after each event: the persons'
+  names reached the store after all, defeating `ui.private`. Reflex 0.9.13 has no var that is sent
+  but not stored (a backend var is stored and never sent; a computed var cannot replace RFDS's
+  `page_rows`, and its cache is stored too), and RFDS's data table takes its rows only from its
+  state, so a data route of its own would mean a second table component. Chosen: **every lex.ui
+  table** -- rows or model -- leaves out of what Reflex stores its page of rows, its totals, its
+  filters' choices and the rows' addresses (`RowsNotStored.__getstate__` in `data.py`, both the
+  state's dict and Reflex's backend-var dict). The browser gets them in the event's update; the count,
+  the page, the sort, the search and the filters are stored, so the rows can be read again. A stored
+  state marks that it left rows out (`_rows_dropped`); the page's opener (`ui_open`, also on a
+  reconnect, which sends the browser the whole state again) sends each table of the page `restore`,
+  which reads the rows again only then. A row click that opens the row's own address reads the rows
+  again when the stored state lost the addresses. Not an option: one rule for every table needs no
+  word, and deciding it by whether the handler reads a private field would leave a model table's
+  persons in the store. `lex_table` on a raw page keeps storing its rows (no opener tells it to
+  restore). *Cost:* a reconnect, or an event in another worker, reads the page of rows again;
+  what the user typed in the search box and chose in a filter is still stored.
+
 ## 6. Limits and risks
 
 - **The address on mount.** Step 1 found that Reflex sends a component's mount event with the

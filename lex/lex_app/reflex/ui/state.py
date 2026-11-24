@@ -296,6 +296,8 @@ class State(rx.State):
         from lex.lex_app.reflex.ui.pages import rows_table
 
         tables = [] if again else rows_table.reopen_events(page)    # a table on screen: the new record's rows
+        # A table whose rows the stored state left out (a reconnect sent the browser the whole state again).
+        tables += [one for one in rows_table.restore_events(page) if one not in tables]
         refused = entry is None or not _page_permitted(self, entry.requires)
         from lex.lex_app.reflex.ui.pages import frame
 

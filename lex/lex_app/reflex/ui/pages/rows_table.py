@@ -18,7 +18,7 @@ import reflex as rx
 from rfds.patterns.exports.state import ExportMixin
 from rfds.state.table import DataTableMixin, query_rows
 
-from lex.lex_app.reflex.data import ChosenColumns
+from lex.lex_app.reflex.data import ChosenColumns, RowsNotStored, rows_read
 from lex.lex_app.reflex.ui import rows as rows_mod
 
 #: Most distinct values a filter offers; a column with more is searched, not filtered.
@@ -29,6 +29,8 @@ ALL = "__all__"
 #: Rows handler key -> the table states that read it; route -> the table states on that page.
 _BY_HANDLER: dict[str, list[type]] = {}
 _BY_ROUTE: dict[str, list[type]] = {}
+#: Route -> every table state on that page, model tables and those under a load too: told to ``restore``.
+_SHOWN_ON: dict[str, list[type]] = {}
 _BY_OWNER: dict[str, list[type]] = {}
 _CACHE: dict[tuple, type] = {}
 #: A built ui.table part -> the state class built for it (for ``ui.testing.rows(table=...)``). Weak: a part
@@ -42,8 +44,10 @@ def handler_key(handler: Any) -> str:
     return f"{handler.state.get_full_name()}.{handler.fn.__name__}"
 
 
-class LexRowsTableState(DataTableMixin, ExportMixin, ChosenColumns, mixin=True):
-    """RFDS's server-paged table over the rows a ``@ui.rows`` handler returns."""
+class LexRowsTableState(DataTableMixin, ExportMixin, ChosenColumns, RowsNotStored, mixin=True):
+    """RFDS's server-paged table over the rows a ``@ui.rows`` handler returns (never stored: ``RowsNotStored``)."""
+
+    rows_not_stored: ClassVar[bool] = True
 
     owner: ClassVar[Any] = None
     handler_name: ClassVar[str] = ""
@@ -183,9 +187,17 @@ class LexRowsTableState(DataTableMixin, ExportMixin, ChosenColumns, mixin=True):
             await self._after_filter_change()
 
     @rx.event
-    def go(self, key: str):
-        """A row whose link is decided per row: open the address its rows handler gave it."""
+    async def go(self, key: str):
+        """A row whose link is decided per row: open the address its rows handler gave it.
+
+        The addresses of the page shown are not stored with the state; after the state was stored the
+        rows are read again to find the row's.
+        """
         where = self._row_to.get(str(key), "")
+        if not where and type(self).row_open:
+            rows = await self._all(self.query)
+            found = next((row for row in rows if str(row.get("id")) == str(key)), None)
+            where = str((found or {}).get(type(self).row_open, "") or "")
         if where:
             return rx.redirect(where)
         return None
@@ -340,6 +352,7 @@ class LexRowsTableState(DataTableMixin, ExportMixin, ChosenColumns, mixin=True):
         else:
             self.totals_rows = self._totals(found, narrowed=searched or bool(filters))
         page = found[offset:offset + limit]
+        rows_read(self)
         if type(self).row_open:
             self._row_to = {str(r["id"]): str(r.get(type(self).row_open, "") or "") for r in page}
         return page, len(found)
@@ -436,6 +449,19 @@ def on_route(route: str, cls: type) -> None:
 
 def reopen_events(route: str) -> list:
     return [cls.reopen for cls in _BY_ROUTE.get(route, ())]
+
+
+def shown_on(route: str, cls: type) -> None:
+    """``cls`` is a table on the page at ``route`` whose rows are not stored: the opener tells it to ``restore``."""
+    if route:
+        listed = _SHOWN_ON.setdefault(route, [])
+        if cls not in listed:
+            listed.append(cls)
+
+
+def restore_events(route: str) -> list:
+    """The tables of ``route`` that read their rows again when the stored state left them out."""
+    return [cls.restore for cls in _SHOWN_ON.get(route, ())]
 
 
 def reread_events(*, handlers: Sequence[Any] = (), owner: Any = None) -> list:

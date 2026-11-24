@@ -402,8 +402,10 @@ class Table(Part):
         state = data.table_state(model, columns=specs, search_field=search_field, filters=self.where,
                                  page_size=self.page_size,
                                  row_fields=tuple(sorted(used)), choice_fields=tuple(self.filters),
-                                 scope_fields=tuple(dict(self.where or {})), ordering=self.ordering)
+                                 scope_fields=tuple(dict(self.where or {})), ordering=self.ordering,
+                                 not_stored=True)
         rows_table._CACHE_BY_TABLE[self] = state
+        rows_table.shown_on(ctx.route, state)
         options = {}
         for name in self.filters:
             field = known[name]
@@ -484,6 +486,7 @@ class Table(Part):
         rows_table._CACHE_BY_TABLE[self] = state
         if not ctx.under_load:          # under a load the table appears again after it, and reads then
             rows_table.on_route(ctx.route, state)
+        rows_table.shown_on(ctx.route, state)
         props: dict[str, Any] = {"row_key": "id"}
         if self.open is not None and not isinstance(self.open, str):
             props["row_href"] = links.row_href(ctx, self.open, "id")

@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1023
+max_scenario: 1025
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2778,3 +2778,13 @@ letters:
       xfail: 0
     note: >-
       Fails on a search sent to created_by__icontains (the bug: it was the first text field of every LexModel).
+  er:
+    title: 'lex.ui tables: the rows a table shows reach the browser and are never stored with the state'
+    scenarios: 1.1024-1.1025
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      Pins the data-protection rule "no person in any state's pickle" for tables. Fails on a row value, a total or a filter choice in a stored state, or on a table that cannot read its rows again after the store left them out.

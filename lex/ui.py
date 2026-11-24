@@ -118,7 +118,8 @@ button/link``               ``requires=`` (drawn only for users who meet it, dec
                             ``filters=``, ``export=``, ``totals=`` (``totals_of_all=True``: of
                             every row, whatever the search leaves), ``row_actions=``,
                             ``choose_columns=``, ``page_size=`` (up to 200; the pager shows
-                            only when the rows do not fit one page)
+                            only when the rows do not fit one page). The rows shown reach the
+                            browser and are never stored with the state (Redis, disk)
 ``ui.address``              a page's address, for a row that leads to a page of its own
 ``ui.reflex_page``          a page written in raw Reflex, as somewhere a link may lead;
                             ``nav=``, ``title=`` list it in an area of the navigation, ``requires=``
