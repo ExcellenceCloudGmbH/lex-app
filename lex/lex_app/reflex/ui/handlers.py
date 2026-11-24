@@ -368,7 +368,7 @@ def action(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any
                     try:
                         async with contextlib.aclosing(_drive(inv, "interactive", fn, self, args, kwargs)) as steps:
                             async for step in steps:
-                                found, report = results.split(step.value, handler=key)
+                                found, report = results.split(step.value, handler=key, state=self.get_full_name())
                                 if report is not None:
                                     runs.mark_progress(self, key, report)
                                 for event in results.to_events(found):
@@ -498,7 +498,7 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                     async with contextlib.aclosing(_drive(inv, "jobs", fn, draft, args, kwargs)) as steps:
                         async for step in steps:
                             final = isinstance(step, _Return)
-                            found, report = results.split(step.value, handler=key)
+                            found, report = results.split(step.value, handler=key, state=self.get_full_name())
                             async with self:
                                 left = self.ui_visit != visit
                                 # Once stopped, what the body changed since its last merge is discarded for good.
@@ -755,7 +755,7 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                     inv.drafts[own] = draft
                     async with contextlib.aclosing(_drive(inv, "interactive", fn, draft, args, kwargs)) as steps:
                         async for step in steps:
-                            found, report = results.split(step.value, handler=key)
+                            found, report = results.split(step.value, handler=key, state=self.get_full_name())
                             async with self:
                                 current = is_current()
                                 if current:

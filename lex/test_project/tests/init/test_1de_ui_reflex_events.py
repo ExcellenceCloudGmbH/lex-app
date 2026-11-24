@@ -42,6 +42,18 @@ class RawTable(rx.State):
         self.key = key
 
 
+class Orders(ui.State):
+    """A lex.ui state whose handlers try to hand on to the wrong things."""
+
+    @ui.rows
+    def rows(self):
+        return []
+
+    @ui.action
+    def save(self):
+        pass
+
+
 class TestCluster01de_ReflexEvents(SimpleTestCase):
     """1.829: another state's handler among a handler's results."""
 
@@ -71,3 +83,25 @@ class TestCluster01de_ReflexEvents(SimpleTestCase):
                 results.split(raw, handler="Orders.save")
             self.assertIn("Orders.save", str(wrong.exception))
             self.assertIn("@ui.custom", str(wrong.exception), "the message says where raw events go")
+
+    def test_1_829_only_another_states_event_handler_is_handed_on(self) -> None:
+        """
+        Scenario 1.829: what is not another state's handler is refused at once.
+        Given: a handler of the state that is running, and a @ui.rows handler of another state.
+        When:  they are split as a result of the running state's handler.
+        Then:  both are refused when the handler returns, not later in the browser: the handler of
+               its own state with the advice to put shared work in a `_` method, the rows handler
+               with the advice to return ui.refresh() for it.
+        """
+        own = Orders.get_full_name()
+        with self.assertRaises(TypeError) as itself:
+            results.split(Orders.save, handler="Orders.close", state=own)
+        self.assertIn("Orders.close", str(itself.exception))
+        self.assertIn("own state", str(itself.exception), "the message says why")
+        self.assertIn("`_`", str(itself.exception), "and where shared work goes")
+        with self.assertRaises(TypeError) as table:
+            results.split(Orders.rows, handler="Other.save", state=RawTable.get_full_name())
+        self.assertIn("@ui.rows", str(table.exception))
+        self.assertIn("ui.refresh(Orders.rows)", str(table.exception), "the message says what to write")
+        out, _ = results.split(RawTable.reload, handler="Orders.close", state=own)
+        self.assertEqual(len(out), 1, "another state's handler still passes")
