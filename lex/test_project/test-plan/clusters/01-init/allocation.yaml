@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 824
+max_scenario: 832
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2389,3 +2389,15 @@ letters:
     note: >-
       `ui.reflex_page("/route")` declares a raw Reflex page as a link target for `ui.address`, `open=`, `ui.link` and
       `ui.button`. These tests fail on a converted table whose rows cannot be opened, or a row link built from a string.
+  dg:
+    title: 'Reflex config: the npm packages RFDS''s browser code needs'
+    scenarios: '1.832'
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      `lex_config()` installs every npm package `rfds_form.js` imports (`react-number-format`, behind a lex.ui table's
+      clearable search box), and keeps a project's own `frontend_packages` beside lex-app's. These tests fail on a
+      project whose dashboards stop building, or one that loses lex-app's packages by listing its own.

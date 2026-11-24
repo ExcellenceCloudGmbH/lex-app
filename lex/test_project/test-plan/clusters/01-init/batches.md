@@ -3085,3 +3085,24 @@ could only link to `@ui.page` functions, so its rows lost their links. 1.783's n
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.824 | A raw Reflex page is somewhere a link may lead | the address is the route with its value encoded as one piece, and is the kind of address a table follows; the table's rows link by their key; the link and the button lead there; a missing or unknown value, and a route that is no route, are refused with what to write |
+
+### Batch 1dg — Reflex config: the npm packages RFDS's browser code needs ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.832 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/config.py` (`lex_config`) |
+| Test file | `lex/test_project/tests/init/test_1dg_reflex_frontend_packages.py` |
+| Test classes | `TestCluster01dg_ReflexFrontendPackages` (1.832) |
+| Fixtures | none (reads RFDS's installed `rfds_form.js`) |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Found while running the Reflex docs site, which has lex.ui tables with search but no RFDS form or number input: its
+dev server could not resolve `react-number-format`. Letters 1db–1df and scenarios to 1.831 are taken on other open
+branches, so this batch starts at 1dg / 1.832.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.832 | Every package RFDS's form script imports is installed | each npm package `rfds_form.js` imports (the script behind a lex.ui table's clearable search box) is installed by Reflex, by Radix, or by `lex_config()`'s frontend packages, `react-number-format` pinned to RFDS's own version; a project's own frontend packages are added beside lex-app's, not in place of them |

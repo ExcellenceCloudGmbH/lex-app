@@ -1473,3 +1473,15 @@ does not remove user launch configurations.
 | 1.824 | A raw Reflex page is somewhere a link may lead | the address is the route with its value encoded as one piece, and is the kind of address a table follows; the table's rows link by their key; the link and the button lead there; a missing or unknown value, and a route that is no route, are refused with what to write |
 
 **Scenario range:** 1.824. **Test file:** `lex/test_project/tests/init/test_1da_ui_reflex_page.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1da](batches.md).
+
+### 1dg. Reflex config: the npm packages RFDS's browser code needs ✅
+
+**What it tests:** a lex.ui table with `search=True` draws RFDS's clearable search input, whose clear button imports from `rfds_form.js`; that script imports `react-number-format`, which RFDS declares only on its form and number inputs. `lex_config()` installs it, and keeps a project's own `frontend_packages` beside it.
+
+**Why a regression matters:** a project whose dashboards stop building (the dev server cannot resolve the import), or one that lists its own packages and silently loses lex-app's.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.832 | Every package RFDS's form script imports is installed | each npm package `rfds_form.js` imports (the script behind a lex.ui table's clearable search box) is installed by Reflex, by Radix, or by `lex_config()`'s frontend packages, `react-number-format` pinned to RFDS's own version; a project's own frontend packages are added beside lex-app's, not in place of them |
+
+**Scenario range:** 1.832. **Test file:** `lex/test_project/tests/init/test_1dg_reflex_frontend_packages.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dg](batches.md).
