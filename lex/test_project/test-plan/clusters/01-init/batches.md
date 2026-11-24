@@ -3147,3 +3147,23 @@ words in a name. 1.783's namespace gains `filter`.
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.828 | A history is filtered by dates and by words | the toolbar has a date-range picker and a text box beside the dropdown; a month keeps its first to last day (a datetime on the last evening included, an undated row never); an open start or end; every word must match in any case; both together; clearing empties them; a field the table does not offer and a date that is not a day change nothing; a model table and an unknown kind are refused |
+
+### Batch 1de — lex.ui handlers may send a Reflex event as it is ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.829 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/results.py` (`split`, `to_events`) |
+| Test file | `lex/test_project/tests/init/test_1de_ui_reflex_events.py` |
+| Test classes | `TestCluster01de_ReflexEvents` (1.829) |
+| Fixtures | a raw Reflex state with two handlers |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Found while converting the reviewed customer project's handlers: many started another state's handler or announced
+something, and stayed raw async handlers for that alone. 1.747's docstring now says a Reflex event is allowed.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.829 | A handler sends a reflex event after its results | the Reflex events are results like the others, in the order written; they reach the browser as they are, after the toast before them; a plain object is still refused with the handler's name and what a handler may return |

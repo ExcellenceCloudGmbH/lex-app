@@ -107,14 +107,24 @@ def split(value: Any, *, handler: str) -> tuple[list, Progress | None]:
             continue
         if isinstance(item, Progress):
             report = item
-        elif isinstance(item, (Goto, Toast, Download, Refresh)):
+        elif isinstance(item, (Goto, Toast, Download, Refresh)) or _is_reflex_event(item):
             out.append(item)
         else:
             raise TypeError(
-                f"{handler} returned {item!r}. A lex.ui handler returns ui.goto(), ui.toast(), ui.download() "
-                "or ui.refresh(), and a job may yield ui.progress(). Use @ui.custom for raw Reflex events."
+                f"{handler} returned {item!r}. A lex.ui handler returns ui.goto(), ui.toast(), ui.download(), "
+                "ui.refresh() or a Reflex event (another handler, rx.call_script(...)), and a job may yield "
+                "ui.progress()."
             )
     return out, report
+
+
+def _is_reflex_event(item: Any) -> bool:
+    """A Reflex event a handler may send as it is: another handler (``Other.load``) or an event
+    spec (``rx.call_script(...)``, ``Other.load(key)``). The browser runs it after the results
+    before it, in order."""
+    from reflex.event import EventHandler, EventSpec
+
+    return isinstance(item, (EventHandler, EventSpec))
 
 
 def _external(path: str) -> bool:
@@ -146,6 +156,8 @@ def to_events(items: list) -> list:
 
             extra = {"description": item.description} if item.description else {}
             events.append(getattr(rfds.toast, item.tone)(item.message, **extra))
+        elif _is_reflex_event(item):
+            events.append(item)
         else:
             events.append(rx.download(url=item.url, filename=item.filename, data=item.data))
     return events

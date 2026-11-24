@@ -1510,3 +1510,15 @@ does not remove user launch configurations.
 | 1.828 | A history is filtered by dates and by words | the toolbar has a date-range picker and a text box beside the dropdown; a month keeps its first to last day (a datetime on the last evening included, an undated row never); an open start or end; every word must match in any case; both together; clearing empties them; a field the table does not offer and a date that is not a day change nothing; a model table and an unknown kind are refused |
 
 **Scenario range:** 1.828. **Test file:** `lex/test_project/tests/init/test_1dd_ui_table_filters.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dd](batches.md).
+
+### 1de. lex.ui handlers may send a Reflex event as it is ✅
+
+**What it tests:** A handler body returns or yields another state's handler, or an event spec such as `rx.call_script(...)`, among its lex.ui results; the browser gets it as it is, in order.
+
+**Why a regression matters:** a converted handler that cannot chain to the handler it used to start, or a result order the browser does not keep.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.829 | A handler sends a reflex event after its results | the Reflex events are results like the others, in the order written; they reach the browser as they are, after the toast before them; a plain object is still refused with the handler's name and what a handler may return |
+
+**Scenario range:** 1.829. **Test file:** `lex/test_project/tests/init/test_1de_ui_reflex_events.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1de](batches.md).
