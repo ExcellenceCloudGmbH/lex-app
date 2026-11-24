@@ -8,6 +8,7 @@ page -- cut down to the fields the table uses -- in the state the browser receiv
 from __future__ import annotations
 
 import itertools
+import re
 import json
 from collections.abc import Mapping, Sequence
 from typing import Any, ClassVar
@@ -31,6 +32,7 @@ _CACHE: dict[tuple, type] = {}
 #: id of a ui.table part -> the state class built for it (for ``ui.testing.rows(table=...)``).
 _CACHE_BY_TABLE: dict[int, type] = {}
 _COUNTER = itertools.count(1)
+_ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def handler_key(handler: Any) -> str:
@@ -49,6 +51,8 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
     row_open: ClassVar[str] = ""                      # the row's own open= field, if any
     tags_fields: ClassVar[tuple[str, ...]] = ()
     choice_fields: ClassVar[tuple[str, ...]] = ()
+    date_fields: ClassVar[tuple[str, ...]] = ()       # filtered by a date range (ui.filter(kind="dates"))
+    text_fields: ClassVar[tuple[str, ...]] = ()       # filtered by "contains" (ui.filter(kind="text"))
     search_fields: ClassVar[tuple[str, ...]] = ()     # the text columns a search looks in
     totals_spec: ClassVar[tuple[Mapping[str, Any], ...]] = ()
     totals_currency: ClassVar[str] = ""               # the money field whose currency splits the totals
@@ -62,6 +66,8 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
     totals_rows: list[dict] = []
     choices: dict[str, list[dict[str, str]]] = {}
     chosen: dict[str, str] = {}
+    dates: dict[str, dict[str, str]] = {}             # a date filter's range, as its picker shows it
+    texts: dict[str, str] = {}                        # a text filter's words, as its box shows them
     _row_to: dict[str, str] = {}
 
     # -- events ----------------------------------------------------------------------------------
@@ -127,6 +133,39 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
         async for _ in choose(self, field, value):
             yield
 
+    @rx.event
+    async def set_dates(self, field: str, value: Mapping[str, Any]):
+        """A date filter's range, ``{"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}``; both empty remove it."""
+        if field not in type(self).date_fields:
+            return
+        value = value if isinstance(value, Mapping) else {}
+        start, end = (_day(value.get("start")), _day(value.get("end")))
+        filters, dates = dict(self.filters), dict(self.dates)
+        if start or end:
+            filters[field], dates[field] = {"op": "between", "value": [start, end]}, {"start": start, "end": end}
+        else:
+            filters.pop(field, None)
+            dates.pop(field, None)
+        self.filters, self.dates, self.page = filters, dates, 0
+        async for _ in self.load():
+            yield
+
+    @rx.event
+    async def set_text(self, field: str, value: str):
+        """A text filter's words: a row matches when the field contains them; ``""`` removes it."""
+        if field not in type(self).text_fields:
+            return
+        text = " ".join(str(value or "").split())[:200]
+        filters, texts = dict(self.filters), dict(self.texts)
+        if text:
+            filters[field], texts[field] = {"op": "contains", "value": text}, text
+        else:
+            filters.pop(field, None)
+            texts.pop(field, None)
+        self.filters, self.texts, self.page = filters, texts, 0
+        async for _ in self.load():
+            yield
+
     def _store_filter(self, key: str, value: Mapping[str, Any]) -> bool:
         # Only the table's own filters: a filter on any other field would let the browser learn,
         # from the count of matching rows, a value the table does not show.
@@ -136,8 +175,8 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
 
     @rx.event
     async def clear_filters(self):
-        """"Clear filters": every filter, and the dropdowns that show them."""
-        self.chosen = {}
+        """"Clear filters": every filter, and the dropdowns, ranges and boxes that show them."""
+        self.chosen, self.dates, self.texts = {}, {}, {}
         if self.filters:
             self.filters = {}
             await self._after_filter_change()
@@ -145,6 +184,8 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
     @rx.event
     async def remove_filter(self, key: str):
         self.chosen = {k: v for k, v in self.chosen.items() if k != key}
+        self.dates = {k: v for k, v in self.dates.items() if k != key}
+        self.texts = {k: v for k, v in self.texts.items() if k != key}
         if key in self.filters:
             self.filters = {k: v for k, v in self.filters.items() if k != key}
             await self._after_filter_change()
@@ -225,7 +266,15 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
 
     @classmethod
     def _matching(cls, rows: list[dict], *, sort: list, filters: dict, query: str) -> list[dict]:
-        plain = {k: v for k, v in (filters or {}).items() if k not in cls.tags_fields}
+        own = (*cls.tags_fields, *cls.date_fields, *cls.text_fields)
+        plain = {k: v for k, v in (filters or {}).items() if k not in own}
+        for name, spec in (filters or {}).items():
+            if name in cls.date_fields:
+                start, end = (list(spec.get("value") or []) + ["", ""])[:2]
+                rows = [r for r in rows if _within(r.get(name), start, end)]
+            elif name in cls.text_fields:
+                words = str(spec.get("value", "")).casefold().split()
+                rows = [r for r in rows if all(word in str(r.get(name) or "").casefold() for word in words)]
         for name, spec in (filters or {}).items():
             if name in cls.tags_fields:
                 wanted = str(spec.get("value", ""))
@@ -314,6 +363,22 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
             about["Filters"] = "; ".join(f"{name} = {dict(spec).get('value', '')}"
                                          for name, spec in sorted(dict(self.filters).items()))
         return labels, out, about
+
+
+def _day(value: Any) -> str:
+    """``value`` as an ISO day (``YYYY-MM-DD``), or ``""`` when it is not one."""
+    text = str(value or "").strip()[:10]
+    return text if _ISO_DAY.fullmatch(text) else ""
+
+
+def _within(value: Any, start: str, end: str) -> bool:
+    """Whether a row's date (a date, a datetime, or their ISO text) falls on a day from ``start`` to ``end``."""
+    if hasattr(value, "isoformat"):
+        value = value.isoformat()
+    day = _day(value)
+    if not day:
+        return False
+    return (not start or day >= start) and (not end or day <= end)
 
 
 async def choose(state: Any, field: str, value: str):

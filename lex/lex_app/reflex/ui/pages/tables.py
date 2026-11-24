@@ -105,6 +105,55 @@ def _record(fn: Callable[[Any], Any]) -> tuple[Any, set[str]]:
     return fn(_Recorder(rx.Var("row").to(dict), seen)), seen
 
 
+#: What a filter can be: a dropdown of the column's values, a date range, words the field contains.
+FILTER_KINDS = ("choice", "dates", "text")
+
+
+@dataclasses.dataclass(frozen=True)
+class Filter:
+    """One filter of a table (see :func:`filter`)."""
+
+    field: str
+    kind: str = "choice"
+    label: Any = None
+
+
+def filter(field: str, *, kind: str = "choice", label: Any = None) -> Filter:  # noqa: A001 - ui.filter
+    """One filter of a table, for ``ui.table(filters=[...])``.
+
+    A plain name is a ``"choice"`` filter: a dropdown of the values the column holds. Give
+    ``kind="dates"`` for a date range over a date column (a row's date, or the day of its
+    datetime, from the start to the end day), or ``kind="text"`` for the rows whose field
+    contains the words typed. ``label`` is the filter's label; the column's label by default::
+
+        ui.table(State.runs, columns=[...], filters=[
+            "started_by",
+            ui.filter("created", kind="dates"),
+            ui.filter("company", kind="text"),
+        ])
+    """
+    if not isinstance(field, str) or not _FIELD.fullmatch(field):
+        raise ValueError(f"ui.filter() takes a column's field name; got {field!r}")
+    if kind not in FILTER_KINDS:
+        raise ValueError(f"ui.filter({field!r}, kind={kind!r}): a filter's kind is one of "
+                         f"{', '.join(repr(k) for k in FILTER_KINDS)}.")
+    return Filter(field, kind, label)
+
+
+def _filters(filters: Any) -> tuple[Filter, ...]:
+    if isinstance(filters, str):
+        raise TypeError(f"ui.table(filters=) takes a list of column names: filters=[{filters!r}]")
+    out = []
+    for item in filters or ():
+        if isinstance(item, str):
+            out.append(Filter(item))
+        elif isinstance(item, Filter):
+            out.append(item)
+        else:
+            raise TypeError(f"ui.table(filters=) takes column names and ui.filter(...); got {item!r}")
+    return tuple(out)
+
+
 @dataclasses.dataclass(eq=False)
 class Table(Part):
     source: Any
@@ -143,7 +192,7 @@ class Table(Part):
             raise ctx.fail(f"the first column, `{first.key}`, is {what}.",
                            "The first column names the row and is the row's link, so it is shown as plain text. "
                            "Put a plain column first, such as the name.")
-        unknown = [name for name in self.filters if name not in keys]
+        unknown = [f.field for f in self.filters if f.field not in keys]
         if unknown:
             raise ctx.fail(f"`filters=` names {', '.join(unknown)}, which is not a column.",
                            f"Filter on columns of the table: {', '.join(keys)}.")
@@ -217,11 +266,24 @@ class Table(Part):
         if self.filters:
             labels = {c.key: (c.label or c.key.replace("_", " ").capitalize()) for c in cols}
             boxes = []
-            for name in self.filters:
+            for f in self.filters:
+                name, label = f.field, say(f.label or labels[f.field])
+                if f.kind == "dates":
+                    boxes.append(rfds.date_range_picker(
+                        value=state.dates.get(name, {"start": "", "end": ""}).to(dict),
+                        on_change=lambda value, name=name: state.set_dates(name, value),
+                        label=label, name=f"filter_{name}", width="sm", recent_key=None))
+                    continue
+                if f.kind == "text":
+                    boxes.append(rfds.text_input(
+                        default_value=state.texts.get(name, "").to(str),
+                        on_blur=lambda value, name=name: state.set_text(name, value),
+                        label=label, name=f"filter_{name}", width="sm", clearable=True))
+                    continue
                 options = state.choices.get(name, []).to(list[dict]) if choices is True else choices[name]
                 boxes.append(rfds.select(options=options, value=state.chosen.get(name, rows_table.ALL).to(str),
                                          on_change=lambda value, name=name: state.set_choice(name, value),
-                                         label=say(labels[name]), name=f"filter_{name}", width="sm"))
+                                         label=label, name=f"filter_{name}", width="sm"))
             filters = rfds.cluster(*boxes, gap="2")
         export = export_menu(on_export=state.export, kinds=("csv", "xlsx"), loading=state.exporting) if self.export else None
         if search is None and filters is None and export is None:
@@ -284,7 +346,11 @@ class Table(Part):
             raise ctx.fail(f"column `{linked[0]}` has `open=`, which only a `@ui.rows` table's rows can carry.",
                            "A model's field is data and never becomes a link. Read the rows in a `@ui.rows` "
                            "handler that builds each address with `ui.address(...)`.")
-        for name in self.filters:
+        for f in self.filters:
+            if f.kind != "choice":
+                raise ctx.fail(f"`filters=` gives {f.field} a {f.kind!r} filter, which only a `@ui.rows` table has yet.",
+                               "A model table filters on fields with choices, or yes/no fields: give the name alone.")
+            name = f.field
             field = known.get(name)
             if field is not None and not (field.choices or field.get_internal_type() == "BooleanField"):
                 raise ctx.fail(f"`filters=` names {name}, whose values are not a fixed set.",
@@ -318,12 +384,12 @@ class Table(Part):
         if self.row_actions is not None:
             used |= _record(self.row_actions)[1]
         state = data.table_state(model, columns=specs, search_field=search_field, filters=self.where,
-                                 row_fields=tuple(sorted(used)), choice_fields=tuple(self.filters),
+                                 row_fields=tuple(sorted(used)), choice_fields=tuple(f.field for f in self.filters),
                                  scope_fields=tuple(dict(self.where or {})))
         from lex.lex_app.reflex.ui.pages import rows_table
 
         options = {}
-        for name in self.filters:
+        for name in (f.field for f in self.filters):
             field = known[name]
             pairs = field.choices or [(True, "Yes"), (False, "No")]
             options[name] = [{"value": rows_table.ALL, "label": "All"},
@@ -384,7 +450,10 @@ class Table(Part):
         state = rows_table.state_for(
             self.source, columns=specs, row_fields=sorted(fields),
             key_field=key, needed=needed, open_fields=tuple(open_fields), row_open=row_open,
-            tags_fields=tuple(c.key for c in cols if c.kind == "tags"), choice_fields=tuple(self.filters),
+            tags_fields=tuple(c.key for c in cols if c.kind == "tags"),
+            choice_fields=tuple(f.field for f in self.filters if f.kind == "choice"),
+            date_fields=tuple(f.field for f in self.filters if f.kind == "dates"),
+            text_fields=tuple(f.field for f in self.filters if f.kind == "text"),
             search_fields=tuple(c.key for c in cols if c.kind in ("text", None, "status", "tag") and c.show is None),
             totals_spec=totals_spec, totals_currency=money[0].currency if money and self.totals else "",
             export_columns=_export_columns(cols),
@@ -472,7 +541,8 @@ def table(source: Any, *, columns: Any = (), key: str | None = None, where: dict
       ``ui.table(FundState.holdings, ...)`` -- a ``@ui.rows`` handler's list of dicts.
 
     What the user can do:
-      ``search=True`` a search box; ``filters=["kind"]`` a dropdown per column; ``export=True``
+      ``search=True`` a search box; ``filters=["kind"]`` a dropdown per column, and
+      ``ui.filter("created", kind="dates")`` or ``kind="text"`` a date range or a "contains" box; ``export=True``
       CSV and Excel of every matching row; ``open=`` a page (the row's key goes into its one
       argument, a real link), or the name of a field holding each row's ``ui.address`` (the row is
       a button that opens it); ``row_actions=lambda row: [ui.button(...)]``.
@@ -489,8 +559,7 @@ def table(source: Any, *, columns: Any = (), key: str | None = None, where: dict
     """
     if isinstance(columns, str):
         raise TypeError(f"ui.table(columns=) takes a list of names: columns=[{columns!r}]")
-    if isinstance(filters, str):
-        raise TypeError(f"ui.table(filters=) takes a list of column names: filters=[{filters!r}]")
+    filters = _filters(filters)
     if totals is not None and not isinstance(totals, dict):
         raise TypeError("ui.table(totals=) takes {column: \"sum\"}: totals={\"amount\": \"sum\"}")
     if where is not None and not isinstance(where, dict):
@@ -501,5 +570,5 @@ def table(source: Any, *, columns: Any = (), key: str | None = None, where: dict
     if key is not None and not (isinstance(key, str) and _FIELD.fullmatch(key)):
         raise ValueError(f"ui.table(key=) names the field that tells rows apart; got {key!r}")
     cols = tuple(columns) if isinstance(columns, (list, tuple)) else (columns,)
-    return Table(source, cols, open, empty, visible, key, where, bool(search), tuple(filters), bool(export),
+    return Table(source, cols, open, empty, visible, key, where, bool(search), filters, bool(export),
                  totals, row_actions)

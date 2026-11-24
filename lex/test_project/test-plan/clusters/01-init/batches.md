@@ -3127,3 +3127,23 @@ showed every section busy while one exported, and ignored a second section's exp
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.827 | A handler from a mixin is each states own | each state keeps the handler under its own name, so a view of one state's running export does not show the other's; the second export runs too instead of being ignored as a repeat; a handler written on the state itself keeps its name |
+
+### Batch 1dd — lex.ui tables: a date-range filter and a "contains" filter ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.828 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/tables.py` (`filter`, the toolbar), `lex/lex_app/reflex/ui/pages/rows_table.py` (`set_dates`, `set_text`, matching), `lex/ui.py` |
+| Test file | `lex/test_project/tests/init/test_1dd_ui_table_filters.py` |
+| Test classes | `TestCluster01dd_TableFilters` (1.828) |
+| Fixtures | a history rows handler with dates of every shape; `ui.testing.Harness` |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Found while moving the reviewed customer project's history tables to lex.ui: each filters by when a run started and by
+words in a name. 1.783's namespace gains `filter`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.828 | A history is filtered by dates and by words | the toolbar has a date-range picker and a text box beside the dropdown; a month keeps its first to last day (a datetime on the last evening included, an undated row never); an open start or end; every word must match in any case; both together; clearing empties them; a field the table does not offer and a date that is not a day change nothing; a model table and an unknown kind are refused |

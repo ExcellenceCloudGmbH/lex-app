@@ -1498,3 +1498,15 @@ does not remove user launch configurations.
 | 1.827 | A handler from a mixin is each states own | each state keeps the handler under its own name, so a view of one state's running export does not show the other's; the second export runs too instead of being ignored as a repeat; a handler written on the state itself keeps its name |
 
 **Scenario range:** 1.827. **Test file:** `lex/test_project/tests/init/test_1dc_ui_mixin_handlers.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dc](batches.md).
+
+### 1dd. lex.ui tables: a date-range filter and a "contains" filter ✅
+
+**What it tests:** `ui.filter(field, kind="dates")` and `ui.filter(field, kind="text")` filter a `@ui.rows` table on the server over every row, only on the fields the table offers, beside its dropdowns.
+
+**Why a regression matters:** a history that cannot be narrowed to a month, a date filter that drops the last day, or a filter on a field the table does not offer.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.828 | A history is filtered by dates and by words | the toolbar has a date-range picker and a text box beside the dropdown; a month keeps its first to last day (a datetime on the last evening included, an undated row never); an open start or end; every word must match in any case; both together; clearing empties them; a field the table does not offer and a date that is not a day change nothing; a model table and an unknown kind are refused |
+
+**Scenario range:** 1.828. **Test file:** `lex/test_project/tests/init/test_1dd_ui_table_filters.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dd](batches.md).

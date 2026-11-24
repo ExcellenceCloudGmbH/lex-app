@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 827
+max_scenario: 828
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2412,3 +2412,15 @@ letters:
     note: >-
       A lex.ui handler that a state takes from a mixin is decorated again under the state's own name. These tests fail
       on a button that stays busy, or a press ignored as a repeat, because another state runs the same handler.
+  dd:
+    title: 'lex.ui tables: a date-range filter and a "contains" filter'
+    scenarios: '1.828'
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.filter(field, kind="dates" | "text")` filters a `@ui.rows` table on the server, only on the fields it offers.
+      These tests fail on a history that cannot be narrowed to a month, a filter that drops the last day, or a filter
+      on a field the table does not offer.

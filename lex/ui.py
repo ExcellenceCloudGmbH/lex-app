@@ -63,6 +63,7 @@ button/link``
                             decides what is shown, never what is allowed
 ``ui.table``                rows from a model (``where=``) or a ``@ui.rows`` handler; ``search=``,
                             ``filters=``, ``export=``, ``totals=``, ``row_actions=``
+``ui.filter``               a table's date-range or "contains" filter (a name alone is a dropdown)
 ``ui.address``              a page's address, for a row that leads to a page of its own
 ``ui.reflex_page``          a page written in raw Reflex, as somewhere a link may lead
 ``ui.custom_block``         a raw component, marked for review with its reason
@@ -85,7 +86,7 @@ from lex.lex_app.reflex.ui.pages.links import address, reflex_page
 from lex.lex_app.reflex.ui.pages.kinds import list_ as list  # noqa: A001 - ui.list is the page kind
 from lex.lex_app.reflex.ui.pages.kinds import record, section
 from lex.lex_app.reflex.ui.pages.parts import PageError
-from lex.lex_app.reflex.ui.pages.tables import column, table
+from lex.lex_app.reflex.ui.pages.tables import column, filter, table  # noqa: A004 - ui.filter
 from lex.lex_app.reflex.ui.pages.vocab import button, custom_block, each, fact, link, message, status, switch, text
 from lex.lex_app.reflex.ui.results import Refuse, download, goto, progress, refresh, toast
 from lex.lex_app.reflex.ui.rows import rows
@@ -95,7 +96,7 @@ from lex.lex_app.reflex.ui.state import State
 __all__ = [
     "ApiError", "PageError", "Refuse", "State", "action", "address", "button", "cancel", "chrome", "column",
     "create", "custom", "custom_block", "dashboard", "delete", "download", "each", "edit", "embed", "fact",
-    "failed", "goto", "install", "job", "link", "load", "loaded", "message", "page", "permission", "progress",
-    "progress_of", "read", "record", "reflex_page", "refresh", "rows", "running", "section", "signed_in", "status",
-    "switch", "table", "testing", "text", "toast",
+    "failed", "filter", "goto", "install", "job", "link", "load", "loaded", "message", "page", "permission",
+    "progress", "progress_of", "read", "record", "reflex_page", "refresh", "rows", "running", "section",
+    "signed_in", "status", "switch", "table", "testing", "text", "toast",
 ]
