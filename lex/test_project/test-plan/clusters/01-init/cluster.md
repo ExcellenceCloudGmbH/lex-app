@@ -1613,3 +1613,21 @@ does not remove user launch configurations.
 | 1.855 | Several choices declared wrongly, and shown | no options, non-text options, a start that is no list, options on another kind, the kinds listed; `ui.fact(kind="choices")` joined by commas |
 
 **Scenario range:** 1.852 – 1.855. **Test file:** `lex/test_project/tests/init/test_1dl_ui_form_choices.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dl](batches.md).
+
+### 1dy. lex.ui tables: the name pinned and given room, a code kept narrow, the Columns menu, every row at once, totals that say what they sum ✅
+
+**What it tests:** `ui.column(kind="name"|"code", pin=True)`, `ui.table(choose_columns=True, page_size=N|None, totals={...: "sum of all rows"})` -- RFDS's sticky column, field widths, column chooser, pagination and totals, on rows and model tables.
+
+**Why a regression matters:** a name that scrolls away, a user's column choice that hides the row's name, a row beyond 200 out of reach, or a total whose meaning changes silently when the user searches.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.940 | The name stays in place and has room; a code stays narrow | sticky start, entity kind at the wide width, identifier at the narrow width; model fields too |
+| 1.941 | A pin written wrongly says what to write | not a bool; not the first column; no width argument |
+| 1.942 | The user chooses, orders and sizes the columns | RFDS's column chooser; the first column always shown and first; widths 40-1,200 px |
+| 1.943 | `page_size=` sets the rows a page, `None` shows every row | 50; default 25; `None`: 200, no size picker, pagination past 200; wrong sizes refused |
+| 1.944 | Every row in one scroll, and past 200 the rest is reached | 150 on one page; 250 as 200 + 50 |
+| 1.945 | A totals row says what it sums and can sum every row | "Total", "Total of matching rows", "Total of all rows"; mixing refused |
+| 1.946 | A table with all of it compiles | Reflex's page compiler |
+
+**Scenario range:** 1.940 – 1.946. **Test file:** `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dy](batches.md).

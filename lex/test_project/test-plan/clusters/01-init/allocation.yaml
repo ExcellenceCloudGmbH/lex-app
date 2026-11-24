@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 855
+max_scenario: 946
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2498,3 +2498,13 @@ letters:
       xfail: 0
     note: >-
       `ui.field(kind="choices", options=...)`: RFDS's checkbox group up to 12 fixed options, its multi-select above or for options from the state; the handler gets a `list[str]` in the order of the options, `[]` for none, checked on the server; in a form, a step and a button's ask=; `ui.fact` shows the kind joined by commas. These tests fail on a text where a list was promised, a value that is no option reaching the body, a required field passing with nothing ticked, or a field that calls the server on every tick.
+  dy:
+    title: 'lex.ui tables: the name pinned and given room, a code kept narrow, the Columns menu, every row at once, totals that say what they sum'
+    scenarios: 1.940-1.946
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.column(kind="name"|"code", pin=True)`, `ui.table(choose_columns=True, page_size=N|None, totals={...: "sum of all rows"})` on rows and model tables, through Reflex's own event processor and its page compiler. These tests fail on a name that scrolls away, a pin RFDS cannot keep, a user's column choice that hides the row's name, a row beyond 200 out of reach, or a total whose label does not say whether it sums the matching rows or every row.

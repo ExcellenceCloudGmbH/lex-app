@@ -1,0 +1,310 @@
+"""lex.ui tables: columns a reader relies on -- the name pinned and given room, a code kept
+narrow, columns chosen and sized by the user -- every row in one scroll, and a totals row that
+says what it sums.
+
+Intent: a wide table of customers or orders is read sideways and down. The name stays in place
+while the user scrolls to the right; a name gets room and a short code does not take it; the user
+can hide, order and size the columns (RFDS's "Columns" menu: a width typed in, never a drag); a
+file's few hundred lines are read in one scroll rather than 25 at a time, up to the 200 rows RFDS
+lets a table hold in the browser, and past that the table still pages; and a totals row says
+whether it sums the rows the search left or every row. A regression is a name that scrolls away,
+a row that cannot be reached, a width that only breaks in the browser, a user's column choice
+that hides the row's name, or a total that silently changes meaning when the user searches.
+
+Cluster 1dy -- scenarios 1.940-1.946. Type: U.
+Covers: lex/lex_app/reflex/ui/pages/tables.py (column kind="name"/"code", pin=; table page_size=,
+choose_columns=, totals=), lex/lex_app/reflex/ui/pages/rows_table.py (page size, totals over all
+rows, their label), lex/lex_app/reflex/data.py (ChosenColumns, the model table's page size).
+Run: python -m lex pytest lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py -v
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+from django.contrib.auth.models import Group
+from django.test import SimpleTestCase
+from reflex.compiler.compiler import compile_page
+
+from lex import ui
+from lex.lex_app.reflex.ui import testing
+from lex.lex_app.reflex.ui.pages import rows_table
+from lex.lex_app.reflex.ui.pages.parts import Build, PageError
+
+pytestmark = pytest.mark.init
+
+DATA = {"count": 3}
+
+
+class CustomersState(ui.State):
+    """A customers list read from a file: a name, a short code, a region and an amount."""
+
+    @ui.rows
+    def customers(self):
+        return [{"id": n, "name": f"Customer {n:03}", "code": f"C{n:03}", "region": "North" if n % 2 else "South",
+                 "amount": "1.00", "currency": "EUR" if n % 3 else "USD"} for n in range(1, DATA["count"] + 1)]
+
+
+CTX = Build(page="customers", route="/customers", caption="Customers")
+
+
+def built(table) -> tuple[type, str]:
+    text = str(table.build(CTX))
+    return rows_table._CACHE_BY_TABLE[id(table)], text
+
+
+def spec_of(state: type, field: str) -> dict:
+    return next(dict(spec) for spec in state.table_columns if spec["field"] == field)
+
+
+class TestCluster01dy_TableColumnsRows(SimpleTestCase):
+    """1.940-1.946: pinned and sized columns, the Columns menu, every row at once, totals that say what they sum."""
+
+    def setUp(self) -> None:
+        DATA["count"] = 3
+
+    # -- 1.940 ---------------------------------------------------------
+    def test_1_940_the_name_stays_in_place_and_has_room_and_a_code_stays_narrow(self) -> None:
+        """
+        Scenario 1.940: kind="name", kind="code" and pin= on a column.
+        Given: a rows table whose first column, the name, is pinned and of kind name, with a
+               column of kind code; and a model table whose first field is pinned, and one whose
+               field is of kind name.
+        When:  they are built.
+        Then:  RFDS's column spec of the name says sticky at the start, RFDS's entity kind and its
+               wide field width; the code is RFDS's identifier kind at its narrow field width; a
+               plain column has no width and is not pinned; the table's cells carry RFDS's sticky
+               marker; a pinned model field keeps its own label and kind; a model field of kind
+               name keeps its label and gets the room.
+        """
+        state, text = built(ui.table(CustomersState.customers, columns=[
+            ui.column("name", kind="name", pin=True), ui.column("code", kind="code"), "region"]))
+        name, code, region = (spec_of(state, field) for field in ("name", "code", "region"))
+        self.assertEqual((name.get("sticky"), name["kind"], name.get("width")),
+                         ("start", "entity", "var(--rfds-size-field-md)"),
+                         "the name stays in place while the table scrolls sideways, and has RFDS's wide width")
+        self.assertEqual((code.get("sticky"), code["kind"], code.get("width")), (None, "id", "var(--rfds-size-field-xs)"),
+                         "a short code is RFDS's identifier, narrow")
+        self.assertEqual((region.get("sticky"), region.get("width")), (None, None),
+                         "a plain column takes the room its values need and scrolls")
+        self.assertIn('"data-rfds-sticky":"start"', text, "RFDS marks the pinned header and cells")
+
+        groups = ui.table(Group, columns=[ui.column("name", pin=True)])
+        text = str(groups.build(Build(page="groups", route="/groups", caption="Groups")))
+        spec = spec_of(rows_table._CACHE_BY_TABLE[id(groups)], "name")
+        self.assertEqual((spec.get("sticky"), spec["header"], spec["kind"]), ("start", "Name", "text"),
+                         "a model table's first field can be pinned and keeps its own label and kind")
+        self.assertIn('"data-rfds-sticky":"start"', text, "RFDS marks it")
+        named = ui.table(Group, columns=["id", ui.column("name", kind="name")])
+        named.build(Build(page="groups", route="/groups", caption="Groups"))
+        spec = spec_of(rows_table._CACHE_BY_TABLE[id(named)], "name")
+        self.assertEqual((spec["header"], spec["kind"], spec.get("width")), ("Name", "entity", "var(--rfds-size-field-md)"),
+                         "a model's field of kind name keeps its label and gets the room")
+
+    # -- 1.941 ---------------------------------------------------------
+    def test_1_941_a_pin_written_wrongly_says_what_to_write(self) -> None:
+        """
+        Scenario 1.941: pin= refused; a column takes no width.
+        Given: a pin that is not True or False, a pin on a column that is not the first, and a
+               width given to a column.
+        When:  the column or the table is declared and built.
+        Then:  each pin is refused with what to write -- on the second column, that RFDS keeps one
+               column in place, the one that names the row; a column has no width argument: its
+               kind says what the values are, and the kinds name and code set the room.
+        """
+        with self.assertRaises(TypeError):
+            ui.column("name", width="wide")
+        self.assertIn("``name`` (a person's or a company's name: given room", ui.column.__doc__,
+                      "the kinds that set a width are documented on ui.column")
+        with self.assertRaisesRegex(TypeError, r"pin=\) takes True or False"):
+            ui.column("name", pin="start")
+        table = ui.table(CustomersState.customers, columns=["name", ui.column("code", pin=True)])
+        with self.assertRaises(PageError) as raised:
+            table.build(CTX)
+        self.assertIn("column `code` is pinned, and only the first column can be.", str(raised.exception))
+        self.assertIn("RFDS keeps one column in place while the table scrolls sideways: the first, which names "
+                      "the row. Pin it: `ui.column(\"name\", pin=True)`.", str(raised.exception))
+
+    # -- 1.942 ---------------------------------------------------------
+    def test_1_942_the_user_chooses_orders_and_sizes_the_columns(self) -> None:
+        """
+        Scenario 1.942: choose_columns=True.
+        Given: a rows table with choose_columns=True, and a model table with it.
+        When:  they are built, and the user hides, reorders and sizes columns -- among them
+               unknown columns, the row's name, widths too small or not numbers.
+        Then:  the toolbar holds RFDS's column chooser and the table follows the chosen columns,
+               order and widths; the name cannot be hidden or moved from first place; only the
+               table's own columns are kept, widths only from 40 to 1,200 pixels; a table
+               without choose_columns has no chooser; the model table has the chooser too.
+        """
+        state, text = built(ui.table(CustomersState.customers, columns=["name", "code", "region"],
+                                     choose_columns=True))
+        self.assertIn("column_chooser", text, "RFDS's Columns menu is in the toolbar")
+        plain_state, plain = built(ui.table(CustomersState.customers, columns=["name", "region"]))
+        self.assertNotIn("column_chooser", plain, "without choose_columns= there is none")
+
+        async def scenario():
+            async with testing.Harness(user="ada") as h:
+                await h.open_tab("/customers")
+                await (await h.send(state, "open"))
+                await (await h.send(state, "set_view_columns", ids=["region", "secret", "code"]))
+                await (await h.send(state, "set_column_order", ids=["region", "name", "secret", "code"]))
+                await (await h.send(state, "set_column_widths",
+                                    widths={"code": 120, "region": 12, "name": "wide", "secret": 300, "amount": 90}))
+                table = await h._state(state)
+                return list(table.view_columns), list(table.column_order), dict(table.column_widths)
+
+        shown, order, widths = asyncio.run(scenario())
+        self.assertEqual(shown, ["name", "region", "code"], "the name is always shown; an unknown column is dropped")
+        self.assertEqual(order, ["name", "region", "code"], "the name stays first; an unknown column is dropped")
+        self.assertEqual(widths, {"code": 120}, "a width from 40 to 1,200 pixels of a column of the table")
+
+        model = str(ui.table(Group, columns=["name"], choose_columns=True).build(
+            Build(page="groups", route="/groups", caption="Groups")))
+        self.assertIn("column_chooser", model, "a model table offers the Columns menu too")
+
+    # -- 1.943 ---------------------------------------------------------
+    def test_1_943_page_size_sets_the_rows_a_page_and_none_shows_every_row(self) -> None:
+        """
+        Scenario 1.943: page_size=.
+        Given: rows tables with page_size=50, page_size=None and none given; model tables with
+               page_size=None; and page sizes that are not a number of rows up to 200.
+        When:  they are built.
+        Then:  50 opens at 50 rows, among the sizes the user can pick; none given is 25 as before;
+               None opens at 200 -- RFDS's limit for a table in the browser -- without the rows
+               per page picker, and with RFDS's pagination only while there are more rows than
+               that; a model table does the same; a wrong size is refused with what to write.
+        """
+        fifty, _ = built(ui.table(CustomersState.customers, columns=["name"], page_size=50))
+        default, default_text = built(ui.table(CustomersState.customers, columns=["name", "code"]))
+        every, every_text = built(ui.table(CustomersState.customers, columns=["name", "region"], page_size=None))
+        def opens_at(state: type) -> int:
+            return state.get_fields()["page_size"].default
+
+        self.assertEqual((opens_at(fifty), 50 in fifty.page_size_options), (50, True), "50 a page, and offered")
+        self.assertEqual(opens_at(default), 25, "the default stays 25 a page")
+        self.assertIn("rfds-pager", default_text, "a paged table has RFDS's pager")
+        self.assertEqual(opens_at(every), 200, "every row: as many as RFDS lets a table hold in the browser")
+        self.assertNotIn('"data-slot":"rfds-pager-size"', every_text, "no rows per page picker")
+        self.assertIn(".total_rows", every_text, "the pagination depends on the number of rows")
+        self.assertIn("rfds-pagination", every_text, "RFDS's pagination, for more than 200 rows")
+
+        groups = ui.table(Group, columns=["name"], page_size=None)
+        model = str(groups.build(Build(page="groups", route="/groups", caption="Groups")))
+        self.assertEqual(opens_at(rows_table._CACHE_BY_TABLE[id(groups)]), 200, "a model table the same way")
+        self.assertNotIn('"data-slot":"rfds-pager-size"', model, "without the rows per page picker")
+
+        for wrong in (0, 201, "all", True, 2.5):
+            with self.assertRaisesRegex(ValueError, r"page_size=\) takes a number of rows up to 200, or None"):
+                ui.table(CustomersState.customers, columns=["name"], page_size=wrong)
+
+    # -- 1.944 ---------------------------------------------------------
+    def test_1_944_every_row_in_one_scroll_and_past_200_the_rest_is_still_reached(self) -> None:
+        """
+        Scenario 1.944: reading a table with page_size=None.
+        Given: a file of 150 rows, then one of 250.
+        When:  the table appears, and the user moves to the next page of the second.
+        Then:  the 150 rows are on one page; of the 250, the first 200 are on the first page and
+               the last 50 on the next: no row is out of reach.
+        """
+        state, _ = built(ui.table(CustomersState.customers, columns=["name", "amount"], page_size=None))
+
+        async def scenario():
+            async with testing.Harness(user="ada") as h:
+                await h.open_tab("/customers")
+                DATA["count"] = 150
+                await (await h.send(state, "open"))
+                small = (len((await h._state(state)).page_rows), (await h._state(state)).total_rows)
+                DATA["count"] = 250
+                await (await h.send(state, "reread"))
+                first = (len((await h._state(state)).page_rows), (await h._state(state)).total_rows)
+                await (await h.send(state, "set_page", value=1))
+                rest = [row["name"] for row in (await h._state(state)).page_rows]
+                return small, first, rest
+
+        small, first, rest = asyncio.run(scenario())
+        self.assertEqual(small, (150, 150), "a file of 150 rows is read in one scroll")
+        self.assertEqual(first, (200, 250), "past 200 the first page holds 200 and the count says 250")
+        self.assertEqual((len(rest), rest[0], rest[-1]), (50, "Customer 201", "Customer 250"),
+                         "the rest is on the next page")
+
+    # -- 1.945 ---------------------------------------------------------
+    def test_1_945_a_totals_row_says_what_it_sums_and_can_sum_every_row(self) -> None:
+        """
+        Scenario 1.945: totals= "sum" and "sum of all rows".
+        Given: a searchable table with a region filter whose amounts are in two currencies,
+               totalled once over the matching rows and once over all rows.
+        When:  the table appears, and the user picks a region and searches.
+        Then:  with nothing narrowing the rows both say "Total"; once a filter or a search narrows
+               them, "sum" totals the rows left and says "Total of matching rows", and "sum of all
+               rows" keeps the total of every row and says "Total of all rows" -- each per
+               currency; mixing the two, or another word, is refused with what to write.
+        """
+        DATA["count"] = 6
+        columns = ["name", "region", ui.column("amount", kind="money", currency="currency")]
+        matching, _ = built(ui.table(CustomersState.customers, columns=columns, search=True, filters=["region"],
+                                     totals={"amount": "sum"}))
+        every, _ = built(ui.table(CustomersState.customers, columns=columns, search=True, filters=["region"],
+                                  totals={"amount": "sum of all rows"}))
+
+        async def totals_of(state):
+            async with testing.Harness(user="ada") as h:
+                await h.open_tab("/customers")
+
+                async def now():
+                    return [(row["name"], row["amount"]) for row in (await h._state(state)).totals_rows]
+
+                await (await h.send(state, "open"))
+                seen = {"all": await now()}
+                await (await h.send(state, "set_choice", field="region", value="North"))
+                seen["north"] = await now()
+                await (await h.send(state, "clear_filters"))
+                await (await h.send(state, "set_query", value="Customer 001"))
+                seen["search"] = await now()
+                return seen
+
+        sums = asyncio.run(totals_of(matching))
+        alls = asyncio.run(totals_of(every))
+        everything = [("Total (EUR)", "4.00"), ("Total (USD)", "2.00")]
+        self.assertEqual(sums["all"], everything, "nothing narrows the rows: Total, per currency")
+        self.assertEqual(alls["all"], everything, "the same for the total of all rows")
+        self.assertEqual(sums["north"], [("Total of matching rows (EUR)", "2.00"), ("Total of matching rows (USD)", "1.00")],
+                         "a filter on: the rows left, and the label says so")
+        self.assertEqual(sums["search"], [("Total of matching rows", "1.00")],
+                         "a search too; one currency left needs no code")
+        self.assertEqual(alls["north"], [("Total of all rows (EUR)", "4.00"), ("Total of all rows (USD)", "2.00")],
+                         "sum of all rows keeps every row, and says so")
+        self.assertEqual(alls["search"], [("Total of all rows (EUR)", "4.00"), ("Total of all rows (USD)", "2.00")],
+                         "also while searching")
+
+        mixed = ui.table(CustomersState.customers, totals={"amount": "sum", "code": "sum of all rows"},
+                         columns=["name", ui.column("code", kind="number"), ui.column("amount", kind="money")])
+        with self.assertRaises(PageError) as raised:
+            mixed.build(CTX)
+        self.assertIn("A table's totals all cover the same rows: write \"sum\" for each column, or "
+                      "\"sum of all rows\" for each.", str(raised.exception))
+        other = ui.table(CustomersState.customers, totals={"amount": "average"},
+                         columns=["name", ui.column("amount", kind="money")])
+        with self.assertRaises(PageError) as raised:
+            other.build(CTX)
+        self.assertIn("A total is the \"sum\" of a number, money or percent column -- of the rows the search and "
+                      "filters leave -- or the \"sum of all rows\"", str(raised.exception))
+
+    # -- 1.946 ---------------------------------------------------------
+    def test_1_946_a_table_with_all_of_it_compiles_to_a_real_page(self) -> None:
+        """
+        Scenario 1.946: compiled with Reflex's page compiler.
+        Given: a list page whose table has a pinned name with room, a narrow code, the Columns menu,
+               every row at once and a total of all rows.
+        When:  Reflex compiles it.
+        Then:  the module is built, with RFDS's sticky column, column chooser and pagination.
+        """
+        page = ui.list(title="Customers", table=ui.table(
+            CustomersState.customers, search=True, choose_columns=True, page_size=None,
+            totals={"amount": "sum of all rows"},
+            columns=[ui.column("name", kind="name", pin=True), ui.column("code", kind="code"),
+                     ui.column("amount", kind="money", currency="currency")]))
+        _, module = compile_page("/customers/all", page.build(Build(page="customers", route="/customers/all")))
+        for expected in ('"data-rfds-sticky":"start"', "column_chooser", "rfds-pagination"):
+            self.assertIn(expected, module, f"compiled: {expected}")

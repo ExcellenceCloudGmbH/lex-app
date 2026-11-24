@@ -17,6 +17,7 @@ import reflex as rx
 from rfds.patterns.exports.state import ExportMixin
 from rfds.state.table import DataTableMixin, query_rows
 
+from lex.lex_app.reflex.data import ChosenColumns
 from lex.lex_app.reflex.ui import rows as rows_mod
 
 #: Most distinct values a filter offers; a column with more is searched, not filtered.
@@ -39,7 +40,7 @@ def handler_key(handler: Any) -> str:
     return f"{handler.state.get_full_name()}.{handler.fn.__name__}"
 
 
-class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
+class LexRowsTableState(DataTableMixin, ExportMixin, ChosenColumns, mixin=True):
     """RFDS's server-paged table over the rows a ``@ui.rows`` handler returns."""
 
     owner: ClassVar[Any] = None
@@ -55,6 +56,7 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
     search_fields: ClassVar[tuple[str, ...]] = ()     # the text columns a search looks in
     totals_spec: ClassVar[tuple[Mapping[str, Any], ...]] = ()
     totals_currency: ClassVar[str] = ""               # the money field whose currency splits the totals
+    totals_of_all: ClassVar[bool] = False             # the totals sum every row, not only the matching ones
     export_columns: ClassVar[tuple[tuple[str, str], ...]] = ()
     export_kinds: ClassVar[dict[str, str]] = {}       # an exported column's label -> its semantic kind
     query_param: ClassVar[str] = ""
@@ -271,20 +273,24 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
                               search_fields=list(cls.search_fields), offset=0, limit=max(len(rows), 1))
         return found
 
-    def _totals(self, rows: list[dict]) -> list[dict]:
+    def _totals(self, rows: list[dict], *, narrowed: bool = False) -> list[dict]:
+        """The totals rows. While a search or filter narrows the rows, the label says what they sum."""
         cls = type(self)
         if not cls.totals_spec:
             return []
         from rfds.data import compute_totals
 
+        word = self._t("Total")
+        if narrowed:
+            word = self._t("Total of all rows") if cls.totals_of_all else self._t("Total of matching rows")
         if not cls.totals_currency:
-            return compute_totals(rows, cls.totals_spec, label=self._t("Total"))
+            return compute_totals(rows, cls.totals_spec, label=word)
         groups: dict[str, list[dict]] = {}
         for row in rows:
             groups.setdefault(str(row.get(cls.totals_currency, "") or ""), []).append(row)
         out: list[dict] = []
         for code, members in sorted(groups.items()):
-            label = self._t("Total") + (f" ({code})" if code and len(groups) > 1 else "")
+            label = word + (f" ({code})" if code and len(groups) > 1 else "")
             for total in compute_totals(members, cls.totals_spec, label=label):
                 total = {**total, "id": f"__total__{code}", cls.totals_currency: code}
                 out.append(total)
@@ -310,7 +316,15 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
                 key = getattr(type(self).owner, type(self).handler_name).fn.__ui_key__
                 raise RFDSUserError(rows_mod.describe(exc, key, "")) from None
         found = self._matching(rows, sort=sort, filters=filters, query=query)
-        self.totals_rows = self._totals(found)
+        cls = type(self)
+        searched = bool(query) and cls.searchable
+        if cls.totals_spec and cls.totals_of_all:
+            # Every row the handler gives, whatever the search and filters leave; a handler that
+            # searches for itself is asked again without the search.
+            every = await self._all("") if searched and cls.takes_search else rows
+            self.totals_rows = self._totals(every, narrowed=searched or bool(filters))
+        else:
+            self.totals_rows = self._totals(found, narrowed=searched or bool(filters))
         page = found[offset:offset + limit]
         if type(self).row_open:
             self._row_to = {str(r["id"]): str(r.get(type(self).row_open, "") or "") for r in page}
@@ -382,14 +396,15 @@ def state_for(handler: Any, *, columns: Sequence[Mapping[str, Any]], row_fields:
         return cls
     owner = handler.state
     name = f"RowsTable_{owner.__name__}_{handler.fn.__name__}_{next(_COUNTER)}"
+    page_size = int(config.pop("page_size", 25))
     classvars = {"owner": owner, "handler_name": handler.fn.__name__, "table_columns": tuple(columns),
-                 "page_size_options": (25, 50, 100, 200),
+                 "page_size_options": tuple(sorted({25, 50, 100, 200, page_size})),
                  "row_fields": tuple(row_fields), "takes_search": rows_mod.takes_search(handler),
                  "export_entity": str(config.pop("entity", handler.fn.__name__)), **config}
     annotations = {k: ClassVar[Any] for k in classvars}
     annotations["page_size"] = int
     cls = type(name, (LexRowsTableState, rx.State), {"__module__": __name__, "__annotations__": annotations,
-                                                     "page_size": 25, **classvars})
+                                                     "page_size": page_size, **classvars})
     globals()[name] = cls          # reachable by name, for Reflex's state managers (see data._state_for)
     _CACHE[key] = cls
     _BY_HANDLER.setdefault(handler_key(handler), []).append(cls)

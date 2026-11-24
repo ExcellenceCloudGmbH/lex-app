@@ -64,7 +64,8 @@ button/link``
 ``ui.each/switch``          repetition and choice; ``visible=`` on every component
                             decides what is shown, never what is allowed
 ``ui.table``                rows from a model (``where=``) or a ``@ui.rows`` handler; ``search=``,
-                            ``filters=``, ``export=``, ``totals=``, ``row_actions=``
+                            ``filters=``, ``export=``, ``totals=``, ``row_actions=``,
+                            ``choose_columns=``, ``page_size=`` (``None``: every row, up to 200)
 ``ui.address``              a page's address, for a row that leads to a page of its own
 ``ui.reflex_page``          a page written in raw Reflex, as somewhere a link may lead
 ``ui.custom_block``         a raw component, marked for review with its reason

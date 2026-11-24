@@ -3308,3 +3308,29 @@ kinds gains `choices`, and the message for options on a field that is no choice 
 | 1.853 | The field is RFDS's input for several and sends nothing while picking | checkbox group up to 12 fixed options, multi-select above or from the state; label, help, required mark, the server's message; `value=` a list or a state value; one event: the submit; compiled with Reflex's page compiler; in a step and in ask= |
 | 1.854 | A run hands the body the checked list | through Reflex's event processor and `ui.testing.run`: the list in option order; nothing ticked or no option is a message at the field and no run; a wizard's last step; a dialog's row key and list |
 | 1.855 | Several choices declared wrongly, and shown | no options, non-text options, a start that is no list, options on another kind, the kinds listed; `ui.fact(kind="choices")` joined by commas |
+
+### Batch 1dy — lex.ui tables: the name pinned and given room, a code kept narrow, the Columns menu, every row at once, totals that say what they sum ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.940 – 1.946 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/tables.py` (`column(kind="name"/"code", pin=)`, `table(page_size=, choose_columns=, totals=)`), `lex/lex_app/reflex/ui/pages/rows_table.py` (page size, totals of all rows, their label), `lex/lex_app/reflex/data.py` (`ChosenColumns`) |
+| Test file | `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py` |
+| Test classes | `TestCluster01dy_TableColumnsRows` (1.940–1.946) |
+| Fixtures | a neutral customers state (name, code, region, amount in two currencies); Django's `Group` as a model table |
+| Tests landed | **7 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Table needs found while rewriting dashboards. What building settled is section 5.14 of
+`docs/superpowers/specs/2026-11-23-reflex-ui-tables-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.940 | The name stays in place and has room; a code stays narrow | `pin=True`: RFDS's `sticky="start"`; `kind="name"`: RFDS's entity kind at its wide field width; `kind="code"`: RFDS's identifier at its narrow width; plain columns unchanged; model fields keep label and kind |
+| 1.941 | A pin written wrongly says what to write | not a bool; on another column than the first; no `width=` argument (rule 6.1.4), the kinds documented |
+| 1.942 | The user chooses, orders and sizes the columns | RFDS's column chooser in the toolbar; the table follows; the first column always shown and first; only the table's columns; widths 40-1,200 px; model tables too |
+| 1.943 | `page_size=` sets the rows a page, `None` shows every row | 50 opens at 50 and is offered; default 25; `None` opens at 200 without the size picker, RFDS's pagination only past 200; model tables too; wrong sizes refused |
+| 1.944 | Every row in one scroll, and past 200 the rest is reached | 150 rows on one page; of 250, 200 then 50 on the next page |
+| 1.945 | A totals row says what it sums and can sum every row | "Total" with nothing narrowing; "Total of matching rows" / "Total of all rows" while a filter or search is on, per currency; mixing or another word refused |
+| 1.946 | A table with all of it compiles | Reflex's page compiler: sticky column, column chooser, pagination |
