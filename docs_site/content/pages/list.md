@@ -98,8 +98,9 @@ action is refused: `requires=ui.create(Fund)` is not met.
 - **`load=`** is a `@ui.load` to run before the page shows. Until it has finished, the whole page
   shows a skeleton, so no action can be clicked before the data it acts on has arrived.
 
-On a `@ui.page`, the search box of a list page's table reads the address's `q` parameter when the
-page opens, so a link such as `/funds?q=growth` opens the list already searched.
+On a `@ui.page`, the search box of a list page's table is kept in the address's `q` parameter:
+a link such as `/funds?q=growth` opens the list already searched, and what the user types is
+written back to the address, so a reload or a copied link keeps the search.
 
 ```python
 @ui.page("/funds", nav="Funds", requires=ui.read(Fund))

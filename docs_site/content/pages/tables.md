@@ -125,10 +125,8 @@ ui.column("signed_on", label="Signed", kind="date")
 
 ## Filters
 
-`filters=` names columns to filter on; each gets a dropdown of the values in it. A dropdown
-offers at most 50 values. If a filtered column has more, the table cannot read: the user sees
-"Something went wrong" with a reference, and the log says the column has too many values to
-filter. Search such a column instead, with `search=True`.
+`filters=` names columns the user can filter on. lex-app picks the control from the column's kind:
+a dropdown of the values in the column, or, for a `date` or `datetime` column, a range of days.
 
 ```python exec
 class AllFunds(ui.State):
@@ -152,6 +150,62 @@ ui.table(
 )
 ```
 
+A dropdown offers at most 50 values. If a filtered column has more, the table cannot read: the
+user sees "Something went wrong" with a reference, and the log says the column has too many
+values to filter. Search such a column instead, with `search=True`.
+
+## Filtering by date
+
+A `date` or `datetime` column in `filters=` gets a date-range picker instead of a dropdown. The
+user picks a first and a last day, and the table keeps the rows whose date falls on one of those
+days, the last day included.
+
+```python exec
+class Signings(ui.State):
+    @ui.rows
+    def rows(self):
+        funds = {row["id"]: row for row in every(self.api, Fund)}
+        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
+        return [
+            {"id": row["id"], "investor": investors[row["investor"]], "fund": funds[row["fund"]]["name"],
+             "signed_on": row["signed_on"], "amount": row["amount"],
+             "currency": funds[row["fund"]]["currency"]}
+            for row in every(self.api, Commitment, ordering="signed_on")
+        ]
+```
+
+```python
+class Signings(ui.State):
+    @ui.rows
+    def rows(self):
+        funds = {row["id"]: row for row in every(self.api, Fund)}
+        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
+        return [
+            {"id": row["id"], "investor": investors[row["investor"]], "fund": funds[row["fund"]]["name"],
+             "signed_on": row["signed_on"], "amount": row["amount"],
+             "currency": funds[row["fund"]]["currency"]}
+            for row in every(self.api, Commitment, ordering="signed_on")
+        ]
+```
+
+```python demo
+ui.table(
+    Signings.rows,
+    columns=["investor", "fund", ui.column("signed_on", label="Signed", kind="date"),
+             ui.column("amount", kind="money", currency="currency")],
+    filters=["fund", "signed_on"],
+)
+```
+
+Pick 1 January 2020 to 31 December 2021: three commitments are left. Choose a fund as well, and
+the table keeps the rows both filters allow.
+
+- A row's date may be a `date`, a `datetime` or ISO text such as `"2020-06-30"`. A `datetime`
+  counts on its day: one at 23:59 on the last day is kept.
+- A first day alone keeps everything from then on; a last day alone, everything until then.
+- A row without a date never matches a range.
+- **Clear filters** removes the range, and the picker is empty again.
+
 ## Opening rows, row actions and export
 
 ```python
@@ -167,7 +221,8 @@ ui.table(
 
 - **`open=`** makes each row a link to a page declared with `@ui.page` and one route argument,
   such as `"/funds/[key]"`. For rows that lead to different pages, put a `ui.address(...)` in a
-  field of each row and give `open=` that field's name.
+  field of each row and give `open=` that field's name; `ui.column("fund", open="fund_page")`
+  makes one cell a link the same way. See [Buttons and links](/pages/buttons-and-links#addresses-in-rows).
 - **`row_actions=`** is a function of the row returning `ui.button`s or `ui.link`s. A value after
   the handler, such as `row["id"]`, is passed to it; it comes back from the browser, so check it in
   the handler. [Your first dashboard](/get-started/first-dashboard#the-page) has one.
@@ -189,7 +244,7 @@ on this site. The demos here use `@ui.rows` tables over sample data.
 ```
 
 A model table is shown only to users who may read the model. Its `filters=` work on fields with
-choices or yes/no fields, and it cannot export or total yet; for those, read the rows in a
-`@ui.rows` handler.
+choices or yes/no fields, so a date range is not offered there, and it cannot export or total
+yet; for those, read the rows in a `@ui.rows` handler.
 
-Next: [`ui.State`](/state-and-actions/state), where a page's data lives.
+Next: [Buttons and links](/pages/buttons-and-links), what a user clicks.

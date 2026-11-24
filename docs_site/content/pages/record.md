@@ -203,4 +203,8 @@ ui.section("Investors", ui.fact("Investors committed", FundInvestors.count, kind
 
 `empty=` is the sentence a section's table shows when it has no rows.
 
+On a record page, a section's `visible=` takes a permission, such as `visible=ui.read(Investor)`:
+a user without it still sees the section's heading, with a note that they may not see it. To show
+different content depending on the record, put a `ui.switch(...)` inside the section.
+
 Next: [`ui.list`](/pages/list), the page for finding things.

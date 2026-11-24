@@ -136,10 +136,13 @@ An action returns nothing, or one or a list of these:
 | --- | --- |
 | `ui.toast("Saved.", tone="success")` | a short message; tones are info, success, warning, error; `description=` adds a second line |
 | `ui.goto("/funds/7")` | the browser goes to that page; `replace=True` replaces the current entry in its history |
-| `ui.download(data=..., filename="x.csv")` | the user gets a file, or `ui.download(url=...)` for one at an address |
-| `ui.refresh(Other.rows)` | the tables over another state's `@ui.rows` handler read again |
+| `ui.download(data=..., filename="x.csv")` | the user gets a file, or `ui.download(url=...)` for one at an address; the file's name tells the browser what it is (`report.pdf` is a PDF) |
+| `ui.refresh(Other.rows)` | the tables over another state's `@ui.rows` handler read again ([Refreshing other tables](/state-and-actions/refresh)) |
+| `Other.reload`, `Other.open(key)` | another state's handler, which the browser runs next |
 
-Anything else fails the action with an error saying what may be returned. A handler can also
+Results in a list happen in the order written. Anything else - including Reflex's own events
+such as `rx.call_script` - fails the action with an error saying what may be returned; a raw
+Reflex handler is marked `@ui.custom`. A handler can also
 `yield` one of these partway through: what it changed so far reaches the browser at each `yield`.
 
 In a page, `ui.running(Sizes.grow)` is true while the action runs, and `ui.failed(Sizes.grow)` is

@@ -36,7 +36,10 @@ What each argument does:
 
 - **The route** starts with `/`. A part in brackets, such as `[key]`, is an argument of the address;
   the page's loads read it from `self.params`, so the page function itself takes no arguments.
-  Only plain arguments are supported, not optional or catch-all ones.
+  Only plain arguments are supported, not optional or catch-all ones. An argument may not be
+  named like a state helper (`user`, `api`, `params`, `can`, `state`, `tab_id`), and no argument
+  or parameter may be named `to`, `record`, `href`, `visible`, `label`, `handler`, `tone` or
+  `icon`, the words a link or button uses itself; the error says what to rename.
 - **`nav=`** lists the page in the navigation under that heading, with the page's title as its
   label. Leave it out and the page is reachable by link only. A page in the navigation needs a
   fixed title, a string rather than a state value.
@@ -45,7 +48,8 @@ What each argument does:
   `ui.delete(Model)` or `ui.permission(...)`. A user without it sees an access-denied page, and
   the page's loads do not start. Leave it out for a page any signed-in user may see.
 - **`params=`** lists the query parameters the page accepts besides its route's arguments, so
-  that a link to it may pass them.
+  that a link to it may pass them: `params=["tab"]`. How to link to a page is on
+  [Buttons and links](/pages/buttons-and-links).
 
 ```md alert warning
 `requires=` decides what is shown, never what is allowed. What a user may read or change is
