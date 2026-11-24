@@ -497,8 +497,8 @@ Built on 2026-11-24 after a spike against RFDS 1.0.0 (`ui.form`, `ui.field`, `ui
   | `datetime` | the browser's `datetime-local` in RFDS's `field` frame: RFDS has no date-time input | `datetime` in the app's time zone | `None` |
   | `year` | `text_input`, numeric, four digits | `int` | `None` |
   | `bool` | `checkbox` | `bool` (`required=True`: must be ticked) | `False` |
-  | `choice` | `select` up to 12 fixed options; else `combobox` | `str`, one of the options | `None` |
-  | `choices` | `checkbox_group` up to 12 fixed options; else `multi_select` | `list[str]`, in the order of the options | `[]` |
+  | `choice` | `select` up to 12 fixed options; else `combobox` | the option's own value (`str`, `int`) | `None` |
+  | `choices` | `checkbox_group` up to 12 fixed options; else `multi_select` | a `list` of the options' own values, in their order | `[]` |
 
 - **Nothing reaches the server while the user types.** Text, number, year and date-time inputs are
   uncontrolled (`default_value`); RFDS's controlled inputs (money, percent, date, box, choice) hold
@@ -550,7 +550,7 @@ Built on 2026-11-24 after a spike against RFDS 1.0.0 (`ui.form`, `ui.field`, `ui
   half built: a choice among thousands loads its options with the page (RFDS's own guidance is server
   search above 200 and a value-help dialog above 1,000).
 - **Several of a list is `kind="choices"`, the same field as a choice.** It takes `options=` as a choice does
-  and gives the handler a `list[str]` in the order of the options, `[]` when none is chosen; `required=True` means
+  and gives the handler a list of the options' own values (texts, or whole numbers) in their order, `[]` when none is chosen; `required=True` means
   at least one ("Choose at least one."), and a value that is no option is refused at the field ("Choose from the
   options."). The input follows RFDS's own rule, at the same line as the dropdown: its checkbox group up to 12
   options, its multi-select above them or for options from the state. *Cost:* none chosen is `[]`, not `None`; no
@@ -617,12 +617,19 @@ Built on 2026-11-24 (batches 1ds-1du), on top of 6.14:
   shared by every searched field: `ui.State.ui_search(field, text)` and `ui_matches[field]`, keyed by
   the field's id (the receiving handler's module-qualified name and the field's key). The browser names
   only that id; the rows handler is looked up in the server's registry and runs as the user, as a
-  table's. Each row gives **`id`** (what the handler receives; an `int` stays an `int`, anything else
-  arrives as text) and **`label`** (the words the user reads) -- named keys rather than "the first
+  table's. Each row gives **`id`** (what the handler receives, as the row's own value: an `int` stays an
+  `int`, a UUID a UUID) and **`label`** (the words the user reads) -- named keys rather than "the first
   field that is not the id", which depends on a dict's order and is harder to explain.
 - **Only a page of matches reaches the browser** (`forms.MATCHES`, 50), each `{value, label}`: none of
   a row's other fields. The first page is asked for when the field appears (`on_mount`), so the list is
   ready when it opens; RFDS debounces typing (250 ms).
+- **A choice's value is the option's own value** (review, 2026-11-24). The first build gave a
+  searched choice's `int` id as an `int` and anything else as text, and a fixed choice always as
+  text (fixed options had to be texts). Now every kind of option reaches the handler as its own
+  value: fixed options may be texts or whole numbers (`options=[2024, 2025]`, `{1: "Q1"}`), options
+  from a state field keep that field's values, and a searched row's `id` arrives as the row gave it
+  (an `int`, a UUID). The browser still shows and sends text; the server maps it back. The names
+  `choice`/`choices` stay.
 - **Searches run per field, and never hold the tab** (review, 2026-11-24). `ui_search` was one
   Reflex handler marked `supersedes=True`, and Reflex supersedes by (event name, tab): a search in one
   field cancelled a search running in another field of the same form, and every keystroke held the

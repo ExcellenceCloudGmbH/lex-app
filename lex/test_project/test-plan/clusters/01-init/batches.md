@@ -3387,13 +3387,13 @@ such a collision.
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.900 – 1.903, 1.912 |
+| Scenario range | 1.900 – 1.903, 1.912, 1.917 |
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/forms.py` (`Expect.search`, `searched`, `search`, `check`, `clean`, `MATCHES`), `lex/lex_app/reflex/ui/pages/forms.py` (`field`, `Field.check`, `Field.expect`, `Field.control`), `lex/lex_app/reflex/ui/state.py` (`ui_search`, `ui_matches`, `_ui_offered`) |
 | Test file | `lex/test_project/tests/init/test_1ds_ui_form_searched_choice.py` |
-| Test classes | `TestCluster01ds_SearchedChoice` (1.900–1.903, 1.912) |
+| Test classes | `TestCluster01ds_SearchedChoice` (1.900–1.903, 1.912, 1.917) |
 | Fixtures | a neutral orders state: 120 customers (with an e-mail each), regions, rows without a label |
-| Tests landed | **5 pass / 0 fail** |
+| Tests landed | **6 pass / 0 fail** |
 | Status | ✅ Complete |
 
 `options=` a `@ui.rows` handler, on top of the forms of 1dh-1dl. What building settled is section 6.15 of
@@ -3406,6 +3406,7 @@ such a collision.
 | 1.902 | The field is RFDS's combobox searching on the server | server-search mode (`shouldFilter:false`) over `ui_matches`; typing and opening send `ui_search`; the id under the key, the label shown; compiled; in a step and ask=, the dialog hands the key and the id |
 | 1.903 | A searched choice declared wrongly | several from a search, a start value, an action as options, one field searching two rows handlers: each names page, slot and what to write |
 | 1.912 | Two searched fields on one form never cancel each other | through Reflex's event processor: a field's matches arrive while another field's slow search runs, another button works meanwhile, and the slow, older search ending after a newer one does not replace the newer matches |
+| 1.917 | A choice reaches the handler as the option's own value | fixed ints, a dict with int keys, a state field of ints, several ints and a searched row whose id is a UUID each reach the handler as their own value, of their own type; a value that is no option is refused; 1.8xx int-option refusals now refuse floats |
 
 ### Batch 1dt — lex.ui: a refusal shown above a form's submit button, with a title ✅
 

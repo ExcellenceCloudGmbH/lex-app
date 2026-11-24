@@ -106,7 +106,7 @@ def searched(field: str, source: Any, invalid: str) -> str:
 
 
 def _offer(key: str, raw: Any, text: str) -> dict[str, tuple[Any, str]]:
-    """A page of the rows ``raw`` as matches: the value as text -> (the row's id, its label).
+    """A page of the rows ``raw`` as matches: the value as text -> (the row's own id, its label).
 
     ``text`` is what the user typed when the rows handler does not search itself: its words are
     then matched against the labels, folded as RFDS's browser filter folds them.
@@ -128,8 +128,7 @@ def _offer(key: str, raw: Any, text: str) -> dict[str, tuple[Any, str]]:
         value = str(ident)
         if value in found:
             raise rows.RowsError(f"{key}: two rows have the id {value!r}; `id` is different on every row.")
-        # A number stays a number for the handler; anything else arrives as the text the browser sent.
-        found[value] = (ident if isinstance(ident, int) and not isinstance(ident, bool) else value, label)
+        found[value] = (ident, label)       # the handler receives the row's own id: an int stays an int
         if len(found) == MATCHES:
             break
     return found
@@ -271,7 +270,7 @@ def _zone() -> datetime.tzinfo:
 
 
 def _several(expect: Expect, raw: Any, options: Any) -> tuple[list, str]:
-    """Several of the options: a list of texts in the order of the options, each once; ``[]`` for none.
+    """Several of the options: a list of their own values in the order of the options, each once; ``[]`` for none.
 
     A form sends one chosen value alone as a text, and an unticked box group as ``False``.
     """
@@ -285,10 +284,10 @@ def _several(expect: Expect, raw: Any, options: Any) -> tuple[list, str]:
         return [], _say("options", "Choose from the options.")
     allowed = expect.options if expect.options is not None else options
     if allowed is not None:
-        allowed = [str(one) for one in allowed]
-        if any(one not in allowed for one in chosen):
+        own = {str(one): one for one in allowed}            # each option's own value, by the text the browser sent
+        if any(one not in own for one in chosen):
             return [], _say("options", "Choose from the options.")
-        chosen = [one for one in allowed if one in chosen]
+        chosen = [one for text, one in own.items() if text in chosen]
     chosen = list(dict.fromkeys(chosen))
     if expect.required and not chosen:
         return [], _say("several", "Choose at least one.")
@@ -322,9 +321,12 @@ def clean(expect: Expect, raw: Any, options: Any = None) -> tuple[Any, str]:
         allowed = expect.options if expect.options is not None else options
         if expect.search:                       # only what the server offered to this tab
             allowed = options or {}
-        if allowed is not None and value not in {str(one) for one in allowed}:
+        if allowed is None:
+            return value, ""
+        own = dict(allowed) if expect.search else {str(one): one for one in allowed}
+        if value not in own:
             return None, _say("option", "Choose one of the options.")
-        return (allowed[value] if expect.search else value), ""
+        return own[value], ""                   # the option's own value: an int stays an int
     if kind in ("number", "money", "percent"):
         number = _number(raw)
         if number is None:

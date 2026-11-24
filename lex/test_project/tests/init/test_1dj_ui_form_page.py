@@ -308,10 +308,11 @@ class TestCluster01dj_FormPage(SimpleTestCase):
                        "Page `new_invoice`, slot `fields`: field `status` is a choice without `options=`.\n"
                        "Give what can be chosen: `options=[\"open\", \"closed\"]`, or "
                        "`options={\"open\": \"Open\", \"closed\": \"Closed\"}` to word them."),
-            "numbers": (dict(fields=[ui.field("status", options=[1, 2])]),
-                        "Page `new_invoice`, slot `fields`: field `status` got `[1, 2]` as its options.\n"
-                        "Give a list of texts, each once: `options=[\"open\", \"closed\"]`, or "
-                        "`options={\"open\": \"Open\", \"closed\": \"Closed\"}` to word them."),
+            "numbers": (dict(fields=[ui.field("status", options=[1.5, 2.5])]),
+                        "Page `new_invoice`, slot `fields`: field `status` got `[1.5, 2.5]` as its options.\n"
+                        "Give a list of texts or whole numbers, each once: `options=[\"open\", \"closed\"]`, or "
+                        "`options={\"open\": \"Open\", \"closed\": \"Closed\"}` to word them. The handler "
+                        "receives the option itself: `options=[2024, 2025]` gives an int."),
             "elsewhere": (dict(fields=[ui.field("kind", options=OtherState.kinds)]),
                           "Page `new_invoice`, slot `fields`: field `kind` takes its options from another state.\n"
                           "The options are a fixed list, or a field of the state whose handler receives the form: "

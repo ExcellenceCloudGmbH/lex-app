@@ -11,7 +11,7 @@ is refused at the field. A regression is a list of every customer in the page, a
 fields (an e-mail address) in the browser, a forged id reaching the handler's body, or an empty
 box until the user types.
 
-Cluster 1ds -- scenarios 1.900-1.903, 1.912. Type: U.
+Cluster 1ds -- scenarios 1.900-1.903, 1.912, 1.917. Type: U.
 Covers: lex/lex_app/reflex/ui/forms.py (Expect.search, check, clean, search, MATCHES),
 lex/lex_app/reflex/ui/pages/forms.py (field, Field.check, Field.expect, Field.control),
 lex/lex_app/reflex/ui/state.py (ui_search, ui_matches).
@@ -122,6 +122,31 @@ class DeliveryState(ui.State):
         self.clicks += 1
 
 
+ACCOUNT = __import__("uuid").UUID(int=7)
+
+
+class LedgerState(ui.State):
+    """Choices whose values are not texts: years, numbered quarters, an account's UUID."""
+
+    years: list[int] = [2024, 2025]
+    got: dict = {}
+
+    @ui.rows
+    def accounts(self, search):
+        return [{"id": ACCOUNT, "label": "Main account"}]
+
+    @ui.action
+    def post(self, values):
+        self.got = {key: repr(value) for key, value in values.items()}
+
+
+def post_entry():
+    return ui.form(title="Post entry", submit=LedgerState.post, fields=[
+        ui.field("year", options=[2024, 2025]), ui.field("quarter", options={1: "Q1", 2: "Q2"}),
+        ui.field("budget_year", options=LedgerState.years), ui.field("months", kind="choices", options=[1, 2, 3]),
+        ui.field("account", options=LedgerState.accounts)])
+
+
 def deliver_order():
     return ui.form(title="Deliver", submit=DeliveryState.deliver,
                    fields=[ui.field("customer", options=DeliveryState.customers),
@@ -157,7 +182,7 @@ def _assigning():
 
 def _build() -> None:
     """What lex-app does when it registers the pages: each is built, which tells the handlers their fields."""
-    for page in (place_order, route_order, broken_order, plan_order, deliver_order):
+    for page in (place_order, route_order, broken_order, plan_order, deliver_order, post_entry):
         page().build(Build(page=page.__name__, route=f"/{page.__name__}"))
     _assigning()
 
@@ -409,3 +434,29 @@ class TestCluster01ds_SearchedChoice(SimpleTestCase):
         self.assertEqual(after, ["Warehouse fast 1", "Warehouse fast 2"],
                          "the older, slow search ending later does not replace what was typed last")
         self.assertEqual(len(customers), 9, "and nothing cancelled the customer's matches")
+
+    # -- 1.917 ---------------------------------------------------------
+    def test_1_917_a_choice_reaches_the_handler_as_the_options_own_value(self) -> None:
+        """
+        Scenario 1.917: what `values[key]` is, for every way of giving options.
+        Given: a fixed list of years (ints), quarters keyed by number (a dict with int keys), years
+               from the state (a list of ints), several months (ints), and a searched account
+               whose row id is a UUID.
+        When:  the browser sends each as the text it showed, and the form is sent.
+        Then:  the handler gets each option's own value -- 2025, 2, 2024, [1, 3], the UUID --
+               never its text; a value that is no option is still refused at the field.
+        """
+        field = next(one.search for one in forms.of(LedgerState.post.fn.__ui_fn__).fields if one.search)
+        sent = {"year": "2025", "quarter": "2", "budget_year": "2024", "months": ["1", "3"], "account": str(ACCOUNT)}
+
+        async def steps(harness):
+            await (await harness.send(State, "ui_search", field=field, text="")).wait_all()
+            await (await harness.send(LedgerState, "post", values=sent))
+            got = dict((await harness.fields(LedgerState))["got"])
+            await (await harness.send(LedgerState, "post", values={**sent, "year": "2023"}))
+            return got, dict((await harness.fields(LedgerState))["ui_invalid"])
+
+        got, invalid = asyncio.run(_session(steps))
+        self.assertEqual(got, {"year": "2025", "quarter": "2", "budget_year": "2024", "months": "[1, 3]",
+                               "account": repr(ACCOUNT)}, "each option's own value, of its own type")
+        self.assertEqual(invalid, {"LedgerState.post|year": "Choose one of the options."}, "a value that is no option")

@@ -120,12 +120,14 @@ class Field(Part):
             return listed, None, data.field_name.removesuffix("_rx_state_")
         pairs = list(given.items()) if isinstance(given, dict) else [(one, None) for one in (given or ())]
         values = [value for value, _ in pairs]
-        if (not pairs or isinstance(given, str) or len(set(values)) != len(values)
-                or not all(isinstance(value, str) and value for value in values)):
+        own = all((isinstance(value, str) and value) or (isinstance(value, int) and not isinstance(value, bool))
+                  for value in values)
+        if not pairs or isinstance(given, str) or not own or len({str(value) for value in values}) != len(values):
             raise ctx.fail(f"field `{self.key}` got {called(given)} as its options.",
-                           "Give a list of texts, each once: `options=[\"open\", \"closed\"]`, or "
-                           "`options={\"open\": \"Open\", \"closed\": \"Closed\"}` to word them.")
-        return ([{"value": value, "label": value if label is None else say(label)} for value, label in pairs],
+                           "Give a list of texts or whole numbers, each once: `options=[\"open\", \"closed\"]`, "
+                           "or `options={\"open\": \"Open\", \"closed\": \"Closed\"}` to word them. The handler "
+                           "receives the option itself: `options=[2024, 2025]` gives an int.")
+        return ([{"value": str(value), "label": str(value) if label is None else say(label)} for value, label in pairs],
                 tuple(values), "")
 
     def expect(self, ctx: Build, handler: Any) -> rules.Expect:
@@ -266,19 +268,21 @@ def field(key: str, *, label: Any = None, kind: str | None = None, options: Any 
     ``datetime``   a day and a time, in the app's time zone    ``datetime.datetime``
     ``year``       four digits                                 ``int``
     ``bool``       a box to tick                               ``bool``
-    ``choice``     one of ``options=``                         ``str``
-    ``choices``    several of ``options=``: boxes to tick,     ``list[str]``, in the order
-                   or a list to pick from above 12 options     of the options
+    ``choice``     one of ``options=``                         the option itself (``str``,
+                                                               ``int``, a row's ``id``)
+    ``choices``    several of ``options=``: boxes to tick,     a ``list`` of them, in the
+                   or a list to pick from above 12 options     order of the options
     =============  ==========================================  ==========================
 
     Nothing entered arrives as ``None`` (``""`` for text, ``False`` for a box, ``[]`` for
-    several). ``options=`` is a list of texts, a dict of value to wording, or a field of the
-    handler's own state; a field with options is a choice, and ``kind="choices"`` lets the user
-    choose several of them.
+    several). ``options=`` is a list of texts or whole numbers, a dict of value to wording, or a
+    field of the handler's own state; a field with options is a choice, and ``kind="choices"``
+    lets the user choose several of them. The handler receives each option's own value, whatever
+    the browser showed: ``options=[2024, 2025]`` gives an ``int``, as does ``{1: "Q1"}``.
 
     One among thousands, or among names that must not all reach the browser, is searched on the
     server: ``options=`` names a ``@ui.rows`` handler, whose rows give ``id`` (what the handler
-    receives; a number stays a number) and ``label`` (the words the user reads)::
+    receives, of its own type: a number stays a number) and ``label`` (the words the user reads)::
 
         @ui.rows
         def customers(self, search):
