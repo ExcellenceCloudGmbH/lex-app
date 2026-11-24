@@ -1,13 +1,14 @@
 
 
-### 1ev. lex reflex check follows the project's own imports from its dashboards ✅
+### 1ew. lex.ui pages: a closed section mounts what it holds when opened; a title from the state; actions ✅
 
-**What it tests:** `check_paths` adds every project module the structure module and the dashboards import, transitively (absolute, relative, a package's `__init__`), and nothing outside the project or not imported; the imported module's undecorated public method is reported.
+**What it tests:** a closed section's chart sits under a condition on its client-side opened state (set by a click), its table does not; an open section mounts at once; a state title and actions in a form's result compile into RFDS's section; a record page, a tab and the navigation refuse them with what to write.
 
-**Why a regression matters:** A handler the browser can call without lex.ui's guard, in a module the check never read.
+**Why a regression matters:** A chart drawn at zero size, a closed section's count lost, or a title or an action silently dropped.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.1031 | The check follows the project's imports | paths: _dashboards, _reflex_structure.py, helpers.py, orders/__init__.py, orders/pages/__init__.py, orders/pages/tickets.py (not unused.py, not os/reflex/lex); one error in tickets.py: TicketsState.approve has no lex.ui decorator |
+| 1.1032 | A closed section mounts its content when opened, its table at once | the chart under a cond on rfdsLexopened; the data table not; onClick sets it; an open section's chart not under the cond |
+| 1.1033 | A section's title may be a state value, and it takes actions | form result: lines_title and rfds-section-actions with the button; record title, record actions, tab actions, a text in actions refused; nav section state title refused; a number title refused |
 
-**Scenario range:** 1.1031. **Test file:** `lex/test_project/tests/init/test_1ev_reflex_check_follows_imports.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ev](batches.md).
+**Scenario range:** 1.1032 – 1.1033. **Test file:** `lex/test_project/tests/init/test_1ew_ui_section_opened_title_actions.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ew](batches.md).

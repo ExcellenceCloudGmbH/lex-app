@@ -59,25 +59,55 @@ def _stacked(ctx: Build, parts: list) -> list:
 class Section(Part):
     nests: ClassVar[bool] = False
 
-    title: str
+    title: Any
     content: tuple = ()
     load: Any = None
     empty: Any = None
     visible: Any = None
     collapsed: bool = False
+    actions: tuple = ()
 
     def body(self, ctx: Build) -> rx.Component:
         return self._content(ctx)[0]
 
-    def titled(self, ctx: Build) -> rx.Component:
-        """The section with its heading: RFDS's section, closed at first when ``collapsed``."""
-        import rfds
+    def fixed(self, ctx: Build, where: str) -> None:
+        """Refuse what a section ``where`` (a record page's, a tab) cannot have: a title from the state, actions."""
+        if not isinstance(self.title, str):
+            raise ctx.fail(f"a section's title is a state value, and {where} names its sections with fixed words.",
+                           "Give the section a sentence as its title; put the value inside it, as `ui.text(...)` "
+                           "or `ui.fact(...)`.")
+        if self.actions:
+            raise ctx.fail(f"the section `{self.title}` has `actions=`, and {where} has no heading of its own "
+                           "to hold them.",
+                           "Put the buttons inside the section, or give the page `actions=[...]`.")
 
-        content, parts = self._content(ctx)
+    def titled(self, ctx: Build) -> rx.Component:
+        """The section with its heading: RFDS's section, closed at first when ``collapsed``.
+
+        A closed section mounts what it holds when the user first opens it (a chart then fits the
+        space it is shown in), except a table, which reads its rows at once for the count in the
+        title. Its actions sit in RFDS's section header; a closed section shows them when opened
+        (RFDS never puts a control inside the disclosure's summary).
+        """
+        import rfds
+        from rfds.components.inputs._shared import client_state
+
+        opened = client_state("lexOpened", False) if self.collapsed else None
+        content, parts = self._content(ctx, opened)
         title: Any = say(self.title)
         if self.collapsed:
             title = self._counted(title, parts)
-        return rfds.section(content, title=title, collapsible=self.collapsed, default_open=not self.collapsed)
+        extra: dict[str, Any] = {}
+        if self.actions:
+            at = ctx.at("actions")
+            buttons = take(at, list(self.actions), (vocab.Button, vocab.Link),
+                           "A section's `actions=` holds `ui.button(...)` and `ui.link(...)`.")
+            extra["actions"] = rfds.cluster(*(part.build(at) for part in buttons), gap="2")
+        if opened is not None:
+            # A click on the closed section can only be on its summary: the content mounts from then on.
+            extra["on_click"] = opened.set_value(True)
+        return rfds.section(content, title=title, collapsible=self.collapsed, default_open=not self.collapsed,
+                            **extra)
 
     def _counted(self, title: Any, parts: list) -> Any:
         """A closed section's title, with its table's row count once the table has read its rows."""
@@ -90,8 +120,12 @@ class Section(Part):
         return rx.cond(state.loaded_at != "", say("{title} ({count, number})", title=title, count=state.total_rows),
                        title)
 
-    def _content(self, ctx: Build) -> tuple[rx.Component, list]:
-        """The section's content, and its parts as built (a table may be a copy carrying ``empty=``)."""
+    def _content(self, ctx: Build, opened: Any = None) -> tuple[rx.Component, list]:
+        """The section's content, and its parts as built (a table may be a copy carrying ``empty=``).
+
+        ``opened``: a client state, true once the user opened the closed section; every part but a
+        table mounts only then.
+        """
         import rfds
 
         if any(isinstance(part, Section) for part in self.content):
@@ -109,27 +143,50 @@ class Section(Part):
             parts = [dataclasses.replace(part, empty=self.empty)
                      if isinstance(part, tables.Table) and part.empty is None else part for part in parts]
         shape = "table" if has_table and len(parts) == 1 else "rect"
-        ctx = dataclasses.replace(ctx, caption=self.title, under_load=ctx.under_load or self.load is not None)
-        return states(ctx, self.load, rfds.stack(*_stacked(ctx, parts)), shape), parts
+        ctx = dataclasses.replace(ctx, caption=self.title if isinstance(self.title, str) else "",
+                                  under_load=ctx.under_load or self.load is not None)
+        if opened is None:
+            return states(ctx, self.load, rfds.stack(*_stacked(ctx, parts)), shape), parts
+        built: list = []
+        group: list = []
+
+        def close() -> None:
+            if group:
+                built.append(rx.cond(opened.value, rfds.stack(*_stacked(ctx, list(group)))))
+                group.clear()
+
+        for part in parts:
+            if isinstance(part, tables.Table):
+                close()
+                built.append(part.build(ctx))
+            else:
+                group.append(part)
+        close()
+        return states(ctx, self.load, rfds.stack(*built), shape), parts
 
     def _render(self, ctx: Build) -> rx.Component:
-        return self.titled(ctx) if self.collapsed else self.body(ctx)
+        return self.titled(ctx) if self.collapsed or self.actions else self.body(ctx)
 
 
-def section(title: str, *content: Any, load: Any = None, empty: Any = None, visible: Any = None,
-            collapsed: bool = False) -> Section:
+def section(title: Any, *content: Any, load: Any = None, empty: Any = None, visible: Any = None,
+            collapsed: bool = False, actions: Any = ()) -> Section:
     """A titled part of the page. With ``load=`` it loads on its own and shows its own skeleton and failure.
 
-    ``collapsed=True`` closes it until the user opens it (in the browser, no round trip); a closed
-    section that holds a table says in its title how many rows the table has, "Fields read (12)",
-    once it has read them. A record page's sections are always open.
+    ``title`` is a sentence, or a state value (``ImportState.lines_title``, "Lines (12)") where the
+    section has a heading of its own -- not on a record page or a tab, which name their sections
+    with fixed words. ``actions=[ui.button(...)]`` puts buttons in the section's heading.
+
+    ``collapsed=True`` closes it until the user opens it (in the browser, no round trip); what it
+    holds is mounted when the user first opens it, so a chart fits the space it is shown in. A
+    closed section that holds a table reads the rows at once and says in its title how many there
+    are, "Fields read (12)". A record page's sections are always open.
     """
-    if not isinstance(title, str) or not title:
-        raise TypeError(f"ui.section() takes its title first, a sentence; got {title!r}")
+    if isinstance(title, str) and not title or not isinstance(title, (str, rx.Var)):
+        raise TypeError(f"ui.section() takes its title first, a sentence or a state value; got {title!r}")
     if not isinstance(collapsed, bool):
         raise TypeError(f"ui.section(collapsed=) takes True or False; got {collapsed!r}. `collapsed=True` closes "
                         "the section until the user opens it.")
-    return Section(title, tuple(content), load, empty, visible, collapsed)
+    return Section(title, tuple(content), load, empty, visible, collapsed, _many(actions))
 
 
 #: An action RFDS treats as a Save: it wants a "last saved" time beside it, which a page header cannot give.
@@ -253,6 +310,8 @@ class Record(Kind):
         if not parts:
             raise ctx.at("sections").fail("a record page needs at least one section.",
                                           "Add `sections=[ui.section(\"Details\", ...)]`.")
+        for index, part in enumerate(parts):
+            part.fixed(ctx.at(f"sections[{index}]"), "a record page")
         titles = [part.title for part in parts]
         twice = sorted({title for title in titles if titles.count(title) > 1})
         if twice:

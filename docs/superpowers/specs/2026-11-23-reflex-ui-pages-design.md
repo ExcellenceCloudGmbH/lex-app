@@ -1263,6 +1263,24 @@ lex-app project. (The table gaps of the same round are section 5.15 of the table
   followed files get lex.ui's checks and RFDS's `lint --strict`, as the dashboards always did.
   *Not followed:* a module loaded by name at run time (`importlib.import_module("...")`).
 
+- **A closed section mounts what it holds when opened; a title from the state; actions (batch 1ew).**
+  RFDS's closed section is a native `<details>`, whose content the browser lays out at zero size: a
+  chart in it fits itself to nothing and never fits again. RFDS's section has no lazy body, so lex.ui
+  wraps what a closed section holds in a condition on a client state (`useState` in the browser, no
+  round trip) that a click on the section sets -- the only clickable part of a closed section is its
+  summary -- and the parts mount on first opening and stay. **Tables are the exception**: they mount at
+  once and read their rows, because the closed section's title says how many rows it holds (6.16).
+  No argument: it is how a closed section behaves. `ui.section(title=)` also takes a **state value**
+  (a title with a count, "Lines (12)", computed by a handler), as `ui.record(title=)` does, wherever
+  the section has a heading of its own (a form's result, `ui.embed`); a record page lists its
+  sections under "On this page" and a tab names its sections, both with fixed words, so a state
+  title there is refused. **`actions=[ui.button(...)]`** -- the word page kinds use -- puts buttons
+  in RFDS's section header; in a closed section RFDS shows them in the opened body, never in the
+  summary (an interactive control inside a summary is an accessibility fault). A section with
+  actions is drawn with its heading also when open on its own (`ui.embed`). On a record page and in
+  a tab, which have no section heading of their own, `actions=` is refused: "Put the buttons inside
+  the section, or give the page `actions=[...]`". A navigation section refuses both.
+
 ## 7. Order of building
 
 One spec, four steps. Each ends by porting real pages of the reviewed project, in the scratchpad

@@ -1,20 +1,21 @@
 
 
-### Batch 1ev — lex reflex check follows the project's own imports from its dashboards ✅
+### Batch 1ew — lex.ui pages: a closed section mounts what it holds when opened; a title from the state; actions ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.1031 |
+| Scenario range | 1.1032 – 1.1033 |
 | Type | U |
-| Files covered | `lex/lex_app/reflex/ui/checks.py` (`followed`, `_imported`, `_module_files`), `lex/lex_app/reflex/scaffold.py` (`check_paths`) |
-| Test file | `lex/test_project/tests/init/test_1ev_reflex_check_follows_imports.py` |
-| Test classes | `TestCluster01ev_CheckFollowsImports` (1.1031) |
-| Fixtures | a project written into a temporary folder |
-| Tests landed | **1 pass / 0 fail** |
+| Files covered | `lex/lex_app/reflex/ui/pages/kinds.py` (`section(title=, actions=)`, `Section.titled`, `_content`, `fixed`, `_render`), `lex/lex_app/reflex/ui/pages/forms.py` (a tab's section), `lex/lex_app/reflex/ui/pages/frame.py` (a navigation section) |
+| Test file | `lex/test_project/tests/init/test_1ew_ui_section_opened_title_actions.py` |
+| Test classes | `TestCluster01ew_SectionOpenedTitleActions` (1.1032–1.1033) |
+| Fixtures | none |
+| Tests landed | **2 pass / 0 fail** |
 | Status | ✅ Complete |
 
 Section 6.22 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.1031 | The check follows the project's imports | paths: _dashboards, _reflex_structure.py, helpers.py, orders/__init__.py, orders/pages/__init__.py, orders/pages/tickets.py (not unused.py, not os/reflex/lex); one error in tickets.py: TicketsState.approve has no lex.ui decorator |
+| 1.1032 | A closed section mounts its content when opened, its table at once | the chart under a cond on rfdsLexopened; the data table not; onClick sets it; an open section's chart not under the cond |
+| 1.1033 | A section's title may be a state value, and it takes actions | form result: lines_title and rfds-section-actions with the button; record title, record actions, tab actions, a text in actions refused; nav section state title refused; a number title refused |

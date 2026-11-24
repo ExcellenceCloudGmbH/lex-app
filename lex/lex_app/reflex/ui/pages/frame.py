@@ -235,7 +235,11 @@ def _section(section: Any) -> NavLinks:
 
     title = section.title
     content = tuple(section.content)
+    if not isinstance(title, str):
+        raise TypeError("ui.frame(nav=): a section of the navigation is named like an area, with fixed words: "
+                        "ui.section(\"Help\", ...); a count goes on a link, ui.link(..., badge=...).")
     extra = [name for name in ("load", "empty", "visible") if getattr(section, name) is not None]
+    extra += ["actions"] if section.actions else []
     if extra or section.collapsed:
         raise TypeError(f"ui.frame(nav=): the section {title!r} is a section of the navigation, which takes its "
                         f"title and its entries only; leave out {', '.join(extra or ['collapsed'])}=.")

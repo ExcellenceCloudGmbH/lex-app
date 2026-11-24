@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1031
+max_scenario: 1033
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2828,3 +2828,13 @@ letters:
       xfail: 0
     note: >-
       The files are parsed, never imported. These tests fail on an imported project module left unchecked, or a module outside the project read.
+  ew:
+    title: 'lex.ui pages: a closed section mounts what it holds when opened; a title from the state; actions'
+    scenarios: 1.1032-1.1033
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      The opened state is RFDS's client_state (rfdsLexopened<n>). These tests fail on a closed section's chart mounted at once, its table deferred, or a state title or actions accepted where they cannot show.

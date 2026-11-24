@@ -478,6 +478,9 @@ class Form(kinds.Kind):
         if after:
             raise ctx.fail(f"{called(after[0])} comes after a section, and with `tabs=True` the sections are the tabs.",
                            "Put what every tab shares first, then the sections.")
+        for index, part in enumerate(parts):
+            if isinstance(part, kinds.Section):
+                part.fixed(ctx.at(f"result[{index}]"), "a tab")
         titles = [part.title for part in sections]
         twice = sorted({title for title in titles if titles.count(title) > 1})
         if twice:
