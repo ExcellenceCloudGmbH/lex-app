@@ -9,7 +9,9 @@ was kept is gone".
 
 A value is gone after its idle time (no read and no write), after its maximum age (since it was
 written), when the tab opens a page again (unless ``keep=True``), when another process or another
-user reads the state, and when the process restarts or keeps too many values. Reading a gone value
+user reads the state, when its user signs out, when its user holds more than
+``LEX_UI_PRIVATE_MB_PER_USER`` (their own least recently used values go first), and when the
+process restarts or keeps too many values. Reading a gone value
 raises :class:`Gone`, a refusal the user is shown in plain words; it never reads as stale data or
 as another user's.
 """
@@ -30,6 +32,9 @@ from lex.lex_app.reflex.ui import results
 
 #: How many private values this process keeps at most; the least recently used goes first.
 _SETTING = ("LEX_UI_PRIVATE_VALUES", 5000)
+#: How many megabytes of private values one user may hold in this process; past it, that user's own
+#: least recently used values go first. One value larger than this is refused.
+_PER_USER = ("LEX_UI_PRIVATE_MB_PER_USER", 100)
 
 
 def _now() -> float:
@@ -43,6 +48,42 @@ def capacity() -> int:
     except ValueError:
         wanted = default
     return max(1, wanted)
+
+
+def per_user() -> float:
+    """How many bytes of private values one user may hold in this process."""
+    name, default = _PER_USER
+    try:
+        wanted = float(os.getenv(name) or default)
+    except ValueError:
+        wanted = float(default)
+    return max(wanted, 0.001) * 1024 * 1024
+
+
+def _size(value: Any) -> int:
+    """About how many bytes ``value`` takes: its pickle, or the sum of its parts' sizes."""
+    import pickle
+    import sys
+
+    try:
+        return len(pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL))
+    except Exception:  # noqa: BLE001 - not picklable: count its parts
+        seen: set[int] = set()
+        total, stack = 0, [value]
+        while stack:
+            one = stack.pop()
+            if id(one) in seen:
+                continue
+            seen.add(id(one))
+            total += sys.getsizeof(one, 64)
+            if isinstance(one, dict):
+                stack.extend(one.keys())
+                stack.extend(one.values())
+            elif isinstance(one, (list, tuple, set, frozenset)):
+                stack.extend(one)
+            elif hasattr(one, "__dict__"):
+                stack.append(vars(one))
+        return total
 
 
 class _Gone:
@@ -87,6 +128,7 @@ class _Entry:
     written: float
     used: float
     field: "Private"
+    size: int = 0
 
 
 _STORE: "collections.OrderedDict[tuple[str, str, str], _Entry]" = collections.OrderedDict()
@@ -157,8 +199,10 @@ def private(*, idle_minutes: float = 60, max_hours: float = 8, keep: bool = Fals
 
     Never in the browser, never in Redis or a state pickle: only here, for this tab and this user.
     It is gone after ``idle_minutes`` without a read or a write, ``max_hours`` after it was written,
-    when the tab opens a page again (``keep=True``: it stays across visits, within those times), and
-    whenever another server process or another user reads the state. Reading it then fails with a
+    when the tab opens a page again (``keep=True``: it stays across visits, within those times), when
+    the user signs out or holds more than ``LEX_UI_PRIVATE_MB_PER_USER`` megabytes (their own least
+    recently used values go first; one value larger than that is refused), and whenever another
+    server process or another user reads the state. Reading it then fails with a
     plain sentence -- "This is no longer available: it is kept only for a while. Start again." --
     shown as every refusal is (a toast, a table's message), never with old or another user's data.
     A load resets it like every field, unless ``keep=True`` and it is still kept. A computed var
@@ -291,9 +335,24 @@ def put(state: Any, field: Private, value: Any) -> None:
         elif not workcopy._differs(value, field.empty()):
             stamps.pop(path, None)                                  # nothing kept: not gone, just empty
         else:
+            size, room = _size(value), per_user()
+            if size > room:
+                raise ValueError(
+                    f"{type(target).__name__}.{field.name} holds about {size / 1048576:.1f} MB, more than one "
+                    f"user may keep in private fields ({room / 1048576:g} MB, the setting "
+                    f"LEX_UI_PRIVATE_MB_PER_USER). Keep less -- the rows the page shows, not every row read -- or "
+                    f"raise LEX_UI_PRIVATE_MB_PER_USER."
+                )
+            own = [(name, entry) for name, entry in _STORE.items() if entry.owner == owner]
+            held = sum(entry.size for _, entry in own)
+            for name, entry in own:                                 # this user's least recently used first
+                if held + size <= room:
+                    break
+                del _STORE[name]
+                held -= entry.size
             now = _now()
             stamps[path] = uuid.uuid4().hex
-            _STORE[key] = _Entry(owner, stamps[path], value, now, now, field)
+            _STORE[key] = _Entry(owner, stamps[path], value, now, now, field, size)
             while len(_STORE) > capacity():
                 _STORE.popitem(last=False)
     if stamps != dict(target._ui_private):
@@ -316,6 +375,17 @@ def leave(tab: str) -> int:
     """The tab opened a page: drop its values that are not kept across visits; returns how many."""
     with _LOCK:
         gone = [key for key, entry in _STORE.items() if key[0] == tab and not entry.field.keep]
+        for key in gone:
+            del _STORE[key]
+    return len(gone)
+
+
+def forget(owner: str) -> int:
+    """The user ``owner`` signed out: drop every value they hold in this process; returns how many."""
+    if not owner:
+        return 0
+    with _LOCK:
+        gone = [key for key, entry in _STORE.items() if entry.owner == owner]
         for key in gone:
             del _STORE[key]
     return len(gone)

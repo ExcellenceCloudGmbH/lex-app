@@ -706,9 +706,9 @@ class PayrollState(ui.State):
   expiry); `max_hours` since it was written (default 8, a working day); the tab opening a page
   again (the opener drops it; `keep=True` keeps it, within those times; Reflex reconnecting its
   socket to the same page is not opening it again, pages design 6.18); another server process
-  (a restart, or the tab's events reaching another worker), another signed-in user on the tab, and
-  more than `LEX_UI_PRIVATE_VALUES` values in the process (default 5000; the least recently used
-  goes first). The lex.ui clock (the heartbeat, every 10 s) drops expired values from memory.
+  (a restart, or the tab's events reaching another worker), another signed-in user on the tab, the
+  user signing out, the user holding more than `LEX_UI_PRIVATE_MB_PER_USER` (below), and more than
+  `LEX_UI_PRIVATE_VALUES` values in the process (default 5000; the least recently used goes first). The lex.ui clock (the heartbeat, every 10 s) drops expired values from memory.
 - **What a reader sees when it is gone**: reading the field raises a refusal, "This is no longer
   available: it is kept only for a while. Start again.", shown as every refusal is -- a toast for
   an action or a job (and `ui.failed` for a job), in a form above its submit button (pages design
@@ -728,9 +728,21 @@ class PayrollState(ui.State):
 - **`ui.testing`**: `fields={"_report": {...}}` seeds it and `result.fields["_report"]` reads it,
   as for every field; `ui.testing.GONE` seeds a value that is gone (to test the refusal) and is what
   `result.fields` holds for one.
+- **One user cannot fill the memory, and signing out empties it** (review, 2026-11-24). The store
+  was one least-recently-used list of 5000 values of any size, so one user's large results could push
+  out everyone else's. Now each value's size is estimated when it is written (its pickle, else the sum
+  of its parts) and one user holds at most `LEX_UI_PRIVATE_MB_PER_USER` megabytes in a process
+  (default 100): a write past it drops that user's own least recently used values first, never
+  another user's; a single value larger than the whole allowance is refused with a sentence naming
+  the setting (an error with a reference for the user, the sentence in the log: it is the author's
+  to fix). `LexUser.sign_out` (the dashboard's Sign out and `/logout`) drops every value of the user
+  in that process. *One setting, not two:* a separate cap per value was considered; the allowance
+  already bounds one value, and a second number would have to be kept below the first.
 - *Cost:* a value lives in one process: with several backend workers, a tab whose events reach
-  another worker finds it gone and is told so. A process keeps at most the setting's number of
-  values, of any size. The leave drop needs the page's opener: a page without one (a dashboard on
+  another worker finds it gone and is told so. A process keeps at most `LEX_UI_PRIVATE_VALUES`
+  values, and each user at most `LEX_UI_PRIVATE_MB_PER_USER` of them. Signing out of lex-app itself
+  (not of the dashboard) does not reach the Reflex process: those values leave after their idle
+  time. The leave drop needs the page's opener: a page without one (a dashboard on
   plain `rx.page`) relies on the idle time.
 
 ### 6.12 A limit on how many runs of a job go at once: `@ui.job(limit=)` (2026-11-24)

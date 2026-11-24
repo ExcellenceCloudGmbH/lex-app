@@ -3522,13 +3522,13 @@ form's `result=`. What building settled is section 6.17 of `docs/superpowers/spe
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.920 – 1.926, 1.911 |
+| Scenario range | 1.920 – 1.926, 1.911, 1.913 |
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/private.py`, `lex/lex_app/reflex/ui/workcopy.py` (`fields_of`, `snapshot`, `restore`, `reset`, `Draft`), `lex/lex_app/reflex/ui/state.py` (`_ui_private`, `ui_open`), `lex/lex_app/reflex/ui/context.py` (`user_id_of`), `lex/lex_app/reflex/ui/testing.py` (`GONE`), `lex/lex_app/reflex/ui/runs.py` (the clock's sweep) |
 | Test file | `lex/test_project/tests/init/test_1dv_ui_private.py` |
-| Test classes | `TestCluster01dv_Private` (1.920–1.926, 1.911) |
+| Test classes | `TestCluster01dv_Private` (1.920–1.926, 1.911, 1.913) |
 | Fixtures | a neutral payroll state (a report not kept, a draft kept) |
-| Tests landed | **8 pass / 0 fail** |
+| Tests landed | **9 pass / 0 fail** |
 | Status | ✅ Complete |
 
 `ui.private` for personal data in a tool's result. What building settled is section 6.11 of `docs/superpowers/specs/2026-11-23-reflex-ui-action-state-layer-design.md`. Test 1.783 follows: `ui.private` is a public name.
@@ -3543,6 +3543,7 @@ form's `result=`. What building settled is section 6.17 of `docs/superpowers/spe
 | 1.925 | ui.testing seeds and reads it like any field | fields= seeds it; result.fields reads it; ui.testing.GONE seeds a gone value and is what result.fields holds; GONE copies and pickles as itself |
 | 1.926 | A private field declared wrongly says what to write | a public name, no type, a plain Reflex state, a limit of 0 or True, keep= not a bool; the empty value from the type; neither a backend var nor a var |
 | 1.911 | A computed var reading a private field is refused when the class is defined | a cached var, a cache=False var and one reading it through a helper method are refused with the var, the field, @ui.rows and copying into a field; one over a backend field stays |
+| 1.913 | One user cannot fill the memory, and signing out drops their values | with LEX_UI_PRIVATE_MB_PER_USER=1 a user's own least recently used value goes, never another user's older one; a value larger than the allowance is refused with a sentence naming the setting and not kept; LexUser.sign_out drops every value of that user only |
 
 ### Batch 1dw — lex.ui: a limit on how many runs of a job go at once -- @ui.job(limit=) ✅
 

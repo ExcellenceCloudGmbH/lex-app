@@ -11,7 +11,7 @@ never another user's. A regression is personal data in a state pickle or in the 
 one user wrote read by another, a value that outlives its limits, or a page that silently shows
 nothing (or old data) where the value was.
 
-Cluster 1dv -- scenarios 1.920-1.926, 1.911. Type: U.
+Cluster 1dv -- scenarios 1.920-1.926, 1.911, 1.913. Type: U.
 Covers: lex/lex_app/reflex/ui/private.py, lex/lex_app/reflex/ui/workcopy.py (fields_of, snapshot,
 restore, reset, Draft), lex/lex_app/reflex/ui/state.py (_ui_private, ui_open),
 lex/lex_app/reflex/ui/context.py (user_id_of), lex/lex_app/reflex/ui/testing.py (GONE),
@@ -82,6 +82,18 @@ class PayrollState(ui.State):
     @ui.load
     def open(self):
         self.note = f"report={self._report.get('name', '-')} draft={len(self._draft)}"
+
+
+class QuotaState(ui.State):
+    """Three private results of about 400 KB each, for the memory a user may hold."""
+
+    _a: str = ui.private()
+    _b: str = ui.private()
+    _c: str = ui.private()
+
+    @ui.action
+    def write(self, name: str, kilobytes: int):
+        setattr(self, f"_{name}", "x" * (kilobytes * 1024))
 
 
 def _session(steps, user: str = "tester"):
@@ -413,3 +425,63 @@ class TestCluster01dv_Private(SimpleTestCase):
 
         fine = ReadsBackend
         self.assertIn("count", fine.computed_vars, "a computed var over a backend field is Reflex's own, and stays")
+
+    # -- 1.913 ---------------------------------------------------------
+    def test_1_913_one_user_cannot_fill_the_memory_and_signing_out_drops_their_values(self) -> None:
+        """
+        Scenario 1.913: what one user may hold, and signing out.
+        Given: `LEX_UI_PRIVATE_MB_PER_USER=1`; bob holds a 300 KB value written first; anna writes
+               three values of about 400 KB each, then one of 2 MB.
+        When:  anna's third value would take her past her megabyte; the 2 MB value is written;
+               anna signs out (`LexUser.sign_out`).
+        Then:  anna's own oldest value goes, never bob's (though bob's is older); a value larger
+               than what one user may hold is refused with a sentence naming the setting, and
+               nothing is kept; signing out drops every value anna holds in this process, and
+               bob's stays.
+        """
+        import logging
+
+        from lex.lex_app.reflex.auth import LexUser
+
+        def held(owner):
+            return sorted(key[2] for key, entry in private._STORE.items() if entry.owner == owner)
+
+        async def as_user(user, token, steps):
+            previous = context.set_user_id_of(lambda state: user)
+            try:
+                async with testing.Harness(user=user, token=token) as harness:
+                    await harness.open_tab()
+                    return await steps(harness)
+            finally:
+                context.set_user_id_of(previous)
+
+        async def write(harness, name, kilobytes):
+            await (await harness.send(QuotaState, "write", name=name, kilobytes=kilobytes))
+            await asyncio.sleep(0.02)
+
+        async def bob(harness):
+            await (await harness.send(PayrollState, "build", name="x" * 300_000))
+            await asyncio.sleep(0.02)
+
+        async def anna(harness):
+            for name in ("a", "b", "c"):
+                await write(harness, name, 400)
+            after_three = held("anna")
+            with self.assertLogs("lex.lex_app.reflex.ui.handlers", logging.ERROR) as logged:
+                await write(harness, "a", 2048)
+            after_big = held("anna")
+            await (await harness.send(LexUser, "sign_out"))
+            await asyncio.sleep(0.02)
+            return after_three, logged.records, after_big, held("anna")
+
+        with patch.dict(os.environ, {"LEX_UI_PRIVATE_MB_PER_USER": "1"}):
+            asyncio.run(as_user("bob", "tab-bob", bob))
+            after_three, records, after_big, signed_out = asyncio.run(as_user("anna", "tab-anna", anna))
+        self.assertEqual(after_three, ["_b", "_c"], "anna's own oldest value went to make room")
+        self.assertEqual(held("bob"), ["_report"], "never another user's, though it is older")
+        reason = str(records[0].exc_info[1])
+        self.assertIn("LEX_UI_PRIVATE_MB_PER_USER", reason, "a value too large names the setting")
+        self.assertRegex(reason, r"QuotaState\._a holds about 2\.0 MB")
+        self.assertEqual(after_big, ["_b", "_c"], "and is not kept")
+        self.assertEqual(signed_out, [], "signing out drops every value of the user")
+        self.assertEqual(held("bob"), ["_report"], "and only theirs")
