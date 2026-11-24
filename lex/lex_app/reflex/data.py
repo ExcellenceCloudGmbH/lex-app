@@ -24,6 +24,7 @@ A state module: no ``from __future__ import annotations`` here, because Reflex
 reads the annotations of the state classes defined below at class creation.
 """
 
+import dataclasses
 import datetime
 import decimal
 import itertools
@@ -378,11 +379,53 @@ class LexTableState(DataTableMixin, mixin=True):
     search_field: ClassVar[str] = ""
     #: The table's fixed filters, set when it mounts (``lex_table(filters=...)``).
     scope: dict[str, str] = {}
+    #: A filter dropdown's choice per field (``ui.table(filters=[...])``).
+    chosen: dict[str, str] = {}
+    #: The fields the browser may filter on (``ui.table(filters=[...])``); ``None``: any field,
+    #: as ``lex_table`` has always allowed (a page that builds its own filter bar over it).
+    choice_fields: ClassVar[tuple[str, ...] | None] = None
+    #: The fixed filters' fields the browser may send when the table appears (``ui.table(where=)``);
+    #: ``None``: any, as ``lex_table`` has always allowed.
+    scope_fields: ClassVar[tuple[str, ...] | None] = None
+
+    def _store_filter(self, key: str, value: Mapping[str, Any]) -> bool:
+        allowed = type(self).choice_fields
+        if allowed is not None and key not in allowed:
+            raise ValueError(f"{type(self).__name__}: {key!r} is not one of the table's filters")
+        return super()._store_filter(key, value)
+
+    @rx.event
+    async def set_choice(self, field: str, value: str):
+        """A filter dropdown's choice; ``""`` removes the filter."""
+        from lex.lex_app.reflex.ui.pages.rows_table import choose
+
+        allowed = type(self).choice_fields
+        if allowed is not None and field not in allowed:
+            return
+        async for _ in choose(self, field, value):
+            yield
+
+    @rx.event
+    async def clear_filters(self):
+        """"Clear filters": every filter, and the dropdowns that show them."""
+        self.chosen = {}
+        if self.filters:
+            self.filters = {}
+            await self._after_filter_change()
+
+    @rx.event
+    async def remove_filter(self, key: str):
+        self.chosen = {k: v for k, v in self.chosen.items() if k != key}
+        if key in self.filters:
+            self.filters = {k: v for k, v in self.filters.items() if k != key}
+            await self._after_filter_change()
 
     @rx.event
     async def open(self, scope: dict):
         """Mount: take the table's fixed filters (state vars resolved by now), then load."""
-        self.scope = {str(k): "" if v is None else str(v) for k, v in (scope or {}).items()}
+        allowed = type(self).scope_fields
+        self.scope = {str(k): "" if v is None else str(v) for k, v in (scope or {}).items()
+                      if allowed is None or str(k) in allowed}
         self.page = 0
         async for _ in self.load():
             yield
@@ -440,6 +483,43 @@ _STATE_CACHE: dict[tuple, type] = {}
 _COUNTER = itertools.count(1)
 
 
+def stable(value: Any, depth: int = 0) -> Any:
+    """``value`` as a key that is the same for the same declaration in every build of a page.
+
+    A function counts by its code's place and what its closure holds, never by its address: a
+    page is built when it is registered and again when it is compiled, and both builds must
+    find one state class.
+    """
+    if depth > 6:
+        return "..."
+    if isinstance(value, rx.Var):
+        return ("var", str(value))
+    if isinstance(value, Mapping):
+        return tuple(sorted((str(k), stable(v, depth + 1)) for k, v in value.items()))
+    if isinstance(value, (list, tuple, set, frozenset)):
+        items = [stable(v, depth + 1) for v in value]
+        return tuple(sorted(items, key=repr)) if isinstance(value, (set, frozenset)) else tuple(items)
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return (type(value).__qualname__,) + tuple(stable(getattr(value, f.name), depth + 1)
+                                                   for f in dataclasses.fields(value))
+    code = getattr(value, "__code__", None)
+    if code is not None:
+        cells = tuple(stable(cell.cell_contents, depth + 1) for cell in (getattr(value, "__closure__", None) or ())
+                      if _filled(cell))
+        bound = getattr(value, "__self__", None)
+        return ("fn", getattr(value, "__qualname__", ""), code.co_filename, code.co_firstlineno, code.co_code,
+                repr(code.co_consts), cells, id(bound) if bound is not None else None)
+    return repr(value)
+
+
+def _filled(cell: Any) -> bool:
+    try:
+        cell.cell_contents
+    except ValueError:
+        return False
+    return True
+
+
 def _state_for(base: type, model: Any, classvars: Mapping[str, Any], *, defaults: Mapping[str, Any] | None = None,
                identity: tuple = ()) -> type:
     """One state class per distinct table or grid: same model, configuration and fixed filters.
@@ -449,8 +529,8 @@ def _state_for(base: type, model: Any, classvars: Mapping[str, Any], *, defaults
     differently never share rows. ``defaults`` override the base's state vars.
     """
     defaults = dict(defaults or {})
-    key = (base.__name__, model_id(model), tuple(sorted((k, repr(v)) for k, v in classvars.items())),
-           tuple(sorted((k, repr(v)) for k, v in defaults.items())), identity)
+    key = (base.__name__, model_id(model), tuple(sorted((k, stable(v)) for k, v in classvars.items())),
+           tuple(sorted((k, stable(v)) for k, v in defaults.items())), identity)
     cls = _STATE_CACHE.get(key)
     if cls is None:
         name = f"{base.__name__.removeprefix('Lex').removesuffix('State')}_{model_id(model)}_{next(_COUNTER)}"
@@ -474,7 +554,8 @@ def _filters_identity(filters: Mapping[str, Any] | None) -> tuple:
 
 def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_field: str = "",
                 page_size: int = 25, filters: Mapping[str, Any] | None = None,
-                row_fields: Sequence[str] = ()) -> type:
+                row_fields: Sequence[str] = (), choice_fields: Sequence[str] | None = None,
+                scope_fields: Sequence[str] | None = None) -> type:
     """The :class:`LexTableState` for one table of ``model`` (one class per distinct table).
 
     The table opens at ``page_size`` rows, which is also among the sizes the
@@ -489,6 +570,10 @@ def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_fiel
     }
     if row_fields:
         classvars["row_fields"] = tuple(row_fields)
+    if choice_fields is not None:
+        classvars["choice_fields"] = tuple(choice_fields)
+    if scope_fields is not None:
+        classvars["scope_fields"] = tuple(scope_fields)
     return _state_for(LexTableState, model, classvars, defaults={"page_size": int(page_size)},
                       identity=_filters_identity(filters))
 

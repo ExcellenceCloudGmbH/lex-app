@@ -1,4 +1,4 @@
-"""Where things lead: a link names a page function or a record, never a route string."""
+"""Where things lead: a link names a page function, a declared raw page or a record, never a route string."""
 
 from __future__ import annotations
 
@@ -40,6 +40,61 @@ def info_of(route: str, name: str, params: Any = ()) -> PageInfo:
     return PageInfo(name, route, arguments, params)
 
 
+class ReflexPage:
+    """A page written in raw Reflex, declared as somewhere a link may lead (see :func:`reflex_page`)."""
+
+    __slots__ = ("__ui_page__", "__name__")
+
+    def __init__(self, info: PageInfo) -> None:
+        self.__ui_page__ = info
+        self.__name__ = info.name
+
+    def __repr__(self) -> str:
+        return f"ui.reflex_page({self.__ui_page__.route!r})"
+
+
+def reflex_page(route: str, *, params: Any = ()) -> ReflexPage:
+    """A page written in raw Reflex at ``route``, as somewhere a lex.ui link may lead.
+
+    For a project that moves to lex.ui a table at a time: its pages are registered with
+    ``app.add_page`` and are not ``@ui.page`` functions yet, but a lex.ui table on one of them
+    still links to the others. Pass the result wherever a link takes a page::
+
+        ORDER = ui.reflex_page("/orders/[key]")
+
+        ui.address(ORDER, key=row["id"])               # in a @ui.rows handler
+        ui.table(State.orders, open=ORDER, ...)        # every row opens its order
+
+    ``params`` are the query parameters the page reads besides its route's arguments. When the
+    app starts, lex-app checks that each declared route is a page of the app.
+    """
+    if not isinstance(route, str) or not route.startswith("/"):
+        raise ValueError(f"ui.reflex_page() takes the page's route as app.add_page registers it, starting with /, "
+                         f"such as \"/orders/[key]\"; got {route!r}.")
+    page = ReflexPage(info_of(route, route, params))
+    _REFLEX_PAGES[route] = page
+    return page
+
+
+#: Every page declared with :func:`reflex_page`, by route: checked against the app's pages when it starts.
+_REFLEX_PAGES: dict[str, ReflexPage] = {}
+
+
+def _route_key(route: str) -> str:
+    """A route as Reflex keys its pages: no slashes around it, ``index`` for ``/``."""
+    return route.strip("/") or "index"
+
+
+def check_reflex_pages(routes: Any) -> None:
+    """Refuse a ``ui.reflex_page`` whose route is not one of ``routes`` (the app's pages)."""
+    known = {_route_key(str(route)) for route in routes}
+    missing = [route for route in _REFLEX_PAGES if _route_key(route) not in known]
+    if missing:
+        route = missing[0]
+        raise ValueError(f"ui.reflex_page({route!r}) names no page of the app. Add the page with "
+                         f"app.add_page(..., route={route!r}), or correct the route.")
+
+
 def page_info(target: Any) -> PageInfo | None:
     return getattr(target, "__ui_page__", None)
 
@@ -49,7 +104,8 @@ def href(ctx: Build, target: Callable[..., Any], values: dict) -> Any:
     info = page_info(target)
     if info is None:
         raise ctx.fail(f"`to=` got {getattr(target, '__name__', target)!r}, which is not a page.",
-                       "Pass a function declared with `@ui.page`. For an outside site use `href=\"https://...\"`.")
+                       "Pass a function declared with `@ui.page`, or a raw Reflex page declared with "
+                       "`ui.reflex_page(\"/route\")`. For an outside site use `href=\"https://...\"`.")
     missing = [name for name in info.arguments if name not in values]
     unknown = [name for name in values if name not in info.arguments and name not in info.params]
     if missing or unknown:
@@ -99,3 +155,41 @@ def piece(ctx: Build, name: str, value: Any, instead: str | None = None) -> Any:
     if value is None or isinstance(value, bool) or str(value) in ("", ".", ".."):
         raise ctx.fail(f"the value for `{name}` in a link is {value!r}.", instead)
     return quote(str(value), safe="")
+
+
+class Address(str):
+    """A page's address made by :func:`address`. A table follows only these: a plain string from data
+    never becomes a link."""
+
+    __slots__ = ()
+
+
+def address(page: Callable[..., Any], **values: Any) -> Address:
+    """The address of ``page`` (a function declared with ``@ui.page``), with its values, built in Python.
+
+    For rows that lead to different pages: a ``@ui.rows`` handler puts ``ui.address(...)`` in a field
+    of each row, and the table's ``open=`` (or a column's) names that field. A value that is ``None``
+    or empty leaves the row without a link: ``ui.address`` then returns ``""``.
+    """
+    info = page_info(page)
+    if info is None:
+        raise TypeError(f"ui.address() takes a page declared with @ui.page or ui.reflex_page(\"/route\"); "
+                        f"got {getattr(page, '__name__', page)!r}")
+    missing = [name for name in info.arguments if name not in values]
+    unknown = [name for name in values if name not in info.arguments and name not in info.params]
+    if missing or unknown:
+        accepted = ", ".join([*info.arguments, *info.params]) or "none"
+        raise TypeError(f"ui.address({info.name}, ...): page `{info.name}` ({info.route}) takes {accepted}; "
+                        f"got {', '.join(values) or 'nothing'}.")
+    path, rest = "", info.route
+    for name in info.arguments:
+        value = values[name]
+        if value is None or isinstance(value, bool) or str(value) in ("", ".", ".."):
+            return Address("")
+        before, _, rest = rest.partition(f"[{name}]")
+        path += before + quote(str(value), safe="")
+    path += rest
+    query = [(name, values[name]) for name in info.params if values.get(name) not in (None, "")]
+    for index, (name, value) in enumerate(query):
+        path += ("?" if index == 0 else "&") + name + "=" + quote(str(value), safe="")
+    return Address(path)

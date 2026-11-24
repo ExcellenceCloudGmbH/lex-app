@@ -38,6 +38,9 @@ def check_app_routes(app: Any) -> None:
                if kwargs.get("route")]
     for route in routes:
         check_route(route)
+    from lex.lex_app.reflex.ui.pages import links
+
+    links.check_reflex_pages(routes)   # a link to a raw page leads to a page the app has
 
 
 def _page_permitted(state: Any, requires: str) -> bool:
@@ -100,6 +103,8 @@ class State(rx.State):
     params = property(lambda self: context.current().session.params)
     can = property(lambda self: context.current().can)
     state = property(lambda self: context.current().state_of)
+    #: The browser tab the handler runs for (Reflex's client token): for a project's own per-tab store.
+    tab_id = property(lambda self: context.current().session.tab)
 
     @rx.event
     async def ui_open(self, page: str):
@@ -120,6 +125,9 @@ class State(rx.State):
         self._ui_page = page
         self._ui_reset = []
         entry = handlers.page_of(page)
+        from lex.lex_app.reflex.ui.pages import rows_table
+
+        tables = rows_table.reopen_events(page)     # a table already on screen: the new record's rows
         if entry is None or not _page_permitted(self, entry.requires):
             self._ui_pending_loads, self._ui_optional_loads, self._ui_started = [], [], []
             return None
@@ -132,7 +140,7 @@ class State(rx.State):
         self._ui_optional_loads = [handlers.load_id(h) for h in entry.optional] if entry.required else []
         starting = list(entry.required or entry.optional)
         self._ui_started = [handlers.load_id(h) for h in starting]
-        return starting
+        return [*starting, *tables]
 
     @rx.event
     def ui_cancel(self, key: str):

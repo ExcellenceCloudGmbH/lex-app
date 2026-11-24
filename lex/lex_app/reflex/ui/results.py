@@ -39,6 +39,15 @@ class Download:
     data: Any = None
 
 
+class Refresh(list):
+    """What ``ui.refresh`` returns: the Reflex events that make those tables read again.
+
+    A list of events, so a handler written in raw Reflex can return it as it is.
+    """
+
+    handlers: tuple = ()
+
+
 @dataclasses.dataclass(frozen=True)
 class Progress:
     fraction: float
@@ -66,6 +75,22 @@ def download(*, url: str | None = None, filename: str | None = None, data: Any =
     return Download(url, filename, data)
 
 
+def refresh(*handlers: Any) -> Refresh:
+    """Make the tables that read these ``@ui.rows`` handlers read again: ``return ui.refresh(State.rows)``.
+
+    A table already reads again after a handler of its own state; this is for a handler of another state.
+    """
+    from lex.lex_app.reflex.ui import rows
+
+    if not handlers or not all(rows.is_rows(h) for h in handlers):
+        raise TypeError("ui.refresh() takes @ui.rows handlers: `return ui.refresh(FundState.holdings)`")
+    from lex.lex_app.reflex.ui.pages import rows_table
+
+    out = Refresh(rows_table.reread_events(handlers=handlers))
+    out.handlers = tuple(handlers)
+    return out
+
+
 def progress(fraction: float, message: str = "") -> Progress:
     """What a job yields to report progress: a fraction from 0 to 1 and a message."""
     return Progress(min(1.0, max(0.0, float(fraction))), str(message))
@@ -73,7 +98,8 @@ def progress(fraction: float, message: str = "") -> Progress:
 
 def split(value: Any, *, handler: str) -> tuple[list, Progress | None]:
     """A handler's returned or yielded value as (results, progress report)."""
-    items = [] if value is None else list(value) if isinstance(value, (list, tuple)) else [value]
+    items = ([] if value is None else [value] if isinstance(value, Refresh)
+             else list(value) if isinstance(value, (list, tuple)) else [value])
     out: list = []
     report: Progress | None = None
     for item in items:
@@ -81,12 +107,12 @@ def split(value: Any, *, handler: str) -> tuple[list, Progress | None]:
             continue
         if isinstance(item, Progress):
             report = item
-        elif isinstance(item, (Goto, Toast, Download)):
+        elif isinstance(item, (Goto, Toast, Download, Refresh)):
             out.append(item)
         else:
             raise TypeError(
-                f"{handler} returned {item!r}. A lex.ui handler returns ui.goto(), ui.toast() or "
-                "ui.download(), and a job may yield ui.progress(). Use @ui.custom for raw Reflex events."
+                f"{handler} returned {item!r}. A lex.ui handler returns ui.goto(), ui.toast(), ui.download() "
+                "or ui.refresh(), and a job may yield ui.progress(). Use @ui.custom for raw Reflex events."
             )
     return out, report
 
@@ -111,6 +137,10 @@ def to_events(items: list) -> list:
                 events.append(navigate(item.path))
             else:
                 events.append(rx.redirect(item.path, replace=item.replace))
+        elif isinstance(item, Refresh):
+            from lex.lex_app.reflex.ui.pages import rows_table
+
+            events.extend(rows_table.reread_events(handlers=item.handlers))
         elif isinstance(item, Toast):
             import rfds
 

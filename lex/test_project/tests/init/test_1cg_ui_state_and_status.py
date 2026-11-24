@@ -46,9 +46,9 @@ class TestCluster01cg_State(TestCase):
         Given: ui.State and a project state inheriting it.
         When:  their fields and handlers are listed.
         Then:  ui.State is a real Reflex state with the status fields and the visit counter;
-               user, api, params, can and state are properties, not event handlers; the
+               user, api, params, can, state and tab_id are properties, not event handlers; the
                project's state inherits the status fields and keeps only its own as its own.
-               Those five names are reserved: a project state declaring a field (with or
+               Those six names are reserved: a project state declaring a field (with or
                without a default), a computed var or a method of one of them is refused when the
                class is defined, with a message naming the state and the name and saying to
                rename it.
@@ -57,7 +57,7 @@ class TestCluster01cg_State(TestCase):
             self.assertIn(name, State.base_vars, f"{name} is a field of ui.State")
             self.assertIn(name, _Board.inherited_vars, f"{name} is inherited by a project state")
         self.assertEqual(list(_Board.base_vars), ["rows"], "a project state's own fields are only its own")
-        for name in ("user", "api", "params", "can", "state"):
+        for name in ("user", "api", "params", "can", "state", "tab_id"):
             self.assertIsInstance(State.__dict__[name], property, f"{name} is a property")
             self.assertNotIn(name, State.event_handlers, f"{name} must not be callable from the browser")
         self.assertIn("ui_open", State.event_handlers)

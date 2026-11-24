@@ -17,7 +17,7 @@ LOOP_TIMEOUT_SECONDS = 60.0
 #: The body's helpers on ``self`` (``ui.State``). A field, method or computed var of a ``ui.State``
 #: may not take these names, nor may a page route's dynamic argument (Reflex makes it a field of
 #: every state, which it reads before the helper).
-RESERVED = ("user", "api", "params", "can", "state")
+RESERVED = ("user", "api", "params", "can", "state", "tab_id")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -28,6 +28,18 @@ class User:
     name: str = ""
     username: str = ""
     email: str = ""
+
+    @property
+    def permissions(self) -> list:
+        """The user's Keycloak permissions, as Keycloak lists them (``{"rsname": ..., "scopes": [...]}``).
+
+        For a project's own logic that takes the permission list; to ask about one model, use
+        ``self.can(Model, "read")``. Only inside a handler body.
+        """
+        inv = active()
+        if inv is None:
+            raise RuntimeError("self.user.permissions only works inside a lex.ui handler body")
+        return list(inv.on_loop(inv.session.permissions()))
 
     @classmethod
     def from_profile(cls, profile: Mapping[str, Any]) -> "User":
@@ -74,6 +86,8 @@ class Session:
     api: Any = None
     #: An httpx-style async client for ``LexApi`` (tests).
     api_client: Any = None
+    #: The browser tab the event came from (Reflex's client token): ``self.tab_id``.
+    tab: str = ""
 
 
 def _params_of(state: Any) -> Params:
@@ -102,8 +116,12 @@ async def _default_resolve(state: Any) -> Session:
     async def permissions() -> list:
         return await auth.permissions_of(await token())
 
+    try:
+        tab = str(target.router.session.client_token or "")
+    except Exception:  # noqa: BLE001 - a state without router data comes from no tab
+        tab = ""
     return Session(user=User.from_profile(session.profile(target)), params=_params_of(target),
-                   token=token, permissions=permissions)
+                   token=token, permissions=permissions, tab=tab)
 
 
 _resolver: Callable[[Any], Awaitable[Session]] = _default_resolve
@@ -163,7 +181,13 @@ class Invocation:
             self.saved.setdefault(id(other), (other, workcopy.snapshot(other)))
             return other
         if state_cls not in self.drafts:
-            self.drafts[state_cls] = self.on_loop(self._draft_of(state_cls))
+            if self.kind == "rows":               # a table's event already holds the user's lock
+                from lex.lex_app.reflex.ui.rows import ReadOnly
+
+                other = self.on_loop(self.live.get_state(state_cls))
+                self.drafts[state_cls] = ReadOnly(state_cls, workcopy.snapshot(other))
+            else:
+                self.drafts[state_cls] = self.on_loop(self._draft_of(state_cls))
         return self.drafts[state_cls]
 
     async def _draft_of(self, state_cls: Any) -> workcopy.Draft:

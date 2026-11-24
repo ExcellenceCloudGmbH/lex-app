@@ -83,6 +83,7 @@ class Section(Part):
             parts = [dataclasses.replace(part, empty=self.empty)
                      if isinstance(part, tables.Table) and part.empty is None else part for part in parts]
         shape = "table" if has_table and len(parts) == 1 else "rect"
+        ctx = dataclasses.replace(ctx, caption=self.title, under_load=ctx.under_load or self.load is not None)
         return states(ctx, self.load, rfds.stack(*_stacked(ctx, parts)), shape)
 
     def _render(self, ctx: Build) -> rx.Component:
@@ -244,6 +245,8 @@ class Record(Kind):
         facts = take(ctx.at("facts"), list(self.facts), (vocab.Fact,), "Use `ui.fact(label, value)`.")
         if facts:
             head.append(rfds.key_value(*vocab.build_all(ctx.at("facts"), facts), columns=min(3, len(facts))))
+        if self.load is not None:
+            ctx = dataclasses.replace(ctx, under_load=True)
         title, actions, sections = self._title(ctx), self._buttons(ctx), self._sections(ctx)   # lex's checks first
         header = rfds.stack(*head) if head else rx.fragment()
         page = _rfds(ctx, lambda: templates.object_page(
@@ -281,7 +284,10 @@ class List(Kind):
         if not isinstance(self.table, tables.Table):
             raise ctx.at("table").fail(f"got {called(self.table)}.",
                                        "`table=` holds one `ui.table(Model, columns=[...])`.")
-        title, actions, table = self._title(ctx), self._buttons(ctx), self.table.build(ctx.at("table"))
+        title, actions = self._title(ctx), self._buttons(ctx)
+        named = dataclasses.replace(ctx.at("table"), caption=title if isinstance(title, str) else "",
+                                    under_load=ctx.under_load or self.load is not None, page_search=True)
+        table = self.table.build(named)
         page = _rfds(ctx, lambda: templates.list_report(title=title, path=ctx.route or "/", table=table, actions=actions))
         return states(ctx, self.load, page, "table")
 

@@ -2693,7 +2693,7 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.759 | ui.State adds fields and helpers but no event handlers of its own | ui.State is a real Reflex state with the status fields and the visit counter; user, api, params, can and state are properties, not event handlers; the project's state inherits the status fields and keeps only its own as its own; those five names are reserved -- a project state declaring a field (with or without a default), a computed var or a method of one of them is refused when the class is defined, with a message naming the state and the name and saying to rename it |
+| 1.759 | ui.State adds fields and helpers but no event handlers of its own | ui.State is a real Reflex state with the status fields and the visit counter; user, api, params, can, state and tab_id are properties, not event handlers; the project's state inherits the status fields and keeps only its own as its own; those six names are reserved -- a project state declaring a field (with or without a default), a computed var or a method of one of them is refused when the class is defined, with a message naming the state and the name and saying to rename it |
 | 1.760 | Status marks follow a run's life | running lists the rows in flight; progress holds the fraction and the message; finishing removes the row and the progress, records the failure message, and a new start clears the previous failure; the registry lets one run per key and argument in, and a cancel request reaches every run of that handler |
 | 1.761 | Views read status with running, failed and progress_of | each is a Reflex expression over ui.State's status fields under the handler's key, with a default when nothing was recorded; the per-row form compares the row as text |
 
@@ -2813,7 +2813,7 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.783 | from lex import ui has every name | each public name is the implementation's own object, ui.ApiError is lex-app's API error, and ui.testing is the test helper module; nothing else is public beside the page names, which batch 1cu covers |
+| 1.783 | from lex import ui has every name | each public name is the implementation's own object, ui.ApiError is lex-app's API error, and ui.testing is the test helper module; nothing else is public beside the page names and the table and adoption names, which batches 1cu, 1cv and 1cy cover |
 | 1.784 | The scaffold templates are written on the layer | none contains async, await, run_orm or lex_api (as a name or an attribute); every state with handlers is a ui.State; the object page and the overview use ui.State with @ui.load; neither the lex.ui check nor RFDS's strict lint reports an error or a warning on any of them; the object page shows its load's failure, else the loaded record, else a spinner; its load, started on mount, reports a refusal in place (in ui.failed, no redirect) |
 | 1.785 | The reference example is written on the layer | outside RFDS's own async export hook it contains no async, await, run_orm or lex_api; every state with handlers is a ui.State; the lex.ui check reports no error and neither check a warning; the overview's load, started on mount, reports its refusal in place on `/` (in ui.failed, no redirect), with the export menu offered only while the load has not failed; a viewer who may not read the featured model is refused by the load (no redirect) and by the export; a viewer who may read some models sees the same counts on screen and in the export, only for those models; the record dashboard reads the model `?model=` names, refuses a missing or unknown one -- in ui.failed, with no redirect -- and shows failure, else the record, else a spinner; the edit page is a form submitted to one action, with no per-keystroke handler, and `save` writes the submitted values |
 
@@ -2907,7 +2907,7 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.797 | ui.table(Model) is the server-paged table | it is RFDS's data table over lex-app's paged table state for that model, showing the named columns under the model's own field labels; something that is not a model is refused with what to pass |
+| 1.797 | ui.table(Model) is the server-paged table | it is RFDS's data table over lex-app's paged table state for that model, showing the named columns under the model's own field labels; something that is neither a model nor a @ui.rows handler is refused with what to pass |
 | 1.798 | Rows open a page, an empty table says so, a column can be relabelled | each row links to the page's address with the row's key in place of the page's argument; the empty sentence is translated and shown by RFDS's empty state; the column carries the given label; open= a page without exactly one argument is refused |
 
 ### Batch 1cs — lex.ui pages: the record and list kinds ✅
@@ -2966,3 +2966,143 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 | --- | --- | --- |
 | 1.806 | One import gives the page kinds and the vocabulary | each name exists and is listed in __all__ -- except ui.list, the page kind, which a star import must not put in place of Python's list; no component or kind takes a styling argument |
 | 1.807 | A list and a record page build, register and load | both build without one raw component in the page functions; the list links its rows to the record page; opening the record page runs the page load and then the section's load, both end loaded, and the state holds what they read |
+
+### Batch 1cv — lex.ui tables: @ui.rows, a handler that returns a table's rows; ui.address; ui.refresh ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.808 – 1.811 |
+| Type | I |
+| Files covered | `lex/lex_app/reflex/ui/rows.py`, `ui/pages/links.py` (address), `ui/results.py` (refresh), `ui/testing.py` (rows) |
+| Test file | `lex/test_project/tests/init/test_1cv_ui_rows_handler.py` |
+| Test classes | `TestCluster01cv_RowsHandler` (1.808–1.811) |
+| Fixtures | rows handlers on a throwaway state, read through `ui.testing.rows` as a user with and without a grant |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.808 | A rows handler is a plain function that tables read | a plain function with no argument, or with `search` alone, is a rows handler; a generator, an async function and any other argument are refused with what to write; the browser cannot send it as an event; `lex reflex check` accepts it |
+| 1.809 | Rows are read as the user on a read only copy | the rows carry the user and the field; lex-app searches and filters a handler without `search`, and a handler with `search` gets the text; writing a field fails the read and leaves the field as it was; a dict is refused with what to return; a missing permission refuses the read (a PermissionError in a test); given the table, the rows come back as its browser gets them |
+| 1.810 | An address is built in python from a page | the argument and the query value are encoded into the page's route; an empty key gives no address; a value the page does not take, a missing argument, and something that is not a page are refused |
+| 1.811 | Refresh names rows handlers and becomes their tables events | the result is accepted beside ui.toast; it becomes the event that makes that table read again, and is itself that list of events for a raw Reflex handler; something that is not a rows handler is refused |
+
+### Batch 1cw — lex.ui tables: a table over a @ui.rows handler, end to end ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.812 – 1.817 |
+| Type | I |
+| Files covered | `lex/lex_app/reflex/ui/pages/rows_table.py`, `ui/pages/tables.py` (the rows table), `ui/handlers.py` (reading again), `ui/state.py` (`ui_open`) |
+| Test file | `lex/test_project/tests/init/test_1cw_ui_rows_table.py` |
+| Test classes | `TestCluster01cw_RowsTable` (1.812–1.817) |
+| Fixtures | rows tables built on a record page and a list page, driven through Reflex's own event processor with `ui.testing.Harness` |
+| Tests landed | **6 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.812 | The browser gets one page of the fields the table uses | its state holds the rows with only the columns' fields, the currency field, the key and the link field; the e-mail address stays on the server; the plain string is no link; the table's state is reachable for later reads |
+| 1.813 | Search filters and sort run on the server | a search finds a row by its tag; each filter keeps the matching rows; the filter choices are the column's values after "All"; the first sort of a money column is high to low; clearing the filters clears the dropdowns; a filter the browser sends on a field the table does not show is refused |
+| 1.814 | Totals per currency and export of what is shown | there is one totals row per currency over all matching rows; the export has the columns' labels and each amount's currency, the matching rows only, and tags joined; each exported column keeps its own cell type |
+| 1.815 | A handler of the state or ui refresh makes the table read again | after each the table shows the new rows without being asked; a table that is not on screen does not read |
+| 1.816 | Opening the page again and a list pages search in the address | the opener tells the page's table to read its first page again (not a table that appears only after a load, which reads when it appears); the list page's table starts with the address's search, and typing a search writes it back |
+| 1.817 | A broken rows handler breaks only its table | a refusal shows its own words in the table; a failure shows a message with a reference and never its detail; a filter of more than 50 values is the table's error too (the advice to search goes to the log, with the reference) |
+
+### Batch 1cx — lex.ui tables: what a column and a table refuse; a model table narrowed with where= ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.818 – 1.820 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/tables.py` (column, table, the checks, the model table), `lex/lex_app/reflex/data.py` (the filter's choice) |
+| Test file | `lex/test_project/tests/init/test_1cx_ui_table_checks.py` |
+| Test classes | `TestCluster01cx_TableChecks` (1.818–1.820) |
+| Fixtures | a throwaway state with a rows handler; Django's Group and User models |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.818 | A column says what it is and is checked when declared | each kind is accepted; a currency code and a currency field are told apart; tones go with status only; show= and kind= are not given together; a link field must be a field name; a wrong kind names the kinds |
+| 1.819 | A table declared wrongly names the page the slot and what to write | each is a PageError naming the page and the slot, saying what it got and what to write |
+| 1.820 | A model table is narrowed with where and searched through the api | the table's state receives the where= values when it appears (a state value included); the toolbar has a search box; a filter offers the field's choices after "All"; two tables narrowed differently never share a state; a column keeps its field's kind; the field a row button reads reaches the browser; building the same table twice finds one state class; its state takes only its where= keys and its own filters, while lex_table's own state still filters on any field; search covers a shown text column only |
+
+### Batch 1cy — lex.ui adoption: a lex.ui part inside a raw page; the user's permissions in a body ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.821 – 1.822 |
+| Type | I |
+| Files covered | `lex/lex_app/reflex/ui/pages/declare.py` (embed), `lex/lex_app/reflex/ui/context.py` (`User.permissions`) |
+| Test file | `lex/test_project/tests/init/test_1cy_ui_adoption.py` |
+| Test classes | `TestCluster01cy_Adoption` (1.821–1.822) |
+| Fixtures | a throwaway state with a rows handler and an action, run through `ui.testing` with two grants |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.821 | A lex ui table sits inside a raw page | the table is RFDS's data table over its generated state, inside the raw page; a whole page kind and something that is not a lex.ui part are refused with what to write; a mistake in the embedded part names it by the name given |
+| 1.822 | A handler body reads the users permission list | both see the user's Keycloak permissions as Keycloak lists them; outside a handler body reading them is refused |
+
+### Batch 1cz — lex.ui tables: a table that leaves the screen keeps none of its rows ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.823 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/rows_table.py` (`close`) |
+| Test file | `lex/test_project/tests/init/test_1cz_ui_table_close.py` |
+| Test classes | `TestCluster01cz_TableClose` (1.823) |
+| Fixtures | the people table of batch 1cw, through `ui.testing.Harness` |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Found while moving the reviewed customer project's tables to lex.ui: `close` only marked the table hidden, so its last
+page stayed in the tab's state. 1.815's hidden table now holds no row either.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.823 | A table that leaves the screen keeps none of its rows | once it has left, its state holds no row, no count, no totals and no filter choice; when it appears again it reads its rows afresh |
+
+### Batch 1da — lex.ui links: a raw Reflex page as somewhere a link may lead ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.824 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/links.py` (`reflex_page`), `lex/ui.py` |
+| Test file | `lex/test_project/tests/init/test_1da_ui_reflex_page.py` |
+| Test classes | `TestCluster01da_ReflexPage` (1.824) |
+| Fixtures | the rows handler of batch 1cw; two raw pages declared with `ui.reflex_page` |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Found while moving the reviewed customer project's tables to lex.ui: its pages are raw Reflex, and a converted table
+could only link to `@ui.page` functions, so its rows lost their links. 1.783's namespace gains `reflex_page`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.824 | A raw Reflex page is somewhere a link may lead | the address is the route with its value encoded as one piece, and is the kind of address a table follows; the table's rows link by their key; the link and the button lead there; a missing or unknown value, and a route that is no route, are refused with what to write; an app without a declared page does not start, naming the route |
+
+### Batch 1dg — Reflex config: the npm packages RFDS's browser code needs ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.832 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/config.py` (`lex_config`) |
+| Test file | `lex/test_project/tests/init/test_1dg_reflex_frontend_packages.py` |
+| Test classes | `TestCluster01dg_ReflexFrontendPackages` (1.832) |
+| Fixtures | none (reads RFDS's installed `rfds_form.js`) |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Found while running the Reflex docs site, which has lex.ui tables with search but no RFDS form or number input: its
+dev server could not resolve `react-number-format`. Letters 1db–1df and scenarios to 1.831 are taken on other open
+branches, so this batch starts at 1dg / 1.832.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.832 | Every package RFDS's form script imports is installed | each npm package `rfds_form.js` imports (the script behind a lex.ui table's clearable search box) is installed by Reflex, by Radix, or by `lex_config()`'s frontend packages, `react-number-format` pinned to RFDS's own version; a project's own frontend packages are added beside lex-app's, not in place of them |
