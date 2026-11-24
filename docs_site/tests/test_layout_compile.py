@@ -87,3 +87,39 @@ def test_the_landing_page_has_a_hero_and_a_card_per_section(compiled):
     for section in nav.NAV:
         assert section.title.replace("&", "&") in out
     assert "docs-hero" in out and "docs-article-wide" in out
+
+
+def test_the_header_has_a_colour_mode_toggle(compiled):
+    """A sun/moon button switches Reflex's colour mode; its label says where it goes."""
+    from docs_site import layout
+
+    out = str(layout._header())
+    assert '"aria-label":"Switch to dark mode"' in out and '"aria-label":"Switch to light mode"' in out
+    assert "toggleColorMode" in out and "resolvedColorMode" in out
+
+
+def test_the_header_is_light_page_coloured_through_tokens():
+    """RFDS's chrome band and lex-app's header paint take the page's colour and grays, so the
+    header is light in light mode and dark in dark mode."""
+    from docs_site.layout import _STYLE
+
+    assert "var(--color-background)" in _STYLE["--lex-header-bg"]
+    assert _STYLE["--rfds-color-chrome-bg"] == "var(--color-background)"
+    assert _STYLE["--rfds-color-chrome-fg"] == "var(--gray-12)"
+    assert "var(--gray-a5)" in _STYLE["--lex-header-shadow"]
+
+
+def test_no_hardcoded_colours_in_the_sites_python():
+    """Colours are Radix/RFDS tokens only, so both colour modes read well."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "docs_site"
+    files = sorted(root.glob("*.py")) + sorted((root / "render").glob("*.py"))
+    found = []
+    for path in files:
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            code = re.sub(r"(^|\s)#(?![0-9a-fA-F]{3,6}\b).*$", "", line)    # drop comments
+            if re.search(r"#[0-9a-fA-F]{3,6}\b", code) or "rgb(" in code:
+                found.append(f"{path.name}:{n}: {line.strip()}")
+    assert files and not found, found

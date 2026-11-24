@@ -100,7 +100,8 @@ def box() -> rx.Component:
                 rx.foreach(SearchState.results, lambda r: rx.el.li(rx.link(
                     rx.vstack(rx.text(r["title"], weight="medium", size="2"),
                               rx.text(r["heading"], size="1", color_scheme="gray"), spacing="0"),
-                    href=r["href"], underline="none", on_click=SearchState.clear)),
+                    href=r["href"], underline="none", on_click=SearchState.clear, display="block",
+                    padding="6px 8px", border_radius="var(--radius-2)", _hover={"background": "var(--gray-a3)"})),
                 ),
                 aria_label="Search results",
                 position="absolute", top="100%", right="0", z_index="50", width="320px", max_width="90vw",

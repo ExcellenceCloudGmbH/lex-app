@@ -38,7 +38,18 @@ def _header() -> rx.Component:
     product = rx.link(_mark(), rx.el.span("lex-app", class_name="docs-product-name"),
                       rx.el.span("dashboards", class_name="docs-product-sub"),
                       href="/", underline="none", class_name="docs-product")
-    return rfds.header(product=product, actions=[search.box()], job_tray=False)
+    return rfds.header(product=product, actions=[search.box(), mode_toggle()], job_tray=False)
+
+
+def mode_toggle() -> rx.Component:
+    """Light / dark: Reflex's colour mode (stored in the browser, so it holds across pages); the
+    Radix theme and RFDS's tokens follow the ``light``/``dark`` class it sets."""
+    def button(icon: str, label: str) -> rx.Component:
+        return rfds.icon_button(icon, label=label, tooltip=False, on_click=rx.toggle_color_mode,
+                                class_name="docs-mode-toggle")
+
+    return rx.color_mode_cond(light=button("moon", "Switch to dark mode"),
+                              dark=button("sun", "Switch to light mode"))
 
 
 # -- sidebar ------------------------------------------------------------------------------------
@@ -112,6 +123,19 @@ def _prev_next(slug: str) -> rx.Component:
 _STYLE = {
     "--docs-sidebar-w": "264px",
     "--docs-toc-w": "220px",
+    # a light header (reflex.dev-like) through RFDS's chrome tokens and lex-app's header tokens:
+    # the band takes the page's colour (translucent, blurred), text and overlays the page's grays
+    "--rfds-color-chrome-bg": "var(--color-background)",
+    "--rfds-color-chrome-fg": "var(--gray-12)",
+    "--rfds-color-chrome-hover": "var(--gray-a3)",
+    "--rfds-color-chrome-selected": "var(--gray-a4)",
+    "--rfds-color-chrome-border": "var(--gray-a6)",
+    "--rfds-color-chrome-stripe": "var(--gray-a5)",
+    "--rfds-color-focus-ring-inverse": "var(--rfds-color-focus-ring, var(--accent-8))",
+    # lex-app's theme paints the band through these two (html:root:root .rfds-header)
+    "--lex-header-bg": "color-mix(in srgb, var(--color-background) 82%, transparent)",
+    "--lex-header-shadow": "inset 0 -1px 0 var(--gray-a5)",
+    "&.rfds-shell": {"background_color": "var(--color-background)"},
     # header: the product name and the mark
     "& .docs-product": {"display": "inline-flex", "align_items": "center", "gap": "8px", "color": "inherit",
                         "white_space": "nowrap"},
@@ -120,9 +144,10 @@ _STYLE = {
                      "background": "var(--accent-9)", "color": "var(--accent-contrast)"},
     "& .docs-product-name": {"font_weight": "700", "font_size": "var(--font-size-3)", "letter_spacing": "-0.01em"},
     "& .docs-product-sub": {"display": "none", "font_weight": "400", "font_size": "var(--font-size-3)", "opacity": "0.8"},
-    "& .rfds-header-actions": {"margin_inline_start": "auto"},
     # the header's content lines up with the centred grid below it
-    "& .rfds-header": {"padding_inline": "max(12px, calc((100% - 1400px) / 2 + 16px))"},
+    "& .rfds-header": {"padding_inline": "max(12px, calc((100% - 1400px) / 2 + 16px))",
+                       "backdrop_filter": "saturate(1.4) blur(10px)"},
+    "& .rfds-header-actions": {"margin_inline_start": "auto", "gap": "8px"},
     # the grid
     "& .docs-grid": {"display": "grid", "grid_template_columns": "minmax(0, 1fr)", "width": "100%",
                      "max_width": "1400px", "margin": "0 auto", "flex": "1 1 auto"},
