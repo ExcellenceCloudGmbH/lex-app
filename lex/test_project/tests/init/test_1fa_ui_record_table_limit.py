@@ -25,8 +25,8 @@ from lex.lex_app.reflex.ui.pages.parts import Build, PageError
 pytestmark = pytest.mark.init
 
 
-class OrderState(ui.State):
-    key: str = "1"
+class CrowdedOrderState(ui.State):
+    """An order with many kinds of lines (no field named like a route argument: Reflex refuses that)."""
 
     @ui.rows
     def lines(self):
@@ -34,7 +34,7 @@ class OrderState(ui.State):
 
 
 def _table():
-    return ui.table(OrderState.lines, columns=["name"])
+    return ui.table(CrowdedOrderState.lines, columns=["name"])
 
 
 CTX = Build(page="order", route="/orders/[key]")
