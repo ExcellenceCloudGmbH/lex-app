@@ -2,7 +2,7 @@
 
 import reflex as rx
 
-from docs_site import nav
+from docs_site import llms, nav
 from docs_site.content import load
 from docs_site.render import render_page, toc
 
@@ -76,6 +76,13 @@ def _content_page(slug: str):
         body = rx.vstack(
             rx.text(section.title, size="2", color_scheme="gray"),
             rx.heading(doc.title, size="8", as_="h1"),
+            rx.hstack(
+                rx.button("Copy page", variant="soft", size="1",
+                          on_click=rx.set_clipboard(llms.page_markdown(slug))),
+                rx.link("View Markdown", href=f"{rx.config.get_config().api_url}/md/{slug}.md",
+                        is_external=True, size="1"),
+                spacing="3",
+            ),
             rx.text(doc.description, size="4", color_scheme="gray") if doc.description else rx.fragment(),
             render_page(doc),
             _prev_next(slug),
