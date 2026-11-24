@@ -215,5 +215,98 @@ def target(where: Any, *, argument: str, mail: bool = False) -> str:
                      f"{where!r}. A route is not written as text.")
 
 
-__all__ = ["Frame", "OpenedPage", "current", "frame", "page_opened", "target"]
+@dataclasses.dataclass(frozen=True)
+class Guard:
+    """Who may see one entry of the frame: the permission strings it needs, the project's rules, and the
+    page values the rules are asked with (none for a listed page; a link's own)."""
+
+    permissions: tuple[str, ...] = ()
+    rules: tuple = ()
+    params: tuple = ()                  # (name, value) pairs
+
+    def __bool__(self) -> bool:
+        return bool(self.permissions or self.rules)
+
+
+def _strings(requires: Any) -> tuple[str, ...]:
+    items = (requires,) if isinstance(requires, str) else tuple(requires or ())
+    return tuple(one for one in items if one)
+
+
+def page_guard(route: str, permission: Any = None, rules: tuple = ()) -> Guard:
+    """The guard of the page at ``route``: what lex-app registered for the page (``@ui.page``,
+    ``lex_page``), else what its entry says (a raw page's ``requires=``)."""
+    from lex.lex_app.reflex.ui import handlers
+
+    page = handlers.page_of(route)
+    if page is not None:
+        return Guard(_strings(page.requires), tuple(page.rules))
+    return Guard(_strings(permission), tuple(rules))
+
+
+def guards() -> dict[str, Guard]:
+    """Every guarded entry of the frame, by its key: a listed page's key is its route."""
+    from lex.lex_app.reflex import shell
+
+    found: dict[str, Guard] = {}
+    for entry in shell.nav_entries():
+        guard = page_guard(entry.route, entry.permission, entry.rules)
+        if guard:
+            found[entry.route] = guard
+    return found
+
+
+def deciding() -> bool:
+    """Whether the frame has anything the server decides when a page opens."""
+    return bool(guards())
+
+
+@dataclasses.dataclass
+class Answers:
+    """What the server decided for one user when a page opened; only this reaches the browser."""
+
+    shown: list[str] = dataclasses.field(default_factory=list)
+
+
+async def decide(state: Any) -> Answers:
+    """The frame for the user signed in on ``state``'s tab, decided on the server.
+
+    An entry is shown when the user holds its permissions -- Keycloak's grants, fetched with the user's
+    token, not what the browser was told -- and every rule grants (on a worker thread, once per rule and
+    values in this event). A rule that fails hides its entry, and is logged.
+    """
+    from lex.lex_app.reflex.access import permission_strings
+    from lex.lex_app.reflex.ui import context, handlers, pools
+
+    session = await context.resolve(state)
+    held: frozenset[str] | None = None
+    asked: dict = {}
+
+    async def may(key: str, guard: Guard) -> bool:
+        nonlocal held
+        if guard.permissions:
+            if held is None:
+                held = permission_strings(await session.permissions())
+            if any(one not in held for one in guard.permissions):
+                return False
+        for rule in guard.rules:
+            if (rule, guard.params) not in asked:
+                asked[(rule, guard.params)] = asyncio.ensure_future(
+                    pools.run("interactive", handlers._ask, rule, session.user, context.Params(dict(guard.params))))
+            try:
+                answer = await asked[(rule, guard.params)]
+            except Exception:  # noqa: BLE001 - hidden, and logged
+                logger.exception("lex.ui: %r failed for the frame's entry %s; the entry is not shown", rule, key)
+                return False
+            if answer is not True:
+                return False
+        return True
+
+    entries = guards()
+    granted = await asyncio.gather(*(may(key, guard) for key, guard in entries.items()))
+    return Answers(shown=[key for key, yes in zip(entries, granted) if yes])
+
+
+__all__ = ["Answers", "Frame", "Guard", "OpenedPage", "current", "decide", "frame", "guards", "page_opened",
+           "target"]
 

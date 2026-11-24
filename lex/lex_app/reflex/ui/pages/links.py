@@ -74,30 +74,31 @@ def reflex_page(route: str, *, params: Any = (), nav: str | None = None, title: 
 
         ui.reflex_page("/legacy", nav="Tools", title="Legacy export", icon="download")
 
-    ``requires=`` (a permission: ``ui.read(Model)``...) hides the entry from users without it; it is
-    not access control -- lex-app does not frame or guard a raw page.
+    ``requires=`` (a permission: ``ui.read(Model)``..., a project's ``@ui.rule``, or a list of them) hides
+    the entry from users who may not open the page, decided on the server when a page opens; it is not
+    access control -- lex-app does not frame or guard a raw page.
     """
     if not isinstance(route, str) or not route.startswith("/"):
         raise ValueError(f"ui.reflex_page() takes the page's route as app.add_page registers it, starting with /, "
                          f"such as \"/orders/[key]\"; got {route!r}.")
-    permission = _entry_permission(route, nav, title, icon, requires)
+    permission, rules = _entry_permission(route, nav, title, icon, requires)
     page = ReflexPage(info_of(route, route, params))
     _REFLEX_PAGES[route] = page
     if nav:
         from lex.lex_app.reflex.shell import NavEntry, list_in_nav
 
-        list_in_nav(NavEntry(route=route, label=title, section=nav, icon=icon, permission=permission))
+        list_in_nav(NavEntry(route=route, label=title, section=nav, icon=icon, permission=permission, rules=rules))
     return page
 
 
-def _entry_permission(route: str, nav: Any, title: Any, icon: Any, requires: Any) -> str | None:
-    """A raw page's navigation entry, checked: its permission string, if it has one."""
+def _entry_permission(route: str, nav: Any, title: Any, icon: Any, requires: Any) -> tuple[Any, tuple]:
+    """A raw page's navigation entry, checked: its permission string(s) and rules, if it has any."""
     if nav is None:
         given = [name for name, value in (("title", title), ("icon", icon), ("requires", requires)) if value is not None]
         if given:
             raise ValueError(f"ui.reflex_page({route!r}): {', '.join(given)}= describe the page's entry in the "
                              "navigation, and it has none. Give its area too: nav=\"Tools\".")
-        return None
+        return None, ()
     if not isinstance(nav, str) or not nav.strip():
         raise ValueError(f"ui.reflex_page({route!r}, nav=) takes the name of an area, such as nav=\"Tools\".")
     if not isinstance(title, str) or not title.strip():
@@ -106,17 +107,16 @@ def _entry_permission(route: str, nav: Any, title: Any, icon: Any, requires: Any
     if "[" in route:
         raise ValueError(f"ui.reflex_page({route!r}, nav=): a page with route arguments cannot be opened from the "
                          "navigation. List the page that leads to it instead.")
+    from lex.lex_app.reflex.access import permission
     from lex.lex_app.reflex.ui import guard
 
-    if requires is None or requires is guard.signed_in:
-        return None
-    if isinstance(requires, guard.Requirement):
-        from lex.lex_app.reflex.access import permission
-
-        return permission(requires.target, requires.scope)
-    raise ValueError(f"ui.reflex_page({route!r}, requires=) takes one permission -- ui.read(Model), "
-                     f"ui.permission(...) -- which hides the entry from users without it; got {requires!r}. A raw "
-                     "page checks anything else itself.")
+    try:
+        items = guard.normalise(requires) or ()
+    except (TypeError, ValueError) as wrong:
+        raise ValueError(f"ui.reflex_page({route!r}, requires=): {wrong} It hides the entry from users who may not "
+                         "open the page; a raw page checks anything else itself.") from None
+    strings = tuple(permission(one.target, one.scope) for one in items if isinstance(one, guard.Requirement))
+    return (strings[0] if len(strings) == 1 else strings or None), guard.rules_of(items)
 
 
 #: Every page declared with :func:`reflex_page`, by route: checked against the app's pages when it starts.

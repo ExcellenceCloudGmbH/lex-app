@@ -191,6 +191,10 @@ class State(rx.State):
     #: "message": the refusal's sentence}``. A page with rules shows its content only on "yes".
     ui_access: dict[str, dict[str, str]] = {}
 
+    #: The keys of the frame's guarded entries this user may open, decided on the server when a page
+    #: opened (``ui.frame``): a guarded entry is drawn only once its key is here.
+    ui_frame_shown: list[str] = []
+
     _ui_boots: dict[str, str] = {}
     _ui_pending_loads: list[str] = []
     _ui_optional_loads: list[str] = []
@@ -307,6 +311,23 @@ class State(rx.State):
 
             await frame.page_opened(self, page, handlers._location(self))
         return [*starting, *tables]
+
+    @rx.event(background=True)
+    async def ui_frame_open(self):
+        """A page in lex-app's frame opened: decide on the server what the frame shows this user.
+
+        Sent by the shell's mount, in the background: the page does not wait, and only the answers
+        reach the browser. A failure is logged; the frame keeps what it showed.
+        """
+        from lex.lex_app.reflex.ui.pages import frame
+
+        try:
+            answers = await frame.decide(self)
+        except Exception:  # noqa: BLE001 - the page is shown; the project reads the log
+            frame.logger.exception("lex.ui: the frame could not be decided for this page")
+            return
+        async with self:
+            self.ui_frame_shown = answers.shown
 
     @rx.event
     def ui_cancel(self, key: str):

@@ -1941,3 +1941,18 @@ does not remove user launch configurations.
 | 1.997 | The whole page declared with ui.page compiles | registered with lex-app's load; compiled with the form, the past runs, the progress and Stop asking Stop this run? behind the edit permission |
 
 **Scenario range:** 1.994 – 1.997. **Test file:** `lex/test_project/tests/init/test_1ei_ui_calculation_file_stop.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1ei](batches.md).
+
+### 1ej. lex.ui frame: what a user may see in the navigation, decided on the server ✅
+
+**What it tests:** Every guarded navigation entry -- a listed page's `requires=` (permissions and `@ui.rule`s), a raw page's `requires=` -- is drawn only on the server's answer, decided when a page opens (the shell's mount, a background event) from Keycloak's grants with the user's token and the rules on worker threads; compiled with Reflex's page compiler and through lex-app's start-up step.
+
+**Why a regression matters:** An entry the user may not open drawn anyway, a rule's page still listed, the browser deciding what is listed, or a failing rule that shows its entry.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1000 | A guarded entry is drawn only on the server's answer | every guarded entry carries its route as key; compiled under ui_frame_shown; the shell's mount asks; no permission string in the navigation; nothing to decide, nothing asked |
+| 1.1001 | The server decides permissions and rules for the user | anna: Reports, Reviews, Audit; carl: nothing; ben: a failing rule hides its entries, logged; the rule asked once per event, on a worker thread, without values |
+| 1.1002 | What the browser was told does not decide | the resolver behind the browser's permissions claims grants: nothing listed; a fresh tab's first page answered at once |
+| 1.1003 | lex-app's start-up draws the decided navigation | declare.install then compile: the answer's var and the mount's event; a raw page's requires= takes a list; a plain function refused naming @ui.rule |
+
+**Scenario range:** 1.1000 – 1.1003. **Test file:** `lex/test_project/tests/init/test_1ej_ui_frame_decided.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ej](batches.md).

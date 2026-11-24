@@ -55,7 +55,11 @@ class NavEntry:
     label: str
     section: str
     icon: str | None = None
-    permission: str | None = None
+    #: The permission (or permissions) a raw page's ``requires=`` gives; a declared page's guard is
+    #: what lex-app registered for it (:func:`~lex.lex_app.reflex.ui.pages.frame.page_guard`).
+    permission: Any = None
+    #: A raw page's rules (``@ui.rule``) in its ``requires=``.
+    rules: tuple = ()
 
 
 _NAV: list[NavEntry] = []
@@ -195,9 +199,16 @@ def environment() -> str:
 
 
 def nav_sections() -> tuple:
-    """The side navigation: the overview first, then each area's pages, in ``ui.frame(nav=)``'s order."""
+    """The side navigation: the overview first, then each area's pages, in ``ui.frame(nav=)``'s order.
+
+    A guarded entry carries its key as RFDS's ``permission``: :func:`lex_chrome` draws it only once the
+    server has decided that this user may open it (:func:`_decided_on_the_server`).
+    """
     from rfds.components.navigation.side_nav import NavItem, NavSection
 
+    from lex.lex_app.reflex.ui.pages import frame
+
+    guarded = frame.guards()
     if not _NAV:
         return ()
     sections = [
@@ -217,7 +228,7 @@ def nav_sections() -> tuple:
                 entry.label,
                 entry.route,
                 icon=entry.icon,
-                permission=entry.permission,
+                permission=entry.route if entry.route in guarded else None,
             )
             for entry in entries
         )
@@ -225,6 +236,30 @@ def nav_sections() -> tuple:
             NavSection(items=items, label_id=f"lex.nav.section.{_slug(heading)}", label_default=heading)
         )
     return tuple(sections)
+
+
+class _decided_on_the_server:
+    """While the navigation is built, RFDS's entry check is the server's answer for this user.
+
+    lex-app's entries carry their key as RFDS's ``permission`` (:func:`nav_sections`); an entry is drawn
+    once ``ui_frame_shown`` -- what the server decided when the page opened -- holds that key. RFDS's own
+    checker (the browser's permissions) is put back afterwards, for anything else that asks it.
+    """
+
+    def __enter__(self) -> None:
+        import importlib
+
+        from lex.lex_app.reflex.ui.state import State as UiState
+
+        side_nav = importlib.import_module("rfds.components.navigation.side_nav")   # the module, not the function
+
+        self._before = list(side_nav._CHECKER)        # read only to put it back: RFDS has no getter
+        side_nav.set_permission_checker(lambda key: UiState.ui_frame_shown.contains(key))
+
+    def __exit__(self, *exc: Any) -> None:
+        from rfds.components.navigation.side_nav import set_permission_checker
+
+        set_permission_checker(self._before[0] if self._before else None)
 
 
 def denied_notice(message: Any = None):
@@ -290,11 +325,18 @@ def lex_chrome(body, *, embedded=None, route=None):
             rx.text(LexUser.display_name, size="2"),
         ),
     )
-    sections = nav_sections()
-    side = rfds.side_nav(*sections) if sections else None
+    with _decided_on_the_server():
+        sections = nav_sections()
+        side = rfds.side_nav(*sections) if sections else None
     trail = breadcrumbs(route)
     if trail is not None:
         body = rx.fragment(trail, body)
+    from lex.lex_app.reflex.ui.pages import frame
+    from lex.lex_app.reflex.ui.state import State as UiState
+
+    # What the frame shows this user is decided on the server whenever a page opens (on any page in
+    # lex-app's frame, a raw one too): the shell's mount asks, in the background.
+    deciding = {"on_mount": UiState.ui_frame_open} if frame.deciding() else {}
     return rx.fragment(
         theme_follower(),
         auth_notice("restored"),
@@ -305,6 +347,7 @@ def lex_chrome(body, *, embedded=None, route=None):
             side_nav=side,
             main=body,
             class_name=rx.cond(embedded, EMBEDDED_CLASS, ""),
+            **deciding,
         ),
     )
 

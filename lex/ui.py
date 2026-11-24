@@ -69,7 +69,8 @@ progress_of/cancel``        event of a Cancel button
 ``ui.testing``              run a handler in a unit test
 ``@ui.page``                where a page lives: its route, its area of the navigation (``nav=``),
                             who may see it. lex-app's frame heads it with its breadcrumbs: the
-                            area, the listed page that opens it, the page
+                            area, the listed page that opens it, the page. The navigation lists
+                            only what the user may open, decided on the server when a page opens
 ``ui.frame``                lex-app's frame for this project, set once in the dashboard module:
                             ``nav=[...]`` the areas' order; ``denied=`` the sentence a refused
                             user reads, ``request_access=`` their way out (a page, https:// or
@@ -104,7 +105,8 @@ button/link``
                             only when the rows do not fit one page)
 ``ui.address``              a page's address, for a row that leads to a page of its own
 ``ui.reflex_page``          a page written in raw Reflex, as somewhere a link may lead;
-                            ``nav=``, ``title=`` list it in an area of the navigation
+                            ``nav=``, ``title=`` list it in an area of the navigation, ``requires=``
+                            (a permission or a rule) hides that entry
 ``ui.custom_block``         a raw component, marked for review with its reason
 ``ui.embed``                the other way round: one lex.ui part inside a raw Reflex page,
                             for moving a project a table at a time

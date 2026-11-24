@@ -3788,3 +3788,25 @@ Fourth piece of the calculation page (section 6.20 of `docs/superpowers/specs/20
 | 1.995 | Stop cancels a run on a worker and the page says so | the worker's task revoked; the record and the page CANCELLED; following ended; no failure |
 | 1.996 | A run in lex-app's process cannot be stopped and the page says so | refused in words; the run still ends in SUCCESS; a later Stop: already ended |
 | 1.997 | The whole page declared with ui.page compiles | registered with lex-app's load; compiled with the form, the past runs, the progress and Stop asking Stop this run? behind the edit permission |
+
+### Batch 1ej — lex.ui frame: what a user may see in the navigation, decided on the server ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1000 – 1.1003 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/frame.py` (`guards`, `decide`), `lex/lex_app/reflex/shell.py` (`nav_sections`, `lex_chrome`), `lex/lex_app/reflex/ui/state.py` (`ui_frame_open`, `ui_frame_shown`), `lex/lex_app/reflex/ui/pages/links.py` (`reflex_page(requires=)`), `lex/lex_app/reflex/ui/pages/declare.py` (`install`) |
+| Test file | `lex/test_project/tests/init/test_1ej_ui_frame_decided.py` |
+| Test classes | `TestCluster01ej_FrameDecidedOnTheServer` (1.1000–1.1003) |
+| Fixtures | pages declared per test (`FrameCase` from 1eb); `ui.testing.Harness` with grants per user; a rule recording its calls |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1000 | A guarded entry is drawn only on the server's answer | every guarded entry carries its route as key; compiled under ui_frame_shown; the shell's mount asks; no permission string in the navigation; nothing to decide, nothing asked |
+| 1.1001 | The server decides permissions and rules for the user | anna: Reports, Reviews, Audit; carl: nothing; ben: a failing rule hides its entries, logged; the rule asked once per event, on a worker thread, without values |
+| 1.1002 | What the browser was told does not decide | the resolver behind the browser's permissions claims grants: nothing listed; a fresh tab's first page answered at once |
+| 1.1003 | lex-app's start-up draws the decided navigation | declare.install then compile: the answer's var and the mount's event; a raw page's requires= takes a list; a plain function refused naming @ui.rule |

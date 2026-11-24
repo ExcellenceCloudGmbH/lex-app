@@ -145,7 +145,8 @@ def page(route: str, *, nav: str | None = None, icon: str | None = None, require
 
     ``requires=`` takes what a handler's does -- a permission, ``ui.signed_in``, a project's rule
     (``@ui.rule``), or a list of them. A rule is asked on the server when the page opens: refused,
-    the page shows the no-access notice with the rule's sentence and starts no load.
+    the page shows the no-access notice with the rule's sentence and starts no load. The page's entry in
+    the navigation is drawn only for users who may open it, decided on the server (permissions and rules).
 
     ``requires=`` and ``visible=`` decide what is shown, never what is allowed: a value a page
     shows reaches the browser. What a user may read or change is enforced by each handler's own
