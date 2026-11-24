@@ -207,4 +207,16 @@ say exactly one thing (`hide_actions_column`) and nothing about a column.
 
 **Scenario range:** 10.188-10.189. **Test file:** `lex/test_project/tests/api_layer/test_10ae_fields_value_list_flag.py`. **Type:** U. **Status:** ✅ Complete (2026-10-16; the filter bar withdrawn 2026-10-20). Covers `lex/api/views/model_info/Fields.py` (`Fields.get`'s `value_list` and `list_ui`, `create_list_ui_info`), `lex/api/serializers/base_serializers.py` (`get_list_ui_options`), `lex/api/utils/filterable_fields.py` (`value_list_field`). Batch: [10ae](batches.md).
 
+
+### 10ah. A calculation's live log and the running-calculations list follow the record's permission_read
+
+| # | Scenario | What We Assert | Status |
+|---|----------|----------------|--------|
+| 10.198 | Live log of a record the caller may not read | `api/init-calculation-logs` returns a readable record's logged line; for a record `permission_read` refuses it answers `{"logs": null}`, the same as a run with no log | ✅ |
+| 10.199 | Who still reads every live log | `LEX_SEC_INTERNAL=false` restores the open answer; a log keyed by an id that names no record (no row, no model) is null for a non-superuser; a superuser reads all of them | ✅ |
+| 10.200 | Running calculations, readable records only | `api/active-calculations` lists only runs on records the caller may read, for a signed-in user and a project API key; the hidden run's display name, record id and calculation id appear nowhere in the body | ✅ |
+| 10.201 | The operator's callers see every run | with `LEX_SEC_INTERNAL=false`, with the instance's own key (`LEX_API_KEY`, the Instance Controller's headers) and as a superuser, both runs are listed | ✅ |
+
+**Scenario range:** 10.198-10.201. **Test file:** `lex/test_project/tests/api_layer/test_10ah_calculation_endpoints_read.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Covers `lex/api/views/calculations/InitCalculationLogs.py`, `lex/api/views/calculations/ActiveCalculations.py`, `lex/api/security.py` (`sees_every_calculation`, `calculation_record_readable`). Batch: [10ah](batches.md).
+
 ---

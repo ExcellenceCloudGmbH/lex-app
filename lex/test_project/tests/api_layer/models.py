@@ -256,3 +256,51 @@ class ContractItem(LexModel):
 
 CONTRACT_MODELS = [ContractItem]
 CONTRACT_ITEM = "contractitem"
+
+
+# ---------------------------------------------------------------------------
+# Calculation endpoints follow the record's read permission (Cluster 10ah)
+# ---------------------------------------------------------------------------
+
+
+class ApiLayerGuardedCalc(CalculationModel):
+    """Cluster 10ah: a calculation model whose secret rows nobody may read.
+
+    Open rows are readable by everyone, so a caller sees their logs and run
+    state; a secret row's ``permission_read`` refuses, so its log and its run
+    must not reach a caller the endpoints do not exempt (a superuser, the
+    instance key).
+    """
+
+    name = models.CharField(max_length=200)
+    is_secret = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):  # pragma: no cover
+        return None
+
+    def permission_read(self, uc):
+        if self.is_secret:
+            return PermissionResult.deny("cluster 10ah: secret row")
+        return PermissionResult.allow_all("cluster 10ah: open row")
+
+    def permission_list(self, uc):
+        return True
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 10ah: edit-open")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+
+GUARDED_CALC_MODELS = [ApiLayerGuardedCalc]
