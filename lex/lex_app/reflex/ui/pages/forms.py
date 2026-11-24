@@ -41,6 +41,7 @@ class Field(Part):
     help: Any = None
     value: Any = None
     currency: Any = None
+    lines: int | None = None
 
     @property
     def is_a(self) -> str:
@@ -71,6 +72,9 @@ class Field(Part):
         if self.currency is not None and kind != "money":
             raise ctx.fail(f"field `{self.key}` has `currency=` and the kind `{kind}`.",
                            "`currency=` goes with `kind=\"money\"`.")
+        if self.lines is not None and kind != "text":
+            raise ctx.fail(f"field `{self.key}` has `lines=` and the kind `{kind}`.",
+                           "`lines=` goes with text, the default kind: leave `kind=` out.")
         if kind == "bool" and not (self.value is None or isinstance(self.value, (bool, rx.Var))):
             raise ctx.fail(f"field `{self.key}` is a yes/no and starts as {called(self.value)}.",
                            "`value=` is `True`, `False` or a state value.")
@@ -139,6 +143,9 @@ class Field(Part):
             "hint": say(self.help) if self.help is not None else None,
             "error": State.ui_invalid.get(f"{runs.key_of(handler)}|{self.key}", ""),
         }
+        if kind == "text" and self.lines is not None:
+            # A text area is as wide as the form: a note or a pasted list needs the room.
+            return rfds.textarea(default_value=start, rows=self.lines, width="full", **common)
         if kind == "text":
             return rfds.text_input(default_value=start, **common)
         if kind == "number":
@@ -180,13 +187,15 @@ class Field(Part):
 
 
 def field(key: str, *, label: Any = None, kind: str | None = None, options: Any = None, required: bool = False,
-          help: Any = None, value: Any = None, currency: Any = None) -> Field:  # noqa: A002 - the design's word
+          help: Any = None, value: Any = None, currency: Any = None,  # noqa: A002 - the design's word
+          lines: int | None = None) -> Field:
     """One input of a form. The handler finds what was entered under ``key``: ``values["name"]``.
 
     ``kind`` says what the value is, and with it what the handler receives:
 
     =============  ==========================================  ==========================
-    ``text``       a line of text (the default)                ``str``, ``""`` when empty
+    ``text``       a line of text (the default), or several    ``str``, ``""`` when empty
+                   with ``lines=``
     ``number``     a number                                    ``int``, or ``Decimal`` with decimals
     ``money``      an amount, in ``currency=`` (a code such    ``Decimal``
                    as ``"EUR"``; else the home currency)
@@ -207,13 +216,20 @@ def field(key: str, *, label: Any = None, kind: str | None = None, options: Any 
     under it; ``value`` is what the field starts with (a value -- a list for several -- or a
     state value the page's load filled). ``required=True`` (for several: at least one) and the
     kind are checked before the handler runs, and the message is shown at the field.
+
+    ``lines=6`` makes a text field several lines high, for notes, a comment or a pasted list:
+    ``ui.field("notes", lines=6)``. The handler still gets a ``str``, with its line breaks, trimmed
+    at the ends (``values["codes"].splitlines()`` for a list). It goes with text only.
     """
     if not isinstance(key, str) or not key.isidentifier() or key.startswith("_"):
         raise TypeError(f"ui.field() takes the key first, the name the handler finds the value under: "
                         f"`ui.field(\"name\")`; got {key!r}")
     if not isinstance(required, bool):
         raise TypeError(f"ui.field({key!r}, required=) is True or False; got {required!r}")
-    return Field(key, label, kind, options, required, help, value, currency)
+    if lines is not None and (not isinstance(lines, int) or isinstance(lines, bool) or lines < 2):
+        raise TypeError(f"ui.field({key!r}, lines=) is how many lines the field shows, 2 or more; got {lines!r}. "
+                        "A field of one line is the default: leave `lines=` out.")
+    return Field(key, label, kind, options, required, help, value, currency, lines)
 
 
 @dataclasses.dataclass(eq=False)

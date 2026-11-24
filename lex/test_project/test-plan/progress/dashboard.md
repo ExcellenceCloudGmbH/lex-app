@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 114 | 859 | 833 | 3 | 0 |
+| 1. Init — Project Bootstrap | 115 | 862 | 836 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -138,6 +138,7 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1dk | lex.ui: a button that asks first -- confirm=, ask= -- and that shows its handler running | 1.847-1.851 | complete | 5 | 0 | 0 | RFDS's confirmation and dialog opened from a button, one per button as written; a dangerous button must ask; ask= values checked like a form's; every button shows its handler running. These tests fail on a dangerous action that runs on one click, a dialog per table row, a reason reaching the handler unchecked, or a button pressable again while its handler runs. |
 | 1dl | lex.ui forms: a field where the user chooses several of a list of options | 1.852-1.855 | complete | 4 | 0 | 0 | `ui.field(kind="choices", options=...)`: RFDS's checkbox group up to 12 fixed options, its multi-select above or for options from the state; the handler gets a `list[str]` in the order of the options, `[]` for none, checked on the server; in a form, a step and a button's ask=; `ui.fact` shows the kind joined by commas. These tests fail on a text where a list was promised, a value that is no option reaching the body, a required field passing with nothing ticked, or a field that calls the server on every tick. |
 | 1dm | lex.ui: a job reports progress from a callback -- self.progress(fraction, message) | 1.856-1.859 | complete | 4 | 0 | 0 | `reports.build(year, on_progress=self.progress)` through Reflex's event processor: each report from the library's own thread reaches the page like a yield's, and writes only the progress; after Stop or leaving a stop_on_leave page the next call raises GeneratorExit in the calling thread and the run ends stopped, not failed; an action, a load or an ended job get a RuntimeError naming @ui.job; `progress` is reserved like `user`. These tests fail on a progress bar frozen while a library works, a Stop the library never hears, fields written from a foreign thread, or a field called progress that hides the helper. |
+| 1dn | lex.ui forms: a text field of several lines -- ui.field(key, lines=6) | 1.860-1.862 | complete | 3 | 0 | 0 | `ui.field("notes", lines=6)`: RFDS's text area, that many rows high and as wide as the form, sending nothing while the user types; the handler gets a `str` with its line breaks, trimmed at the ends, in a form, a wizard step and a button's ask=; `lines=` on any other kind, or not a whole number of 2 or more, is refused with what to write. These tests fail on a pasted list squashed onto one line, a field that calls the server on every keystroke, or lines= silently ignored on a number. |
 | 1e |  | 1.30-1.43 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |

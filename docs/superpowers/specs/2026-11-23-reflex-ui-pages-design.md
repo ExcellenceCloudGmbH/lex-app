@@ -489,7 +489,7 @@ Built on 2026-11-24 after a spike against RFDS 1.0.0 (`ui.form`, `ui.field`, `ui
 
   | `kind=` | Input (RFDS 1.0.0) | The handler gets | Nothing entered |
   | --- | --- | --- | --- |
-  | `text` | `text_input` | `str`, stripped | `""` |
+  | `text` | `text_input`; `textarea` with `lines=` | `str`, stripped | `""` |
   | `number` | `number_input` | `int`, or `Decimal` with decimals | `None` |
   | `money` | `money_input` (`currency=` as on `ui.fact`, else the home currency) | `Decimal` | `None` |
   | `percent` | `percent_input` (5.25 % is posted as 0.0525) | `Decimal` ratio | `None` |
@@ -555,6 +555,13 @@ Built on 2026-11-24 after a spike against RFDS 1.0.0 (`ui.form`, `ui.field`, `ui
   options."). The input follows RFDS's own rule, at the same line as the dropdown: its checkbox group up to 12
   options, its multi-select above them or for options from the state. *Cost:* none chosen is `[]`, not `None`; no
   `max=`.
+- **Several lines of text are `lines=`, not a kind.** `ui.field("notes", lines=6)` is RFDS's `textarea`,
+  that many rows high and as wide as the form, uncontrolled like the one-line input; the handler gets a `str`
+  with its line breaks, trimmed at the ends like every text (`values["codes"].splitlines()` for a pasted
+  list). `lines=` is a whole number of 2 or more, refused when the field is declared otherwise ("A field of
+  one line is the default: leave `lines=` out."), and goes with text only: any other kind refuses it when the
+  page is built ("`lines=` goes with text, the default kind: leave `kind=` out."). Added 2026-11-24 (batch 1dn).
+  *Cost:* no character limit or counter (RFDS's `max_length=`, `show_count=`).
 - **A file field is not built** (`kind="file"` says to use `ui.custom_block`).
 - **A new visit starts every form over**: the opener clears the messages, the wizard steps, the
   results and an open dialog.

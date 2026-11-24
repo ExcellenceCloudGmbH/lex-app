@@ -3332,3 +3332,25 @@ settled is in the `@ui.job` part of section 6.4 of `docs/superpowers/specs/2026-
 | 1.857 | After Stop the next report raises the stop a yield would | Stop and leaving a `stop_on_leave` page: `GeneratorExit` in the calling thread; the library stops; the body's cleanup runs; changes since the last yield discarded; no error; nothing running |
 | 1.858 | Elsewhere self.progress says it belongs in a job | an action, a load, a job that has ended: `RuntimeError` naming `self.progress` and `@ui.job`; nothing reported |
 | 1.859 | progress is a name a ui.State reserves | a property the browser cannot call; a field, computed var or method named `progress` refused when the class is defined; the route argument `[progress]` refused; `lex reflex check` reports it |
+
+### Batch 1dn — lex.ui forms: a text field of several lines -- ui.field(key, lines=6) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.860 – 1.862 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/forms.py` (`field(lines=)`, `Field.check`, `Field.control`), `lex/lex_app/reflex/ui/forms.py` (`clean`: text) |
+| Test file | `lex/test_project/tests/init/test_1dn_ui_form_lines.py` |
+| Test classes | `TestCluster01dn_FormLines` (1.860–1.862) |
+| Fixtures | a neutral order-notes state (notes, pasted codes, a row's reason) |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+`lines=` on the forms of 1dh-1dl. What building settled is in section 6.14 of
+`docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.860 | Lines makes the field RFDS's text area, and it sends nothing while typing | RFDS's textarea with that many rows, full width; label, help, required mark, the server's message; `value=` a text or a state value; without `lines=` still the one-line input; one event: the submit; compiled with Reflex's page compiler; in a step and in ask= |
+| 1.861 | The handler gets the text with its line breaks, trimmed at the ends | through Reflex's event processor and `ui.testing.run`: the lines as typed, blank space at the ends gone; only blank lines on a required field is a message and no run; a pasted list splits into its lines in a wizard; a dialog's row key and text |
+| 1.862 | lines= belongs to text and is a number of lines | number, date, yes/no, choice and choices refuse it, naming the page, the slot and the field; `kind="text"` takes it; 1, 0, a text, `True`, 2.5 refused when declared, saying to leave it out for one line |

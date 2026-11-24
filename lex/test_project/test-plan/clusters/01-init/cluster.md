@@ -1628,3 +1628,17 @@ does not remove user launch configurations.
 | 1.859 | progress is a name a ui.State reserves | a property the browser cannot call; a field, computed var or method named `progress` refused when the class is defined; the route argument `[progress]` refused; `lex reflex check` reports it |
 
 **Scenario range:** 1.856 – 1.859. **Test file:** `lex/test_project/tests/init/test_1dm_ui_job_progress_callback.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dm](batches.md).
+
+### 1dn. lex.ui forms: a text field of several lines -- ui.field(key, lines=6) ✅
+
+**What it tests:** `ui.field(key, lines=6)` -- RFDS's text area for notes, a comment or a pasted list; the handler gets a `str` with its line breaks, trimmed at the ends; `lines=` only with text, and only a number of lines.
+
+**Why a regression matters:** a pasted list squashed onto one line, a field that calls the server on every keystroke, or `lines=` silently ignored on a number.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.860 | Lines makes the field RFDS's text area, and it sends nothing while typing | RFDS's textarea with that many rows, full width; label, help, required mark, the server's message; `value=` a text or a state value; without `lines=` still the one-line input; one event: the submit; compiled with Reflex's page compiler; in a step and in ask= |
+| 1.861 | The handler gets the text with its line breaks, trimmed at the ends | through Reflex's event processor and `ui.testing.run`: the lines as typed, blank space at the ends gone; only blank lines on a required field is a message and no run; a pasted list splits into its lines in a wizard; a dialog's row key and text |
+| 1.862 | lines= belongs to text and is a number of lines | number, date, yes/no, choice and choices refuse it, naming the page, the slot and the field; `kind="text"` takes it; 1, 0, a text, `True`, 2.5 refused when declared, saying to leave it out for one line |
+
+**Scenario range:** 1.860 – 1.862. **Test file:** `lex/test_project/tests/init/test_1dn_ui_form_lines.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dn](batches.md).
