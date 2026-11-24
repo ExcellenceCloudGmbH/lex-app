@@ -338,7 +338,7 @@ class Form(kinds.Kind):
             built.extend(kinds._stacked(ctx, loose))
             loose = []
             at = ctx.at(f"result[{index}]")
-            built.append(shown(at, rfds.section(part.body(at), title=say(part.title)), part.visible))
+            built.append(shown(at, part.titled(at), part.visible))
         built.extend(kinds._stacked(ctx, loose))
         return built
 

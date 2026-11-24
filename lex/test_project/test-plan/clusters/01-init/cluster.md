@@ -1631,3 +1631,17 @@ does not remove user launch configurations.
 | 1.946 | A table with all of it compiles | Reflex's page compiler |
 
 **Scenario range:** 1.940 – 1.946. **Test file:** `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dy](batches.md).
+
+### 1dz. lex.ui pages: a section closed until the user opens it, saying how many rows it holds ✅
+
+**What it tests:** `ui.section(title, ..., collapsed=True)` -- RFDS's section as a native disclosure, closed at first, its title counting its table's rows; in a form's `result=` and `ui.embed`; refused on a record page.
+
+**Why a regression matters:** a detail that shows open and buries the result, a count that is wrong or shows before the rows are read, or a closed section where RFDS cannot close one.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.947 | A closed section opens in the browser and says how many rows it holds | RFDS's collapsible section, closed; the count once loaded; no table: title alone; model tables; embed |
+| 1.948 | A closed section compiles | Reflex's page compiler |
+| 1.949 | A closed section where RFDS cannot close one is refused | record page; not a bool |
+
+**Scenario range:** 1.947 – 1.949. **Test file:** `lex/test_project/tests/init/test_1dz_ui_section_collapsed.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dz](batches.md).

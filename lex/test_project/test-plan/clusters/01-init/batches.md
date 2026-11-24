@@ -3334,3 +3334,24 @@ Table needs found while rewriting dashboards. What building settled is section 5
 | 1.944 | Every row in one scroll, and past 200 the rest is reached | 150 rows on one page; of 250, 200 then 50 on the next page |
 | 1.945 | A totals row says what it sums and can sum every row | "Total" with nothing narrowing; "Total of matching rows" / "Total of all rows" while a filter or search is on, per currency; mixing or another word refused |
 | 1.946 | A table with all of it compiles | Reflex's page compiler: sticky column, column chooser, pagination |
+
+### Batch 1dz — lex.ui pages: a section closed until the user opens it, saying how many rows it holds ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.947 – 1.949 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/kinds.py` (`section(collapsed=)`, `Section.titled`, the record's refusal), `lex/lex_app/reflex/ui/pages/forms.py` (a form's `result=` sections), `lex/lex_app/reflex/ui/pages/declare.py` (`ui.embed` of a closed section) |
+| Test file | `lex/test_project/tests/init/test_1dz_ui_section_collapsed.py` |
+| Test classes | `TestCluster01dz_SectionCollapsed` (1.947–1.949) |
+| Fixtures | a neutral import tool (orders, fields read); Django's `Group` as a model table |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+What building settled is section 6.15 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.947 | A closed section opens in the browser and says how many rows it holds | RFDS's collapsible section, closed; title and the table's count once loaded, via RFDS's translation; open sections unchanged; no table: title alone; model tables; `ui.embed` |
+| 1.948 | A closed section compiles | Reflex's page compiler: the disclosure and the counting title |
+| 1.949 | A closed section where RFDS cannot close one is refused | on a record page, with `tabs=True` offered; `collapsed=` not a bool |

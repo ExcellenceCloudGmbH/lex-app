@@ -597,6 +597,33 @@ def invoice_report():
     )
 ```
 
+
+### 6.15 A section that opens and closes (2026-11-24, batch 1dz)
+
+A need found while rewriting dashboards: a part of a page closed until the user opens it -- the
+fields a file was read with, the lines left out -- with a count in its title, "Fields read (12)".
+
+```python
+result=[ui.section("Orders", ui.table(ImportState.orders, columns=["name"])),
+        ui.section("Fields read", ui.table(ImportState.fields_read, columns=["name"]), collapsed=True)]
+```
+
+- **`collapsed=True` is RFDS's section as a native disclosure** (`rfds.section(collapsible=True,
+  default_open=False)`: `<details>`/`<summary>`, opened in the browser with no round trip). It works
+  wherever a section has its own heading: a form's `result=`, and `ui.embed(ui.section(...))`.
+  Name: a section is open by default, so the word says the exception, as `required=` does.
+- **The count comes from the section's table.** A title is a sentence, not a state value
+  (sections are anchors and table captions by their title), so a count written into the title
+  would need a second way to give a title. Instead a closed section that holds one table shows,
+  once the table has read its rows, the table's row count through RFDS's translation
+  (`"{title} ({count, number})"`) -- the same number the table's toolbar shows; before that, the
+  title alone. A closed section without a table has its title alone. The table reads its rows
+  when the page shows it, also while the section is closed (the content of `<details>` is
+  mounted), so the count is there before the user opens it. *Cost:* a count of anything but a
+  table's rows is not offered.
+- **A record page's sections are always open.** RFDS's object page lists them under "On this
+  page" and has no closed section; `collapsed=True` there is refused, pointing to `tabs=True`.
+
 ---
 
 ## 7. Order of building

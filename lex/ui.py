@@ -57,7 +57,8 @@ progress_of/cancel``        event of a Cancel button
                             left out of ``import *``, which would hide Python's ``list``)
 ``ui.field/step``           a form's inputs, and a wizard's steps; the handler gets ``values``.
                             ``ui.button(confirm=, ask=)`` asks before its handler runs
-``ui.section``              a titled part of a page; ``load=`` makes it load on its own
+``ui.section``              a titled part of a page; ``load=`` makes it load on its own;
+                            ``collapsed=True`` closes it until the user opens it
 ``ui.text/fact/status/      what fills the slots; none takes a styling argument
 message/column/
 button/link``

@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 114 | 946 | 836 | 3 | 0 |
+| 1. Init — Project Bootstrap | 115 | 949 | 839 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -138,6 +138,7 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1dk | lex.ui: a button that asks first -- confirm=, ask= -- and that shows its handler running | 1.847-1.851 | complete | 5 | 0 | 0 | RFDS's confirmation and dialog opened from a button, one per button as written; a dangerous button must ask; ask= values checked like a form's; every button shows its handler running. These tests fail on a dangerous action that runs on one click, a dialog per table row, a reason reaching the handler unchecked, or a button pressable again while its handler runs. |
 | 1dl | lex.ui forms: a field where the user chooses several of a list of options | 1.852-1.855 | complete | 4 | 0 | 0 | `ui.field(kind="choices", options=...)`: RFDS's checkbox group up to 12 fixed options, its multi-select above or for options from the state; the handler gets a `list[str]` in the order of the options, `[]` for none, checked on the server; in a form, a step and a button's ask=; `ui.fact` shows the kind joined by commas. These tests fail on a text where a list was promised, a value that is no option reaching the body, a required field passing with nothing ticked, or a field that calls the server on every tick. |
 | 1dy | lex.ui tables: the name pinned and given room, a code kept narrow, the Columns menu, every row at once, totals that say what they sum | 1.940-1.946 | complete | 7 | 0 | 0 | `ui.column(kind="name"|"code", pin=True)`, `ui.table(choose_columns=True, page_size=N|None, totals={...: "sum of all rows"})` on rows and model tables, through Reflex's own event processor and its page compiler. These tests fail on a name that scrolls away, a pin RFDS cannot keep, a user's column choice that hides the row's name, a row beyond 200 out of reach, or a total whose label does not say whether it sums the matching rows or every row. |
+| 1dz | lex.ui pages: a section closed until the user opens it, saying how many rows it holds | 1.947-1.949 | complete | 3 | 0 | 0 | `ui.section(title, ..., collapsed=True)`: RFDS's section as a native disclosure in a form's result= and in ui.embed, its title counting its table's rows once read; refused on a record page. These tests fail on a detail that shows open, a count shown before the rows are read, or a closed section on a page where RFDS cannot close one. |
 | 1e |  | 1.30-1.43 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |

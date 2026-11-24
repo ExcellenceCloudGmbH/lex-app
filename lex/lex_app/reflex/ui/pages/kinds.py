@@ -64,8 +64,34 @@ class Section(Part):
     load: Any = None
     empty: Any = None
     visible: Any = None
+    collapsed: bool = False
 
     def body(self, ctx: Build) -> rx.Component:
+        return self._content(ctx)[0]
+
+    def titled(self, ctx: Build) -> rx.Component:
+        """The section with its heading: RFDS's section, closed at first when ``collapsed``."""
+        import rfds
+
+        content, parts = self._content(ctx)
+        title: Any = say(self.title)
+        if self.collapsed:
+            title = self._counted(title, parts)
+        return rfds.section(content, title=title, collapsible=self.collapsed, default_open=not self.collapsed)
+
+    def _counted(self, title: Any, parts: list) -> Any:
+        """A closed section's title, with its table's row count once the table has read its rows."""
+        from lex.lex_app.reflex.ui.pages import rows_table
+
+        held = [part for part in parts if isinstance(part, tables.Table)]
+        state = rows_table._CACHE_BY_TABLE.get(id(held[0])) if len(held) == 1 else None
+        if state is None:
+            return title
+        return rx.cond(state.loaded_at != "", say("{title} ({count, number})", title=title, count=state.total_rows),
+                       title)
+
+    def _content(self, ctx: Build) -> tuple[rx.Component, list]:
+        """The section's content, and its parts as built (a table may be a copy carrying ``empty=``)."""
         import rfds
 
         if any(isinstance(part, Section) for part in self.content):
@@ -84,17 +110,26 @@ class Section(Part):
                      if isinstance(part, tables.Table) and part.empty is None else part for part in parts]
         shape = "table" if has_table and len(parts) == 1 else "rect"
         ctx = dataclasses.replace(ctx, caption=self.title, under_load=ctx.under_load or self.load is not None)
-        return states(ctx, self.load, rfds.stack(*_stacked(ctx, parts)), shape)
+        return states(ctx, self.load, rfds.stack(*_stacked(ctx, parts)), shape), parts
 
     def _render(self, ctx: Build) -> rx.Component:
-        return self.body(ctx)
+        return self.titled(ctx) if self.collapsed else self.body(ctx)
 
 
-def section(title: str, *content: Any, load: Any = None, empty: Any = None, visible: Any = None) -> Section:
-    """A titled part of the page. With ``load=`` it loads on its own and shows its own skeleton and failure."""
+def section(title: str, *content: Any, load: Any = None, empty: Any = None, visible: Any = None,
+            collapsed: bool = False) -> Section:
+    """A titled part of the page. With ``load=`` it loads on its own and shows its own skeleton and failure.
+
+    ``collapsed=True`` closes it until the user opens it (in the browser, no round trip); a closed
+    section that holds a table says in its title how many rows the table has, "Fields read (12)",
+    once it has read them. A record page's sections are always open.
+    """
     if not isinstance(title, str) or not title:
         raise TypeError(f"ui.section() takes its title first, a sentence; got {title!r}")
-    return Section(title, tuple(content), load, empty, visible)
+    if not isinstance(collapsed, bool):
+        raise TypeError(f"ui.section(collapsed=) takes True or False; got {collapsed!r}. `collapsed=True` closes "
+                        "the section until the user opens it.")
+    return Section(title, tuple(content), load, empty, visible, collapsed)
 
 
 #: An action RFDS treats as a Save: it wants a "last saved" time beside it, which a page header cannot give.
@@ -226,6 +261,10 @@ class Record(Kind):
         built: list = []
         for index, (part, ident) in enumerate(zip(parts, _section_ids(titles))):
             at = ctx.at(f"sections[{index}]")
+            if part.collapsed:
+                raise at.fail(f"the section `{part.title}` is collapsed, and a record page's sections are always open.",
+                              "RFDS lists them under \"On this page\". To show one section at a time, give the "
+                              "record `tabs=True`.")
             needs = None
             if isinstance(part.visible, guard.Requirement):
                 needs = permission(part.visible.target, part.visible.scope)     # RFDS keeps the heading and says why

@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 946
+max_scenario: 949
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2508,3 +2508,13 @@ letters:
       xfail: 0
     note: >-
       `ui.column(kind="name"|"code", pin=True)`, `ui.table(choose_columns=True, page_size=N|None, totals={...: "sum of all rows"})` on rows and model tables, through Reflex's own event processor and its page compiler. These tests fail on a name that scrolls away, a pin RFDS cannot keep, a user's column choice that hides the row's name, a row beyond 200 out of reach, or a total whose label does not say whether it sums the matching rows or every row.
+  dz:
+    title: 'lex.ui pages: a section closed until the user opens it, saying how many rows it holds'
+    scenarios: 1.947-1.949
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.section(title, ..., collapsed=True)`: RFDS's section as a native disclosure in a form's result= and in ui.embed, its title counting its table's rows once read; refused on a record page. These tests fail on a detail that shows open, a count shown before the rows are read, or a closed section on a page where RFDS cannot close one.
