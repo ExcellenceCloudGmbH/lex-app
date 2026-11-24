@@ -76,6 +76,7 @@ The submit handler is an `@ui.action` (or an `@ui.job`, below) whose last argume
 | `year` | four digits | `int` |
 | `bool` | a box to tick | `bool`; `False` when not ticked |
 | `choice` | one of `options=` | `str`, checked against the options |
+| `choices` | several of `options=` | `list[str]` in the order of the options, `[]` when none |
 
 Other kinds arrive as `None` when nothing was entered. A field with `options=` is a choice even
 without `kind="choice"`. Values for fields the page did not declare never reach the handler.
@@ -88,6 +89,7 @@ ui.field("signed_on", label="Signed", kind="date", required=True)
 ui.field("currency", options=["EUR", "USD"])         # a dropdown
 ui.field("country", options={"DE": "Germany", "FR": "France"})  # value -> what the user reads
 ui.field("investor", options=Lookup.investor_names)  # options held in a field of the state
+ui.field("regions", kind="choices", options=["North", "South", "East", "West"])  # several
 ui.field("rate", kind="percent", help="Per year.")
 ```
 
@@ -100,6 +102,8 @@ ui.field("rate", kind="percent", help="Per year.")
 - **`options=`** with up to 12 fixed options is a dropdown; with more, or with options held in a
   state field, it is a box that filters the options as the user types. Either way the chosen value
   is checked on the server.
+- **`kind="choices"`** lets the user choose several: boxes to tick for up to 12 fixed options, a
+  list to pick from above that. `required=True` then means at least one.
 
 Nothing reaches the server while the user types: the one event a form sends is its submit.
 
