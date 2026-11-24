@@ -3158,7 +3158,7 @@ column's kind (no new name), and the "contains" filter was dropped: `search=True
 | Test file | `lex/test_project/tests/init/test_1de_ui_reflex_events.py` |
 | Test classes | `TestCluster01de_ReflexEvents` (1.829) |
 | Fixtures | a raw Reflex state with two handlers |
-| Tests landed | **1 pass / 0 fail** |
+| Tests landed | **2 pass / 0 fail** (the second: a @ui.rows handler or the running state's own handler is refused when returned) |
 | Status | ✅ Complete |
 
 First built to accept any Reflex event; after an independent review only another state's handler is accepted, so raw
