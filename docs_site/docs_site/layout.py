@@ -16,11 +16,13 @@ def _title(slug: str) -> str:
 
 
 def _header() -> rx.Component:
+    from docs_site import search
+
     return rx.hstack(
         rx.link(rx.heading("lex-app dashboards", size="4"), href="/", underline="none"),
         rx.spacer(),
-        rx.box(id="docs-search-slot"),
-        padding="12px 24px", border_bottom="1px solid var(--gray-a5)", width="100%", align="center",
+        search.box(),
+        padding=rx.breakpoints(initial="12px 16px", md="12px 24px"), border_bottom="1px solid var(--gray-a5)", width="100%", align="center",
     )
 
 
