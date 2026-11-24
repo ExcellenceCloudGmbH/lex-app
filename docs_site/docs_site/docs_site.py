@@ -1,8 +1,14 @@
 """The docs app: lex-app's look, no sign-in, every page from nav.py."""
 
-import reflex as rx
-import rfds
-from rfds.platform import install_platform
+# Django first, as lex/reflex_app.py does: `reflex run` processes never ran the lex CLI's bootstrap,
+# and a guarded @ui.action enters lex-app's acting-user context, which imports Django models.
+from lex.tools.django_bootstrap import setup_django
+
+setup_django()
+
+import reflex as rx  # noqa: E402 - Django must be ready first
+import rfds  # noqa: E402
+from rfds.platform import install_platform  # noqa: E402
 
 from docs_site import layout, llms, sandbox
 from lex import ui

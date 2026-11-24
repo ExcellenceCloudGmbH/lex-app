@@ -123,3 +123,22 @@ def test_no_hardcoded_colours_in_the_sites_python():
             if re.search(r"#[0-9a-fA-F]{3,6}\b", code) or "rgb(" in code:
                 found.append(f"{path.name}:{n}: {line.strip()}")
     assert files and not found, found
+
+
+def test_the_app_module_sets_django_up_as_lex_apps_own_does():
+    """A guarded @ui.action enters lex-app's acting-user context, which imports Django models. In a
+    test, lex-app's pytest plugin has already set Django up; `reflex run` has not. So the app module
+    must, before anything imports a model, as lex/reflex_app.py does. Checked in a fresh process
+    without the plugin, where the bug lived."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    site = Path(__file__).resolve().parents[1]
+    probe = ("import docs_site.docs_site; from django.apps import apps; "
+             "from lex.lex_app.reflex.ui.guard import acting_user; "
+             "ctx = acting_user(type('U', (), {'username': 'demo'})()); ctx.__enter__(); ctx.__exit__(None, None, None); "
+             "print('ready', apps.ready)")
+    out = subprocess.run([sys.executable, "-c", probe], cwd=site, capture_output=True, text=True, timeout=300)
+    assert out.returncode == 0, out.stderr[-2000:]
+    assert "ready True" in out.stdout
