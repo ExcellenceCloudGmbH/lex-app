@@ -52,6 +52,9 @@ def mark_started(s: Any, key: str, arg: str) -> None:
     failed = dict(s.ui_failed)
     failed.pop(key, None)
     s.ui_failed = failed
+    busy = getattr(s, "_ui_busy", ())
+    if key in busy:
+        s._ui_busy = [one for one in busy if one != key]
     s._ui_boots = {**dict(s._ui_boots), f"{key}|{arg}": BOOT}
 
 
@@ -108,6 +111,23 @@ def claim(token: str, key: str, arg: str) -> Run | None:
 def release(token: str, key: str, arg: str) -> None:
     with _LOCK:
         _ACTIVE.pop((token, key, arg), None)
+
+
+#: Job id (module and qualified name) -> the words of the first button that runs it, for its refusals.
+_WORDS: dict[str, str] = {}
+
+
+def name_job(handler: Any, words: Any) -> None:
+    """A button saying ``words`` runs ``handler``: its refusals name the job so (the first button wins)."""
+    fn = getattr(handler, "fn", handler)
+    body = getattr(fn, "__ui_fn__", None)
+    if body is not None and isinstance(words, str) and words.strip():
+        _WORDS.setdefault(f"{body.__module__}.{body.__qualname__}", words.strip())
+
+
+def words_of(fn: Any) -> str:
+    """How a job's refusal names it: its button's words, else its name as a form's submit button says it."""
+    return _WORDS.get(f"{fn.__module__}.{fn.__qualname__}") or fn.__name__.replace("_", " ").strip().capitalize()
 
 
 #: Job id (module and qualified name) -> how many of its runs hold a place under its ``limit=`` in this process.

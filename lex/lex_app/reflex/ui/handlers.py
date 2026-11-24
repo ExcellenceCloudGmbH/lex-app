@@ -579,8 +579,8 @@ async def _merge(inv: context.Invocation, live: Any) -> None:
 
 
 def _limit_message(fn: Callable[..., Any], limit: int) -> str:
-    """The refusal of a run over ``limit=``, naming the job as its button does ("Build report")."""
-    name = fn.__name__.replace("_", " ").strip().capitalize()
+    """The refusal of a run over ``limit=``, naming the job as its button does ("Export to CSV")."""
+    name = runs.words_of(fn)
     if limit == 1:
         return results.message("lex.ui.job.limit.one", "{name} is already running. Try again in a moment.", name=name)
     return results.message("lex.ui.job.limit", "{name} is already running {limit} times. Try again in a moment.",
@@ -655,6 +655,8 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                             runs.mark_finished(self, key, arg, error=message)
                         elif message:
                             self.ui_failed = {**dict(self.ui_failed), key: message}
+                            if busy is not None:          # about this press only: it leaves with the visit
+                                self._ui_busy = sorted({*self._ui_busy, key})
                 finally:
                     if placed:
                         runs.give_place(place)

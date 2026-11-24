@@ -8,7 +8,7 @@ a refused press that changes the page or holds a place, or a place that is never
 (after a failure, a cancel, a refusal or a form's wrong field), which would lock the job for
 everyone.
 
-Cluster 1dw -- scenarios 1.927-1.929, 1.915. Type: U.
+Cluster 1dw -- scenarios 1.927-1.929, 1.915, 1.919. Type: U.
 Covers: lex/lex_app/reflex/ui/handlers.py (job, _limit_message), lex/lex_app/reflex/ui/runs.py
 (take_place, give_place).
 Run: python -m lex pytest lex/test_project/tests/init/test_1dw_ui_job_limit.py -v
@@ -307,3 +307,51 @@ class TestCluster01dw_JobLimit(SimpleTestCase):
         self.assertEqual(outcomes, [], "neither job was refused for the other's limit")
         self.assertEqual(sorted(RAN), ["lex_test_limits_invoices", "lex_test_limits_orders"], "both ran")
         self.assertEqual(runs._PLACES, {}, "and both gave their place back")
+
+    # -- 1.919 ---------------------------------------------------------
+    def test_1_919_the_limit_sentence_uses_the_buttons_words_and_leaves_with_the_visit(self) -> None:
+        """
+        Scenario 1.919: what the refusal says, and how long it stays.
+        Given: `export` (limit=2) pressed through a button that says "Export to CSV"; the kept
+               report form's job (limit=1).
+        When:  a third export is pressed while two run; the report is pressed while it runs, and
+               the user opens another page and comes back.
+        Then:  the refusal names the job as its button does -- "Export to CSV is already running
+               2 times. Try again in a moment." -- (a form's job, as its submit button: "Build
+               report"); the refusal was about that press: after a new visit it is no longer
+               kept, also under a kept form.
+        """
+        from lex.lex_app.reflex.ui import forms
+        from lex.lex_app.reflex.ui.state import State
+
+        for registry in (runs._WORDS, forms._KEPT, forms._KEPT_STATES):     # what this test declares, undone after it
+            self.addCleanup(lambda registry=registry, was=registry.copy(): (registry.clear(), registry.update(was)))
+        ui.button("Export to CSV", ExportState.export, "north").build(Build(page="exports", route="/exports"))
+        ui.form(title="Report", submit=ExportState.build_report, keep=True,
+                fields=[ui.field("year", kind="year", required=True)]).build(Build(page="report", route="/report"))
+        report = runs.key_of(ExportState.build_report)
+
+        async def steps(harness):
+            held = [await harness.send(ExportState, "export", region=region) for region in ("north", "south")]
+            await _until(lambda: runs._PLACES.get(f"{__name__}.ExportState.export") == 2, "the exports never started")
+            await (await harness.send(ExportState, "export", region="east"))
+            refused = [o.message for o in harness.outcomes]
+            harness.outcomes.clear()
+            first = await harness.send(ExportState, "build_report", values={"year": "2025"})
+            await _until(lambda: runs._PLACES.get(f"{__name__}.{report}") == 1, "the report never started")
+            await (await harness.send(ExportState, "build_report", values={"year": "2026"}))
+            before = dict((await harness.fields(ExportState))["ui_failed"])
+            await (await harness.send(State, "ui_open", page="/elsewhere"))
+            await (await harness.send(State, "ui_open", page="/report"))
+            after = dict((await harness.fields(ExportState))["ui_failed"])
+            GATE["open"].set()
+            for one in (*held, first):
+                await one
+            return refused, before, after
+
+        refused, before, after = _session(steps)
+        self.assertEqual(refused, ["Export to CSV is already running 2 times. Try again in a moment."],
+                         "the job is named as its button names it")
+        self.assertEqual(before.get(report), "Build report is already running. Try again in a moment.",
+                         "a form's job as its submit button")
+        self.assertNotIn(report, after, "the refusal of a press leaves with the visit, also under a kept form")

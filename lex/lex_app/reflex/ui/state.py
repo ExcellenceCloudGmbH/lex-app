@@ -142,6 +142,9 @@ class State(rx.State):
     ui_running: dict[str, list[str]] = {}
     #: Handler key -> the failure message of its last run.
     ui_failed: dict[str, str] = {}
+    #: The handlers whose last failure was a press refused for ``limit=``: about that moment only,
+    #: it leaves ``ui_failed`` with the visit.
+    _ui_busy: list[str] = []
     ui_progress: dict[str, float] = {}
     #: Load key -> whether its last run finished; a page shows its skeleton until then.
     ui_loaded: dict[str, bool] = {}
@@ -227,6 +230,9 @@ class State(rx.State):
         if again:
             return self._ui_start(page, again=True)
         self.ui_visit += 1
+        if self._ui_busy:                           # a press refused for limit= was about that moment
+            self.ui_failed = {key: one for key, one in dict(self.ui_failed).items() if key not in self._ui_busy}
+            self._ui_busy = []
         forms.forget_offers(self, visit=True)       # the matches shown leave; another user's offers too
         private.leave(str(self.router.session.client_token or ""))   # private values not kept across visits
         kept = forms.kept()

@@ -3556,13 +3556,13 @@ form's `result=`. What building settled is section 6.17 of `docs/superpowers/spe
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.927 – 1.929, 1.915 |
+| Scenario range | 1.927 – 1.929, 1.915, 1.919 |
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/handlers.py` (`job`, `_limit_message`), `lex/lex_app/reflex/ui/runs.py` (`take_place`, `give_place`) |
 | Test file | `lex/test_project/tests/init/test_1dw_ui_job_limit.py` |
-| Test classes | `TestCluster01dw_JobLimit` (1.927–1.929, 1.915) |
+| Test classes | `TestCluster01dw_JobLimit` (1.927–1.929, 1.915, 1.919) |
 | Fixtures | a neutral export state (an export held at a gate, a report form, a job that stops) |
-| Tests landed | **4 pass / 0 fail** |
+| Tests landed | **5 pass / 0 fail** |
 | Status | ✅ Complete |
 
 `limit=` on `@ui.job`. What building settled is section 6.12 of `docs/superpowers/specs/2026-11-23-reflex-ui-action-state-layer-design.md`.
@@ -3573,6 +3573,7 @@ form's `result=`. What building settled is section 6.17 of `docs/superpowers/spe
 | 1.928 | A place is given back however the run ends | a failure, a body's refusal, a cancel and a form's wrong field each free the place; a run reporting through self.progress from a library's thread holds its place while it reports and gives it back when stopped; a refused press of a form's job leaves no field message and is a toast, not above the submit button; limit=1 has its own sentence |
 | 1.929 | The limit is declared as a whole number | 0, True, 2.5 and "2" refused with what to write; the handler carries its limit, also into a mixin's copy |
 | 1.915 | Two jobs of the same name in two modules have their own places | Exports.run with limit=1 in two modules: the second runs beside the first, neither refused, both places given back |
+| 1.919 | The limit sentence uses the button's words and leaves with the visit | a third press of a job run by a button saying "Export to CSV" is refused naming it so; a form's job as its submit button; after a new visit the refusal is no longer in ui.failed, also for a kept form |
 
 ### Batch 1dx — lex.ui forms: a result kept across visits -- ui.form(keep=True) ✅
 

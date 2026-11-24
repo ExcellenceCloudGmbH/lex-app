@@ -256,6 +256,7 @@ class Button(Part):
         if getattr(getattr(self.handler, "fn", None), "__ui_kind__", "") in ("action", "job"):
             from lex.lex_app.reflex.ui import runs
 
+            runs.name_job(self.handler, self.label)     # its refusals name the job as this button does
             # The button knows its handler: it shows it running -- for a row's button this row's run, not another's.
             extra["loading"] = runs.running(self.handler, *self.args[:1])
         if isinstance(self.disabled, rx.Var):           # a reason per row, or from the state; "" lets it be pressed

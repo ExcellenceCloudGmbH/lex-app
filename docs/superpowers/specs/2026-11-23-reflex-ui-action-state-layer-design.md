@@ -780,7 +780,11 @@ def export(self, region):
   refusal is (pages design 6.15): it is about the press, not about what was entered, and it no
   longer holds once a run ends. Nothing else on the page changes -- the check comes before a
   form's values are judged, so no field message appears and the last result stays. The job is
-  named as its submit button is named (6.14 of the pages design).
+  named as its button says it (review, 2026-11-24): the words of the first `ui.button` that runs
+  it ("Export to CSV is already running 2 times."), else as a form's submit button is named (6.14
+  of the pages design: `build_report` is "Build report"). Because the refusal is about that press,
+  a new visit drops it from `ui.failed` -- so a kept form (pages design 6.18), which shows its
+  handler's last failure under it, never shows it when the user comes back.
 - *Fixed sentence:* `limit=` takes the number only. A sentence of the project's own would be a
   second way to word a standard message, outside the translation of the others.
   *Considered first:* the pool's own size (`LEX_UI_JOB_THREADS`, for every job at once), and
