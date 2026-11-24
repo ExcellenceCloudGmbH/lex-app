@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1022
+max_scenario: 1023
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2768,3 +2768,13 @@ letters:
       xfail: 0
     note: >-
       The look stays lex-app's: RFDS's header has a logo slot for a tenant's mark. These tests fail on a lost mark, a brand that does not lead home, a decorative mark read out, or an unchecked address.
+  eq:
+    title: 'lex.ui: a search through self.api matches the model''s own text, never created_by'
+    scenarios: 1.1023
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      Fails on a search sent to created_by__icontains (the bug: it was the first text field of every LexModel).

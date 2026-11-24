@@ -444,6 +444,22 @@ ui.table(CustomersState.customers, page_size=200, choose_columns=True,
   *Name:* `totals_of_all` reads as the label does ("Total of all rows"); `totals_over="all"` was
   considered (a string whose only other value would be the default).
 
+### 5.15 What rewrites of real dashboards still needed (2026-11-24, batches 1eq onward)
+
+Gaps found while rewriting dashboards onto lex.ui, each a need of any lex-app project.
+
+- **A search matches the model's own text (bug, batch 1eq).** `self.api.list(Model, search=...)`,
+  `lex_table`'s default and a model table's search box took "the first plain text field" -- on every
+  LexModel that is `created_by`, which lex-app adds to every model and which comes first, so a search
+  for a name found nothing. lex-app's API has no search field to copy: its grid filters one column at
+  a time and its global search reads every field at once (an OR the list API's parameters cannot
+  express). The search is now the first plain text field (no choices, not credential-shaped) **the
+  model itself declares**: fields declared by lex-app's own abstract bases (`LexModel`,
+  `CalculationModel`) are skipped. A model table searches the first such column it shows, and
+  `created_by` only when it shows no other. A model with no text field of its own is refused with
+  what to write instead (`filters={"<field>__icontains": text}`). *Not added:* a per-model
+  `search_field` setting -- one rule, nothing to configure.
+
 ## 6. Limits and risks
 
 - **The address on mount.** Step 1 found that Reflex sends a component's mount event with the

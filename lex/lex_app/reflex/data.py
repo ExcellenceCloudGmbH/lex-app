@@ -670,11 +670,29 @@ def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_fiel
                       identity=_filters_identity(filters))
 
 
+def _framework_fields(model: Any) -> set[str]:
+    """The fields lex-app gives every model of a kind (``created_by``, ``edited_by``...): declared by
+    lex-app's own abstract bases (``LexModel``, ``CalculationModel``), not by the model."""
+    names: set[str] = set()
+    for base in getattr(model, "__mro__", ())[1:]:
+        meta = getattr(base, "_meta", None)
+        if meta is not None and getattr(meta, "abstract", False) and base.__module__.startswith("lex.core."):
+            names.update(field.name for field in meta.local_fields)
+    return names
+
+
 def _default_search_field(model: Any) -> str:
+    """The field a search matches: the first plain text field the model itself declares.
+
+    Never a field lex-app adds to every model: on a LexModel the first text field would be the
+    audit field ``created_by`` (who created the record), and a search for a name would find nothing.
+    """
     from django.db import models
 
+    inherited = _framework_fields(model)
     for field in visible_fields(model):
-        if isinstance(field, (models.CharField, models.TextField)) and not field.choices:
+        if isinstance(field, (models.CharField, models.TextField)) and not field.choices \
+                and field.name not in inherited:
             return field.name
     return ""
 
@@ -700,7 +718,8 @@ def lex_table(
         fields: The fields to show (default: :func:`visible_fields`).
         columns: RFDS column specs, replacing ``fields`` entirely.
         caption: The table's accessible caption (default: the model's plural name).
-        search_field: The field the quick search matches (default: the first plain text field).
+        search_field: The field the quick search matches (default: the first plain text field the
+            model itself declares, never lex-app's ``created_by``).
         page_size: Rows per page (RFDS shows at most 200).
         row_fields: Fields kept in each row besides the columns' own (a key that is not shown).
         **table_props: Anything else ``rfds.data_table`` takes (``row_href``,

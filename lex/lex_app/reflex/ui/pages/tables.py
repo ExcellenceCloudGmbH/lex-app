@@ -389,7 +389,10 @@ class Table(Part):
         if self.search and not texts:
             raise ctx.fail("`search=True`, and the table has no text column to search.",
                            "Add a text column, or leave search out.")
-        search_field = texts[0] if self.search else ""     # a shown column: the browser never searches a hidden one
+        # A shown column (the browser never searches a hidden one); the model's own before lex-app's created_by.
+        inherited = data._framework_fields(model)
+        texts = [name for name in texts if name not in inherited] + [name for name in texts if name in inherited]
+        search_field = texts[0] if self.search else ""
         used: set[str] = {key}
         for c in cols:
             if c.show is not None:
