@@ -3448,3 +3448,71 @@ What building settled is section 6.15 of `docs/superpowers/specs/2026-11-23-refl
 | 1.909 | The toast is RFDS's toast with its action | through `ui.testing.run`: the toast with its link; RFDS's toast with one action worded as the link, redirecting (outside as outside); 10 s with an action; none without |
 | 1.910 | A toast link written wrongly is refused where it is written | not a ui.link, a button, `visible=`, a missing or unknown page value, an empty key: each says what to write |
 
+### Batch 1dy — lex.ui tables: the name pinned and given room, a code kept narrow, the Columns menu, every row at once, totals that say what they sum ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.940 – 1.946 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/tables.py` (`column(kind="name"/"code", pin=)`, `table(page_size=, choose_columns=, totals=)`), `lex/lex_app/reflex/ui/pages/rows_table.py` (page size, totals of all rows, their label), `lex/lex_app/reflex/data.py` (`ChosenColumns`) |
+| Test file | `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py` |
+| Test classes | `TestCluster01dy_TableColumnsRows` (1.940–1.946) |
+| Fixtures | a neutral customers state (name, code, region, amount in two currencies); Django's `Group` as a model table |
+| Tests landed | **7 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Table needs found while rewriting dashboards. What building settled is section 5.14 of
+`docs/superpowers/specs/2026-11-23-reflex-ui-tables-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.940 | The name stays in place and has room; a code stays narrow | `pin=True`: RFDS's `sticky="start"`; `kind="name"`: RFDS's entity kind at its wide field width; `kind="code"`: RFDS's identifier at its narrow width; plain columns unchanged; model fields keep label and kind |
+| 1.941 | A pin written wrongly says what to write | not a bool; on another column than the first; no `width=` argument (rule 6.1.4), the kinds documented |
+| 1.942 | The user chooses, orders and sizes the columns | RFDS's column chooser in the toolbar; the table follows; the first column always shown and first; only the table's columns; widths 40-1,200 px; model tables too |
+| 1.943 | `page_size=` sets the rows a page, `None` shows every row | 50 opens at 50 and is offered; default 25; `None` opens at 200 without the size picker, RFDS's pagination only past 200; model tables too; wrong sizes refused |
+| 1.944 | Every row in one scroll, and past 200 the rest is reached | 150 rows on one page; of 250, 200 then 50 on the next page |
+| 1.945 | A totals row says what it sums and can sum every row | "Total" with nothing narrowing; "Total of matching rows" / "Total of all rows" while a filter or search is on, per currency; mixing or another word refused |
+| 1.946 | A table with all of it compiles | Reflex's page compiler: sticky column, column chooser, pagination |
+
+### Batch 1dz — lex.ui pages: a section closed until the user opens it, saying how many rows it holds ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.947 – 1.949 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/kinds.py` (`section(collapsed=)`, `Section.titled`, the record's refusal), `lex/lex_app/reflex/ui/pages/forms.py` (a form's `result=` sections), `lex/lex_app/reflex/ui/pages/declare.py` (`ui.embed` of a closed section) |
+| Test file | `lex/test_project/tests/init/test_1dz_ui_section_collapsed.py` |
+| Test classes | `TestCluster01dz_SectionCollapsed` (1.947–1.949) |
+| Fixtures | a neutral import tool (orders, fields read); Django's `Group` as a model table |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+What building settled is section 6.16 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.947 | A closed section opens in the browser and says how many rows it holds | RFDS's collapsible section, closed; title and the table's count once loaded, via RFDS's translation; open sections unchanged; no table: title alone; model tables; `ui.embed` |
+| 1.948 | A closed section compiles | Reflex's page compiler: the disclosure and the counting title |
+| 1.949 | A closed section where RFDS cannot close one is refused | on a record page, with `tabs=True` offered; `collapsed=` not a bool |
+
+### Batch 1ea — lex.ui pages: a tool's result as tabs -- one section at a time, as on a record page ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.950 – 1.952 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/forms.py` (`form(tabs=)`, `Form._result`, `Form._tabs`), `lex/lex_app/reflex/ui/pages/kinds.py` (the record's `tabs=`, unchanged) |
+| Test file | `lex/test_project/tests/init/test_1ea_ui_form_result_tabs.py` |
+| Test classes | `TestCluster01ea_FormResultTabs` (1.950–1.952) |
+| Fixtures | a neutral region report tool; Django's `Group` as a model table behind a permission |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Tabs existed on record pages (`ui.record(tabs=True)`); the same argument now works where sections also are, a
+form's `result=`. What building settled is section 6.17 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.950 | The result's sections are tabs, each title its tab | RFDS's tabs; titles as tabs, not repeated as headings; shared parts above; without `tabs=` as before; the record's `tabs=True` unchanged |
+| 1.951 | Tabs compile and keep who may see a tab | Reflex's page compiler; RFDS's tab permission: a refused tab and its table not drawn; a section's load stays a part load |
+| 1.952 | Tabs written wrongly say what to write | no result, one section, a part after a section, two of one title, a closed section, a state `visible=`, not a bool |

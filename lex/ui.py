@@ -60,14 +60,17 @@ progress_of/cancel``        event of a Cancel button
 ``ui.field/step``           a form's inputs, and a wizard's steps; the handler gets ``values``.
                             ``options=`` a ``@ui.rows`` handler searches on the server as the user
                             types. ``ui.button(confirm=, ask=)`` asks before its handler runs
-``ui.section``              a titled part of a page; ``load=`` makes it load on its own
+``ui.section``              a titled part of a page; ``load=`` makes it load on its own;
+                            ``collapsed=True`` closes it until the user opens it; ``tabs=True``
+                            on ``ui.record`` or a ``ui.form``'s result shows one section at a time
 ``ui.text/fact/status/      what fills the slots; none takes a styling argument
 message/column/
 button/link``
 ``ui.each/switch``          repetition and choice; ``visible=`` on every component
                             decides what is shown, never what is allowed
 ``ui.table``                rows from a model (``where=``) or a ``@ui.rows`` handler; ``search=``,
-                            ``filters=``, ``export=``, ``totals=``, ``row_actions=``
+                            ``filters=``, ``export=``, ``totals=``, ``row_actions=``,
+                            ``choose_columns=``, ``page_size=`` (``None``: every row, up to 200)
 ``ui.address``              a page's address, for a row that leads to a page of its own
 ``ui.reflex_page``          a page written in raw Reflex, as somewhere a link may lead
 ``ui.custom_block``         a raw component, marked for review with its reason

@@ -1701,3 +1701,48 @@ does not remove user launch configurations.
 
 **Scenario range:** 1.908 – 1.910. **Test file:** `lex/test_project/tests/init/test_1du_ui_toast_link.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1du](batches.md).
 
+### 1dy. lex.ui tables: the name pinned and given room, a code kept narrow, the Columns menu, every row at once, totals that say what they sum ✅
+
+**What it tests:** `ui.column(kind="name"|"code", pin=True)`, `ui.table(choose_columns=True, page_size=N|None, totals={...: "sum of all rows"})` -- RFDS's sticky column, field widths, column chooser, pagination and totals, on rows and model tables.
+
+**Why a regression matters:** a name that scrolls away, a user's column choice that hides the row's name, a row beyond 200 out of reach, or a total whose meaning changes silently when the user searches.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.940 | The name stays in place and has room; a code stays narrow | sticky start, entity kind at the wide width, identifier at the narrow width; model fields too |
+| 1.941 | A pin written wrongly says what to write | not a bool; not the first column; no width argument |
+| 1.942 | The user chooses, orders and sizes the columns | RFDS's column chooser; the first column always shown and first; widths 40-1,200 px |
+| 1.943 | `page_size=` sets the rows a page, `None` shows every row | 50; default 25; `None`: 200, no size picker, pagination past 200; wrong sizes refused |
+| 1.944 | Every row in one scroll, and past 200 the rest is reached | 150 on one page; 250 as 200 + 50 |
+| 1.945 | A totals row says what it sums and can sum every row | "Total", "Total of matching rows", "Total of all rows"; mixing refused |
+| 1.946 | A table with all of it compiles | Reflex's page compiler |
+
+**Scenario range:** 1.940 – 1.946. **Test file:** `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dy](batches.md).
+
+### 1dz. lex.ui pages: a section closed until the user opens it, saying how many rows it holds ✅
+
+**What it tests:** `ui.section(title, ..., collapsed=True)` -- RFDS's section as a native disclosure, closed at first, its title counting its table's rows; in a form's `result=` and `ui.embed`; refused on a record page.
+
+**Why a regression matters:** a detail that shows open and buries the result, a count that is wrong or shows before the rows are read, or a closed section where RFDS cannot close one.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.947 | A closed section opens in the browser and says how many rows it holds | RFDS's collapsible section, closed; the count once loaded; no table: title alone; model tables; embed |
+| 1.948 | A closed section compiles | Reflex's page compiler |
+| 1.949 | A closed section where RFDS cannot close one is refused | record page; not a bool |
+
+**Scenario range:** 1.947 – 1.949. **Test file:** `lex/test_project/tests/init/test_1dz_ui_section_collapsed.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dz](batches.md).
+
+### 1ea. lex.ui pages: a tool's result as tabs -- one section at a time, as on a record page ✅
+
+**What it tests:** `ui.form(..., tabs=True)` -- the result's sections as RFDS's tabs, each title its tab, the parts they share above; the record page's `tabs=True`, the same argument.
+
+**Why a regression matters:** a second way to write tabs, a tab whose content is lost, a tab a user may not see drawn anyway, or a mistake that only shows in the browser.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.950 | The result's sections are tabs, each title its tab | RFDS's tabs; shared parts above; without `tabs=` as before |
+| 1.951 | Tabs compile and keep who may see a tab | Reflex's page compiler; RFDS's tab permission; part loads |
+| 1.952 | Tabs written wrongly say what to write | seven refusals |
+
+**Scenario range:** 1.950 – 1.952. **Test file:** `lex/test_project/tests/init/test_1ea_ui_form_result_tabs.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ea](batches.md).

@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 910
+max_scenario: 952
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2558,3 +2558,33 @@ letters:
       xfail: 0
     note: >-
       `ui.toast(..., link=ui.link(...))`: a link's targets (a page, a raw page, a record, an outside address) and checks, run when the handler makes the toast; RFDS's toast with one action. These tests fail on a toast without its button, a button that leads to the wrong page, or a link whose mistake is found only when a user presses it.
+  dy:
+    title: 'lex.ui tables: the name pinned and given room, a code kept narrow, the Columns menu, every row at once, totals that say what they sum'
+    scenarios: 1.940-1.946
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.column(kind="name"|"code", pin=True)`, `ui.table(choose_columns=True, page_size=N|None, totals={...: "sum of all rows"})` on rows and model tables, through Reflex's own event processor and its page compiler. These tests fail on a name that scrolls away, a pin RFDS cannot keep, a user's column choice that hides the row's name, a row beyond 200 out of reach, or a total whose label does not say whether it sums the matching rows or every row.
+  dz:
+    title: 'lex.ui pages: a section closed until the user opens it, saying how many rows it holds'
+    scenarios: 1.947-1.949
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.section(title, ..., collapsed=True)`: RFDS's section as a native disclosure in a form's result= and in ui.embed, its title counting its table's rows once read; refused on a record page. These tests fail on a detail that shows open, a count shown before the rows are read, or a closed section on a page where RFDS cannot close one.
+  ea:
+    title: 'lex.ui pages: a tool''s result as tabs -- one section at a time, as on a record page'
+    scenarios: 1.950-1.952
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.form(..., tabs=True)`: the result's sections as RFDS's tabs, each title its tab, what they share above; compiled with Reflex's page compiler; a tab's permission is RFDS's; every mistake refused. These tests fail on a second way to write tabs, a tab whose content is lost, a tab a user may not see drawn anyway, or a mistake that only shows in the browser.
