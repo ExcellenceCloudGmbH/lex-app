@@ -763,6 +763,171 @@ Built in batch 1dx.
 - *Cost:* the result's fields must be kept by the page's load too (its `keep=`, or `ui.private(keep=True)`);
   lex-app cannot see which fields a result reads, so it does not check this.
 
+### 6.19 A calculation's page: `ui.calculation(Model, ...)` (2026-11-24, batches 1ef-1ei)
+
+The owner's decision (2026-11-24): a tool that writes to other systems, needs an audit trail and keeps
+a record people come back to is a lex-app calculation model, run on lex-app's worker with lex-app's
+status, audit and history. lex.ui gets one page kind over such a model: a form for its inputs, the run
+while it goes, its result, and the past runs -- with permissions taken from the model. It is written
+for any project with calculations; the example is a region report.
+
+**What lex-app already offers, and what the page uses of it** (read in `docs/calculations/`,
+`CalculationModel`, `One.py`, `CalculationLogTreeView`, `latest_calculation.py`):
+
+| Need | lex-app's own mechanism | Through |
+| --- | --- | --- |
+| Create the record | the create endpoint (`permission_create`, validation, audit entry) | `self.api.create` |
+| Start the run | the Calculate button's request: `PATCH ... calculate=true`, answered 202 with the record `IN_PROGRESS`; the run goes to the calculation thread pool, and from there to a Celery worker when Celery is on. A `calculate_on_create` model starts on its create | `self.api.calculate` (new) |
+| Status | `is_calculated`: `NOT_CALCULATED`, `IN_PROGRESS`, `SUCCESS`, `ERROR`, `CANCELLED`, `ABORTED` -- written by whichever process ran it | `self.api.get` |
+| The error | `calculation_error_message` (or `error_message`) when the model declares one: the exception's text, a blank line, the traceback | `self.api.get` |
+| Progress | **no fraction**: a run reports by logging (`LexLogger`). Its log lines are stored as `CalculationLog` rows (an atomic run's when it commits) and, while it runs, kept as live text in the calculation cache | `self.api.log` (new) |
+| The log of a past run | the newest run's id of a row (`lex_reserved_calculation_id`, resolved by the grid's list request) and its `CalculationLog` rows, read as the user | `self.api.log` (new) |
+| Files | a `FileField` of the record, served by `api/<model>/file-download` as the user, audited | the result's download button |
+| Stop | `PATCH ... cancel=true` (`CalculationModel.cancel`): revokes a worker's task, or stops a cooperative in-process run | the run's Stop button |
+
+**The API, as a reader writes it:**
+
+```python
+from lex import ui
+from reports.models import RegionReport, RegionReportLine
+
+@ui.page("/reports/regions", nav="Reports", requires=ui.read(RegionReport))
+def region_reports():
+    return ui.calculation(
+        RegionReport,
+        title="Region report",
+        fields=[ui.field("region", kind="choice", options={"north": "North", "south": "South"}, required=True),
+                ui.field("year", kind="year", required=True)],
+        result=[RegionReport.orders,
+                ui.fact("Revenue", RegionReport.revenue, kind="money"),
+                RegionReport.report_file,
+                ui.section("Lines", ui.table(RegionReportLine, where={"report": RegionReport.id},
+                                             columns=["customer", ui.column("amount", kind="money")]))],
+        history=ui.table(RegionReport, columns=["region", "year", "created_by"], search=True),
+    )
+```
+
+One new name, `ui.calculation`; everything inside it is form, section and table vocabulary. Two methods
+on `self.api` that a project's own handlers may use too: `self.api.calculate(Model, pk)` and
+`self.api.log(Model, pk)`.
+
+**One page, two views.** The page at `/reports/regions` shows the form, and under it the past runs.
+The same page with `?run=42` shows that run: the page of a record. One declaration, one permission,
+one place in the navigation; a run's address is the page's address with its key, so it can be
+bookmarked and sent while the run still goes. *Considered:* two pages (a form page and a run page with
+a route argument), which every calculation would declare twice with the same model, title and
+result; and `ui.form` with a result that follows the run, which gives a run no address and a past
+run no page.
+
+**The kind is bound to the model, and writes no state of the project's.** lex-app makes the page's
+state (one per page, as a model table makes one per table) with its handlers: the form's submit, the
+run's load, the job that follows a run, Stop and a file's download. A project writes no handler for
+the ordinary page. *Considered:* a `ui.State` base class the project subclasses -- a second
+place to write the same page, for nothing the page needs.
+
+**A field of the run is written as the model's field: `RegionReport.orders`.** The page is about one
+model, so `RegionReport.orders` can only mean this run's `orders`. It works wherever a value goes:
+`ui.fact("Revenue", RegionReport.revenue, kind="money")`, `ui.text("{n} orders", n=RegionReport.orders)`,
+`ui.table(..., where={"report": RegionReport.id})`, `visible=`. Alone in `result=` it is a fact with the
+model's own label (its `verbose_name`, as a table's column header) and the kind its Django field
+implies (a whole number, a decimal, a date, an instant, yes or no, text); a `FileField` alone is a
+button that downloads the file as the user. A string is still a sentence everywhere, as on every
+other page. A field of another model is refused when the page is built ("`Customer.name` is a field
+of Customer; this page is about RegionReport"). *Considered:* field names as strings (`"orders"`),
+which would make a string mean a sentence on every page but this one; a `ui.run("orders")` helper, a
+new name for what the model already names.
+
+**The inputs are the record's fields.** Each field's key names a field of the model, which the form's
+values are written to: `ui.field("year")` is `RegionReport.year`. They are written as a form's fields
+(kinds, `options=`, `required=`, `steps=` for a wizard) -- nothing is inferred from the model, so a field
+reads the same on every page. Built-time checks: a key that is not a field the model lets one set
+(not a field, `is_calculated`, the key, an automatic time) is refused, naming the model's settable
+fields; a field the model requires on create (no default, not `null`, not `blank`) that the form
+leaves out is refused, since lex-app would refuse every create ("RegionReport needs `year` when a
+record is created: add `ui.field("year")`").
+
+**Starting is lex-app's create and lex-app's Calculate, as the user.** The submit button reads
+**Calculate** -- the word lex-app's grid uses -- and runs `calculate(values)`: the values are made
+into the API's shapes (a decimal as text, a date as ISO), the record is created through
+`self.api.create` (so `permission_create`, validation, `created_by` and the audit entry are the
+user's), and the run is started through `self.api.calculate`, unless the create already started it
+(`calculate_on_create`). The browser then goes to the run's address. A refusal by the API -- not
+permitted, a field it rejects, a closed record -- is the form's refusal, above the button, in the API's
+words (6.15).
+
+**`self.api.calculate(Model, pk)` mints the run's id as the grid does** (`<model>_<pk>_update_<uuid>`).
+`self.api.update(Model, pk, {"calculate": "true"})` starts a run too, but under an id of the
+`<model>_update_<uuid>` shape, under which neither the grid's log button nor this page finds the run's
+log. It answers the record, `IN_PROGRESS`; a run already going is left alone (lex-app answers the
+record as it is).
+
+**Following a run is reading the record until it settles: the same with Celery and without.** The
+page never talks to the process that runs the calculation; it reads the record through lex-app's API,
+as the user, every `calculations.POLL_SECONDS` (1 s), until its status is no longer `IN_PROGRESS`.
+Without Celery the run goes on lex-app's calculation thread pool, in the API's process; with Celery
+on a worker, which writes the status when it ends (`CallbackTask`). Either way the record's status is
+the truth, and the page shows it. The reading is a `@ui.job(stop_on_leave=True)` that starts when the
+run's view appears while the run goes (the progress part's `on_mount`): leaving the page stops the
+watching, never the run; coming back to the run's address watches again. *Considered:* lex-app's
+websocket of status changes, which the Reflex process does not hold a connection to and which carries
+no permission check of the reader; a Reflex background task per run without a job's run
+bookkeeping.
+
+**Progress is the run's own log.** lex-app reports no fraction, so the bar is RFDS's indeterminate
+bar, and its message is the newest line the run has logged -- from the live log while it runs (what the
+grid's log panel shows), else "Running". A project that wants a message per phase logs one
+(`LexLogger().add_text("Reading orders").log()`): nothing lex.ui-specific goes into a calculation.
+*Not built:* a fraction; lex-app would need a progress field written by the run.
+
+**The run's view** is RFDS's page header (the title, the run's name -- its `str()` -- under it, and
+"New run" leading back to the form), then:
+
+| Status | What is shown |
+| --- | --- |
+| any | a status badge (Not started, Running, Done, Failed, Stopped, Interrupted), and the inputs as facts, labelled as their fields |
+| `IN_PROGRESS` | the progress bar with the newest log line; **Stop** to users who may edit the model |
+| `SUCCESS` | `result=` |
+| `ERROR` | the calculation's error in its own words: the first part of `calculation_error_message`, without the traceback, in RFDS's inline message (danger); a model that keeps no message: "The calculation failed. Its log says what happened." |
+| `CANCELLED` | "The calculation was stopped before it finished." |
+| `ABORTED` | "The calculation was interrupted: lex-app found it unfinished after a restart. Start it again." |
+| a log exists | a closed section "Log" with the run's log, rendered as the grid renders it (Markdown, by RFDS's `safe_markdown`), whatever the status |
+
+A run the user may not read is the error page with lex-app's refusal (the run's load reads it through
+the API, as the user); a key that is no run says so ("There is no run 42.").
+
+**The past runs are a `ui.table` over the model: `history=ui.table(RegionReport, columns=[...])`.** All
+of a table's words work (`search=`, `filters=`, `page_size=`, `choose_columns=`); lex-app adds the run's
+status as the last column (a status column, with the same words and tones as the badge), makes each row
+open the run's address, and orders the newest run first. Who sees which runs is the model's
+`permission_list`/`permission_read`, as on every model table. A table of another model is refused, so
+is `open=` (the page decides where a run leads) and a `where=` (the past runs are the model's). *Considered:*
+`history=["region", "year"]` -- a second way to list columns, without search or filters.
+
+**Permissions come from the model.** The page's `requires=` is the author's (normally
+`ui.read(Model)`). The form is shown to users who may create the model (`visible=ui.create(Model)`), Stop
+to those who may edit it; lex-app's API enforces both whatever the browser shows, and every read and
+write of the page is the user's.
+
+**What a reader of a past run sees** is that run's view, as it stands: the same badge, inputs, result,
+error and log as the user who ran it saw at the end -- read now, as the reader, so a field the reader
+may not see is missing for them as it is in the grid.
+
+**Built in four batches:** 1ef the kind, the form and the start (`self.api.calculate`); 1eg the run's
+view, following with and without Celery, the result, the error, the log (`self.api.log`); 1eh the past
+runs; 1ei a file of the result, and Stop.
+
+**Not built:**
+- *A review between the inputs and the run that depends on the inputs* (rows found for the region,
+  a decision per row): a wizard's steps have no handler between them. Checks of the inputs and a
+  confirming last step work as in any wizard (`steps=`); a per-row decision is a form of its own
+  before the calculation page, or a field of the record the calculation reads.
+- *The API's field errors at their fields*: lex-app's validation answers a 400 per field; the page
+  shows them together as the form's refusal, above the button.
+- *"Run again with these inputs"* on a past run.
+- *A fraction of progress*, and a run started elsewhere telling the page it began: the page reads
+  only while it is open on the run.
+- *Several records per run* (a batch's generated rows): a result's related table shows them.
+
 ---
 
 ## 7. Order of building
@@ -806,7 +971,7 @@ components are enough for that project, or which one is missing.
 ## 9. Not in this spec
 
 - Rules about content — how many figures an overview may have, wording, when a tone fits (piece 3).
-- The calculation-model page (piece 4).
+- The calculation-model page (piece 4) -- since designed and built: 6.19.
 - A chunked-upload component; until then an upload is a `ui.custom_block`.
 - A free dialog or side panel.
 - Layout helpers (rows, columns, spacing).
@@ -836,6 +1001,7 @@ Kinds            ui.overview(title, load=, figures=, tiles=, sections=, actions=
                  ui.list(title, load=, filters=, table=, actions=)
                  ui.record(title, load=, status=, facts=, sections=, tabs=, actions=)
                  ui.form(title, load=, fields= | steps=, submit=, result=, actions=, keep=)
+                 ui.calculation(Model, title=, fields= | steps=, result=, history=, actions=)
 
 Components       ui.text(sentence, **values)             ui.fact(label, value, kind=)
                  ui.figure(label, value, kind=, change=, to=)
