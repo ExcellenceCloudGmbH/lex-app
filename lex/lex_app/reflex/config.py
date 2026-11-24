@@ -95,7 +95,8 @@ def lex_config(**overrides: Any):
     Any ``rx.Config`` option overrides the default of the same name, and
     ``REFLEX_<OPTION>`` environment variables override both, as in any Reflex
     app. ``plugins`` replaces the whole list: keep RFDS's two plugins in this
-    order, or ``rfds.install()`` refuses to start.
+    order, or ``rfds.install()`` refuses to start. ``frontend_packages`` is the
+    exception: a project's packages are added to the ones lex-app needs.
 
     The plugins are Radix with RFDS's root theme, and RFDS itself with lex-app's
     brand and locale (:mod:`lex.lex_app.reflex.design`). The *Built with Reflex*
@@ -136,5 +137,21 @@ def lex_config(**overrides: Any):
     if origins:
         settings["cors_allowed_origins"] = origins
 
+    # A project's own frontend packages sit beside lex-app's instead of replacing them.
+    own_packages = list(overrides.pop("frontend_packages", None) or [])
+    settings["frontend_packages"] = [*_frontend_packages(), *own_packages]
     settings.update(overrides)
     return rx.Config(**settings)
+
+
+def _frontend_packages() -> list[str]:
+    """npm packages RFDS's browser code imports without declaring them on every component that loads it.
+
+    A lex.ui table's search box is RFDS's clearable text input; its clear button imports
+    ``rfdsClearInput`` from ``rfds_form.js``, which imports ``react-number-format`` when it loads.
+    RFDS declares the package only on its form and number inputs, so a project using neither could
+    not build. Pinned to the version RFDS ships against.
+    """
+    from rfds._vendor._npm import spec
+
+    return [spec("react-number-format")]

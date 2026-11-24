@@ -60,19 +60,39 @@ def reflex_page(route: str, *, params: Any = ()) -> ReflexPage:
     ``app.add_page`` and are not ``@ui.page`` functions yet, but a lex.ui table on one of them
     still links to the others. Pass the result wherever a link takes a page::
 
-        REQUEST = ui.reflex_page("/requests/[req]")
+        ORDER = ui.reflex_page("/orders/[key]")
 
-        ui.address(REQUEST, req=row["key"])            # in a @ui.rows handler
-        ui.table(State.requests, open=REQUEST, ...)    # every row opens its request
+        ui.address(ORDER, key=row["id"])               # in a @ui.rows handler
+        ui.table(State.orders, open=ORDER, ...)        # every row opens its order
 
-    ``params`` are the query parameters the page reads besides its route's arguments. Declare it
-    next to the ``app.add_page`` call that registers the route: nothing else checks that the
-    page exists.
+    ``params`` are the query parameters the page reads besides its route's arguments. When the
+    app starts, lex-app checks that each declared route is a page of the app.
     """
     if not isinstance(route, str) or not route.startswith("/"):
         raise ValueError(f"ui.reflex_page() takes the page's route as app.add_page registers it, starting with /, "
-                         f"such as \"/requests/[req]\"; got {route!r}.")
-    return ReflexPage(info_of(route, route, params))
+                         f"such as \"/orders/[key]\"; got {route!r}.")
+    page = ReflexPage(info_of(route, route, params))
+    _REFLEX_PAGES[route] = page
+    return page
+
+
+#: Every page declared with :func:`reflex_page`, by route: checked against the app's pages when it starts.
+_REFLEX_PAGES: dict[str, ReflexPage] = {}
+
+
+def _route_key(route: str) -> str:
+    """A route as Reflex keys its pages: no slashes around it, ``index`` for ``/``."""
+    return route.strip("/") or "index"
+
+
+def check_reflex_pages(routes: Any) -> None:
+    """Refuse a ``ui.reflex_page`` whose route is not one of ``routes`` (the app's pages)."""
+    known = {_route_key(str(route)) for route in routes}
+    missing = [route for route in _REFLEX_PAGES if _route_key(route) not in known]
+    if missing:
+        route = missing[0]
+        raise ValueError(f"ui.reflex_page({route!r}) names no page of the app. Add the page with "
+                         f"app.add_page(..., route={route!r}), or correct the route.")
 
 
 def page_info(target: Any) -> PageInfo | None:
