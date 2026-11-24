@@ -15,11 +15,15 @@ _TONE = {"info": "info", "success": "success", "warning": "warning", "danger": "
 
 
 class LexDocTransformer(DocumentTransformer[rx.Component]):
-    def __init__(self, page: Page):
-        from docs_site.render.live import PageModule
-
+    def __init__(self, page: Page, live: bool = True):
+        """live=False is for text this site did not write (docstrings): no code runs and no
+        directive raises; python fences and md directives show as plain code."""
         self.page = page
-        self.module = PageModule(page.slug)
+        self.live = live
+        if live:
+            from docs_site.render.live import PageModule
+
+            self.module = PageModule(page.slug)
         self._demos = 0
 
     # -- the page ---------------------------------------------------------------
@@ -60,9 +64,11 @@ class LexDocTransformer(DocumentTransformer[rx.Component]):
         return rx.separator()
 
     def code_block(self, block: CodeBlock) -> rx.Component:
-        if block.language == "python" and block.flags:
+        if self.live and block.language == "python" and block.flags:
             return self.live_block(block)
-        return rx.code_block(block.content.rstrip("\n"), language=block.language or "log",  # "text" is not a language rx.code_block accepts
+        # rx.code_block accepts no "text"-like language, so plain text gets "log"
+        language = block.language if block.language not in (None, "", "text", "txt", "plaintext") else "log"
+        return rx.code_block(block.content.rstrip("\n"), language=language,
                              show_line_numbers=False, can_copy=True)
 
     def live_block(self, block: CodeBlock) -> rx.Component:
@@ -80,6 +86,9 @@ class LexDocTransformer(DocumentTransformer[rx.Component]):
                          "(exec, demo, demo-only)")
 
     def directive(self, block: DirectiveBlock) -> rx.Component:
+        if not self.live:
+            return rx.code_block(block.content.rstrip("\n"), language="markdown",
+                                 show_line_numbers=False, can_copy=True)
         if block.name == "alert":
             tone = _TONE.get(block.args[0] if block.args else "info", "info")
             return rfds.inline_message(rx.vstack(*self.transform_blocks(block.children), spacing="2"),

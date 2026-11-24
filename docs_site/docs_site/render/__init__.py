@@ -14,7 +14,7 @@ def render_page(page: Page) -> rx.Component:
     so the states its ```python exec``` blocks define are never redefined."""
     key = (page.slug, page.source)
     if key not in _rendered:
-        _rendered[key] = LexDocTransformer(page).transform(page.document)
+        _rendered[key] = LexDocTransformer(page, live=not page.slug.startswith("reference/")).transform(page.document)
     return _rendered[key]
 
 

@@ -1,6 +1,11 @@
 """The API reference covers every name lex.ui exports, from its own docstrings."""
 
+import pytest
+from reflex_docgen.markdown import parse_document
+
 from docs_site import content, nav, reference
+from docs_site.content import Page
+from docs_site.render import render_page
 
 
 def test_every_export_is_in_one_group():
@@ -25,10 +30,29 @@ def test_reference_slugs_load_and_are_in_nav():
     assert nav.problems() == []
 
 
-def test_a_docstring_cannot_open_a_live_or_directive_block():
-    hostile = "Intro.\n\n```python demo\nboom()\n```\n\n```md nope\nx\n```\n\n~~~python\ny\n~~~\n\n## Heading"
-    out = reference._docstring(hostile)
-    # the whole docstring sits inside one fence longer than any run inside it
-    assert out.startswith("````markdown\n") and out.endswith("\n````")
-    # a harmless docstring is left as readable Markdown
-    assert reference._docstring("Plain `code` text.") == "Plain `code` text."
+HOSTILE = (
+    "## Heading\n\n> ```python exec\n> raise RuntimeError('ran')\n> ```\n\n"
+    "- a\n  - b\n\n    ```python exec\n    raise RuntimeError('ran')\n    ```\n\n"
+    "10. item\n\n    ```python exec\n    raise RuntimeError('ran')\n    ```\n\n"
+    "```python exec\nraise RuntimeError('ran')\n```\n\n```md nonsense\nnot a directive\n```\n\n"
+    "```text\nplain\n```\n"
+)
+
+
+def _page(slug: str, source: str = HOSTILE) -> Page:
+    return Page(slug=slug, title="X", description="", source=source, document=parse_document(source),
+                headings=[])
+
+
+def test_a_docstring_cannot_run_code_or_raise_in_a_reference_page():
+    built = str(render_page(_page("reference/hostile")))
+    assert "ran" in built and "not a directive" in built and "plain" in built
+
+
+def test_the_same_blocks_run_on_a_normal_page():
+    with pytest.raises(Exception):
+        render_page(_page("t/hostile-live", "```python exec\nraise RuntimeError('ran')\n```\n"))
+
+
+def test_an_explicit_text_fence_renders():
+    assert "plain" in str(render_page(_page("t/text-fence", "```text\nplain\n```\n")))
