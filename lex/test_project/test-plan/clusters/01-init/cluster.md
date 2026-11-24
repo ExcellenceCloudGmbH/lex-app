@@ -1784,8 +1784,9 @@ does not remove user launch configurations.
 | 1.965 | The trail comes from the area, the parent and the page | a listed page; a record opened by the list's table; a form a button leads to; no area, no trail |
 | 1.966 | A table that opens a page is its parent before a link | an earlier link loses to the list's table; a page's own nav= is its area, its list still the parent |
 | 1.967 | The frame draws the trail and it compiles | Reflex's page compiler; area text, parent link, state title; a raw @lex_page in an area; none without an area or a route |
+| 1.979 | A calculation page in an area, and its run's view under it | listed in its area by its title; the trail is the area and the page; while ?run= is open the page links back to its form and the run's name (its key until named) is the last crumb; compiled in lex-app's frame; a page with one view keeps the plain trail |
 
-**Scenario range:** 1.965 – 1.967. **Test file:** `lex/test_project/tests/init/test_1ec_ui_breadcrumbs.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ec](batches.md).
+**Scenario range:** 1.965 – 1.967, 1.979. **Test file:** `lex/test_project/tests/init/test_1ec_ui_breadcrumbs.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ec](batches.md).
 
 ### 1ed. lex.ui frame: a project's no-access sentence and way out, and its own access rules ✅
 
@@ -1889,8 +1890,9 @@ does not remove user launch configurations.
 | 1.982 | A user the model does not let create is refused above the button | no record; the refusal in ui_refused of the form's handler; the browser stays |
 | 1.983 | With Celery on the run goes to a worker and the page does not wait | dispatched once, never in-process; the record IN_PROGRESS; the browser already at the run |
 | 1.984 | self.api.calculate and self.api.log are the grid's Calculate and log | [] before a run; IN_PROGRESS at once; the run's Markdown log after; its newest line |
+| 1.978 | A rule on the page guards the calculation's own handlers | @ui.page(requires=a @ui.rule) on ui.calculation: the granted user's run starts as before; the refused user's page says the rule's sentence and calculate, the load, Stop, the download and the following sent by name are each refused with it before lex-app's API is called; the guarded page has its own state |
 
-**Scenario range:** 1.980 – 1.984. **Test file:** `lex/test_project/tests/init/test_1ef_ui_calculation_start.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1ef](batches.md).
+**Scenario range:** 1.980 – 1.984, 1.978. **Test file:** `lex/test_project/tests/init/test_1ef_ui_calculation_start.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1ef](batches.md).
 
 ### 1eg. lex.ui calculation pages: one run, followed until it ends -- its result, its error, its log ✅
 
@@ -1906,8 +1908,9 @@ does not remove user launch configurations.
 | 1.988 | A failed run shows its error in its own words | ERROR; the exception's text without the traceback; the failed run's log kept |
 | 1.989 | A run the reader may not read is no run to them | nothing of the run in the state; the error page says There is no run N., as for a missing key |
 | 1.990 | Leaving stops the watching, never the run | the follow job ends on a new visit; the run still ends in SUCCESS |
+| 1.999 | A reconnect keeps following the run and does not open the page again | the socket reconnects on a followed run's address: same visit, the following goes on and the re-sent follow is a repeat; the load reads the run again; ui.frame(opened=) called once; the one following ends with SUCCESS |
 
-**Scenario range:** 1.985 – 1.990. **Test file:** `lex/test_project/tests/init/test_1eg_ui_calculation_run.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1eg](batches.md).
+**Scenario range:** 1.985 – 1.990, 1.999. **Test file:** `lex/test_project/tests/init/test_1eg_ui_calculation_run.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1eg](batches.md).
 
 ### 1eh. lex.ui calculation pages: the past runs -- a model table, each row opening its run ✅
 
@@ -1920,8 +1923,9 @@ does not remove user launch configurations.
 | 1.991 | The past runs are a model table lex-app completes | compiled under Past runs; the status column added last, in the badge's words; each row a link to ?run=<key>; -id first; the author's search kept; the author's table unchanged |
 | 1.992 | Past runs written wrongly say what to write | another model, open=, where=, not a table |
 | 1.993 | The past runs are read as the user, newest first | three runs, newest first with their status, through lex-app's list view; none for a reader the model's permission_read refuses |
+| 1.998 | The past runs follow the table's paging and first column | history= with page_size=10 and choose_columns: the author's first column in place, the added status not; opens at 10, RFDS's pager only while the runs do not fit; totals= and totals_of_all= refused in the history slot; pin= and page_size=None no words |
 
-**Scenario range:** 1.991 – 1.993. **Test file:** `lex/test_project/tests/init/test_1eh_ui_calculation_history.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1eh](batches.md).
+**Scenario range:** 1.991 – 1.993, 1.998. **Test file:** `lex/test_project/tests/init/test_1eh_ui_calculation_history.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1eh](batches.md).
 
 ### 1ei. lex.ui calculation pages: a file the run produced, and stopping a run ✅
 

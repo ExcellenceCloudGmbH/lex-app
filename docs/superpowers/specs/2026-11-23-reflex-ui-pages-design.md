@@ -1056,6 +1056,25 @@ template, the order until the user sorts (`"-id"`, new on lex-app's model table 
 to those who may edit it; lex-app's API enforces both whatever the browser shows, and every read and
 write of the page is the user's.
 
+**With the frame (6.19) and the review's fixes (merged 2026-11-24).**
+- *The page's `requires=` is its handlers' too* (1.978). A project writes `requires=` on its own
+  handlers; a calculation page's handlers are lex-app's, so lex-app gives them the page's -- its
+  permissions and its `@ui.rule`s. A user the page refuses cannot send its events by name either
+  (Calculate, the run's load, Stop, the download, the following): each is refused with the rule's
+  sentence before lex-app's API is called. Before the merge, a rule on the page hid the page and left
+  its handlers open. The state is one per page and requirements: the same title and fields under
+  another `requires=` is another state.
+- *A run's view sits under its page in the breadcrumbs* (1.979). `?run=` is the same route, so the
+  frame's trail would not change; while a run is open, the page becomes a link back to its form and the
+  run's name (its key until lex-app names it) is the last crumb. A page kind with a view inside it
+  gives the crumb with `view_crumb()`; the frame draws it.
+- *The past runs after the review's table changes* (1.998): the author's first column stays in place
+  and the added status column does not; the pager shows only while the runs do not fit one page;
+  `totals=` stays refused, as on every model table.
+- *A reconnect while a run is followed is the same visit* (6.18; 1.999): the following goes on, the
+  progress part's second `follow` is a repeat, the load reads the run again, and `ui.frame(opened=)`
+  is not called again -- it is called once a visit (1.977).
+
 **What a reader of a past run sees** is that run's view, as it stands: the same badge, inputs, result,
 error and log as the user who ran it saw at the end -- read now, as the reader, so a field the reader
 may not see is missing for them as it is in the grid.

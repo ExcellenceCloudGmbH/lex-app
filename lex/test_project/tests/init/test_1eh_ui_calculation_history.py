@@ -7,7 +7,7 @@ page size), to which lex-app adds the run's status, a link from each row to that
 and permission_read, as on every model table. A regression is a past run nobody can open, a list
 that starts with the oldest run, or runs shown that the model would not show the reader.
 
-Cluster 1eh -- scenarios 1.991-1.993. Type: E (1.993 reads the rows through lex-app's real list view).
+Cluster 1eh -- scenarios 1.991-1.993, 1.998. Type: E (1.993 reads the rows through lex-app's real list view).
 Covers: lex/lex_app/reflex/ui/pages/calculation.py (history=), lex/lex_app/reflex/ui/pages/tables.py
 (a model table's row link and order given by its page kind), lex/lex_app/reflex/data.py
 (LexTableState's default ordering).
@@ -49,7 +49,7 @@ def _built_history(page):
 
 
 class TestCluster01eh_CalculationHistory(E2ETestCase):
-    """1.991-1.993: the past runs as declared; written wrongly; read as the user, newest first."""
+    """1.991-1.993, 1.998: the past runs as declared; written wrongly; read as the user, newest first; paged."""
 
     e2e_models = UI_CALC_MODELS
 
@@ -140,3 +140,39 @@ class TestCluster01eh_CalculationHistory(E2ETestCase):
         UiRegionReport.may_read = False
         refused, _ = asyncio.run(first_page())
         self.assertEqual(refused, [], "the model's permission_read decides which runs a reader sees")
+
+    # -- 1.998 ---------------------------------------------------------
+    def test_1_998_the_past_runs_follow_the_tables_paging_and_first_column(self) -> None:
+        """
+        Scenario 1.998: history= after the review's table changes (merge of the calculation page with them).
+        Given: history=ui.table(Model, columns=["region", "year", "orders"], page_size=10,
+               choose_columns=True); then a history that totals, and the removed words.
+        When:  the page is built and compiled.
+        Then:  the first column the author wrote stays in place and lex-app's status column does not;
+               the table opens at 10 rows, and RFDS's pager shows only while the runs do not fit one
+               page; the Columns menu is there; totals= on the past runs is refused in the history slot
+               (a model table does not total), and pin= and page_size=None are no words.
+        """
+        written = ui.table(UiRegionReport, columns=["region", "year", "orders"], page_size=10, choose_columns=True)
+        page = region_reports(written)
+        _, module = compile_page(ROUTE, page.build(CTX))
+        state = _built_history(page)
+        self.assertEqual([(c["field"], c.get("sticky")) for c in state.table_columns],
+                         [("region", "start"), ("year", None), ("orders", None), ("is_calculated", None)],
+                         "the author's first column in place; the status added last, not pinned")
+        self.assertEqual(state.get_fields()["page_size"].default, 10, "opens at the author's page size")
+        self.assertRegex(module, r"\.total_rows_rx_state_ > [\w.]+\.page_size_rx_state_",
+                         "the pager only while the runs do not fit one page")
+        self.assertIn("rfds-pagination", module)
+        self.assertIn("view_columns", module, "the Columns menu")
+        for history in (ui.table(UiRegionReport, columns=["region", "orders"], totals={"orders": "sum"}),
+                        ui.table(UiRegionReport, columns=["region", "orders"], totals={"orders": "sum"},
+                                 totals_of_all=True)):
+            with self.subTest(totals_of_all=history.totals_of_all), self.assertRaises(PageError) as wrong:
+                region_reports(history).build(CTX)
+            self.assertIn("slot `history`", str(wrong.exception))
+            self.assertIn("cannot export or total yet", str(wrong.exception))
+        with self.assertRaises(TypeError):
+            ui.column("region", pin=True)
+        with self.assertRaisesRegex(ValueError, "write page_size=200"):
+            ui.table(UiRegionReport, columns=["region"], page_size=None)

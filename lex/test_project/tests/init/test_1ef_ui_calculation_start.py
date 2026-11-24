@@ -9,7 +9,7 @@ to the run's address on the same page. A regression is a run nobody may trace to
 created past the model's permissions, a page that blocks while the run goes, or a run whose log the
 grid cannot find.
 
-Cluster 1ef -- scenarios 1.980-1.984. Type: E (the handlers run against lex-app's real views).
+Cluster 1ef -- scenarios 1.980-1.984, 1.978. Type: E (the handlers run against lex-app's real views).
 Covers: lex/lex_app/reflex/ui/pages/calculation.py (ui.calculation, its checks, the form view),
 lex/lex_app/reflex/ui/calculations.py (the state, calculate), lex/lex_app/reflex/data.py and
 lex/lex_app/reflex/ui/context.py (self.api.calculate, self.api.log).
@@ -68,8 +68,8 @@ def _start(test, values, *, grants=((UiRegionReport, "create"),)):
 
 
 class TestCluster01ef_CalculationStart(E2ETestCase):
-    """1.980-1.984: the page as declared; a run started as the user, in-process and on a worker; a refusal;
-    self.api.calculate and self.api.log."""
+    """1.980-1.984, 1.978: the page as declared; a run started as the user, in-process and on a worker; a refusal;
+    self.api.calculate and self.api.log; a rule on the page guards its handlers."""
 
     e2e_models = UI_CALC_MODELS
 
@@ -224,3 +224,83 @@ class TestCluster01ef_CalculationStart(E2ETestCase):
         self.assertTrue(any("Reading the orders of south." in entry for entry in after), f"the run's log: {after}")
         self.assertEqual(calculations.newest_line(after), "Reading the orders of south.",
                          "the newest line a run logged, as the progress message shows it")
+
+    # -- 1.978 ---------------------------------------------------------
+    def test_1_978_a_rule_on_the_page_guards_the_calculations_own_handlers(self) -> None:
+        """
+        Scenario 1.978: @ui.rule on a ui.calculation page (merge of the frame's rules with the page kind).
+        Given: @ui.page(ROUTE, requires=north_team), a rule that grants anna and refuses bob with its
+               own sentence; the page's handlers are lex-app's, so the project cannot give them requires=.
+        When:  each opens the page, sends the form, and -- bob, as a browser may -- sends the page's other
+               events by name: its load on a run's address, Stop, the download and the following.
+        Then:  anna's page is granted and her run starts as before; bob's page is refused with the rule's
+               sentence and every one of his events is refused with it, before lex-app's API is called:
+               no record is created, no run read, stopped or downloaded. The page built outside a page
+               (no requires=) keeps its own state.
+        """
+        from unittest.mock import patch as patching
+
+        import reflex as rx
+
+        from lex.lex_app.reflex import shell
+        from lex.lex_app.reflex.ui import handlers
+        from lex.lex_app.reflex.ui.pages import declare, frame, links
+        from lex.lex_app.reflex.ui.state import State
+
+        asked: list = []
+
+        @ui.rule
+        def north_team(user, params):
+            asked.append(user.id)
+            return True if user.id == "anna" else "Only the north team runs region reports."
+
+        for target in (patching.dict(declare._DECLARED, clear=True), patching.dict(handlers._PAGES),
+                       patching.dict(links._REFLEX_PAGES, clear=True), patching.object(shell, "_NAV", []),
+                       patching.dict(shell._PLACES, clear=True), patching.object(frame, "_FRAME", None),
+                       patching.object(rx, "page", lambda **kwargs: (lambda fn: fn))):
+            target.start()
+            self.addCleanup(target.stop)
+
+        @ui.page(ROUTE, requires=north_team)
+        def guarded_reports():
+            return region_reports()
+
+        declare.finalize()
+        state = declare._DECLARED[ROUTE].kind.state
+        self.assertIsNot(state, region_reports().state, "the guarded page's handlers are its own")
+        existing = UiRegionReport.objects.create(region="north", year=2024)
+
+        async def scenario(user: str):
+            async with Session(self.client, user=user, grants=((UiRegionReport, "create"),)) as session:
+                await (await session.harness.send(State, "ui_open", page=ROUTE))
+                access = dict((await session.harness._state(State)).ui_access)
+                await (await session.harness.send(state, "calculate", values={"region": "north", "year": "2026"}))
+                if user == "bob":
+                    await session.harness.navigate(f"{ROUTE}?run={existing.pk}")
+                    await (await session.harness.send(state, "open"))
+                    await session.harness.set_fields(state, run_id=str(existing.pk))
+                    for event, arguments in (("stop", {}), ("download", {"field": "report_file"}), ("follow", {})):
+                        await (await session.harness.send(state, event, **arguments))
+                await asyncio.sleep(0.05)
+                return access, list(session.harness.outcomes), list(session.harness.results), \
+                    await session.harness.fields(state), list(session.views.calls)
+
+        access, outcomes, went, _, _ = asyncio.run(scenario("anna"))
+        self.assertEqual(access[ROUTE]["granted"], "yes", "anna's page is granted")
+        created = UiRegionReport.objects.exclude(pk=existing.pk).get()
+        self.assertEqual([g.path for g in went if hasattr(g, "path")], [f"{ROUTE}?run={created.pk}"],
+                         "and her run started as before")
+        self.assertEqual(settled(created), CalculationModel.SUCCESS)
+
+        access, outcomes, went, fields, calls = asyncio.run(scenario("bob"))
+        refusal = "Only the north team runs region reports."
+        self.assertEqual(dict(access[ROUTE]), {"granted": "no", "message": refusal}, "bob's page is refused")
+        self.assertEqual([(o.kind, o.message) for o in outcomes], [("denied", refusal)] * 5,
+                         "calculate, the load, Stop, the download and the following: each refused with the rule's sentence")
+        self.assertEqual(calls, [], "before lex-app's API is called")
+        self.assertEqual(UiRegionReport.objects.count(), 2, "no record created for bob")
+        self.assertEqual((fields["run_status"], fields["run"]), ("", {}), "and no run read")
+        self.assertEqual({(type(r).__name__, getattr(r, "message", "")) for r in went}, {("Toast", refusal)},
+                         "bob is told so, and his browser goes nowhere and downloads nothing")
+        self.assertIn("anna", asked)
+        self.assertIn("bob", asked)

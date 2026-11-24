@@ -8,7 +8,7 @@ model's own fields (``RegionReport.orders``), or the calculation's error in its 
 run's log. A regression is a page that says "running" for ever, a result shown before the run ended,
 a traceback shown to a user, or a run shown to someone the model does not let read it.
 
-Cluster 1eg -- scenarios 1.985-1.990. Type: E (the handlers run against lex-app's real views).
+Cluster 1eg -- scenarios 1.985-1.990, 1.999. Type: E (the handlers run against lex-app's real views).
 Covers: lex/lex_app/reflex/ui/pages/calculation.py (the run's view, the result with the model's
 fields), lex/lex_app/reflex/ui/calculations.py (open, follow, error_words, newest_line).
 Run: python -m lex pytest lex/test_project/tests/init/test_1eg_ui_calculation_run.py -v
@@ -51,7 +51,8 @@ def region_reports(**changes):
 
 
 class TestCluster01eg_CalculationRun(E2ETestCase):
-    """1.985-1.990: the run's view; followed with Celery off and on; a failure; a run not the reader's; leaving."""
+    """1.985-1.990, 1.999: the run's view; followed with Celery off and on; a failure; a run not the reader's;
+    leaving; a reconnect."""
 
     e2e_models = UI_CALC_MODELS
     #: The live log is lex-app's own cache: a failed atomic run's log is kept from it.
@@ -284,6 +285,83 @@ class TestCluster01eg_CalculationRun(E2ETestCase):
         self.assertEqual(after["ui_running"], {}, "leaving stopped the following")
         UiRegionReport.gate.set()
         self.assertEqual(settled(record), CalculationModel.SUCCESS, "the run went on and ended")
+
+
+    # -- 1.999 ---------------------------------------------------------
+    def test_1_999_a_reconnect_keeps_following_the_run_and_does_not_open_the_page_again(self) -> None:
+        """
+        Scenario 1.999: the socket drops while a run is followed (merge of the calculation page with the
+        review's same visit and the frame's opened=).
+        Given: ui.frame(opened=) recording each opening; a run held open in lex-app's process; its
+               address opened and followed.
+        When:  the socket drops and Reflex reconnects on the same address (``hydrate`` and ``on_load``
+               again, on a new connection): the page's load runs again and the progress part, mounted
+               again, sends ``follow`` again; then the run is let go.
+        Then:  the reconnect is the same visit: the following goes on (leaving would stop it) and the
+               second ``follow`` is a repeat, not a second follower; the load read the run again; the
+               page was opened once; when the run ends the one following stops by itself with SUCCESS.
+        """
+        import reflex as rx
+
+        from lex.lex_app.reflex.ui.pages import frame
+        from lex.lex_app.reflex.ui.state import State
+
+        opened: list = []
+        unframed = patch.object(frame, "_FRAME", None)
+        unframed.start()
+        self.addCleanup(unframed.stop)
+        ui.frame(opened=lambda user, page: opened.append(page.address))
+        UiRegionReport.gate = threading.Event()
+        record = self._created()
+        self._calculate(record)
+        url = f"{ROUTE}?run={record.pk}"
+
+        def at(sid: str) -> dict:
+            return {"pathname": ROUTE, "asPath": url, "query": {"run": str(record.pk)}, "sid": sid}
+
+        async def scenario():
+            async with Session(self.client) as session:
+                harness, key = session.harness, runs.key_of(self.state.open)
+
+                async def connect(sid: str) -> None:
+                    await (await harness.send(rx.State, "hydrate", _router_data=at(sid)))
+                    await (await harness.send(State, "ui_open", page=ROUTE, _router_data=at(sid)))
+
+                    async def loaded():
+                        return (await harness.fields(State))["ui_loaded"].get(key)
+
+                    await session.until(loaded, "the page's load never finished")
+
+                await connect("socket-1")
+                visit = (await harness.fields(State))["ui_visit"]
+                following = await harness.send(self.state, "follow", _router_data=at("socket-1"))
+                follow = runs.key_of(self.state.follow)
+
+                async def running():
+                    return follow in (await self._fields(session))["ui_running"]
+
+                await session.until(running, "the following never started")
+                await session.until(lambda: opened, "the page was never opened")
+                await harness.set_fields(self.state, run_name="")              # what the load reads again
+                await connect("socket-2")
+                again = await harness.send(self.state, "follow", _router_data=at("socket-2"))
+                await asyncio.wait_for(again, 5)
+                await asyncio.sleep(0.1)
+                during = await self._fields(session)
+                during["ui_visit"] = (await harness.fields(State))["ui_visit"]
+                UiRegionReport.gate.set()
+                await asyncio.wait_for(following, 10)
+                return visit, during, await self._fields(session)
+
+        visit, during, after = asyncio.run(scenario())
+        follow = runs.key_of(self.state.follow)
+        self.assertEqual(during["ui_visit"], visit, "the reconnect is the same visit")
+        self.assertEqual(during["ui_running"], {follow: [""]}, "the one following goes on: no second follower")
+        self.assertEqual((during["run_status"], during["run_name"]), ("IN_PROGRESS", "north 2026"),
+                         "the load read the run again")
+        self.assertEqual(opened, [url], "the page was opened once")
+        self.assertEqual(after["run_status"], "SUCCESS", "followed until it settled")
+        self.assertEqual(after["ui_running"], {}, "and the following stopped by itself")
 
 
 def _waited(condition, seconds: float = 10) -> bool:

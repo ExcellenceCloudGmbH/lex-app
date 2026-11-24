@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 997
+max_scenario: 999
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2630,10 +2630,10 @@ letters:
       `ui.frame(nav=[...], sign_out=)` once in the dashboard module; `nav=` on `@ui.page` names the page's area, on `ui.reflex_page(nav=, title=, icon=, requires=)` too; a page with route arguments is in its area unlisted; the current entry's area marked; compiled with Reflex's page compiler. These tests fail on areas in import order, an area made by a typo, a raw page that cannot be listed, a second frame from another module, or a sign-out to an unchecked address.
   ec:
     title: 'lex.ui frame: breadcrumbs from the area and the page, written by no page'
-    scenarios: 1.965-1.967
+    scenarios: 1.965-1.967, 1.979
     status: complete
     tests:
-      pass: 3
+      pass: 4
       skip: 0
       xfail: 0
     note: >-
@@ -2660,30 +2660,30 @@ letters:
       `opened(user, page)` after the page's required loads (at once without them), on a worker thread, not awaited; the page's route, address, title as the load left it, area and values; not for a refused or failed page; failures logged. These tests fail on a page that waits for the bookkeeping, an entry for a refused or failed page, or a recently-used entry without the record's name.
   ef:
     title: 'lex.ui calculation pages: the page kind, its form, a run started as the user -- ui.calculation'
-    scenarios: 1.980-1.984
-    status: complete
-    tests:
-      pass: 5
-      skip: 0
-      xfail: 0
-    note: >-
-      `ui.calculation(Model, title=, fields=/steps=)`: the form's values become a record created through lex-app's create view as the user and its run is started by lex-app's Calculate request (`self.api.calculate`, the grid's run id), in-process with Celery off and handed to a worker with Celery on; the browser goes to `?run=<key>`; a refusal of the model's permission_create is the form's; `self.api.log` reads the newest run's log. These tests fail on a record created past the model's permissions, a page that waits for the run, or a run whose log the grid cannot find.
-  eg:
-    title: 'lex.ui calculation pages: one run, followed until it ends -- its result, its error, its log'
-    scenarios: 1.985-1.990
+    scenarios: 1.980-1.984, 1.978
     status: complete
     tests:
       pass: 6
       skip: 0
       xfail: 0
     note: >-
+      `ui.calculation(Model, title=, fields=/steps=)`: the form's values become a record created through lex-app's create view as the user and its run is started by lex-app's Calculate request (`self.api.calculate`, the grid's run id), in-process with Celery off and handed to a worker with Celery on; the browser goes to `?run=<key>`; a refusal of the model's permission_create is the form's; `self.api.log` reads the newest run's log. These tests fail on a record created past the model's permissions, a page that waits for the run, or a run whose log the grid cannot find.
+  eg:
+    title: 'lex.ui calculation pages: one run, followed until it ends -- its result, its error, its log'
+    scenarios: 1.985-1.990, 1.999
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
       `?run=<key>` on a calculation page: the run read through lex-app's API as the user and followed (a `@ui.job(stop_on_leave=True)` started by the progress part) until its status settles, the same with Celery off (lex-app's process) and on (a worker's report); the progress message is the run's newest logged line; the result written with the model's own fields (`RegionReport.orders`); the error in its own words without the traceback; the log, also of a failed run; a run outside the reader's permission_read is no run to them. These tests fail on a page that says running for ever, a traceback shown to a user, or a run shown to a reader the model refuses.
   eh:
     title: 'lex.ui calculation pages: the past runs -- a model table, each row opening its run'
-    scenarios: 1.991-1.993
+    scenarios: 1.991-1.993, 1.998
     status: complete
     tests:
-      pass: 3
+      pass: 4
       skip: 0
       xfail: 0
     note: >-

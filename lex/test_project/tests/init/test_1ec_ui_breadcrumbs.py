@@ -7,7 +7,7 @@ navigation, the listed page whose table opens it or whose button leads to it. A 
 that loses its trail when it becomes a lex.ui page, a trail that needs per-page code, a parent link
 that leads to the wrong list, or a record page whose title (a state value) breaks the page.
 
-Cluster 1ec -- scenarios 1.965-1.967. Type: U.
+Cluster 1ec -- scenarios 1.965-1.967, 1.979. Type: U.
 Covers: lex/lex_app/reflex/shell.py (Place, place_of, set_place, lex_chrome), lex/lex_app/reflex/ui/pages/declare.py
 (finalize, leads_to).
 Run: python -m lex pytest lex/test_project/tests/init/test_1ec_ui_breadcrumbs.py -v
@@ -47,7 +47,8 @@ def _about(title):
 
 
 class TestCluster01ec_Breadcrumbs(FrameCase):
-    """1.965-1.967: the trail of a listed page, of a record and of a form; which parent; compiled."""
+    """1.965-1.967, 1.979: the trail of a listed page, of a record and of a form; which parent; compiled;
+    a calculation's run under its page."""
 
     def declare_sales(self):
         @ui.page("/orders/[key]")
@@ -160,3 +161,44 @@ class TestCluster01ec_Breadcrumbs(FrameCase):
         _, module = compile_page("/cash", self.page_named("/cash")())
         for expected in ("rfds-breadcrumbs", '"Finance"', '"Cash"'):
             self.assertIn(expected, module, f"a raw page in an area: {expected}")
+
+    # -- 1.979 ---------------------------------------------------------
+    def test_1_979_a_calculation_page_in_an_area_and_its_runs_view_under_it(self) -> None:
+        """
+        Scenario 1.979: ui.calculation in the frame (merge of the frame with the calculation page).
+        Given: ui.frame(nav=["Reports", "Sales"]) and a calculation page declared with nav="Reports".
+        When:  lex-app registers it, and the page is built in lex-app's frame and compiled.
+        Then:  the page is listed in Reports by its title; its trail is the area and the page; while a
+               run is open (``?run=``, the same route) the trail goes on: the page becomes a link back to
+               its form, and the run's name -- its key until lex-app names it -- is the last crumb. A
+               page with one view keeps the plain trail.
+        """
+        from lex.lex_app.reflex.ui.pages import declare
+        from lex.test_project.tests.init.models import UiRegionReport
+
+        ui.frame(nav=["Reports", "Sales"])
+
+        @ui.page("/reports/regions", nav="Reports")
+        def region_reports():
+            return ui.calculation(UiRegionReport, title="Region report",
+                                  fields=[ui.field("region", required=True), ui.field("year", kind="year", required=True)],
+                                  history=ui.table(UiRegionReport, columns=["region", "year"]))
+
+        self.declare_sales()
+        declare.finalize()
+        [entry] = [one for one in shell.nav_entries() if one.route == "/reports/regions"]
+        self.assertEqual((entry.section, entry.label), ("Reports", "Region report"), "listed in its area by its title")
+        place = shell.place_of("/reports/regions")
+        self.assertEqual((place.area, place.title, place.parent), ("Reports", "Region report", None))
+        state = declare._DECLARED["/reports/regions"].kind.state
+        showing, words = place.view
+        self.assertIn("run_id", str(showing), "the run's crumb shows while a run is open")
+        self.assertIn("run_name", str(words), "named as lex-app names the run")
+        self.assertIn("run_id", str(words), "its key until then")
+        trail = str(shell.breadcrumbs("/reports/regions"))
+        self.assertIn('"/reports/regions"', trail, "in the run's view the page is the way back to its form")
+        _, module = compile_page("/reports/regions", self.page_named("/reports/regions")())
+        for expected in ("rfds-breadcrumbs", '"Reports"', '"Region report"', state.get_full_name().split(".")[-1]):
+            self.assertIn(expected, module, f"compiled: {expected}")
+        self.assertIsNone(shell.place_of("/orders").view, "a page with one view keeps the plain trail")
+        self.assertNotIn("run_id", str(shell.breadcrumbs("/orders")))

@@ -3632,13 +3632,13 @@ What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-refl
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.965 – 1.967 |
+| Scenario range | 1.965 – 1.967, 1.979 |
 | Type | U |
-| Files covered | `lex/lex_app/reflex/shell.py` (`Place`, `place_of`, `breadcrumbs`, `lex_chrome`), `lex/lex_app/reflex/ui/pages/declare.py` (`leads_to`, `_place_pages`) |
+| Files covered | `lex/lex_app/reflex/shell.py` (`Place`, `place_of`, `breadcrumbs`, `lex_chrome`), `lex/lex_app/reflex/ui/pages/declare.py` (`leads_to`, `_place_pages`), `lex/lex_app/reflex/ui/pages/calculation.py` (`view_crumb`: a run's view under its page) |
 | Test file | `lex/test_project/tests/init/test_1ec_ui_breadcrumbs.py` |
-| Test classes | `TestCluster01ec_Breadcrumbs` (1.965–1.967) |
+| Test classes | `TestCluster01ec_Breadcrumbs` (1.965–1.967, 1.979) |
 | Fixtures | neutral orders, reports and regions pages; the frame's registries emptied per test |
-| Tests landed | **3 pass / 0 fail** |
+| Tests landed | **4 pass / 0 fail** |
 | Status | ✅ Complete |
 
 What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
@@ -3648,6 +3648,7 @@ What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-refl
 | 1.965 | The trail comes from the area, the parent and the page | a listed page; a record opened by the list's table; a form a button leads to; no area, no trail |
 | 1.966 | A table that opens a page is its parent before a link | an earlier link loses to the list's table; a page's own nav= is its area, its list still the parent |
 | 1.967 | The frame draws the trail and it compiles | Reflex's page compiler; area text, parent link, state title; a raw @lex_page in an area; none without an area or a route |
+| 1.979 | A calculation page in an area, and its run's view under it | listed in its area by its title; the trail is the area and the page; while ?run= is open the page links back to its form and the run's name (its key until named) is the last crumb; compiled in lex-app's frame; a page with one view keeps the plain trail |
 
 ### Batch 1ed — lex.ui frame: a project's no-access sentence and way out, and its own access rules ✅
 
@@ -3699,13 +3700,13 @@ What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-refl
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.980 – 1.984 |
+| Scenario range | 1.980 – 1.984, 1.978 |
 | Type | E |
-| Files covered | `lex/lex_app/reflex/ui/pages/calculation.py` (`calculation`, its checks, the form view), `lex/lex_app/reflex/ui/calculations.py` (the page's state, `calculate`), `lex/lex_app/reflex/data.py` (`LexApi.calculate`, `LexApi.log`), `lex/lex_app/reflex/ui/context.py` (`self.api.calculate`, `self.api.log`) |
+| Files covered | `lex/lex_app/reflex/ui/pages/calculation.py` (`calculation`, its checks, the form view), `lex/lex_app/reflex/ui/calculations.py` (the page's state, `calculate`), `lex/lex_app/reflex/data.py` (`LexApi.calculate`, `LexApi.log`), `lex/lex_app/reflex/ui/context.py` (`self.api.calculate`, `self.api.log`), `lex/lex_app/reflex/ui/pages/declare.py` (`page_requires`: the page's requires= for the kind's own handlers) |
 | Test file | `lex/test_project/tests/init/test_1ef_ui_calculation_start.py` |
-| Test classes | `TestCluster01ef_CalculationStart` (1.980–1.984) |
+| Test classes | `TestCluster01ef_CalculationStart` (1.980–1.984, 1.978) |
 | Fixtures | `UiRegionReport` (a calculation model with a gate and permission switches) and `UiRegionReportLine` in the cluster's models; `_ui_calc_aids.Session`: the harness with `self.api` = lex.ui's own API client answered by lex-app's real views through the signed-in `APIClient` |
-| Tests landed | **5 pass / 0 fail** |
+| Tests landed | **6 pass / 0 fail** |
 | Status | ✅ Complete |
 
 The calculation page kind of section 6.20 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`, first piece: the kind, its checks against the model, its form and the start of a run. The handlers run in `ui.testing.Harness` against lex-app's real views.
@@ -3717,18 +3718,19 @@ The calculation page kind of section 6.20 of `docs/superpowers/specs/2026-11-23-
 | 1.982 | A user the model does not let create is refused above the button | no record; the refusal in ui_refused of the form's handler; the browser stays |
 | 1.983 | With Celery on the run goes to a worker and the page does not wait | dispatched once, never in-process; the record IN_PROGRESS; the browser already at the run |
 | 1.984 | self.api.calculate and self.api.log are the grid's Calculate and log | [] before a run; IN_PROGRESS at once; the run's Markdown log after; its newest line |
+| 1.978 | A rule on the page guards the calculation's own handlers | @ui.page(requires=a @ui.rule) on ui.calculation: the granted user's run starts as before; the refused user's page says the rule's sentence and calculate, the load, Stop, the download and the following sent by name are each refused with it before lex-app's API is called; the guarded page has its own state |
 
 ### Batch 1eg — lex.ui calculation pages: one run, followed until it ends -- its result, its error, its log ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.985 – 1.990 |
+| Scenario range | 1.985 – 1.990, 1.999 |
 | Type | E |
-| Files covered | `lex/lex_app/reflex/ui/pages/calculation.py` (the run's view, the result written with the model's fields), `lex/lex_app/reflex/ui/calculations.py` (`open`, `follow`, `error_words`, `newest_line`) |
+| Files covered | `lex/lex_app/reflex/ui/pages/calculation.py` (the run's view, the result written with the model's fields), `lex/lex_app/reflex/ui/calculations.py` (`open`, `follow`, `error_words`, `newest_line`), `lex/lex_app/reflex/ui/pages/frame.py` (`page_opened` once a visit) |
 | Test file | `lex/test_project/tests/init/test_1eg_ui_calculation_run.py` |
-| Test classes | `TestCluster01eg_CalculationRun` (1.985–1.990) |
+| Test classes | `TestCluster01eg_CalculationRun` (1.985–1.990, 1.999) |
 | Fixtures | the 1ef models and `_ui_calc_aids.Session`; lex-app's log cache left running (`e2e_unpatch`); a recorded worker whose report is lex-app's own task success callback |
-| Tests landed | **6 pass / 0 fail** |
+| Tests landed | **7 pass / 0 fail** |
 | Status | ✅ Complete |
 
 Second piece of the calculation page (section 6.20 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`). Found while building: lex-app answers a record outside the reader's permission_read with 404, so the page says "There is no run N." for both.
@@ -3741,18 +3743,19 @@ Second piece of the calculation page (section 6.20 of `docs/superpowers/specs/20
 | 1.988 | A failed run shows its error in its own words | ERROR; the exception's text without the traceback; the failed run's log kept |
 | 1.989 | A run the reader may not read is no run to them | nothing of the run in the state; the error page says There is no run N., as for a missing key |
 | 1.990 | Leaving stops the watching, never the run | the follow job ends on a new visit; the run still ends in SUCCESS |
+| 1.999 | A reconnect keeps following the run and does not open the page again | the socket reconnects on a followed run's address: same visit, the following goes on and the re-sent follow is a repeat; the load reads the run again; ui.frame(opened=) called once; the one following ends with SUCCESS |
 
 ### Batch 1eh — lex.ui calculation pages: the past runs -- a model table, each row opening its run ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.991 – 1.993 |
+| Scenario range | 1.991 – 1.993, 1.998 |
 | Type | E |
 | Files covered | `lex/lex_app/reflex/ui/pages/calculation.py` (`history=`, the status column), `lex/lex_app/reflex/ui/pages/tables.py` (a model table's row link and order set by its page kind; a status column's words), `lex/lex_app/reflex/data.py` (`LexTableState.default_ordering`) |
 | Test file | `lex/test_project/tests/init/test_1eh_ui_calculation_history.py` |
-| Test classes | `TestCluster01eh_CalculationHistory` (1.991–1.993) |
+| Test classes | `TestCluster01eh_CalculationHistory` (1.991–1.993, 1.998) |
 | Fixtures | the 1ef models; `_ui_calc_aids.ViewsClient` for the table's rows read through lex-app's list view |
-| Tests landed | **3 pass / 0 fail** |
+| Tests landed | **4 pass / 0 fail** |
 | Status | ✅ Complete |
 
 Third piece of the calculation page (section 6.20 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`).
@@ -3762,6 +3765,7 @@ Third piece of the calculation page (section 6.20 of `docs/superpowers/specs/202
 | 1.991 | The past runs are a model table lex-app completes | compiled under Past runs; the status column added last, in the badge's words; each row a link to ?run=<key>; -id first; the author's search kept; the author's table unchanged |
 | 1.992 | Past runs written wrongly say what to write | another model, open=, where=, not a table |
 | 1.993 | The past runs are read as the user, newest first | three runs, newest first with their status, through lex-app's list view; none for a reader the model's permission_read refuses |
+| 1.998 | The past runs follow the table's paging and first column | history= with page_size=10 and choose_columns: the author's first column in place, the added status not; opens at 10, RFDS's pager only while the runs do not fit; totals= and totals_of_all= refused in the history slot; pin= and page_size=None no words |
 
 ### Batch 1ei — lex.ui calculation pages: a file the run produced, and stopping a run ✅
 

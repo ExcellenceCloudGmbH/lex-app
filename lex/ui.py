@@ -84,7 +84,8 @@ progress_of/cancel``        event of a Cancel button
 ``ui.calculation``          the page of a lex-app calculation model: a form for a run's inputs
                             (created and started as the user), the run while it goes, its
                             result, the past runs; ``?run=<key>`` is one run. A field of the run
-                            is written as the model's: ``RegionReport.orders``
+                            is written as the model's: ``RegionReport.orders``. The page's
+                            ``requires=`` guards its handlers too
 ``ui.field/step``           a form's inputs, and a wizard's steps; the handler gets ``values``.
                             ``options=`` a ``@ui.rows`` handler searches on the server as the user
                             types. ``ui.button(confirm=, ask=)`` asks before its handler runs

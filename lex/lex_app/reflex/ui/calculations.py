@@ -32,10 +32,12 @@ RUN = "run"
 
 @dataclasses.dataclass(frozen=True)
 class Plan:
-    """What one calculation page's state needs to know: the model, and the keys its form writes."""
+    """What one calculation page's state needs to know: the model, the keys its form writes, and the
+    page's ``requires=`` -- which its handlers require too, a project's ``@ui.rule`` among them."""
 
     model: Any
     keys: tuple[str, ...]
+    requires: tuple = ()
 
 
 def payload(values: dict) -> dict:
@@ -170,9 +172,13 @@ def make_state(plan: Plan, counter: Any) -> type:
                             "run_error": str, "run_log": list[str]},
         "run_id": "", "run": {}, "run_status": "", "run_name": "", "run_error": "", "run_log": [],
     }
-    made = {"calculate": (handlers.action, calculate), "open": (handlers.load, open),
-            "follow": (lambda fn: handlers.job(fn, stop_on_leave=True), follow),
-            "download": (handlers.action, download), "stop": (handlers.action, stop)}
+    # Each handler requires what the page does: a user the page refuses cannot send its events either.
+    requires = tuple(plan.requires) or None
+    made = {"calculate": (lambda fn: handlers.action(fn, requires=requires), calculate),
+            "open": (lambda fn: handlers.load(fn, requires=requires), open),
+            "follow": (lambda fn: handlers.job(fn, stop_on_leave=True, requires=requires), follow),
+            "download": (lambda fn: handlers.action(fn, requires=requires), download),
+            "stop": (lambda fn: handlers.action(fn, requires=requires), stop)}
     for handler, (decorate, fn) in made.items():
         fn.__name__ = handler
         fn.__qualname__ = f"{name}.{handler}"

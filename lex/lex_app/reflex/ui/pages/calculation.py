@@ -100,15 +100,24 @@ class Calculation(kinds.Kind):
     actions: tuple = ()
 
     def __post_init__(self) -> None:
+        from lex.lex_app.reflex.ui.pages import declare
+
         every = [*self.fields, *(one for step in self.steps for one in getattr(step, "fields", ()))]
         keys = tuple(getattr(one, "key", "") for one in every)
+        # The handlers are lex-app's: the page's requires= (its permissions and the project's rules) is theirs.
+        requires = declare.page_requires()
         identity = (str(self.title), tuple((getattr(one, "key", ""), getattr(one, "is_a", ""),
-                                            bool(getattr(one, "required", False))) for one in every))
-        self.state = runtime.state_for(runtime.Plan(self.model, keys), identity)
+                                            bool(getattr(one, "required", False))) for one in every), requires)
+        self.state = runtime.state_for(runtime.Plan(self.model, keys, requires), identity)
         self.load = self.state.open
 
     def loads(self) -> tuple[list, list]:
         return [self.load], []
+
+    def view_crumb(self) -> tuple:
+        """The run's view as one more breadcrumb under the page: shown while a run is open, its name."""
+        S = self.state
+        return S.run_id != "", rx.cond(S.run_name != "", S.run_name, S.run_id)
 
     # -- the checks ---------------------------------------------------------------------------------
     def _inputs(self, ctx: Build) -> None:
@@ -296,7 +305,9 @@ def calculation(model: Any, *, title: Any, fields: Any = (), steps: Any = (), re
     entry -- and starts its run as lex-app's Calculate button does. The browser then goes to the run:
     the same page with ``?run=<key>``, which follows the run until it ends, whether lex-app runs it
     in its own process or on a Celery worker. A refusal of the API is the form's, above the button.
-    The form is shown to users who may create the model.
+    The form is shown to users who may create the model. The page's handlers are lex-app's, so the
+    page's ``requires=`` -- its permissions and a project's ``@ui.rule`` -- is theirs too: a user the
+    page refuses cannot send its events either.
     """
     from django.db import models
 

@@ -69,6 +69,9 @@ class Place:
     title: Any                          # a sentence, or a state value (a record's name)
     parent: str | None = None           # the parent page's route
     parent_title: str | None = None
+    #: A view inside the page, shown as one more crumb while it is open: (the condition, its words) --
+    #: a calculation's run (``?run=``), under its page. ``None``: the page has one view.
+    view: Any = None
 
 
 #: Route -> where the page sits; a page without an area has no entry, and no breadcrumbs.
@@ -95,7 +98,10 @@ def _crumb_label(text: Any) -> Any:
 
 
 def breadcrumbs(route: str | None) -> Any:
-    """RFDS's breadcrumbs for the page at ``route``: its area, its parent, itself; ``None`` without an area."""
+    """RFDS's breadcrumbs for the page at ``route``: its area, its parent, itself; ``None`` without an area.
+
+    While a view inside the page shows (a calculation's run), the page is a link back and the view the last crumb.
+    """
     place = place_of(route)
     if place is None:
         return None
@@ -104,8 +110,16 @@ def breadcrumbs(route: str | None) -> Any:
     crumbs: list[dict] = [{"label": _crumb_label(place.area)}]          # an area is not a page: text
     if place.parent:
         crumbs.append({"label": _crumb_label(place.parent_title), "href": place.parent})
-    crumbs.append({"label": _crumb_label(place.title)})
-    return rfds.page(rfds.breadcrumbs(*crumbs))
+    page = {"label": _crumb_label(place.title)}
+    trail = rfds.page(rfds.breadcrumbs(*crumbs, page))
+    if place.view is None:
+        return trail
+    import reflex as rx
+
+    # A view inside the page (a run): the page becomes the way back to its first view, the view its crumb.
+    showing, words = place.view
+    back = {**page, "href": route} if "[" not in route else page
+    return rx.cond(showing, rfds.page(rfds.breadcrumbs(*crumbs, back, {"label": _crumb_label(words)})), trail)
 
 
 def nav_entries() -> list[NavEntry]:
