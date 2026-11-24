@@ -375,6 +375,55 @@ Built and tested the same day; these differ from, or add to, the sections above:
 - **A table that leaves the screen keeps none of its rows** (added 2026-11-24): `close` drops the
   page, the count, the totals and the filter choices from the tab's state.
 
+### 5.14 Columns and rows a reader relies on (2026-11-24, batch 1dy)
+
+Needs found while rewriting dashboards: a name that stays in place in a wide table, columns of
+different widths, columns the user sizes, a file's rows in one scroll, a totals row that says what
+it sums. Each is RFDS's own feature, exposed with the fewest new words:
+
+```python
+ui.table(CustomersState.customers, page_size=None, choose_columns=True,
+         totals={"amount": "sum of all rows"},
+         columns=[ui.column("name", kind="name", pin=True), ui.column("code", kind="code"),
+                  "region", ui.column("amount", kind="money", currency="currency")])
+```
+
+- **One pinned column: the first.** `ui.column(..., pin=True)` is RFDS's `sticky="start"`. RFDS's
+  data table puts every start-sticky cell at the left edge and reserves scroll padding for one such
+  column, the identity cell, so only the first column -- the one that names the row -- may be
+  pinned ("RFDS keeps one column in place while the table scrolls sideways: the first, which names
+  the row. Pin it: ..."). Pinning several would need hand-made offsets; not added.
+- **No width argument; two kinds instead.** Rule 6.1(4) of the pages design forbids optional
+  styling, and test 1.806 refuses a `width` argument on every component. The need is about the
+  values, so two kinds say what they are: `kind="name"` (a person's or a company's name) is RFDS's
+  `entity` kind at RFDS's wide field width (`size.field.md`); `kind="code"` (an order number, an
+  ISO code) is RFDS's identifier (`id`) at its narrow field width (`size.field.xs`). A plain column
+  takes the room its values need, as before. Considered: `width="wide"|"narrow"` (refused by the
+  rule), `min_width=`.
+- **Resizing is RFDS's "Columns" menu.** RFDS's data table has no drag handle (WCAG 2.5.7: dragging
+  is never required); its `column_chooser` shows and hides columns, moves them up and down, takes a
+  width typed in pixels and "Fit to content". Drag resizing exists only in RFDS's AG Grid
+  (`data_grid`), which lex.ui tables do not use. `choose_columns=True` adds the menu to the
+  toolbar, on rows and model tables. The choice is kept in the table's state (`ChosenColumns`,
+  `data.py`) and cleaned on the server: only the table's own columns, widths from 40 to 1,200 px
+  (RFDS's range), and the first column always shown and first, because it names the row and is
+  its link. It lasts until the tab is closed; saving it needs RFDS's saved views and a store (not
+  added). Name: like `search=`, `filters=` and `export=`, it names what the user gets.
+- **Every row: `page_size=None`, up to 200.** RFDS's rule DA-09: at most 200 rows reach the
+  browser in a data table (`DataTableMixin.page_size_options` must be 1-200). `page_size=None`
+  opens the table at 200 rows in one scroll, without the rows-per-page picker; past 200, RFDS's
+  `pagination` appears below the table, so no row is out of reach. More than 200 rows in one
+  scroll is RFDS's AG Grid (virtualised), a different engine; not added. `page_size=50` sets the
+  rows a page (1-200), offered with 25, 50, 100 and 200. Name: `page_size`, as `lex_table()` and
+  RFDS's state call it; `rows_per_page=` and `paged=False` were considered.
+- **A totals row says what it sums.** `totals={"amount": "sum"}` totals the rows the search and
+  filters leave, as before; `"sum of all rows"` totals every row the handler returns, whatever the
+  user narrows (a handler that searches for itself is read again without the search). While a
+  search or a filter is on, the label says which: "Total of matching rows" or "Total of all rows";
+  otherwise "Total". All totals of one table cover the same rows ("write "sum" for each column,
+  or "sum of all rows" for each"). Name: a second word for `totals=` rather than a new argument
+  (`totals_of="all"` considered). A model table still cannot total (5.13).
+
 ## 6. Limits and risks
 
 - **The address on mount.** Step 1 found that Reflex sends a component's mount event with the

@@ -1613,3 +1613,185 @@ does not remove user launch configurations.
 | 1.855 | Several choices declared wrongly, and shown | no options, non-text options, a start that is no list, options on another kind, the kinds listed; `ui.fact(kind="choices")` joined by commas |
 
 **Scenario range:** 1.852 – 1.855. **Test file:** `lex/test_project/tests/init/test_1dl_ui_form_choices.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dl](batches.md).
+
+### 1dm. lex.ui: a job reports progress from a callback -- self.progress(fraction, message) ✅
+
+**What it tests:** `self.progress(fraction, message)` in a `@ui.job`, handed to a library as its progress callback and called from the library's own thread: the page shows it as a `yield ui.progress(...)`; Stop reaches the library through it; anywhere else it says it belongs in a job; `progress` is a reserved name.
+
+**Why a regression matters:** a progress bar frozen while a library works, a Stop button the library never hears, half-finished fields written from a foreign thread, or a field called `progress` that silently hides the helper.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.856 | A callback on the library's thread shows the job's progress | each fraction and message reaches the browser in order, as a yield's; the callback ran on the library's thread; a report carries no other field; the job ends with its result; `self.progress` on the body's thread beside `yield ui.progress` |
+| 1.857 | After Stop the next report raises the stop a yield would | Stop and leaving a `stop_on_leave` page: `GeneratorExit` in the calling thread; the library stops; the body's cleanup runs; changes since the last yield discarded; no error; nothing running |
+| 1.858 | Elsewhere self.progress says it belongs in a job | an action, a load, a job that has ended: `RuntimeError` naming `self.progress` and `@ui.job`; nothing reported |
+| 1.859 | progress is a name a ui.State reserves | a property the browser cannot call; a field, computed var or method named `progress` refused when the class is defined; the route argument `[progress]` refused; `lex reflex check` reports it |
+
+**Scenario range:** 1.856 – 1.859. **Test file:** `lex/test_project/tests/init/test_1dm_ui_job_progress_callback.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dm](batches.md).
+
+### 1dn. lex.ui forms: a text field of several lines -- ui.field(key, lines=6) ✅
+
+**What it tests:** `ui.field(key, lines=6)` -- RFDS's text area for notes, a comment or a pasted list; the handler gets a `str` with its line breaks, trimmed at the ends; `lines=` only with text, and only a number of lines.
+
+**Why a regression matters:** a pasted list squashed onto one line, a field that calls the server on every keystroke, or `lines=` silently ignored on a number.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.860 | Lines makes the field RFDS's text area, and it sends nothing while typing | RFDS's textarea with that many rows, full width; label, help, required mark, the server's message; `value=` a text or a state value; without `lines=` still the one-line input; one event: the submit; compiled with Reflex's page compiler; in a step and in ask= |
+| 1.861 | The handler gets the text with its line breaks, trimmed at the ends | through Reflex's event processor and `ui.testing.run`: the lines as typed, blank space at the ends gone; only blank lines on a required field is a message and no run; a pasted list splits into its lines in a wizard; a dialog's row key and text |
+| 1.862 | lines= belongs to text and is a number of lines | number, date, yes/no, choice and choices refuse it, naming the page, the slot and the field; `kind="text"` takes it; 1, 0, a text, `True`, 2.5 refused when declared, saying to leave it out for one line |
+
+**Scenario range:** 1.860 – 1.862. **Test file:** `lex/test_project/tests/init/test_1dn_ui_form_lines.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dn](batches.md).
+
+### 1do. lex.ui: a state field named like a route argument stops the app at start-up, not the frontend build ✅
+
+**What it tests:** the start-up route check refuses a dynamic route argument that has the name of a field or computed var of any state -- what Reflex refuses only when it builds the frontend -- with a sentence naming the field, the state and the route; and refuses nothing Reflex lets through.
+
+**Why a regression matters:** a project whose tests are green and whose deploy fails on a frontend build error, or a start-up that refuses an app Reflex would build.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.863 | A field named like a route argument stops the app with a sentence | a lex.ui field and computed var, a plain Reflex field, an inherited one; a page the app added, a declared one, an optional argument, a route without its leading slash: a `ValueError` naming the field, its state and module and the route, saying to rename the field; Reflex itself refuses each name |
+| 1.864 | What Reflex lets through starts | an argument named like a backend field, an event handler, a static part of a path, or nothing any state has: the app starts; Reflex lets each through too |
+| 1.865 | The route check runs before the pages are built | `ui.install` calls `check_app_routes`, which checks the state fields; a helper's name (`[user]`) is still refused first, with its own sentence |
+
+**Scenario range:** 1.863 – 1.865. **Test file:** `lex/test_project/tests/init/test_1do_ui_route_argument_fields.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1do](batches.md).
+
+### 1ds. lex.ui forms: a choice searched on the server ✅
+
+**What it tests:** `ui.field(key, options=State.rows_handler)` -- RFDS's server-search combobox over a `@ui.rows` handler; a page of `{value, label}` matches; the value checked against what the tab was offered; in a form, a step and a button's ask=.
+
+**Why a regression matters:** every customer in the page, a row's other fields (an e-mail address) in the browser, a forged id reaching the handler's body, or an empty box until the user types.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.900 | A search offers a page of matches and nothing else of the rows | the tidied text; at most `MATCHES` `{value, label}`; no other field reaches the browser; labels matched when the handler does not search; rows without a label fail as a table's; an unknown field ignored |
+| 1.901 | The server accepts only a value it offered to the tab | the row's id for the body; unoffered or forged ids refused at the field; required; earlier searches' values kept |
+| 1.902 | The field is RFDS's combobox searching on the server | server-search mode over `ui_matches`; `ui_search` on typing and opening; the id sent, the label shown; compiled; in a step and ask= |
+| 1.903 | A searched choice declared wrongly | several, a start value, an action as options, two rows handlers for one field |
+
+**Scenario range:** 1.900 – 1.903. **Test file:** `lex/test_project/tests/init/test_1ds_ui_form_searched_choice.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ds](batches.md).
+
+### 1dt. lex.ui: a refusal shown above a form's submit button, with a title ✅
+
+**What it tests:** `ui.Refuse(message, title=)` -- in a form, and in an action's ask= dialog, RFDS's inline message above the submit button until the form is sent again; elsewhere a toast headed by the title.
+
+**Why a regression matters:** a refusal the user never sees, one that stays after the form was sent again, the same sentence twice, or a title that is lost.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.904 | Outside a form a refusal is a toast headed by its title | the title first, the sentence as the description; without a title as before; nothing kept in place |
+| 1.905 | In a form the refusal stays above the button until the form is sent again | kept per handler, no toast; cleared by every send and a new visit; API refusals too; errors stay toasts; jobs too |
+| 1.906 | The form shows it above its submit button | RFDS's inline message before the action bar, warning, announced, titled; compiled; a wizard too |
+| 1.907 | A dialog that asked stays open with the refusal | an action's dialog keeps it and closes on success; a job's dialog closed, its refusal a toast |
+
+**Scenario range:** 1.904 – 1.907. **Test file:** `lex/test_project/tests/init/test_1dt_ui_refuse_in_place.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dt](batches.md).
+
+### 1du. lex.ui: a toast that offers to open the result elsewhere ✅
+
+**What it tests:** `ui.toast(..., link=ui.link(...))` -- the targets and checks of every link, run when the handler makes the toast; RFDS's toast with one action.
+
+**Why a regression matters:** a toast without its button, a button that leads to the wrong page, or a link whose mistake is found only when a user presses it.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.908 | A toast link leads where a ui.link leads | page, raw page, record, outside address |
+| 1.909 | The toast is RFDS's toast with its action | one action, worded as the link, redirecting; longer duration |
+| 1.910 | A toast link written wrongly is refused where it is written | each mistake says what to write |
+
+**Scenario range:** 1.908 – 1.910. **Test file:** `lex/test_project/tests/init/test_1du_ui_toast_link.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1du](batches.md).
+
+### 1dy. lex.ui tables: the name pinned and given room, a code kept narrow, the Columns menu, every row at once, totals that say what they sum ✅
+
+**What it tests:** `ui.column(kind="name"|"code", pin=True)`, `ui.table(choose_columns=True, page_size=N|None, totals={...: "sum of all rows"})` -- RFDS's sticky column, field widths, column chooser, pagination and totals, on rows and model tables.
+
+**Why a regression matters:** a name that scrolls away, a user's column choice that hides the row's name, a row beyond 200 out of reach, or a total whose meaning changes silently when the user searches.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.940 | The name stays in place and has room; a code stays narrow | sticky start, entity kind at the wide width, identifier at the narrow width; model fields too |
+| 1.941 | A pin written wrongly says what to write | not a bool; not the first column; no width argument |
+| 1.942 | The user chooses, orders and sizes the columns | RFDS's column chooser; the first column always shown and first; widths 40-1,200 px |
+| 1.943 | `page_size=` sets the rows a page, `None` shows every row | 50; default 25; `None`: 200, no size picker, pagination past 200; wrong sizes refused |
+| 1.944 | Every row in one scroll, and past 200 the rest is reached | 150 on one page; 250 as 200 + 50 |
+| 1.945 | A totals row says what it sums and can sum every row | "Total", "Total of matching rows", "Total of all rows"; mixing refused |
+| 1.946 | A table with all of it compiles | Reflex's page compiler |
+
+**Scenario range:** 1.940 – 1.946. **Test file:** `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dy](batches.md).
+
+### 1dz. lex.ui pages: a section closed until the user opens it, saying how many rows it holds ✅
+
+**What it tests:** `ui.section(title, ..., collapsed=True)` -- RFDS's section as a native disclosure, closed at first, its title counting its table's rows; in a form's `result=` and `ui.embed`; refused on a record page.
+
+**Why a regression matters:** a detail that shows open and buries the result, a count that is wrong or shows before the rows are read, or a closed section where RFDS cannot close one.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.947 | A closed section opens in the browser and says how many rows it holds | RFDS's collapsible section, closed; the count once loaded; no table: title alone; model tables; embed |
+| 1.948 | A closed section compiles | Reflex's page compiler |
+| 1.949 | A closed section where RFDS cannot close one is refused | record page; not a bool |
+
+**Scenario range:** 1.947 – 1.949. **Test file:** `lex/test_project/tests/init/test_1dz_ui_section_collapsed.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dz](batches.md).
+
+### 1ea. lex.ui pages: a tool's result as tabs -- one section at a time, as on a record page ✅
+
+**What it tests:** `ui.form(..., tabs=True)` -- the result's sections as RFDS's tabs, each title its tab, the parts they share above; the record page's `tabs=True`, the same argument.
+
+**Why a regression matters:** a second way to write tabs, a tab whose content is lost, a tab a user may not see drawn anyway, or a mistake that only shows in the browser.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.950 | The result's sections are tabs, each title its tab | RFDS's tabs; shared parts above; without `tabs=` as before |
+| 1.951 | Tabs compile and keep who may see a tab | Reflex's page compiler; RFDS's tab permission; part loads |
+| 1.952 | Tabs written wrongly say what to write | seven refusals |
+
+**Scenario range:** 1.950 – 1.952. **Test file:** `lex/test_project/tests/init/test_1ea_ui_form_result_tabs.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ea](batches.md).
+
+### 1dv. lex.ui: a result held privately on the server -- ui.private ✅
+
+**What it tests:** `ui.private()` -- a state field whose value stays in the server process's memory, bound to its tab and user, for a while; never in a state pickle or the browser; a plain refusal once it is gone.
+
+**Why a regression matters:** personal data in Redis or the browser, one user's value read by another, a value that outlives its limits, or a page that shows nothing or old data where it was.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.920 | The value stays in memory, never in a pickle or the browser | an action, a job and a table's rows read it; every state pickled as Reflex's Redis and disk managers do, the state as the browser gets it, and every update hold no part of it; only a stamp; nothing kept is the empty value |
+| 1.921 | Another user or another process never sees it | another user signed in on the tab is refused with the sentence and gets nothing; a process that never held it says the same; the page keeps what it had |
+| 1.922 | It leaves after its idle time and its maximum age | reads within the idle time keep it; past the maximum age or the idle time it is gone; the lex.ui clock drops it from memory; LEX_UI_PRIVATE_VALUES bounds memory, least recently used first |
+| 1.923 | A new visit drops it unless kept | the opener drops a value not kept (reading says so); keep=True stays; a load resets the one not kept and keeps the kept; a kept value that is gone is reset by the load: no error-page loop |
+| 1.924 | What the user sees when it is gone | an action and a job are refused with the sentence (toast; ui.failed for a job); a table's message is the sentence; a failed action leaves it gone, and restores a kept value |
+| 1.925 | ui.testing seeds and reads it like any field | fields= seeds it; result.fields reads it; ui.testing.GONE seeds a gone value and is what result.fields holds; GONE copies and pickles as itself |
+| 1.926 | A private field declared wrongly says what to write | a public name, no type, a plain Reflex state, a limit of 0 or True, keep= not a bool; the empty value from the type; neither a backend var nor a var |
+
+**Scenario range:** 1.920 – 1.926. **Test file:** `lex/test_project/tests/init/test_1dv_ui_private.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dv](batches.md).
+
+### 1dw. lex.ui: a limit on how many runs of a job go at once -- @ui.job(limit=) ✅
+
+**What it tests:** `@ui.job(limit=N)` -- at most N runs of a job at once in the server process; a further press is refused at once with a sentence, not queued.
+
+**Why a regression matters:** an expensive job run more often than allowed, a refused press that changes the page, or a lost place that locks the job for everyone.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.927 | Beyond the limit a press is refused at once | two run at once; the third is refused before the others end, with the sentence, as a toast and in ui.failed; its body never runs; afterwards it runs |
+| 1.928 | A place is given back however the run ends | a failure, a body's refusal, a cancel and a form's wrong field each free the place; a run reporting through self.progress from a library's thread holds its place while it reports and gives it back when stopped; a refused press of a form's job leaves no field message and is a toast, not above the submit button; limit=1 has its own sentence |
+| 1.929 | The limit is declared as a whole number | 0, True, 2.5 and "2" refused with what to write; the handler carries its limit, also into a mixin's copy |
+
+**Scenario range:** 1.927 – 1.929. **Test file:** `lex/test_project/tests/init/test_1dw_ui_job_limit.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dw](batches.md).
+
+### 1dx. lex.ui forms: a result kept across visits -- ui.form(keep=True) ✅
+
+**What it tests:** `ui.form(..., keep=True)` -- a form's result shown again when the user comes back, while what it shows is kept; said plainly when it is not.
+
+**Why a regression matters:** a user who comes back to an empty form after a long job, a result shown over data that is gone, or a failure while away that is never shown.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.930 | A kept form shows what its job found after the user was away | back while the job runs: running and its progress; back after: the result flag and the rows; the field starts from what was typed; a form not kept starts over |
+| 1.931 | A kept result whose data is gone says so | within the private idle time the result shows; past it, no result and the sentence under the form; a private field not kept does not decide; a failure while away stays to be shown; sending again clears it |
+| 1.932 | The kept form page compiles and shows its failure in place | RFDS's inline message bound to ui.failed for a kept form only; the field's start from the state; compiled with Reflex's page compiler; registered with its state; keep= True or False only |
+| 1.933 | A kept form with a load keeps what the load keeps | after a revisit and the load: the kept private result and the field in the load's keep= survive; what the load does not keep is reset |
+| 1.934 | A kept form keeps its refusal above its submit button | a ui.Refuse with a title stays above the button across a visit for a kept form and leaves for a form not kept; the line under a kept form does not repeat it; sending again clears both |
+| 1.935 | A kept form with tabs and a searched choice | keep=True with tabs=True compiles with its search; back within the idle time the tab's table reads the kept private value; a customer offered before the visit is still accepted; past the idle time the form and the tab's table say it is gone |
+
+**Scenario range:** 1.930 – 1.935. **Test file:** `lex/test_project/tests/init/test_1dx_ui_form_keep.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dx](batches.md).

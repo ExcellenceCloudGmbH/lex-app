@@ -36,13 +36,18 @@
                             ``self.params``, ``self.can()``, ``self.state()``
 ``@ui.load``                fills the page when it opens
 ``@ui.action``              a short handler, under about a second
-``@ui.job``                 long work with progress; the user keeps working
+``@ui.job``                 long work with progress; the user keeps working. ``limit=2``: at
+                            most two runs at once in the server, a further press is refused
 ``@ui.rows``                a table's rows, as a list of dicts; read-only, read as the user
 ``@ui.custom``              a raw Reflex handler, marked for review
-``ui.goto/toast/download``  what a handler returns; ``ui.refresh(State.rows)`` makes the
-                            tables of another state read again
+``ui.goto/toast/download``  what a handler returns; ``ui.toast(link=ui.link(...))`` offers to
+                            open something; ``ui.refresh(State.rows)`` makes the tables of
+                            another state read again
 ``ui.progress``             what a job yields
-``ui.Refuse``               an expected refusal, shown in its own words
+``ui.private``              a state field kept in the server's memory only, for its user, for a
+                            while: ``_report: dict = ui.private()``
+``ui.Refuse``               an expected refusal, shown in its own words (``title=`` heads it): in
+                            a form above its submit button, elsewhere as a toast
 ``ui.ApiError``             lex-app's API refused a call (``.status``, ``.denied``,
                             ``.detail``); uncaught, it is shown to the user
 ``requires=``               ``ui.read/create/edit/delete(Model)``, ``ui.permission()``,
@@ -56,15 +61,19 @@ progress_of/cancel``        event of a Cancel button
 ``ui.record/list/form``     the page kinds: named slots, placed by lex-app (``ui.list`` is
                             left out of ``import *``, which would hide Python's ``list``)
 ``ui.field/step``           a form's inputs, and a wizard's steps; the handler gets ``values``.
-                            ``ui.button(confirm=, ask=)`` asks before its handler runs
-``ui.section``              a titled part of a page; ``load=`` makes it load on its own
+                            ``options=`` a ``@ui.rows`` handler searches on the server as the user
+                            types. ``ui.button(confirm=, ask=)`` asks before its handler runs
+``ui.section``              a titled part of a page; ``load=`` makes it load on its own;
+                            ``collapsed=True`` closes it until the user opens it; ``tabs=True``
+                            on ``ui.record`` or a ``ui.form``'s result shows one section at a time
 ``ui.text/fact/status/      what fills the slots; none takes a styling argument
 message/column/
 button/link``
 ``ui.each/switch``          repetition and choice; ``visible=`` on every component
                             decides what is shown, never what is allowed
 ``ui.table``                rows from a model (``where=``) or a ``@ui.rows`` handler; ``search=``,
-                            ``filters=``, ``export=``, ``totals=``, ``row_actions=``
+                            ``filters=``, ``export=``, ``totals=``, ``row_actions=``,
+                            ``choose_columns=``, ``page_size=`` (``None``: every row, up to 200)
 ``ui.address``              a page's address, for a row that leads to a page of its own
 ``ui.reflex_page``          a page written in raw Reflex, as somewhere a link may lead
 ``ui.custom_block``         a raw component, marked for review with its reason
@@ -88,6 +97,7 @@ from lex.lex_app.reflex.ui.pages.kinds import record, section
 from lex.lex_app.reflex.ui.pages.parts import PageError
 from lex.lex_app.reflex.ui.pages.tables import column, table
 from lex.lex_app.reflex.ui.pages.vocab import button, custom_block, each, fact, link, message, status, switch, text
+from lex.lex_app.reflex.ui.private import private
 from lex.lex_app.reflex.ui.results import Refuse, download, goto, progress, refresh, toast
 from lex.lex_app.reflex.ui.rows import rows
 from lex.lex_app.reflex.ui.runs import cancel, failed, loaded, progress_of, running
@@ -96,7 +106,7 @@ from lex.lex_app.reflex.ui.state import State
 __all__ = [
     "ApiError", "PageError", "Refuse", "State", "action", "address", "button", "cancel", "column",
     "create", "custom", "custom_block", "dashboard", "delete", "download", "each", "edit", "embed", "fact",
-    "failed", "field", "form", "goto", "job", "link", "load", "loaded", "message", "page", "permission", "progress",
+    "failed", "field", "form", "goto", "job", "link", "load", "loaded", "message", "page", "permission", "private", "progress",
     "progress_of", "read", "record", "reflex_page", "refresh", "rows", "running", "section", "signed_in", "status",
     "step", "switch", "table", "testing", "text", "toast",
 ]

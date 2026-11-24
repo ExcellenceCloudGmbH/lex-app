@@ -489,7 +489,7 @@ Built on 2026-11-24 after a spike against RFDS 1.0.0 (`ui.form`, `ui.field`, `ui
 
   | `kind=` | Input (RFDS 1.0.0) | The handler gets | Nothing entered |
   | --- | --- | --- | --- |
-  | `text` | `text_input` | `str`, stripped | `""` |
+  | `text` | `text_input`; `textarea` with `lines=` | `str`, stripped | `""` |
   | `number` | `number_input` | `int`, or `Decimal` with decimals | `None` |
   | `money` | `money_input` (`currency=` as on `ui.fact`, else the home currency) | `Decimal` | `None` |
   | `percent` | `percent_input` (5.25 % is posted as 0.0525) | `Decimal` ratio | `None` |
@@ -543,7 +543,7 @@ Built on 2026-11-24 after a spike against RFDS 1.0.0 (`ui.form`, `ui.field`, `ui
 - **`kind=` is one list for showing and for entering.** `ui.fact` now takes `date`, `year` (no
   thousands separator), `bool` (the words Yes and No), `choice` and `choices` (joined by commas) too.
 - **A choice among many is a type-ahead box over a list the page holds; a server-searched choice is
-  not built.** `options=` takes a list, a dict of value to wording, or a field of the handler's own
+  not built** (since built without a new handler kind: see 6.15). `options=` takes a list, a dict of value to wording, or a field of the handler's own
   state (filled by the page's load), checked against that field on the server. RFDS's `combobox`
   searches on the server only through an event handler and a results field per field: in lex.ui that
   would be a sixth handler kind or a generated state per field, for one input. Left out rather than
@@ -555,9 +555,16 @@ Built on 2026-11-24 after a spike against RFDS 1.0.0 (`ui.form`, `ui.field`, `ui
   options."). The input follows RFDS's own rule, at the same line as the dropdown: its checkbox group up to 12
   options, its multi-select above them or for options from the state. *Cost:* none chosen is `[]`, not `None`; no
   `max=`.
+- **Several lines of text are `lines=`, not a kind.** `ui.field("notes", lines=6)` is RFDS's `textarea`,
+  that many rows high and as wide as the form, uncontrolled like the one-line input; the handler gets a `str`
+  with its line breaks, trimmed at the ends like every text (`values["codes"].splitlines()` for a pasted
+  list). `lines=` is a whole number of 2 or more, refused when the field is declared otherwise ("A field of
+  one line is the default: leave `lines=` out."), and goes with text only: any other kind refuses it when the
+  page is built ("`lines=` goes with text, the default kind: leave `kind=` out."). Added 2026-11-24 (batch 1dn).
+  *Cost:* no character limit or counter (RFDS's `max_length=`, `show_count=`).
 - **A file field is not built** (`kind="file"` says to use `ui.custom_block`).
 - **A new visit starts every form over**: the opener clears the messages, the wizard steps, the
-  results and an open dialog.
+  results and an open dialog -- except the result and the refusal of a form declared `keep=True` (6.18).
 - **`ui.testing.run(...)` results gain `invalid`** (field -> message) for a project's form tests.
 
 A tool page, whole -- a form, a job with progress as submit, a result with a table and a download:
@@ -596,6 +603,165 @@ def invoice_report():
                 ui.button("Download", InvoiceReportState.download)],
     )
 ```
+
+
+### 6.15 A searched choice, a refusal in place, a toast with a link
+
+Built on 2026-11-24 (batches 1ds-1du), on top of 6.14:
+
+- **A choice searched on the server is `options=` a `@ui.rows` handler -- no new handler kind.** 6.14
+  left it out because RFDS's combobox searches only through an event handler and a results field per
+  input. The handler the author writes already exists: a rows handler that takes `search` receives the
+  typed text (one without `search` returns every row and lex-app matches the words against the labels,
+  folded as RFDS's browser filter folds them). The event handler and the results field are lex-app's,
+  shared by every searched field: `ui.State.ui_search(field, text)` and `ui_matches[field]`, keyed by
+  the field's id (the receiving handler's module-qualified name and the field's key). The browser names
+  only that id; the rows handler is looked up in the server's registry and runs as the user, as a
+  table's. Each row gives **`id`** (what the handler receives; an `int` stays an `int`, anything else
+  arrives as text) and **`label`** (the words the user reads) -- named keys rather than "the first
+  field that is not the id", which depends on a dict's order and is harder to explain.
+- **Only a page of matches reaches the browser** (`forms.MATCHES`, 50), each `{value, label}`: none of
+  a row's other fields. The first page is asked for when the field appears (`on_mount`), so the list is
+  ready when it opens; RFDS debounces typing (250 ms) and a newer search supersedes an older one.
+- **The server accepts only a value it offered to this tab.** Every value offered is remembered on the
+  server (`_ui_offered`, a backend field: never sent), so a value chosen from an earlier search stays
+  valid while the user types on; a forged or merely existing value is refused at the field ("Choose one
+  of the options."). Past 1,000 remembered values only the latest search's count. A failed search
+  (the rows handler raised, or a row without `id` or `label`) is handled as a table's: logged with what
+  to write and a reference, the reference shown at the field.
+- **RFDS's server-search combobox shows its value as it is**, not an option's label. lex.ui gives the
+  combobox the chosen match's label (under a name the server ignores, `<key>__shown`) and sends the id
+  beside it in a hidden input under the field's key. *Cost:* the chosen item carries no check mark in
+  the open list.
+- **A searched choice starts empty and chooses one.** `value=` is refused (the server cannot word, or
+  accept, a value it never offered); `kind="choices"` with a searched source is refused: RFDS's
+  multi-select has no server search. *Cost:* an edit form cannot show the current customer in the box.
+- **It works in a form, a wizard's step and a button's `ask=`**, as every field. A project's unit test
+  sends `ui_search` through `ui.testing.Harness` before it sends the form.
+- **A form's refusal is shown in the form, above its submit button** -- where the user is looking --
+  in RFDS's `inline_message` (warning tone, as the toast it replaces; `role="alert"`: it is new and the
+  form did not do what was asked). It is kept per handler (`ui_refused[key] = {title, message}`) and
+  leaves when the form is sent again, whatever comes of that send, and on a new visit -- as the result
+  of 6.14 does (a form declared `keep=True` keeps both: 6.18). It is not also a toast: RFDS's rule is that a warning is never *only* a toast, and the
+  same sentence twice, one of them persistent, is noise. A refusal by lex-app's API (not permitted, a
+  4xx) is a refusal too; an unexpected failure stays a toast with its reference, since nothing in the
+  form can fix it. One way to refuse, `raise ui.Refuse(...)`, wherever the handler runs: no
+  form-error return value was added.
+- **`ui.Refuse(message, title=)`: an optional short heading.** In a form it heads the inline message;
+  outside a form the refusal is a toast as before, its first line the title and its second the
+  sentence (RFDS's toast `description`). *Considered:* a `heading=` word; `title=` is the word the
+  page kinds, sections and RFDS's own messages already use.
+- **An action's `ask=` dialog stays open until the action succeeds**, so its refusal shows in the
+  dialog, above its buttons; before, it closed as soon as the values passed. A job's dialog still
+  closes when the job starts -- the user keeps working while it runs -- so a job's refusal from a
+  dialog is a toast, headed by its title. `confirm=` dialogs (no form) close first, as before.
+- **A toast offers to open something with `link=ui.link(...)`**: `return ui.toast("Your export is
+  ready.", link=ui.link("Open", to=history_page, key=report_id))`. No action API was invented: the
+  link is written as every link is, with the same targets (`to=` a page or a `ui.reflex_page`,
+  `record=(Model, pk)`, `href=` an outside address) and the same checks, run when the handler makes
+  the toast, so a wrong link fails the handler, not the user's click ("ui.toast(link=): a link to page
+  `export_page` (/exports/[key]) is missing key. ... Write `to=export_page, key=...`."). It becomes
+  RFDS's `ToastAction` -- one button, the link's words, opening the address as `ui.link` would
+  (`record=` and `href=` as outside addresses) -- and RFDS keeps a success or info toast with an action
+  open 10 seconds. `visible=` is refused: a toast's link is always shown. RFDS's rule that a toast's
+  action is also reachable on the page is the author's, said in `ui.toast`'s docstring. *Considered:*
+  `action=` (RFDS's word, but it takes an event) and a `ui.toast_action`; both are a second way to say
+  where something leads.
+
+### 6.16 A section that opens and closes (2026-11-24, batch 1dz)
+
+A need found while rewriting dashboards: a part of a page closed until the user opens it -- the
+fields a file was read with, the lines left out -- with a count in its title, "Fields read (12)".
+
+```python
+result=[ui.section("Orders", ui.table(ImportState.orders, columns=["name"])),
+        ui.section("Fields read", ui.table(ImportState.fields_read, columns=["name"]), collapsed=True)]
+```
+
+- **`collapsed=True` is RFDS's section as a native disclosure** (`rfds.section(collapsible=True,
+  default_open=False)`: `<details>`/`<summary>`, opened in the browser with no round trip). It works
+  wherever a section has its own heading: a form's `result=`, and `ui.embed(ui.section(...))`.
+  Name: a section is open by default, so the word says the exception, as `required=` does.
+- **The count comes from the section's table.** A title is a sentence, not a state value
+  (sections are anchors and table captions by their title), so a count written into the title
+  would need a second way to give a title. Instead a closed section that holds one table shows,
+  once the table has read its rows, the table's row count through RFDS's translation
+  (`"{title} ({count, number})"`) -- the same number the table's toolbar shows; before that, the
+  title alone. A closed section without a table has its title alone. The table reads its rows
+  when the page shows it, also while the section is closed (the content of `<details>` is
+  mounted), so the count is there before the user opens it. *Cost:* a count of anything but a
+  table's rows is not offered.
+- **A record page's sections are always open.** RFDS's object page lists them under "On this
+  page" and has no closed section; `collapsed=True` there is refused, pointing to `tabs=True`.
+
+
+### 6.17 Tabs inside a page (2026-11-24, batch 1ea)
+
+A need found while rewriting dashboards: two or more views of one result side by side as tabs --
+a table per region, or the figures and a chart. **Tabs existed already**: `ui.record(tabs=True)`
+shows a record's sections one at a time (RFDS's object page with `navigation="tabs"`). The same
+argument now works where sections also are, a form's `result=`; no `ui.tabs` was added.
+
+```python
+ui.form(title="Region report", submit=RegionReportState.build_report, fields=[...], tabs=True,
+        result=[ui.text(RegionReportState.note),
+                ui.section("North", ui.table(RegionReportState.north, columns=["name"])),
+                ui.section("South", ui.table(RegionReportState.south, columns=["name"]))])
+```
+
+- **Each section's title is its tab** (RFDS's `tabs` with one `TabSpec` per section, switched in
+  the browser through a client state, as RFDS's object page does); the title is not repeated as a
+  heading inside the tab. What comes before the first section -- a sentence, a button -- is above
+  the tabs and shared by all; a part after a section is refused ("Put what every tab shares
+  first, then the sections").
+- **The same rules as a record's tabs.** Two or more sections; each its own title; `visible=` on a
+  section is a permission, RFDS's tab permission (a refused tab is not drawn), never a state value;
+  a closed section is refused in a tab ("a tab is opened by its tab"). A section's `load=` stays a
+  part load. RFDS mounts only the open tab, so a tab's table reads its rows when the tab is opened.
+- *Not added:* a count on each tab (RFDS's tab badge): a table in a tab that is not open has not
+  read its rows, so the count would be missing exactly where it is wanted.
+
+
+### 6.18 A form's result kept across visits: `ui.form(keep=True)` (2026-11-24)
+
+A user starts a long job from a form, leaves the page, comes back, and should find what it found.
+Built in batch 1dx.
+
+- **What existed, and what did not.** A state's fields already survive a visit: a page without a
+  load never resets them, and a load's `keep=("customer",)` exempts fields from its reset. A job
+  keeps running when the user leaves (unless `stop_on_leave=True`) and writes its result. What did
+  not survive was the form's result flag: the opener starts every form over (6.14). So `keep=` on
+  the state alone shows an empty form; one option was added.
+- **`ui.form(..., keep=True)` keeps the result flag across visits**, the same word as the load's
+  `keep=` and `ui.private(keep=True)`: "survives a new visit". Back while the job runs, the form
+  shows its progress; back after it finished, the result. Its wizard step and field messages still
+  start over. *Considered first:* `@ui.load(keep=...)` alone (does not reach the flag), a job
+  option (the result is declared on the page, not the handler), keeping every form (an entry form
+  should start over).
+- **What was typed is not kept by lex-app** (it may be personal): a field shows it again through
+  `value=` on a state field the handler sets, which the load keeps -- `ui.field("customer",
+  value=ReportState.customer)`, `self.customer = values["customer"]`, `@ui.load(keep=("customer",))`.
+- **A kept result shows only while what it shows is kept.** On a new visit the opener checks the
+  submit handler's state: if a `ui.private(keep=True)` field of it is gone (its idle time or age
+  passed, another process, another user), the result does not show over nothing; the form says,
+  under it, "The last result is no longer available: results are kept only for a while. Send the
+  form again." A private field that is not kept leaves with every visit and does not decide: what
+  reads it says it is gone where it reads it (action design 6.11).
+- **A kept form shows its handler's last failure under it**, in RFDS's inline message (warning
+  tone), besides the toast: the user may have been away when it was toasted. Sending the form again
+  clears it.
+- **A kept form keeps its refusal too, in the one place a refusal shows** (6.15's refusal in place): the
+  opener keeps `ui_refused` for a kept form's handler, so a `ui.Refuse` stays above the submit
+  button, headed by its title, whether the user stayed or came back; the line under the form then
+  stays empty (`ui_failed` holds the same sentence), so a refusal is never shown twice. Under the
+  form remain what has no place above the button: an unexpected failure's toasted reference, and
+  "The last result is no longer available ...". A form that is not kept drops its refusal on a new
+  visit, as 6.15 says.
+- **A searched choice (6.15) starts empty on a kept form too**: `value=` is refused for it, and the
+  values offered to the tab (`_ui_offered`) are not part of the visit, so a value chosen before the
+  visit away is still accepted when the user chooses it again.
+- *Cost:* the result's fields must be kept by the page's load too (its `keep=`, or `ui.private(keep=True)`);
+  lex-app cannot see which fields a result reads, so it does not check this.
 
 ---
 
@@ -669,7 +835,7 @@ Declaring        @ui.page(route, nav=, icon=, requires=, params=)      @ui.dashb
 Kinds            ui.overview(title, load=, figures=, tiles=, sections=, actions=)
                  ui.list(title, load=, filters=, table=, actions=)
                  ui.record(title, load=, status=, facts=, sections=, tabs=, actions=)
-                 ui.form(title, load=, fields= | steps=, submit=, result=, actions=)
+                 ui.form(title, load=, fields= | steps=, submit=, result=, actions=, keep=)
 
 Components       ui.text(sentence, **values)             ui.fact(label, value, kind=)
                  ui.figure(label, value, kind=, change=, to=)

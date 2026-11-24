@@ -52,6 +52,13 @@ class _Step:
         self.done = threading.Event()
 
 
+class _Report(_Step):
+    """One ``self.progress(...)`` of a job, from its body or from a thread the body started.
+
+    Only the progress is written: the job's other fields wait for its next yield or its end.
+    """
+
+
 @dataclasses.dataclass
 class _Return:
     value: Any
@@ -120,7 +127,7 @@ def _classify(key: str, exc: BaseException, user: str = "") -> Outcome:
 
     denied = results.message("lex.ui.denied", "You are not permitted to do this.")
     if isinstance(exc, results.Refuse):
-        outcome = Outcome("refused", "", exc.message)
+        outcome = Outcome("refused", exc.title, exc.message)
     elif isinstance(exc, _NotPermitted) or (isinstance(exc, LexApiError) and exc.denied):
         logger.warning("lex.ui handler %s was not permitted for user %s", key, user or "(unknown)")
         outcome = Outcome("denied", "", denied)
@@ -150,7 +157,18 @@ def _classify(key: str, exc: BaseException, user: str = "") -> Outcome:
 
 
 def _toast(outcome: Outcome) -> results.Toast:
+    if outcome.kind == "refused" and outcome.title:         # the title heads it, the sentence under it
+        return results.Toast(outcome.title, "warning", outcome.message)
     return results.Toast(outcome.message, "warning" if outcome.kind == "refused" else "error")
+
+
+def _in_place(outcome: Outcome, receives: Any, kind: str) -> bool:
+    """Whether a refusal is shown in the form the user sent, rather than as a toast.
+
+    A form's or dialog's handler that refused (or was denied); not an unexpected failure. A dialog
+    that started a job closed when the job started: there is no form left to show it in.
+    """
+    return receives is not None and outcome.kind != "error" and not (kind == "job" and receives.dialog)
 
 
 async def _denied(session: context.Session, requirements: tuple | None) -> bool:
@@ -200,8 +218,37 @@ async def _shielded(wind_up: Any) -> Any:
     return task.result()
 
 
+#: A running job's working copy (by id) -> (that copy, how its ``self.progress`` reaches the page).
+_REPORTERS: dict[int, tuple[Any, Callable[[results.Progress], bool]]] = {}
+_REPORTERS_LOCK = threading.Lock()
+
+_NOT_IN_A_JOB = ("self.progress(fraction, message) belongs in a @ui.job: call it in the job's body, or in a "
+                 "thread the body started, while the job runs. An action or a load shows no progress; make "
+                 "long work a @ui.job.")
+
+
+def reporter(target: Any) -> Callable[..., None]:
+    """``self.progress``: show a running job's progress in the page, like ``yield ui.progress(...)``.
+
+    Callable from the job's body and from any thread the body started (a library's callback). It
+    writes only the progress. Once the job was stopped -- Stop, or leaving the page with
+    ``stop_on_leave=True`` -- it raises ``GeneratorExit``, the stop the job's next yield would raise.
+    Anywhere else it raises a ``RuntimeError`` saying it belongs in a ``@ui.job``.
+    """
+
+    def progress(fraction: float, message: str = "") -> None:
+        with _REPORTERS_LOCK:
+            found = _REPORTERS.get(id(target))
+        if found is None or found[0] is not target:
+            raise RuntimeError(_NOT_IN_A_JOB)
+        if found[1](results.progress(fraction, message)):
+            raise GeneratorExit
+
+    return progress
+
+
 async def _drive(inv: context.Invocation, pool: str, fn: Callable[..., Any], target: Any,
-                 args: tuple, kwargs: dict) -> AsyncIterator[Any]:
+                 args: tuple, kwargs: dict, *, reports: bool = False) -> AsyncIterator[Any]:
     """Run the body on ONE pool thread; yield a ``_Step`` for each of its yields, then a ``_Return``.
 
     The body's thread waits at each yield until the consumer has handled the step (and may have
@@ -209,42 +256,72 @@ async def _drive(inv: context.Invocation, pool: str, fn: Callable[..., Any], tar
     consumer stops early (closes this generator, fails, or is cancelled), the body is told to
     stop at its yield, and this generator returns only once the body's thread has finished, so
     the body's own cleanup never runs after the consumer has moved on.
+
+    With ``reports=True`` (a job), ``self.progress(...)`` on ``target`` -- from the body's thread or
+    any other -- yields a ``_Report`` and waits, like a yield, for the consumer to handle it. A
+    report answered with ``stop`` raises ``GeneratorExit`` where it was made; the body ending with
+    it is a stopped run.
     """
     loop = inv.loop
     queue: asyncio.Queue = asyncio.Queue()
     lock = threading.Lock()
     closed = False
-    outstanding: _Step | None = None     # the step the body's thread is waiting on, if any
+    halted = False                       # a report was answered with stop
+    outstanding: set[_Step] = set()      # the steps threads are waiting on
 
-    def emit(value: Any) -> bool:
-        nonlocal outstanding
-        step = _Step(value)
+    def emit(value: Any, kind: type = _Step) -> bool:
+        nonlocal halted
+        step = kind(value)
         with lock:
             if closed:
+                halted = halted or kind is _Report
                 return True
-            outstanding = step
+            outstanding.add(step)
         loop.call_soon_threadsafe(queue.put_nowait, step)
         step.done.wait()
+        with lock:
+            outstanding.discard(step)
+            if step.stop and kind is _Report:
+                halted = True
         return step.stop
+
+    def report(value: results.Progress) -> bool:
+        try:
+            on_loop = asyncio.get_running_loop() is loop
+        except RuntimeError:
+            on_loop = False
+        if on_loop:                      # it would wait for the loop it blocks
+            raise RuntimeError(_NOT_IN_A_JOB)
+        return emit(value, _Report)
 
     def body() -> Any:
         token = context.enter(inv)
         try:
             access = guard.acting_user(inv.session.user) if inv.orm else guard.block_queries(inv.handler)
             with access:
-                out = fn(target, *args, **kwargs)
-                if not inspect.isgenerator(out):
-                    return out
                 try:
-                    while True:
-                        if emit(next(out)):
-                            out.close()
-                            return _STOPPED
-                except StopIteration as done:
-                    return done.value
+                    out = fn(target, *args, **kwargs)
+                    if not inspect.isgenerator(out):
+                        return out
+                    try:
+                        while True:
+                            if emit(next(out)):
+                                out.close()
+                                return _STOPPED
+                    except StopIteration as done:
+                        return done.value
+                except GeneratorExit:
+                    with lock:
+                        stopped = halted
+                    if stopped:              # self.progress raised the stop, and the body let it through
+                        return _STOPPED
+                    raise
         finally:
             context.leave(token)
 
+    if reports:
+        with _REPORTERS_LOCK:
+            _REPORTERS[id(target)] = (target, report)
     task = asyncio.ensure_future(pools.run(pool, body))
     task.add_done_callback(lambda _: queue.put_nowait(_END))
     try:
@@ -257,10 +334,11 @@ async def _drive(inv: context.Invocation, pool: str, fn: Callable[..., Any], tar
     finally:
         with lock:
             closed = True
-            waiting = outstanding
-        if waiting is not None and not waiting.done.is_set():   # stopped early: let the body's thread go
-            waiting.stop = True
-            waiting.done.set()
+            waiting = list(outstanding)
+        for step in waiting:                                    # stopped early: let the waiting threads go
+            if not step.done.is_set():
+                step.stop = True
+                step.done.set()
         if not task.done():
             try:
                 await asyncio.shield(task)                      # the body's cleanup completes first
@@ -271,6 +349,9 @@ async def _drive(inv: context.Invocation, pool: str, fn: Callable[..., Any], tar
                 else:
                     logger.warning("lex.ui handler %s: the body's cleanup failed after the run was stopped type=%s",
                                    inv.handler, type(exc).__name__)
+        if reports:
+            with _REPORTERS_LOCK:
+                _REPORTERS.pop(id(target), None)
     value = await task
     yield _Return(None if value is _STOPPED else value)
 
@@ -345,7 +426,7 @@ def action(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any
             session, failure = await _session(self, requirements)   # who is acting, what they may do
             if failure is None and receives is not None:
                 try:
-                    args, arg, go = forms.receive(self, key, fn, receives, args, kwargs)
+                    args, arg, go = forms.receive(self, key, fn, receives, args, kwargs, kind="action")
                     kwargs = {}
                 except Exception as exc:  # noqa: BLE001 - reported below, like a failure of the body
                     failure = exc
@@ -390,11 +471,14 @@ def action(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any
                 if failure is not None:
                     outcome = _classify(key, failure, user=_user_id(session))
                     message = outcome.message
-                    for event in results.to_events([_toast(outcome)]):
-                        yield event
+                    if _in_place(outcome, receives, "action"):
+                        forms.refused(self, key, outcome.title, outcome.message)
+                    else:
+                        for event in results.to_events([_toast(outcome)]):
+                            yield event
                 else:
                     if receives is not None:
-                        forms.done(self, key)
+                        forms.done(self, key, close=receives.dialog)
                     for event in _tables_of(self):        # its state's tables read again
                         yield event
             finally:
@@ -423,7 +507,17 @@ async def _merge(inv: context.Invocation, live: Any) -> None:
         workcopy.merge(target, draft)
 
 
-def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_leave: bool = False) -> Any:
+def _limit_message(fn: Callable[..., Any], limit: int) -> str:
+    """The refusal of a run over ``limit=``, naming the job as its button does ("Build report")."""
+    name = fn.__name__.replace("_", " ").strip().capitalize()
+    if limit == 1:
+        return results.message("lex.ui.job.limit.one", "{name} is already running. Try again in a moment.", name=name)
+    return results.message("lex.ui.job.limit", "{name} is already running {limit} times. Try again in a moment.",
+                           name=name, limit=limit)
+
+
+def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_leave: bool = False,
+        limit: int | None = None) -> Any:
     """Long work, written as a plain function; the user keeps working while it runs.
 
     The body works on a copy of the state. Only what it changed is written back, at each
@@ -431,7 +525,30 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
     per tab and set of arguments at a time; a repeat is ignored. ``yield ui.progress(...)``
     reports progress; a cancel, or leaving the page with ``stop_on_leave=True``, takes effect at
     a yield.
+
+    A library that reports progress through a callback gets ``self.progress``, which shows the
+    progress as ``yield ui.progress(fraction, message)`` would, also when the library calls it from
+    a thread of its own::
+
+        @ui.job
+        def build(self, values):
+            report = reports.build(values["year"], on_progress=self.progress)
+            return ui.download(data=report, filename="report.pdf")
+
+    ``self.progress`` writes only the progress: the job's other fields are written at its next
+    ``yield`` and at its end. Once the job is stopped, the next ``self.progress(...)`` raises the
+    stop its next ``yield`` would (``GeneratorExit``), so the library stops too. Anywhere but a
+    running job it raises an error.
+
+    ``limit=2`` lets at most two runs of the job go at once in this server process, for all users
+    together (an expensive read of another system). A press beyond that is refused at once, not
+    queued: "Export is already running 2 times. Try again in a moment." -- a toast, and
+    ``ui.failed``. A form's job is told so in a toast too, not above its submit button: it is about
+    the press, not about what was entered, and it no longer holds once a run ends.
     """
+    if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or limit < 1):
+        raise ValueError(f"@ui.job(limit=) is how many runs of the job may go at once: a whole number, 1 or "
+                         f"more; got {limit!r}")
 
     def decorate(fn: Callable[..., Any]) -> Any:
         _check_plain(fn, "job")
@@ -451,6 +568,8 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                 return                                    # already running: a repeat is ignored
             started = False
             stopped = False
+            placed = False                                 # holds one of the job's places under limit=
+            busy: Exception | None = None                  # refused for limit=: a toast, also for a form's job
             message = ""
             session: context.Session | None = None
 
@@ -463,16 +582,22 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                         elif message:
                             self.ui_failed = {**dict(self.ui_failed), key: message}
                 finally:
+                    if placed:
+                        runs.give_place(key)
                     runs.release(token, key, call)
 
             try:
                 try:
                     # Resolved before the user's lock is taken: nothing inside a block below raises.
                     session, failure = await _session(self, requirements)
+                    if failure is None and limit is not None:
+                        placed = runs.take_place(key, limit)
+                        if not placed:                    # refused at once, before the values: nothing else changes
+                            failure = busy = results.Refuse(_limit_message(fn, limit))
                     if failure is None and receives is not None:
                         async with self:
                             try:
-                                args, arg, go = forms.receive(self, key, fn, receives, args, kwargs)
+                                args, arg, go = forms.receive(self, key, fn, receives, args, kwargs, kind="job")
                                 kwargs = {}
                             except Exception as exc:  # noqa: BLE001 - reported below, outside the block
                                 failure, go = exc, True
@@ -495,10 +620,12 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                                              loop=asyncio.get_running_loop(), live=self,
                                              orm=requirements is not None)
                     inv.drafts[own] = draft
-                    async with contextlib.aclosing(_drive(inv, "jobs", fn, draft, args, kwargs)) as steps:
+                    async with contextlib.aclosing(_drive(inv, "jobs", fn, draft, args, kwargs, reports=True)) as steps:
                         async for step in steps:
                             final = isinstance(step, _Return)
-                            found, report = results.split(step.value, handler=key, state=self.get_full_name())
+                            only_progress = isinstance(step, _Report)     # self.progress(): the other fields wait
+                            found, report = ([], step.value) if only_progress else results.split(
+                                step.value, handler=key, state=self.get_full_name())
                             async with self:
                                 left = self.ui_visit != visit
                                 # Once stopped, what the body changed since its last merge is discarded for good.
@@ -508,7 +635,8 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                                         step.stop = True
                                         stopped = True
                                 else:
-                                    await _merge(inv, self)
+                                    if not only_progress:
+                                        await _merge(inv, self)
                                     if report is not None:
                                         runs.mark_progress(self, key, report)
                             if not discard:
@@ -522,13 +650,17 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                 except Exception as exc:  # noqa: BLE001 - the body has finished here; reported to the user
                     outcome = _classify(key, exc, user=_user_id(session))
                     message = outcome.message
-                    for event in results.to_events([_toast(outcome)]):
-                        yield event
+                    if _in_place(outcome, receives, "job") and exc is not busy:
+                        async with self:
+                            forms.refused(self, key, outcome.title, outcome.message)
+                    else:
+                        for event in results.to_events([_toast(outcome)]):
+                            yield event
             finally:                                      # also on cancellation: nothing is left running
                 await _shielded(wind_up())
 
-        _mark(wrapper, fn, "job", requires=requirements, stop_on_leave=stop_on_leave)
-        wrapper.__ui_again__ = functools.partial(job, requires=requires, stop_on_leave=stop_on_leave)
+        _mark(wrapper, fn, "job", requires=requirements, stop_on_leave=stop_on_leave, limit=limit)
+        wrapper.__ui_again__ = functools.partial(job, requires=requires, stop_on_leave=stop_on_leave, limit=limit)
         return rx.event(wrapper, background=True)
 
     return decorate(fn) if fn is not None else decorate

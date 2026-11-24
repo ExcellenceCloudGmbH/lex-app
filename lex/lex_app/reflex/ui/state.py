@@ -25,8 +25,44 @@ def check_route(route: str) -> None:
         )
 
 
+def check_route_fields(routes: list[str]) -> None:
+    """Refuse a route whose dynamic argument has the name of a state's field (``ValueError``).
+
+    Reflex makes every dynamic route argument a computed var of its root state, and refuses to add
+    the page while any state -- a ``ui.State`` or a plain Reflex one -- has a field or a computed
+    var of that name (``BaseState._check_overwritten_dynamic_args``). It finds out only when it
+    adds the pages declared with a decorator, which is when it builds the frontend: this finds the
+    same collisions at start-up, among the states defined by then. A backend field (``_name``) or
+    an event handler of that name is not refused by Reflex, nor here.
+    """
+    from reflex.route import get_route_args
+    from reflex.state import DynamicRouteVar
+    from reflex.state import State as Root
+
+    def every(cls: Any) -> list:
+        found = [cls]
+        for sub in sorted(cls.get_substates(), key=lambda one: one.get_full_name()):
+            found += every(sub)
+        return found
+
+    states = every(Root)
+    for route in routes:
+        for name in get_route_args(route):
+            for cls in states:
+                computed = cls.computed_vars.get(name)
+                if name in cls.base_vars or (computed is not None and not isinstance(computed, DynamicRouteVar)):
+                    what = "field" if name in cls.base_vars else "computed var"
+                    raise ValueError(
+                        f"route {'/' + route.lstrip('/')!r}: its dynamic argument [{name}] has the name of the "
+                        f"{what} {cls.__name__}.{name} (in {cls.__module__}). Reflex makes a route argument a value "
+                        f"of every state, and does not build the app's pages while a state has a field of that "
+                        f"name. Rename the field, e.g. {name}_value."
+                    )
+
+
 def check_app_routes(app: Any) -> None:
-    """Refuse an app that has a page route with a dynamic argument named like a ``ui.State`` helper.
+    """Refuse an app that has a page route with a dynamic argument named like a ``ui.State`` helper,
+    or like a field of any state.
 
     ``create_app`` calls it once the project's pages are registered: it sees the pages added to
     the app and those declared with ``@rx.page`` or ``@lex_page`` that the app adds when it compiles.
@@ -38,9 +74,17 @@ def check_app_routes(app: Any) -> None:
                if kwargs.get("route")]
     for route in routes:
         check_route(route)
+    check_route_fields(routes)          # Reflex would refuse them only when it builds the frontend
     from lex.lex_app.reflex.ui.pages import links
 
     links.check_reflex_pages(routes)   # a link to a raw page leads to a page the app has
+
+
+def _progress(state: Any) -> Any:
+    """``self.progress``: report a running job's progress (see :func:`handlers.reporter`)."""
+    from lex.lex_app.reflex.ui import handlers
+
+    return handlers.reporter(state)
 
 
 def _page_permitted(state: Any, requires: str) -> bool:
@@ -59,8 +103,8 @@ class State(rx.State):
     """The base class of a page state: handler status for views, and the body's helpers.
 
     Inside a handler body: ``self.user``, ``self.api``, ``self.params``, ``self.can(Model, scope)``
-    and ``self.state(Other)``. They are properties, so the browser cannot call them. Their names are
-    reserved: a subclass declaring a field, computed var or method with one of them is refused
+    and ``self.state(Other)``; in a job, ``self.progress(fraction, message)``. They are properties,
+    so the browser cannot call them. Their names are reserved: a subclass declaring a field, computed var or method with one of them is refused
     when the class is defined.
     """
 
@@ -95,10 +139,15 @@ class State(rx.State):
     ui_step: dict[str, int] = {}
     #: Handler key -> whether its form's last submit succeeded: the form's result shows while it is true.
     ui_done: dict[str, bool] = {}
+    #: Handler key -> its form's last refusal, ``{"title", "message"}``: shown above the submit button
+    #: until the form is sent again.
+    ui_refused: dict[str, dict[str, str]] = {}
     #: The dialog of a button with ``confirm=`` or ``ask=`` that is open ('' when none is), and the
     #: values that button passes to its handler.
     ui_asking: str = ""
     ui_asking_args: list = []
+    #: Searched field id -> the matches the user may choose from now: ``{"value", "label"}``, a page of them.
+    ui_matches: dict[str, list[dict[str, str]]] = {}
 
     _ui_boots: dict[str, str] = {}
     _ui_pending_loads: list[str] = []
@@ -111,6 +160,11 @@ class State(rx.State):
     _ui_started: list[str] = []
     #: Load id -> the token of its latest run in this tab; an older run on mount is stale.
     _ui_load_runs: dict[str, str] = {}
+    #: Searched field id -> every value offered to this tab (as text) -> the row's id: what a form accepts.
+    _ui_offered: dict[str, dict] = {}
+    #: "State.field" -> the stamp of the value a ``ui.private`` field holds in the server's memory.
+    #: Only the stamp is part of the state: the value itself is never stored with it.
+    _ui_private: dict[str, str] = {}
 
     user = property(lambda self: context.current().session.user)
     api = property(lambda self: context.api_of(context.current()))
@@ -119,6 +173,8 @@ class State(rx.State):
     state = property(lambda self: context.current().state_of)
     #: The browser tab the handler runs for (Reflex's client token): for a project's own per-tab store.
     tab_id = property(lambda self: context.current().session.tab)
+    #: A running job's progress, shown in the page: from its body or a thread it started (``@ui.job``).
+    progress = property(_progress)
 
     @rx.event
     async def ui_open(self, page: str):
@@ -133,10 +189,21 @@ class State(rx.State):
         from lex.lex_app.reflex.ui import handlers
 
         self.ui_visit += 1
-        from lex.lex_app.reflex.ui import runs
+        from lex.lex_app.reflex.ui import forms, private, runs
 
         await runs.sweep(self)
-        self.ui_invalid, self.ui_step, self.ui_done = {}, {}, {}      # a form starts over on a new visit
+        private.leave(str(self.router.session.client_token or ""))   # private values not kept across visits
+        kept = forms.kept()
+        # A form starts over on a new visit: its field messages, its step, its result and its refusal leave.
+        # One declared keep=True keeps its result while what it shows is kept, and its refusal: shown above its
+        # submit button, as when the user stayed (the user may have been away when it came).
+        done = {key: True for key, value in dict(self.ui_done).items() if value and key in kept}
+        for key in list(done):
+            if private.gone_in(await self.get_state(kept[key])):
+                done.pop(key)
+                self.ui_failed = {**dict(self.ui_failed), key: forms.gone_message()}
+        refused = {key: one for key, one in dict(self.ui_refused).items() if key in kept}
+        self.ui_invalid, self.ui_step, self.ui_done, self.ui_refused = {}, {}, done, refused
         self.ui_asking, self.ui_asking_args = "", []
         self._ui_page = page
         self._ui_reset = []
@@ -171,13 +238,24 @@ class State(rx.State):
     def ui_ask(self, dialog: str, args: list):
         """A button with ``confirm=`` or ``ask=`` was pressed: its dialog opens, holding the button's values."""
         self.ui_asking, self.ui_asking_args = dialog, list(args)
-        self.ui_invalid = {}
+        self.ui_invalid, self.ui_refused = {}, {}
 
     @rx.event
     def ui_ask_close(self, open: bool = False):  # noqa: A002 - the name Radix gives the value
         """The open dialog was answered or dismissed."""
         if not open:
             self.ui_asking, self.ui_asking_args = "", []
+
+    @rx.event(supersedes=True)
+    async def ui_search(self, field: str, text: str = ""):
+        """A searched choice opened (``text`` is ``""``), or the user typed into it: offer the matches.
+
+        Only the field's id comes from the browser: the rows handler that searches is looked up in
+        the server's registry, and runs as the user.
+        """
+        from lex.lex_app.reflex.ui import forms
+
+        await forms.search(self, field, text)
 
     @rx.event
     def ui_step_back(self, key: str):

@@ -13,16 +13,22 @@ from lex.lex_app.reflex.ui.pages.parts import Build, Part, called, say
 
 #: What a column's kind is called in RFDS's column spec; status, tag and tags are drawn by lex-app.
 _RFDS_KIND = {"text": "text", "number": "number", "money": "money", "percent": "percent", "date": "date",
-              "datetime": "instant", "status": "text", "tag": "text", "tags": "text"}
+              "datetime": "instant", "status": "text", "tag": "text", "tags": "text", "name": "entity", "code": "id"}
 #: A column's kind as an exported cell's type (RFDS's semantic types).
 _EXPORT_KIND = {"number": "number", "money": "amount", "percent": "ratio", "date": "date", "datetime": "instant"}
 KINDS = tuple(_RFDS_KIND)
 _DRAWN = ("status", "tag", "tags")
 _NUMERIC = ("number", "money", "percent")
-_TEXTUAL = (None, "text", "status", "tag", "tags")
+_TEXTUAL = (None, "text", "status", "tag", "tags", "name", "code")
 _CODE = re.compile(r"[A-Z]{3}")
 _COMMON_CODES = {"EUR", "USD", "GBP", "CHF", "JPY", "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "CAD", "AUD", "CNY"}
 _FIELD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+#: The kinds that set a column's width, to RFDS's field widths: a name gets room, a code stays narrow.
+_KIND_WIDTH = {"name": "var(--rfds-size-field-md)", "code": "var(--rfds-size-field-xs)"}
+#: What ``totals=`` sums: the rows the search and filters leave, or every row.
+TOTALS = ("sum", "sum of all rows")
+#: The most rows RFDS lets a table hold in the browser (DA-09): ``page_size=None`` shows up to this many.
+MAX_PAGE = 200
 
 
 @dataclasses.dataclass(frozen=True)
@@ -34,15 +40,19 @@ class Column:
     tones: tuple = ()
     open: str | None = None
     show: Callable[[Any], Any] | None = None
+    pin: bool = False
 
 
 def column(key: str, *, label: str | None = None, kind: str | None = None, currency: str | None = None,
-           tones: dict | None = None, open: str | None = None, show: Callable[[Any], Any] | None = None) -> Column:
+           tones: dict | None = None, open: str | None = None, show: Callable[[Any], Any] | None = None,
+           pin: bool = False) -> Column:
     """A table column that needs more than its name.
 
     ``kind`` says what the values are, and each kind is drawn the same way on every page: text,
     number, money, percent, date, datetime; ``status`` (a word with a tone), ``tag`` (one label),
-    ``tags`` (a list of labels).
+    ``tags`` (a list of labels); ``name`` (a person's or a company's name: given room, RFDS's
+    wide field width), ``code`` (a short identifier such as an order number: RFDS's identifier
+    type, narrow).
 
     ``currency`` goes with money: three capitals is a code (``"EUR"``); anything else names the
     row's field that holds the code (``currency="currency"``). ``tones`` goes with status:
@@ -52,6 +62,9 @@ def column(key: str, *, label: str | None = None, kind: str | None = None, curre
     ``show`` draws a cell no kind describes: a function of the row returning ``ui.text``,
     ``ui.status`` or ``ui.link``. ``row["x"]`` there stands for the value in the browser, not the
     value itself: a Python ``if`` on it cannot work; use ``visible=`` or ``ui.switch``.
+
+    ``pin=True`` on the first column keeps it in place while the table scrolls sideways; RFDS
+    pins that one column only.
     """
     from lex.lex_app.reflex.ui.pages.vocab import TONES
 
@@ -83,7 +96,10 @@ def column(key: str, *, label: str | None = None, kind: str | None = None, curre
         raise ValueError(f"{where}): give kind= or show=, not both. show= draws the cell itself.")
     if show is not None and not callable(show):
         raise TypeError(f"{where}, show=) takes a function of the row: `show=lambda row: ui.text(row[\"x\"])`")
-    return Column(key, label, kind, currency, tuple(dict(tones or {}).items()), open, show)
+    if not isinstance(pin, bool):
+        raise TypeError(f"{where}, pin=) takes True or False; got {pin!r}. `pin=True` keeps the first column in "
+                        "place while the table scrolls sideways.")
+    return Column(key, label, kind, currency, tuple(dict(tones or {}).items()), open, show, pin)
 
 
 class _Recorder:
@@ -123,13 +139,20 @@ class Table(Part):
     export: bool = False
     totals: dict | None = None
     row_actions: Callable[[Any], Any] | None = None
+    page_size: int | None = 25
+    choose_columns: bool = False
 
     def build(self, ctx: Build) -> rx.Component:
         # A model table reads through the API as the user; without the grant it could only show an error.
         from lex.lex_app.reflex.ui import guard
 
         if self.visible is None and _is_model(self.source):
-            return dataclasses.replace(self, visible=guard.read(self.source)).build(ctx)
+            from lex.lex_app.reflex.ui.pages import rows_table
+
+            copy = dataclasses.replace(self, visible=guard.read(self.source))
+            component = copy.build(ctx)
+            rows_table._CACHE_BY_TABLE[id(self)] = rows_table._CACHE_BY_TABLE[id(copy)]   # the table as written
+            return component
         return super().build(ctx)
 
     # -- shared checks -------------------------------------------------------------------------------
@@ -147,6 +170,11 @@ class Table(Part):
             raise ctx.fail(f"the first column, `{first.key}`, is {what}.",
                            "The first column names the row and is the row's link, so it is shown as plain text. "
                            "Put a plain column first, such as the name.")
+        pinned = [c.key for c in cols[1:] if c.pin]
+        if pinned:
+            raise ctx.fail(f"column `{pinned[0]}` is pinned, and only the first column can be.",
+                           "RFDS keeps one column in place while the table scrolls sideways: the first, which "
+                           f"names the row. Pin it: `ui.column(\"{first.key}\", pin=True)`.")
         unknown = [name for name in self.filters if name not in keys]
         if unknown:
             raise ctx.fail(f"`filters=` names {', '.join(unknown)}, which is not a column.",
@@ -156,12 +184,18 @@ class Table(Part):
             if col is None:
                 raise ctx.fail(f"`totals=` names {name}, which is not a column.",
                                f"Total columns of the table: {', '.join(keys)}.")
-            if how != "sum":
+            if how not in TOTALS:
                 raise ctx.fail(f"`totals=` asks for {how!r} of {name}.",
-                               "A total is the \"sum\" of a number, money or percent column: `totals={\"amount\": \"sum\"}`.")
+                               "A total is the \"sum\" of a number, money or percent column -- of the rows the "
+                               "search and filters leave -- or the \"sum of all rows\": "
+                               "`totals={\"amount\": \"sum\"}`.")
             if col.kind not in _NUMERIC:
                 raise ctx.fail(f"`totals=` sums {name}, which is not a number.",
                                "Give it kind=\"number\", \"money\" or \"percent\".")
+        if len(set(dict(self.totals or {}).values())) > 1:
+            raise ctx.fail("`totals=` mixes \"sum\" and \"sum of all rows\".",
+                           "A table's totals all cover the same rows: write \"sum\" for each column, or "
+                           "\"sum of all rows\" for each.")
         if self.search and not any(c.kind in _TEXTUAL and c.show is None for c in cols):
             raise ctx.fail("`search=True`, and the table has no text column to search.",
                            "Add a text column, or leave search out.")
@@ -188,14 +222,19 @@ class Table(Part):
         specs = []
         for c in cols:
             given = base.get(c.key)
+            layout: dict[str, Any] = {}
+            if c.kind in _KIND_WIDTH:
+                layout["width"] = _KIND_WIDTH[c.kind]
+            if c.pin:
+                layout["sticky"] = "start"
             if given is not None and c.kind is None and c.show is None and c.open is None and c.currency is None:
                 spec = dict(given)                       # a model's field: its own kind and label
                 if c.label is not None:
                     spec.update(header=c.label, header_id=c.label)
-                specs.append(spec)
+                specs.append({**spec, **layout})
                 continue
             header = c.label or (given or {}).get("header") or c.key.replace("_", " ").capitalize()
-            options: dict[str, Any] = {"header_id": header}
+            options: dict[str, Any] = {"header_id": header, **layout}
             if c.currency is not None:
                 if _CODE.fullmatch(c.currency):
                     options["ccy"] = c.currency
@@ -209,7 +248,8 @@ class Table(Part):
             specs.append(rfds_column(c.key, header, kind=_RFDS_KIND[c.kind or "text"], **options))
         return specs
 
-    def _toolbar(self, ctx: Build, state: Any, cols: list[Column], *, choices: Any) -> rx.Component | None:
+    def _toolbar(self, ctx: Build, state: Any, cols: list[Column], specs: list[dict], *,
+                 choices: Any) -> rx.Component | None:
         import rfds
 
         from lex.lex_app.reflex.ui.pages import rows_table
@@ -236,10 +276,30 @@ class Table(Part):
                                          label=label, name=f"filter_{name}", width="sm"))
             filters = rfds.cluster(*boxes, gap="2")
         export = export_menu(on_export=state.export, kinds=("csv", "xlsx"), loading=state.exporting) if self.export else None
-        if search is None and filters is None and export is None:
+        chooser = None
+        if self.choose_columns:
+            chooser = rfds.column_chooser(columns=specs, visible=state.view_columns, on_change=state.set_view_columns,
+                                          order=state.column_order, on_reorder=state.set_column_order,
+                                          widths=state.column_widths, on_width_change=state.set_column_widths)
+        if search is None and filters is None and export is None and chooser is None:
             return None
-        return rfds.table_toolbar(search=search, filters=filters, export=export, density_toggle=False,
-                                  result_count=state.total_rows)
+        return rfds.table_toolbar(search=search, filters=filters, export=export, column_chooser=chooser,
+                                  density_toggle=False, result_count=state.total_rows)
+
+    def _paging(self, state: Any) -> dict[str, Any]:
+        """The data table's paging and column choice: RFDS's pager, or every row with a pager only past 200."""
+        import rfds
+
+        props: dict[str, Any] = {}
+        if self.choose_columns:
+            props.update(visible_columns=state.view_columns, column_order=state.column_order,
+                         column_widths=state.column_widths)
+        if self.page_size is None:
+            props["pager"] = False
+            props["footer"] = rx.cond(state.total_rows > state.page_size, rfds.pagination(
+                page=state.page, page_count=state.page_count, on_page_change=state.set_page,
+                page_size=state.page_size, total=state.total_rows))
+        return props
 
     def _row_actions(self, ctx: Build) -> Any:
         if self.row_actions is None:
@@ -276,6 +336,7 @@ class Table(Part):
         import rfds
 
         from lex.lex_app.reflex import data
+        from lex.lex_app.reflex.ui.pages import rows_table
 
         model = self.source
         cols = self._columns()
@@ -317,7 +378,7 @@ class Table(Part):
         actions = self._row_actions(ctx)
         if actions is not None:
             props["row_actions"] = actions
-        texts = [c.key for c in cols if c.kind in (None, "text") and c.show is None
+        texts = [c.key for c in cols if c.kind in (None, "text", "name", "code") and c.show is None
                  and known[c.key].get_internal_type() in ("CharField", "TextField") and not known[c.key].choices]
         if self.search and not texts:
             raise ctx.fail("`search=True`, and the table has no text column to search.",
@@ -330,10 +391,10 @@ class Table(Part):
         if self.row_actions is not None:
             used |= _record(self.row_actions)[1]
         state = data.table_state(model, columns=specs, search_field=search_field, filters=self.where,
+                                 page_size=MAX_PAGE if self.page_size is None else self.page_size,
                                  row_fields=tuple(sorted(used)), choice_fields=tuple(self.filters),
                                  scope_fields=tuple(dict(self.where or {})))
-        from lex.lex_app.reflex.ui.pages import rows_table
-
+        rows_table._CACHE_BY_TABLE[id(self)] = state
         options = {}
         for name in self.filters:
             field = known[name]
@@ -341,9 +402,10 @@ class Table(Part):
             options[name] = [{"value": rows_table.ALL, "label": "All"},
                              *({"value": str(v).lower() if isinstance(v, bool) else str(v), "label": str(label)}
                                for v, label in pairs if not isinstance(label, (list, tuple)))]
-        toolbar = self._toolbar(ctx, state, cols, choices=options)
+        toolbar = self._toolbar(ctx, state, cols, specs, choices=options)
         if toolbar is not None:
             props["toolbar"] = toolbar
+        props.update(self._paging(state))
         caption = say(ctx.caption) if ctx.caption else str(model._meta.verbose_name_plural).capitalize()
         table = rfds.data_table(state=state, columns=specs, caption=caption,
                                 **{k: v for k, v in props.items() if k != "row_fields"})
@@ -391,7 +453,7 @@ class Table(Part):
         fields |= set(open_fields)
         money = [c for c in cols if c.kind == "money" and c.currency and not _CODE.fullmatch(c.currency)]
         kinds_by_key = {c.key: c.kind for c in cols}
-        totals_spec = tuple({**spec, "aggregate": dict(self.totals or {}).get(spec["field"], "none")}
+        totals_spec = tuple({**spec, "aggregate": "sum" if spec["field"] in dict(self.totals or {}) else "none"}
                             for spec in specs) if self.totals else ()
         state = rows_table.state_for(
             self.source, columns=specs, row_fields=sorted(fields),
@@ -399,8 +461,11 @@ class Table(Part):
             tags_fields=tuple(c.key for c in cols if c.kind == "tags"),
             choice_fields=tuple(name for name in self.filters if kinds_by_key.get(name) not in _DATE_KINDS),
             date_fields=tuple(name for name in self.filters if kinds_by_key.get(name) in _DATE_KINDS),
-            search_fields=tuple(c.key for c in cols if c.kind in ("text", None, "status", "tag") and c.show is None),
+            search_fields=tuple(c.key for c in cols if c.kind in ("text", None, "status", "tag", "name", "code")
+                                and c.show is None),
             totals_spec=totals_spec, totals_currency=money[0].currency if money and self.totals else "",
+            totals_of_all=TOTALS[1] in dict(self.totals or {}).values(),
+            page_size=MAX_PAGE if self.page_size is None else self.page_size,
             export_columns=_export_columns(cols),
             export_kinds={label: _EXPORT_KIND[kinds_by_key[field]] for field, label in _export_columns(cols)
                           if kinds_by_key.get(field) in _EXPORT_KIND},
@@ -423,9 +488,10 @@ class Table(Part):
             props["row_actions"] = actions
         if self.totals:
             props["totals"] = state.totals_rows
-        toolbar = self._toolbar(ctx, state, cols, choices=True)
+        toolbar = self._toolbar(ctx, state, cols, specs, choices=True)
         if toolbar is not None:
             props["toolbar"] = toolbar
+        props.update(self._paging(state))
         caption = say(ctx.caption) if ctx.caption else say(ctx.page.replace("_", " ").capitalize())
         table = rfds.data_table(state=state, columns=specs, caption=caption, **props)
         return rx.box(table, on_mount=state.open, on_unmount=state.close, width="100%")
@@ -476,7 +542,8 @@ def _renderer(ctx: Build, c: Column) -> Callable[[Any], rx.Component] | None:
 
 def table(source: Any, *, columns: Any = (), key: str | None = None, where: dict | None = None, open: Any = None,
           search: bool = False, filters: Any = (), export: bool = False, totals: dict | None = None,
-          row_actions: Callable[[Any], Any] | None = None, empty: Any = None, visible: Any = None) -> Table:
+          row_actions: Callable[[Any], Any] | None = None, empty: Any = None, visible: Any = None,
+          page_size: int | None = 25, choose_columns: bool = False) -> Table:
     """Rows from a model, or from a ``@ui.rows`` handler, paged on the server and read as the user.
 
     Where the rows come from:
@@ -490,12 +557,17 @@ def table(source: Any, *, columns: Any = (), key: str | None = None, where: dict
       its values, or a range of days for a ``date`` or ``datetime`` column; ``export=True``
       CSV and Excel of every matching row; ``open=`` a page (the row's key goes into its one
       argument, a real link), or the name of a field holding each row's ``ui.address`` (the row is
-      a button that opens it); ``row_actions=lambda row: [ui.button(...)]``.
+      a button that opens it); ``row_actions=lambda row: [ui.button(...)]``; ``choose_columns=True``
+      RFDS's "Columns" menu, where the user hides, orders and sizes the columns (a width typed in;
+      the first column always shows and stays first; kept until the tab is closed).
 
     What lex-app does by itself:
-      25 rows a page, sorting by column, loading rows, the error in place, ``empty=`` when there
-      are no rows, "No rows match" with a way to clear the search; ``totals={"amount": "sum"}``
-      adds a totals row over every matching row, one per currency.
+      25 rows a page (``page_size=50`` another number, up to 200; ``page_size=None`` every row in
+      one scroll, up to 200 -- RFDS's limit for a table in the browser -- with a pager only past
+      that), sorting by column, loading rows, the error in place, ``empty=`` when there are no
+      rows, "No rows match" with a way to clear the search; ``totals={"amount": "sum"}`` adds a
+      totals row over every matching row, ``"sum of all rows"`` over every row whatever the search
+      and filters leave, one per currency; while a search or filter is on, its label says which.
 
     ``columns`` are field names or ``ui.column(...)``s; the first names the row and is plain text.
     ``key`` names the field that tells rows apart (a model: its primary key; rows: ``"id"``). Only
@@ -515,6 +587,10 @@ def table(source: Any, *, columns: Any = (), key: str | None = None, where: dict
                         "row_actions=lambda row: [ui.button(\"Approve\", State.approve, row[\"id\"])]")
     if key is not None and not (isinstance(key, str) and _FIELD.fullmatch(key)):
         raise ValueError(f"ui.table(key=) names the field that tells rows apart; got {key!r}")
+    if page_size is not None and (isinstance(page_size, bool) or not isinstance(page_size, int)
+                                  or not 1 <= page_size <= MAX_PAGE):
+        raise ValueError(f"ui.table(page_size=) takes a number of rows up to {MAX_PAGE}, or None for every row in one "
+                         f"scroll (up to {MAX_PAGE}, RFDS's limit for a table in the browser); got {page_size!r}")
     cols = tuple(columns) if isinstance(columns, (list, tuple)) else (columns,)
     return Table(source, cols, open, empty, visible, key, where, bool(search), tuple(filters), bool(export),
-                 totals, row_actions)
+                 totals, row_actions, page_size, bool(choose_columns))

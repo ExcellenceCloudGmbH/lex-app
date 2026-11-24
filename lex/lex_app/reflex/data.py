@@ -368,7 +368,49 @@ def scope_params(scope: Mapping[str, Any]) -> list[tuple[str, str]]:
 # -- table and grid states ----------------------------------------------------
 
 
-class LexTableState(DataTableMixin, mixin=True):
+class ChosenColumns(rx.State, mixin=True):
+    """The columns a user chose in RFDS's "Columns" menu (``ui.table(choose_columns=True)``).
+
+    Only the table's own columns are kept; the first column names the row, so it is always shown
+    and stays first; a width is whole pixels from 40 to 1,200 (RFDS's column chooser's range).
+    They live in the browser tab's state: a new visit starts from the table as declared.
+    """
+
+    view_columns: list[str] = []          # shown columns ([] = all)
+    column_order: list[str] = []          # every column in display order ([] = as declared)
+    column_widths: dict[str, int] = {}    # a user's width in px per column
+
+    def _column_ids(self) -> list[str]:
+        return [str(spec.get("field")) for spec in (getattr(type(self), "table_columns", ()) or ())]
+
+    def _chosen(self, ids: Any) -> list[str]:
+        known = self._column_ids()
+        picked = [str(i) for i in (ids if isinstance(ids, (list, tuple)) else []) if str(i) in known]
+        picked = list(dict.fromkeys(picked))
+        if known and picked:
+            picked = [known[0], *(i for i in picked if i != known[0])]
+        return picked
+
+    @rx.event
+    def set_view_columns(self, ids: list[str]):
+        self.view_columns = self._chosen(ids)
+
+    @rx.event
+    def set_column_order(self, ids: list[str]):
+        self.column_order = self._chosen(ids)
+
+    @rx.event
+    def set_column_widths(self, widths: dict):
+        known = set(self._column_ids())
+        clean: dict[str, int] = {}
+        for key, value in (widths if isinstance(widths, Mapping) else {}).items():
+            if str(key) in known and isinstance(value, (int, float)) and not isinstance(value, bool) \
+                    and 40 <= value <= 1200:
+                clean[str(key)] = int(value)
+        self.column_widths = clean
+
+
+class LexTableState(DataTableMixin, ChosenColumns, mixin=True):
     """RFDS's server-paged table over one model, read through the lex-app API as the user.
 
     ``resource`` names the model; ``search_field`` is the field the quick
