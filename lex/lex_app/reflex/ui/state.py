@@ -51,6 +51,12 @@ def _page_permitted(state: Any, requires: str) -> bool:
     return requires in lex_permission_resolver(current_identity(state))
 
 
+
+def _is_running(handler: Any) -> bool:
+    from lex.lex_app.reflex.ui import runs as ui_runs
+
+    return ui_runs.active(context.current().session.tab, ui_runs.key_of(handler))
+
 class State(rx.State):
     """The base class of a page state: handler status for views, and the body's helpers.
 
@@ -105,6 +111,11 @@ class State(rx.State):
     state = property(lambda self: context.current().state_of)
     #: The browser tab the handler runs for (Reflex's client token): for a project's own per-tab store.
     tab_id = property(lambda self: context.current().session.tab)
+
+    #: Whether a job of this tab is running now: ``self.is_running(Desk.export)``. For work that must
+    #: not overlap another job - refuse, or wait, instead of keeping a flag of your own: a flag set by
+    #: a job that fails stays set; a run never does. (A property, so the browser cannot call it.)
+    is_running = property(lambda self: _is_running)
 
     @rx.event
     async def ui_open(self, page: str):

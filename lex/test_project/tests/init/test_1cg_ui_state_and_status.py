@@ -57,7 +57,7 @@ class TestCluster01cg_State(TestCase):
             self.assertIn(name, State.base_vars, f"{name} is a field of ui.State")
             self.assertIn(name, _Board.inherited_vars, f"{name} is inherited by a project state")
         self.assertEqual(list(_Board.base_vars), ["rows"], "a project state's own fields are only its own")
-        for name in ("user", "api", "params", "can", "state", "tab_id"):
+        for name in ("user", "api", "params", "can", "state", "tab_id", "is_running"):
             self.assertIsInstance(State.__dict__[name], property, f"{name} is a property")
             self.assertNotIn(name, State.event_handlers, f"{name} must not be callable from the browser")
         self.assertIn("ui_open", State.event_handlers)

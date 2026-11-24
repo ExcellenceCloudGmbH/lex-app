@@ -1522,3 +1522,16 @@ does not remove user launch configurations.
 | 1.829 | A handler sends a reflex event after its results | the Reflex events are results like the others, in the order written; they reach the browser as they are, after the toast before them; a plain object is still refused with the handler's name and what a handler may return |
 
 **Scenario range:** 1.829. **Test file:** `lex/test_project/tests/init/test_1de_ui_reflex_events.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1de](batches.md).
+
+### 1df. lex.ui: a button that says why it cannot be pressed; a typed download; is another job running ✅
+
+**What it tests:** `ui.button(disabled=<reason or row field>)` keeps a blocked button in place with its reason; `ui.download(media_type=)`; `self.is_running(Other.job)` in a body.
+
+**Why a regression matters:** a button that vanishes or stays pressable for a row it cannot act on, a file the browser cannot place, or an overlap a body cannot see.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.830 | A button says why it cannot be pressed and a file what it is | each row's button is blocked exactly when its row has a reason, stays focusable and shows the reason; a fixed reason is shown; the download carries its media type; a reason that is not a sentence or a field is refused |
+| 1.831 | A body asks whether another job is running | the export sees the build running while it runs, then not; outside a body the question is refused |
+
+**Scenario range:** 1.830 – 1.831. **Test file:** `lex/test_project/tests/init/test_1df_ui_button_disabled_download_type.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1df](batches.md).

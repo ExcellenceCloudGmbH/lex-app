@@ -3167,3 +3167,25 @@ something, and stayed raw async handlers for that alone. 1.747's docstring now s
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.829 | A handler sends a reflex event after its results | the Reflex events are results like the others, in the order written; they reach the browser as they are, after the toast before them; a plain object is still refused with the handler's name and what a handler may return |
+
+### Batch 1df — lex.ui: a button that says why it cannot be pressed; a typed download; is another job running ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.830 – 1.831 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/vocab.py` (`button(disabled=)`), `lex/lex_app/reflex/ui/results.py` (`download(media_type=)`), `lex/lex_app/reflex/ui/state.py` and `runs.py` (`is_running`), `lex/lex_app/reflex/ui/context.py` (`RESERVED`) |
+| Test file | `lex/test_project/tests/init/test_1df_ui_button_disabled_download_type.py` |
+| Test classes | `TestCluster01df_ButtonDisabledDownloadType` (1.830–1.831) |
+| Fixtures | a rows handler with a reason per row; two jobs; `ui.testing.Harness` |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Found while converting the reviewed customer project: row actions disabled with a reason per row, downloads of PDFs and
+workbooks, and flags that kept jobs from overlapping (and stuck when a job failed). 1.770's reserved names gain
+`is_running`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.830 | A button says why it cannot be pressed and a file what it is | each row's button is blocked exactly when its row has a reason, stays focusable and shows the reason; a fixed reason is shown; the download carries its media type; a reason that is not a sentence or a field is refused |
+| 1.831 | A body asks whether another job is running | the export sees the build running while it runs, then not; outside a body the question is refused |

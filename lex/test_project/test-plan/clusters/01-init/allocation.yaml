@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 829
+max_scenario: 831
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2435,3 +2435,15 @@ letters:
     note: >-
       A handler body may return or yield another state's handler or an event spec among its results. These tests fail
       on a converted handler that cannot chain to the handler it used to start, or a result order the browser loses.
+  df:
+    title: 'lex.ui: a button that says why it cannot be pressed; a typed download; is another job running'
+    scenarios: 1.830-1.831
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.button(disabled=)`, `ui.download(media_type=)` and `self.is_running(Other.job)`. These tests fail on a button
+      that vanishes or stays pressable for a row it cannot act on, a file the browser cannot place, or an overlap a
+      body cannot see.

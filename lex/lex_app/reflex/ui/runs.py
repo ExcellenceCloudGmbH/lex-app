@@ -105,6 +105,12 @@ def claim(token: str, key: str, arg: str) -> Run | None:
         return run
 
 
+def active(token: str, key: str) -> bool:
+    """Whether a run of ``key`` is in flight in one tab (``self.is_running`` in a body)."""
+    with _LOCK:
+        return any(tab == token and name == key for (tab, name, _) in _ACTIVE)
+
+
 def release(token: str, key: str, arg: str) -> None:
     with _LOCK:
         _ACTIVE.pop((token, key, arg), None)

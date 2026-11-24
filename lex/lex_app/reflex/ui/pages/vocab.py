@@ -212,6 +212,7 @@ class Button(Part):
     visible: Any = None
     primary: bool = False               # set by the kind: the first action of a page
     args: tuple = ()                    # values passed to the handler (a row's key)
+    disabled: Any = None                # why it cannot be pressed now ("" or None: it can)
 
     def click(self, ctx: Build) -> Any:
         if self.to is not None:
@@ -233,16 +234,27 @@ class Button(Part):
             from lex.lex_app.reflex.ui import runs
 
             extra["loading"] = runs.running(self.handler, self.args[0])     # this row's run, not another's
+        if isinstance(self.disabled, rx.Var):           # a reason per row, or from the state; "" lets it be pressed
+            reason = self.disabled.to(str)
+            extra["disabled"] = reason != ""
+            extra["disabled_reason"] = rx.cond(reason != "", reason, None)
+        elif self.disabled:
+            extra["disabled"], extra["disabled_reason"] = True, say(self.disabled)
         return rfds.button(say(self.label), intent=intent, icon=self.icon, on_click=self.click(ctx), **extra)
 
 
 def button(label: Any, handler: Any = None, *args: Any, to: Any = None, tone: str = "neutral",
-           icon: str | None = None, visible: Any = None, **values: Any) -> Button:
+           icon: str | None = None, visible: Any = None, disabled: Any = None, **values: Any) -> Button:
     """Runs a handler, or opens a page (``to=``, with the page's parameters by name).
 
     Values after the handler are passed to it: in a table's ``row_actions``,
     ``ui.button("Approve", State.approve, row["id"])``; the button then shows that row's run.
     The values come back from the browser: check them in the handler.
+
+    ``disabled=`` says why it cannot be pressed now: the button stays in its place, greyed, and
+    shows the reason when pointed at or focused. Give the sentence, or a field holding it -
+    ``disabled=row["blocked"]``, where ``""`` lets that row's button be pressed. Like ``visible=``,
+    it decides what is shown: the handler still checks.
     """
     if args and handler is None:
         raise ValueError("ui.button(): values after the label go to a handler; give the handler first.")
@@ -251,7 +263,11 @@ def button(label: Any, handler: Any = None, *args: Any, to: Any = None, tone: st
                          "or `ui.button(\"New fund\", to=new_fund)`.")
     if values and to is None:
         raise ValueError(f"ui.button(): {', '.join(values)} can only be given with to=, as the page's parameters.")
-    return Button(label, handler, to, values, _tone(tone), icon, visible, False, tuple(args))
+    if disabled is not None and not isinstance(disabled, (str, rx.Var)):
+        raise TypeError(f"ui.button(disabled=) takes why it cannot be pressed (a sentence, or a field holding one); "
+                        f"got {disabled!r}")
+    return Button(label, handler, to, values, _tone(tone), icon, visible, False, tuple(args),
+                  disabled if isinstance(disabled, rx.Var) else (disabled or None))
 
 
 def menu_entry(ctx: Build, label: Any, click: Any, visible: Any, *, tone: str = "neutral",

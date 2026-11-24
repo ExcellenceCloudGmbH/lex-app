@@ -17,7 +17,7 @@ LOOP_TIMEOUT_SECONDS = 60.0
 #: The body's helpers on ``self`` (``ui.State``). A field, method or computed var of a ``ui.State``
 #: may not take these names, nor may a page route's dynamic argument (Reflex makes it a field of
 #: every state, which it reads before the helper).
-RESERVED = ("user", "api", "params", "can", "state", "tab_id")
+RESERVED = ("user", "api", "params", "can", "state", "tab_id", "is_running")
 
 
 @dataclasses.dataclass(frozen=True)

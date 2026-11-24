@@ -37,6 +37,7 @@ class Download:
     url: str | None = None
     filename: str | None = None
     data: Any = None
+    media_type: str | None = None
 
 
 class Refresh(list):
@@ -68,11 +69,13 @@ def toast(message: str, *, tone: str = "info", description: str = "") -> Toast:
     return Toast(str(message), tone, str(description))
 
 
-def download(*, url: str | None = None, filename: str | None = None, data: Any = None) -> Download:
-    """Hand the user a file: by ``url``, or ``data`` with a ``filename``."""
+def download(*, url: str | None = None, filename: str | None = None, data: Any = None,
+             media_type: str | None = None) -> Download:
+    """Hand the user a file: by ``url``, or ``data`` with a ``filename`` (and its ``media_type``,
+    such as ``"application/pdf"``, so the browser knows what it is)."""
     if url is None and data is None:
         raise ValueError("ui.download() needs url= or data=")
-    return Download(url, filename, data)
+    return Download(url, filename, data, media_type)
 
 
 def refresh(*handlers: Any) -> Refresh:
@@ -159,7 +162,7 @@ def to_events(items: list) -> list:
         elif _is_reflex_event(item):
             events.append(item)
         else:
-            events.append(rx.download(url=item.url, filename=item.filename, data=item.data))
+            events.append(rx.download(url=item.url, filename=item.filename, data=item.data, mime_type=item.media_type))
     return events
 
 

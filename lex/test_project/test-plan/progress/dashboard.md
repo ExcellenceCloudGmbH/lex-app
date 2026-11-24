@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 107 | 829 | 803 | 3 | 0 |
+| 1. Init — Project Bootstrap | 108 | 831 | 805 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -131,6 +131,7 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1dc | lex.ui handlers declared on a state mixin are each state's own | 1.827 | complete | 1 | 0 | 0 | A lex.ui handler that a state takes from a mixin is decorated again under the state's own name. These tests fail on a button that stays busy, or a press ignored as a repeat, because another state runs the same handler. |
 | 1dd | lex.ui tables: a date-range filter and a "contains" filter | 1.828 | complete | 1 | 0 | 0 | `ui.filter(field, kind="dates" | "text")` filters a `@ui.rows` table on the server, only on the fields it offers. These tests fail on a history that cannot be narrowed to a month, a filter that drops the last day, or a filter on a field the table does not offer. |
 | 1de | lex.ui handlers may send a Reflex event as it is | 1.829 | complete | 1 | 0 | 0 | A handler body may return or yield another state's handler or an event spec among its results. These tests fail on a converted handler that cannot chain to the handler it used to start, or a result order the browser loses. |
+| 1df | lex.ui: a button that says why it cannot be pressed; a typed download; is another job running | 1.830-1.831 | complete | 2 | 0 | 0 | `ui.button(disabled=)`, `ui.download(media_type=)` and `self.is_running(Other.job)`. These tests fail on a button that vanishes or stays pressable for a row it cannot act on, a file the browser cannot place, or an overlap a body cannot see. |
 | 1e |  | 1.30-1.43 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |
