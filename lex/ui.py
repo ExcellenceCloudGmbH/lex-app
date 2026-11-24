@@ -58,7 +58,8 @@ progress_of/cancel``        event of a Cancel button
 ``ui.field/step``           a form's inputs, and a wizard's steps; the handler gets ``values``.
                             ``ui.button(confirm=, ask=)`` asks before its handler runs
 ``ui.section``              a titled part of a page; ``load=`` makes it load on its own;
-                            ``collapsed=True`` closes it until the user opens it
+                            ``collapsed=True`` closes it until the user opens it; ``tabs=True``
+                            on ``ui.record`` or a ``ui.form``'s result shows one section at a time
 ``ui.text/fact/status/      what fills the slots; none takes a styling argument
 message/column/
 button/link``

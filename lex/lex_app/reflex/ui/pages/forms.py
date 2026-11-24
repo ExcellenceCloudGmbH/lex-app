@@ -295,6 +295,7 @@ class Form(kinds.Kind):
     submit: Any = None
     result: tuple = ()
     actions: tuple = ()
+    tabs: bool = False
 
     def loads(self) -> tuple[list, list]:
         parts = [part for part in self.result if isinstance(part, kinds.Section)]
@@ -329,6 +330,8 @@ class Form(kinds.Kind):
         parts = take(ctx, list(self.result), (*vocab.CONTENT, tables.Table, kinds.Section),
                      "`result=` holds what a section holds -- `ui.text`, `ui.table`, `ui.button`... -- or "
                      "`ui.section(title, ...)`s.")
+        if self.tabs:
+            return self._tabs(ctx, parts)
         built: list = []
         loose: list = []
         for index, part in enumerate(parts):
@@ -341,6 +344,48 @@ class Form(kinds.Kind):
             built.append(shown(at, part.titled(at), part.visible))
         built.extend(kinds._stacked(ctx, loose))
         return built
+
+    def _tabs(self, ctx: Build, parts: list) -> list:
+        """The result with ``tabs=True``: what every tab shares, then RFDS's tabs, one per section."""
+        import rfds
+        from rfds.components.inputs._shared import client_state
+        from rfds.components.navigation import TabSpec
+
+        from lex.lex_app.reflex.access import permission
+        from lex.lex_app.reflex.ui import guard
+
+        sections = [part for part in parts if isinstance(part, kinds.Section)]
+        if len(sections) < 2:
+            raise ctx.fail(f"`tabs=True` shows the result's sections one at a time, and it has {len(sections)}.",
+                           "Give `result=` two or more `ui.section(title, ...)`s, one per tab, or leave `tabs=` out.")
+        first = parts.index(sections[0])
+        after = [part for part in parts[first:] if not isinstance(part, kinds.Section)]
+        if after:
+            raise ctx.fail(f"{called(after[0])} comes after a section, and with `tabs=True` the sections are the tabs.",
+                           "Put what every tab shares first, then the sections.")
+        titles = [part.title for part in sections]
+        twice = sorted({title for title in titles if titles.count(title) > 1})
+        if twice:
+            raise ctx.fail(f"two sections are both called `{twice[0]}`.", "Give each tab's section its own title.")
+        specs: list = []
+        for index, (part, ident) in enumerate(zip(sections, kinds._section_ids(titles)), start=first):
+            at = ctx.at(f"result[{index}]")
+            if part.collapsed:
+                raise at.fail(f"the section `{part.title}` is collapsed, and a tab is opened by its tab.",
+                              "Leave `collapsed=` out.")
+            needs = None
+            if isinstance(part.visible, guard.Requirement):
+                needs = permission(part.visible.target, part.visible.scope)     # RFDS's tab permission
+            elif not (part.visible is None or part.visible is guard.signed_in):
+                raise at.fail("`visible=` on a tab takes a permission.",
+                              "A tab always shows. To hide it from some users write `visible=ui.read(Model)`; to "
+                              "show different content by state, put `ui.switch(...)` inside the section.")
+            specs.append(TabSpec(value=ident, label_id=part.title, label_default=part.title,
+                                 content=rx.el.div(part.body(at), id=ident), permission=needs))
+        current = client_state("lexTab", specs[0].value)
+        tabs = kinds._rfds(ctx, lambda: rfds.tabs(*specs, value=current.value, on_change=current.set,
+                                                  label=say("Result")))
+        return [*kinds._stacked(ctx, parts[:first]), tabs]
 
     def _page(self, ctx: Build) -> rx.Component:
         import rfds
@@ -365,6 +410,10 @@ class Form(kinds.Kind):
             fields=tuple(one.expect(ctx.at("fields"), handler) for one in every),
             steps=tuple(tuple(one.key for one in fields) for _, fields in steps) if wizard else (),
             where=f"page `{ctx.page}`"))
+        if self.tabs and not self.result:
+            raise ctx.at("result").fail("`tabs=True` shows the result's sections one at a time, and it has 0.",
+                                        "Give `result=` two or more `ui.section(title, ...)`s, one per tab, or leave "
+                                        "`tabs=` out.")
         if self.load is not None:
             ctx = dataclasses.replace(ctx, under_load=True)
 
@@ -406,7 +455,7 @@ class Form(kinds.Kind):
 
 
 def form(*, title: Any, load: Any = None, fields: Any = (), steps: Any = (), submit: Any = None,
-         result: Any = (), actions: Any = ()) -> Form:
+         result: Any = (), actions: Any = (), tabs: bool = False) -> Form:
     """Entering something, at once or in steps. A tool is a form with a ``result=``.
 
     ``fields=`` is a list of ``ui.field``; ``steps=[ui.step("Details", fields=[...]), ...]`` makes
@@ -427,9 +476,15 @@ def form(*, title: Any, load: Any = None, fields: Any = (), steps: Any = (), sub
     again: what a section holds, or ``ui.section``\\ s. The handler keeps what the result shows in
     its state -- large or private data in a field whose name starts with ``_``, which stays on the
     server -- and a ``@ui.rows`` handler or a computed value reads it. ``actions`` are placed in
-    the page header, none of them as the primary one: that is the submit button.
+    the page header, none of them as the primary one: that is the submit button. ``tabs=True``
+    shows the result's sections one at a time, as on a record page: each section's title is its
+    tab, and what comes before the first section is above the tabs.
     """
-    return Form(title, load, kinds._many(fields), kinds._many(steps), submit, kinds._many(result), kinds._many(actions))
+    if not isinstance(tabs, bool):
+        raise TypeError(f"ui.form(tabs=) takes True or False; got {tabs!r}. `tabs=True` shows the result's sections "
+                        "one at a time.")
+    return Form(title, load, kinds._many(fields), kinds._many(steps), submit, kinds._many(result), kinds._many(actions),
+                tabs)
 
 
 def dialog(ctx: Build, button: Any) -> Any:

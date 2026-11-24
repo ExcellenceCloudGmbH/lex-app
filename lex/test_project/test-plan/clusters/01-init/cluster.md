@@ -1645,3 +1645,17 @@ does not remove user launch configurations.
 | 1.949 | A closed section where RFDS cannot close one is refused | record page; not a bool |
 
 **Scenario range:** 1.947 – 1.949. **Test file:** `lex/test_project/tests/init/test_1dz_ui_section_collapsed.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dz](batches.md).
+
+### 1ea. lex.ui pages: a tool's result as tabs -- one section at a time, as on a record page ✅
+
+**What it tests:** `ui.form(..., tabs=True)` -- the result's sections as RFDS's tabs, each title its tab, the parts they share above; the record page's `tabs=True`, the same argument.
+
+**Why a regression matters:** a second way to write tabs, a tab whose content is lost, a tab a user may not see drawn anyway, or a mistake that only shows in the browser.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.950 | The result's sections are tabs, each title its tab | RFDS's tabs; shared parts above; without `tabs=` as before |
+| 1.951 | Tabs compile and keep who may see a tab | Reflex's page compiler; RFDS's tab permission; part loads |
+| 1.952 | Tabs written wrongly say what to write | seven refusals |
+
+**Scenario range:** 1.950 – 1.952. **Test file:** `lex/test_project/tests/init/test_1ea_ui_form_result_tabs.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ea](batches.md).

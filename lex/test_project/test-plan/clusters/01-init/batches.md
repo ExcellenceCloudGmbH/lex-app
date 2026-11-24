@@ -3355,3 +3355,25 @@ What building settled is section 6.15 of `docs/superpowers/specs/2026-11-23-refl
 | 1.947 | A closed section opens in the browser and says how many rows it holds | RFDS's collapsible section, closed; title and the table's count once loaded, via RFDS's translation; open sections unchanged; no table: title alone; model tables; `ui.embed` |
 | 1.948 | A closed section compiles | Reflex's page compiler: the disclosure and the counting title |
 | 1.949 | A closed section where RFDS cannot close one is refused | on a record page, with `tabs=True` offered; `collapsed=` not a bool |
+
+### Batch 1ea — lex.ui pages: a tool's result as tabs -- one section at a time, as on a record page ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.950 – 1.952 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/forms.py` (`form(tabs=)`, `Form._result`, `Form._tabs`), `lex/lex_app/reflex/ui/pages/kinds.py` (the record's `tabs=`, unchanged) |
+| Test file | `lex/test_project/tests/init/test_1ea_ui_form_result_tabs.py` |
+| Test classes | `TestCluster01ea_FormResultTabs` (1.950–1.952) |
+| Fixtures | a neutral region report tool; Django's `Group` as a model table behind a permission |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Tabs existed on record pages (`ui.record(tabs=True)`); the same argument now works where sections also are, a
+form's `result=`. What building settled is section 6.16 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.950 | The result's sections are tabs, each title its tab | RFDS's tabs; titles as tabs, not repeated as headings; shared parts above; without `tabs=` as before; the record's `tabs=True` unchanged |
+| 1.951 | Tabs compile and keep who may see a tab | Reflex's page compiler; RFDS's tab permission: a refused tab and its table not drawn; a section's load stays a part load |
+| 1.952 | Tabs written wrongly say what to write | no result, one section, a part after a section, two of one title, a closed section, a state `visible=`, not a bool |

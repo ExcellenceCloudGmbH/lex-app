@@ -624,6 +624,33 @@ result=[ui.section("Orders", ui.table(ImportState.orders, columns=["name"])),
 - **A record page's sections are always open.** RFDS's object page lists them under "On this
   page" and has no closed section; `collapsed=True` there is refused, pointing to `tabs=True`.
 
+
+### 6.16 Tabs inside a page (2026-11-24, batch 1ea)
+
+A need found while rewriting dashboards: two or more views of one result side by side as tabs --
+a table per region, or the figures and a chart. **Tabs existed already**: `ui.record(tabs=True)`
+shows a record's sections one at a time (RFDS's object page with `navigation="tabs"`). The same
+argument now works where sections also are, a form's `result=`; no `ui.tabs` was added.
+
+```python
+ui.form(title="Region report", submit=RegionReportState.build_report, fields=[...], tabs=True,
+        result=[ui.text(RegionReportState.note),
+                ui.section("North", ui.table(RegionReportState.north, columns=["name"])),
+                ui.section("South", ui.table(RegionReportState.south, columns=["name"]))])
+```
+
+- **Each section's title is its tab** (RFDS's `tabs` with one `TabSpec` per section, switched in
+  the browser through a client state, as RFDS's object page does); the title is not repeated as a
+  heading inside the tab. What comes before the first section -- a sentence, a button -- is above
+  the tabs and shared by all; a part after a section is refused ("Put what every tab shares
+  first, then the sections").
+- **The same rules as a record's tabs.** Two or more sections; each its own title; `visible=` on a
+  section is a permission, RFDS's tab permission (a refused tab is not drawn), never a state value;
+  a closed section is refused in a tab ("a tab is opened by its tab"). A section's `load=` stays a
+  part load. RFDS mounts only the open tab, so a tab's table reads its rows when the tab is opened.
+- *Not added:* a count on each tab (RFDS's tab badge): a table in a tab that is not open has not
+  read its rows, so the count would be missing exactly where it is wanted.
+
 ---
 
 ## 7. Order of building
