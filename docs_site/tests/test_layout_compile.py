@@ -1,6 +1,17 @@
 """The docs app compiles, with the routes the site promises."""
 
 
+def test_the_packages_rfds_vendor_js_imports_are_installed():
+    """A lex.ui table's search box is RFDS's clearable text input, which imports ``rfdsClearInput``
+    from ``rfds_form.js``; that file imports ``react-number-format`` at module level, and only RFDS's
+    form and number inputs declare the package. Without it the dev server fails to resolve the import."""
+    from rfds._vendor._npm import spec
+
+    from rxconfig import config
+
+    assert spec("react-number-format") in config.frontend_packages
+
+
 def test_the_app_compiles_with_a_home_page(compiled):
     assert "index" in compiled.pages
 
