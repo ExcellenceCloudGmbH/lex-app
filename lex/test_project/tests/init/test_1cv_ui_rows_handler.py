@@ -36,7 +36,7 @@ def person():
 person.__ui_page__ = links.info_of("/people/[key]", "person", ["tab"])
 
 
-class RowsDesk(ui.State):
+class RowsState(ui.State):
     """A state with the rows handlers the scenarios read."""
 
     label: str = "people"
@@ -76,10 +76,10 @@ class TestCluster01cv_RowsHandler(SimpleTestCase):
                generator, an async function and any other argument are refused with what to write;
                the browser cannot send it as an event; `lex reflex check` accepts it.
         """
-        self.assertTrue(rows.is_rows(RowsDesk.people), "a plain function is a rows handler")
-        self.assertFalse(rows.takes_search(RowsDesk.people), "without `search`, lex-app does the search")
-        self.assertTrue(rows.takes_search(RowsDesk.found), "with `search`, the handler searches itself")
-        self.assertIs(rows.owner_of(RowsDesk.people), RowsDesk, "a rows handler knows its state")
+        self.assertTrue(rows.is_rows(RowsState.people), "a plain function is a rows handler")
+        self.assertFalse(rows.takes_search(RowsState.people), "without `search`, lex-app does the search")
+        self.assertTrue(rows.takes_search(RowsState.found), "with `search`, the handler searches itself")
+        self.assertIs(rows.owner_of(RowsState.people), RowsState, "a rows handler knows its state")
 
         def generator(self):
             yield []
@@ -100,7 +100,7 @@ class TestCluster01cv_RowsHandler(SimpleTestCase):
                 ui.rows(fn)
             self.assertIn(words, str(wrong.exception), f"{name}: refused with what to write")
         with self.assertRaises(RuntimeError) as sent:
-            RowsDesk.people.fn(object())
+            RowsState.people.fn(object())
         self.assertIn("it is not an event to send", str(sent.exception), "the browser cannot run a rows handler")
 
         from lex.lex_app.reflex.ui import checks
@@ -120,28 +120,28 @@ class TestCluster01cv_RowsHandler(SimpleTestCase):
                a missing permission refuses the read (a PermissionError in a test); given the
                table, the rows come back as its browser gets them.
         """
-        read = testing.rows(RowsDesk.people, user="ada")
+        read = testing.rows(RowsState.people, user="ada")
         self.assertEqual([(r["name"], r["seen_by"], r["label"]) for r in read][:1], [("Ada Example", "ada", "people")],
                          "the handler runs as the user and reads the state's fields")
-        self.assertEqual([r["name"] for r in testing.rows(RowsDesk.people, search="example")],
+        self.assertEqual([r["name"] for r in testing.rows(RowsState.people, search="example")],
                          ["Ada Example", "Bob Example"], "lex-app searches the rows of a handler without `search`")
-        self.assertEqual([r["name"] for r in testing.rows(RowsDesk.people, filters={"kind": "company"})],
+        self.assertEqual([r["name"] for r in testing.rows(RowsState.people, filters={"kind": "company"})],
                          ["Fund One"], "and applies the filters")
-        self.assertEqual([r["name"] for r in testing.rows(RowsDesk.found, search="bob")], ["Bob Example"],
+        self.assertEqual([r["name"] for r in testing.rows(RowsState.found, search="bob")], ["Bob Example"],
                          "a handler with `search` receives the text and does the search")
         with self.assertRaises(AttributeError) as wrote:
-            testing.rows(RowsDesk.writes)
-        self.assertEqual(str(wrote.exception), "RowsDesk.label: `@ui.rows` reads; change the state in a `@ui.load` "
+            testing.rows(RowsState.writes)
+        self.assertEqual(str(wrote.exception), "RowsState.label: `@ui.rows` reads; change the state in a `@ui.load` "
                                                "or an `@ui.action`.", "a write to the state fails the read")
         with self.assertRaises(rows.RowsError) as shape:
-            testing.rows(RowsDesk.broken)
+            testing.rows(RowsState.broken)
         self.assertIn("returned dict; a @ui.rows handler returns a list of dicts", str(shape.exception),
                       "a value that is not a list says what to return")
         with self.assertRaises(PermissionError, msg="a rows handler that requires a permission does not run without it"):
-            testing.rows(RowsDesk.groups)
-        self.assertEqual(testing.rows(RowsDesk.groups, grants=["auth.Group:read"]), [{"id": 1, "name": "x"}],
+            testing.rows(RowsState.groups)
+        self.assertEqual(testing.rows(RowsState.groups, grants=["auth.Group:read"]), [{"id": 1, "name": "x"}],
                          "and runs with it")
-        shown = testing.rows(RowsDesk.people, table=ui.table(RowsDesk.people, columns=["name"], search=True), search="bob")
+        shown = testing.rows(RowsState.people, table=ui.table(RowsState.people, columns=["name"], search=True), search="bob")
         self.assertEqual(shown, [{"id": "3", "name": "Bob Example"}],
                          "with table=, the rows come back as that table's browser gets them: its fields only")
 
@@ -175,13 +175,13 @@ class TestCluster01cv_RowsHandler(SimpleTestCase):
                table read again, and is itself that list of events for a raw Reflex handler;
                something that is not a rows handler is refused.
         """
-        state = rows_table.state_for(RowsDesk.people, columns=[{"field": "name", "header": "Name", "kind": "text"}],
+        state = rows_table.state_for(RowsState.people, columns=[{"field": "name", "header": "Name", "kind": "text"}],
                                      row_fields=["id", "name"], needed=("name",))
-        found, _ = results.split([ui.toast("Saved."), ui.refresh(RowsDesk.people)], handler="X.save")
+        found, _ = results.split([ui.toast("Saved."), ui.refresh(RowsState.people)], handler="X.save")
         self.assertEqual(len(found), 2, "ui.refresh is a result like ui.toast")
         events = results.to_events([found[1]])
         self.assertIn(state.reread, events, "it becomes the table's read-again event")
-        self.assertIn(state.reread, list(ui.refresh(RowsDesk.people)),
+        self.assertIn(state.reread, list(ui.refresh(RowsState.people)),
                       "and is itself that list of events, so a raw Reflex handler can return it as it is")
         with self.assertRaises(TypeError, msg="only rows handlers are refreshed"):
-            ui.refresh(RowsDesk.label)
+            ui.refresh(RowsState.label)

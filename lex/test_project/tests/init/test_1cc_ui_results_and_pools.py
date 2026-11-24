@@ -37,7 +37,8 @@ class TestCluster01cc_Results(TestCase):
         When:  values are built and split as a handler's return value would be.
         Then:  goto, toast and download are results; progress is the progress report, clamped
                to 0..1; None is nothing; a wrong tone, an empty path, a download of nothing and
-               any other object are refused with the handler's name (a Reflex event is allowed: 1.829).
+               any other object (a raw Reflex event) are refused with the handler's name (another state's
+               handler is allowed: 1.829).
         """
         out, report = results.split([results.goto("/a"), results.toast("Saved", tone="success"),
                                      results.progress(1.7, "Reading")], handler="Tickets.open")

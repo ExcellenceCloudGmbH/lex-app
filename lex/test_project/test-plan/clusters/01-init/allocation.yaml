@@ -2390,7 +2390,7 @@ letters:
       `ui.reflex_page("/route")` declares a raw Reflex page as a link target for `ui.address`, `open=`, `ui.link` and
       `ui.button`. These tests fail on a converted table whose rows cannot be opened, or a row link built from a string.
   db:
-    title: 'lex.ui pages in a project''s own chrome, in a project''s own app'
+    title: "lex.ui's part of lex-app's app, and every page in lex-app's chrome"
     scenarios: 1.825-1.826
     status: complete
     tests:
@@ -2398,9 +2398,9 @@ letters:
       skip: 0
       xfail: 0
     note: >-
-      `ui.chrome(frame, first=)` puts every `@ui.page` and the failed-load page in the project's frame, after the
-      project's gate; `ui.install(app)` puts lex.ui into a project's own Reflex app. These tests fail on a converted
-      page that looks unlike its neighbours, or a page load that runs before the gate it relies on.
+      create_app runs lex.ui's part of the app in one internal step, and every page is in lex-app's chrome after the
+      grants; the project-frame hook built first was withdrawn after review. These tests fail on a page registered
+      twice, without its error page, or outside lex-app's chrome.
   dc:
     title: 'lex.ui handlers declared on a state mixin are each state''s own'
     scenarios: '1.827'
@@ -2413,7 +2413,7 @@ letters:
       A lex.ui handler that a state takes from a mixin is decorated again under the state's own name. These tests fail
       on a button that stays busy, or a press ignored as a repeat, because another state runs the same handler.
   dd:
-    title: 'lex.ui tables: a date-range filter and a "contains" filter'
+    title: 'lex.ui tables: a date column is filtered by a range of days'
     scenarios: '1.828'
     status: complete
     tests:
@@ -2421,11 +2421,11 @@ letters:
       skip: 0
       xfail: 0
     note: >-
-      `ui.filter(field, kind="dates" | "text")` filters a `@ui.rows` table on the server, only on the fields it offers.
-      These tests fail on a history that cannot be narrowed to a month, a filter that drops the last day, or a filter
-      on a field the table does not offer.
+      A date or datetime column named in `filters=` is filtered by a range of days, on the server, only on the fields
+      the table offers. These tests fail on a list that cannot be narrowed to a month, a range that drops its last
+      day, or a filter on a field the table does not offer.
   de:
-    title: 'lex.ui handlers may send a Reflex event as it is'
+    title: 'lex.ui handlers may hand on to another state''s handler'
     scenarios: '1.829'
     status: complete
     tests:
@@ -2433,10 +2433,11 @@ letters:
       skip: 0
       xfail: 0
     note: >-
-      A handler body may return or yield another state's handler or an event spec among its results. These tests fail
-      on a converted handler that cannot chain to the handler it used to start, or a result order the browser loses.
+      A handler body may return or yield another state's handler among its results; raw Reflex events stay in the
+      custom region. These tests fail on a handler that cannot chain to another state, or a browser script slipping
+      out of an ordinary handler.
   df:
-    title: 'lex.ui: a button that says why it cannot be pressed; a typed download; is another job running'
+    title: 'lex.ui: a button that says why it cannot be pressed; a download the browser can place'
     scenarios: 1.830-1.831
     status: complete
     tests:
@@ -2444,6 +2445,5 @@ letters:
       skip: 0
       xfail: 0
     note: >-
-      `ui.button(disabled=)`, `ui.download(media_type=)` and `self.is_running(Other.job)`. These tests fail on a button
-      that vanishes or stays pressable for a row it cannot act on, a file the browser cannot place, or an overlap a
-      body cannot see.
+      `ui.button(disabled=<reason>)` and a download's media type from its file name. These tests fail on a button
+      that vanishes or stays pressable for a row it cannot act on, or a file the browser cannot place.

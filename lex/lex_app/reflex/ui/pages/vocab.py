@@ -235,6 +235,10 @@ class Button(Part):
 
             extra["loading"] = runs.running(self.handler, self.args[0])     # this row's run, not another's
         if isinstance(self.disabled, rx.Var):           # a reason per row, or from the state; "" lets it be pressed
+            if self.disabled._var_type in (bool, int, float):
+                raise ctx.fail(f"a button's `disabled=` is a {self.disabled._var_type.__name__} from the state.",
+                               "Give the reason as text: a field holding the sentence, and \"\" when the "
+                               "button can be pressed.")
             reason = self.disabled.to(str)
             extra["disabled"] = reason != ""
             extra["disabled_reason"] = rx.cond(reason != "", reason, None)

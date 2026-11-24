@@ -3084,29 +3084,29 @@ could only link to `@ui.page` functions, so its rows lost their links. 1.783's n
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.824 | A raw Reflex page is somewhere a link may lead | the address is the route with its value encoded as one piece, and is the kind of address a table follows; the table's rows link by their key; the link and the button lead there; a missing or unknown value, and a route that is no route, are refused with what to write |
+| 1.824 | A raw Reflex page is somewhere a link may lead | the address is the route with its value encoded as one piece, and is the kind of address a table follows; the table's rows link by their key; the link and the button lead there; a missing or unknown value, and a route that is no route, are refused with what to write; an app without a declared page does not start, naming the route |
 
-### Batch 1db — lex.ui pages in a project's own chrome, in a project's own app ✅
+### Batch 1db — lex.ui's part of lex-app's app, and every page in lex-app's chrome ✅
 
 | Property | Value |
 | --- | --- |
 | Scenario range | 1.825 – 1.826 |
 | Type | U |
-| Files covered | `lex/lex_app/reflex/ui/pages/declare.py` (`chrome`, `install`), `lex/lex_app/reflex/shell.py` (`framed`, `first_loads`), `lex/lex_app/reflex/ui/state.py` (`error_page`), `lex/lex_app/reflex/app.py` |
-| Test file | `lex/test_project/tests/init/test_1db_ui_project_chrome.py` |
-| Test classes | `TestCluster01db_ProjectChrome` (1.825–1.826) |
-| Fixtures | a project frame and gate; `rx.page` and the app's `add_page` recorded |
+| Files covered | `lex/lex_app/reflex/ui/pages/declare.py` (`install`), `lex/lex_app/reflex/app.py`, `lex/ui.py` |
+| Test file | `lex/test_project/tests/init/test_1db_ui_install.py` |
+| Test classes | `TestCluster01db_Install` (1.825–1.826) |
+| Fixtures | `rx.page` and the app's `add_page` recorded |
 | Tests landed | **2 pass / 0 fail** |
 | Status | ✅ Complete |
 
-Found while moving the reviewed customer project to lex.ui: it has its own frame, gate, error page and app module, so
-`@ui.page` could not be used without changing how its pages look. 1.778 and 1.805 now read `create_app`'s call of
-`ui.install`; 1.783's namespace gains `chrome` and `install`.
+First built as a project-frame hook (`ui.chrome`, a public `ui.install`) for the reviewed customer project, then
+withdrawn after an independent review (design note `2026-11-24-reflex-ui-project-chrome-design.md`); what stays is
+`create_app`'s one internal step. 1.778 and 1.805 read `create_app`'s call of it.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.825 | A page in the projects own frame after its gate | the page is in the project's frame, not lex-app's chrome; its load events are the grants, then the project's gate for that route, then the opener; the error page is in the frame too; without ui.chrome lex-app's chrome; a non-function is refused |
-| 1.826 | Install puts lex ui into a projects own app | the declared page is registered; the error page is added with the grants and the project's gate as its loads; the jobs' clock is registered once; the routes are checked after the project's pages |
+| 1.825 | Create app hands lex ui its pages in one step | the declared page is registered once; the error page is added after the user's grants; the jobs' clock is registered once; the routes are checked after the pages; create_app runs the step, and lex.ui offers no app or chrome hook |
+| 1.826 | Every page is in lex apps chrome after the grants | a page and the error page are in lex-app's chrome; the page's load events are the grants, then the opener - nothing of the project's between them |
 
 ### Batch 1dc — lex.ui handlers declared on a state mixin are each state's own ✅
 
@@ -3128,31 +3128,31 @@ showed every section busy while one exported, and ignored a second section's exp
 | --- | --- | --- |
 | 1.827 | A handler from a mixin is each states own | each state keeps the handler under its own name, so a view of one state's running export does not show the other's; the second export runs too instead of being ignored as a repeat; a handler written on the state itself keeps its name |
 
-### Batch 1dd — lex.ui tables: a date-range filter and a "contains" filter ✅
+### Batch 1dd — lex.ui tables: a date column is filtered by a range of days ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.828 |
+| Scenario range | 1.828 | A date column is filtered by a range of days | the kind column has a dropdown and the date column a date-range picker; a month keeps its first to last day (a datetime on the last evening included, an undated row never); an open start or end; the range and the dropdown together; clearing empties the picker; a range for a field that is no date filter and a date that is not a day change nothing |
 | Type | U |
-| Files covered | `lex/lex_app/reflex/ui/pages/tables.py` (`filter`, the toolbar), `lex/lex_app/reflex/ui/pages/rows_table.py` (`set_dates`, `set_text`, matching), `lex/ui.py` |
+| Files covered | `lex/lex_app/reflex/ui/pages/tables.py` (the toolbar, filters by column kind), `lex/lex_app/reflex/ui/pages/rows_table.py` (`set_dates`, matching) |
 | Test file | `lex/test_project/tests/init/test_1dd_ui_table_filters.py` |
 | Test classes | `TestCluster01dd_TableFilters` (1.828) |
-| Fixtures | a history rows handler with dates of every shape; `ui.testing.Harness` |
+| Fixtures | a rows handler with dates of every shape; `ui.testing.Harness` |
 | Tests landed | **1 pass / 0 fail** |
 | Status | ✅ Complete |
 
-Found while moving the reviewed customer project's history tables to lex.ui: each filters by when a run started and by
-words in a name. 1.783's namespace gains `filter`.
+First built as `ui.filter(kind="dates" | "text")`; after an independent review the filter's control follows the
+column's kind (no new name), and the "contains" filter was dropped: `search=True` already does it.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.828 | A history is filtered by dates and by words | the toolbar has a date-range picker and a text box beside the dropdown; a month keeps its first to last day (a datetime on the last evening included, an undated row never); an open start or end; every word must match in any case; both together; clearing empties them; a field the table does not offer and a date that is not a day change nothing; a model table and an unknown kind are refused |
+| 1.828 | A date column is filtered by a range of days | the kind column has a dropdown and the date column a date-range picker; a month keeps its first to last day (a datetime on the last evening included, an undated row never); an open start or end; the range and the dropdown together; clearing empties the picker; a range for a field that is no date filter and a date that is not a day change nothing |
 
-### Batch 1de — lex.ui handlers may send a Reflex event as it is ✅
+### Batch 1de — lex.ui handlers may hand on to another state's handler ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.829 |
+| Scenario range | 1.829 | A handler hands on to another states handler | the other state's handlers are results like the toast, in the order written, and reach the browser as they are; a browser script, a redirect and a plain object are refused with the handler's name and where raw events go |
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/results.py` (`split`, `to_events`) |
 | Test file | `lex/test_project/tests/init/test_1de_ui_reflex_events.py` |
@@ -3161,23 +3161,23 @@ words in a name. 1.783's namespace gains `filter`.
 | Tests landed | **1 pass / 0 fail** |
 | Status | ✅ Complete |
 
-Found while converting the reviewed customer project's handlers: many started another state's handler or announced
-something, and stayed raw async handlers for that alone. 1.747's docstring now says a Reflex event is allowed.
+First built to accept any Reflex event; after an independent review only another state's handler is accepted, so raw
+events stay in the custom region. 1.747's docstring follows.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.829 | A handler sends a reflex event after its results | the Reflex events are results like the others, in the order written; they reach the browser as they are, after the toast before them; a plain object is still refused with the handler's name and what a handler may return |
+| 1.829 | A handler hands on to another states handler | the other state's handlers are results like the toast, in the order written, and reach the browser as they are; a browser script, a redirect and a plain object are refused with the handler's name and where raw events go |
 
-### Batch 1df — lex.ui: a button that says why it cannot be pressed; a typed download; is another job running ✅
+### Batch 1df — lex.ui: a button that says why it cannot be pressed; a download the browser can place ✅
 
 | Property | Value |
 | --- | --- |
 | Scenario range | 1.830 – 1.831 |
 | Type | U |
-| Files covered | `lex/lex_app/reflex/ui/pages/vocab.py` (`button(disabled=)`), `lex/lex_app/reflex/ui/results.py` (`download(media_type=)`), `lex/lex_app/reflex/ui/state.py` and `runs.py` (`is_running`), `lex/lex_app/reflex/ui/context.py` (`RESERVED`) |
-| Test file | `lex/test_project/tests/init/test_1df_ui_button_disabled_download_type.py` |
-| Test classes | `TestCluster01df_ButtonDisabledDownloadType` (1.830–1.831) |
-| Fixtures | a rows handler with a reason per row; two jobs; `ui.testing.Harness` |
+| Files covered | `lex/lex_app/reflex/ui/pages/vocab.py` (`button(disabled=)`), `lex/lex_app/reflex/ui/results.py` (`download`) |
+| Test file | `lex/test_project/tests/init/test_1df_ui_button_disabled.py` |
+| Test classes | `TestCluster01df_ButtonDisabled` (1.830–1.831) |
+| Fixtures | a rows handler with a reason per row |
 | Tests landed | **2 pass / 0 fail** |
 | Status | ✅ Complete |
 
@@ -3187,5 +3187,5 @@ workbooks, and flags that kept jobs from overlapping (and stuck when a job faile
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.830 | A button says why it cannot be pressed and a file what it is | each row's button is blocked exactly when its row has a reason, stays focusable and shows the reason; a fixed reason is shown; the download carries its media type; a reason that is not a sentence or a field is refused |
-| 1.831 | A body asks whether another job is running | the export sees the build running while it runs, then not; outside a body the question is refused |
+| 1.830 | A button says why it cannot be pressed | each row's button is blocked exactly when its row has a reason, stays focusable and shows it; a fixed reason is shown; a yes/no field and True are refused with what to give instead |
+| 1.831 | A download tells the browser what the file is | a file built from data carries the media type its name says; a download by URL carries none |

@@ -1470,22 +1470,22 @@ does not remove user launch configurations.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.824 | A raw Reflex page is somewhere a link may lead | the address is the route with its value encoded as one piece, and is the kind of address a table follows; the table's rows link by their key; the link and the button lead there; a missing or unknown value, and a route that is no route, are refused with what to write |
+| 1.824 | A raw Reflex page is somewhere a link may lead | the address is the route with its value encoded as one piece, and is the kind of address a table follows; the table's rows link by their key; the link and the button lead there; a missing or unknown value, and a route that is no route, are refused with what to write; an app without a declared page does not start, naming the route |
 
 **Scenario range:** 1.824. **Test file:** `lex/test_project/tests/init/test_1da_ui_reflex_page.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1da](batches.md).
 
-### 1db. lex.ui pages in a project's own chrome, in a project's own app ✅
+### 1db. lex.ui's part of lex-app's app, and every page in lex-app's chrome ✅
 
-**What it tests:** A project with its own frame, gate and app module writes pages with `@ui.page`: `ui.chrome(frame, first=)` puts every page (and the failed-load page) in the project's frame, with the project's gate loading before the page's loads; `ui.install(app)` puts lex.ui into the project's own `rx.App`.
+**What it tests:** `create_app` hands lex.ui's pages to the app in one internal step (the declared `@ui.page` pages, `/ui-error`, the jobs' clock, the route check), and every `@ui.page` is in lex-app's chrome after the user's grants. lex.ui has no hook for a project's own frame or gate (the 2026-11-24 `ui.chrome`/`ui.install` was withdrawn after review).
 
-**Why a regression matters:** a converted page that suddenly looks and behaves unlike its neighbours, or a page load that runs before the gate it relies on.
+**Why a regression matters:** a page registered twice, without its error page, or outside lex-app's chrome.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.825 | A page in the projects own frame after its gate | the page is in the project's frame, not lex-app's chrome; its load events are the grants, then the project's gate for that route, then the opener; the error page is in the frame too; without ui.chrome lex-app's chrome; a non-function is refused |
-| 1.826 | Install puts lex ui into a projects own app | the declared page is registered; the error page is added with the grants and the project's gate as its loads; the jobs' clock is registered once; the routes are checked after the project's pages |
+| 1.825 | Create app hands lex ui its pages in one step | the declared page is registered once; the error page is added after the user's grants; the jobs' clock is registered once; the routes are checked after the pages; create_app runs the step, and lex.ui offers no app or chrome hook |
+| 1.826 | Every page is in lex apps chrome after the grants | a page and the error page are in lex-app's chrome; the page's load events are the grants, then the opener - nothing of the project's between them |
 
-**Scenario range:** 1.825 – 1.826. **Test file:** `lex/test_project/tests/init/test_1db_ui_project_chrome.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1db](batches.md).
+**Scenario range:** 1.825 – 1.826. **Test file:** `lex/test_project/tests/init/test_1db_ui_install.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1db](batches.md).
 
 ### 1dc. lex.ui handlers declared on a state mixin are each state's own ✅
 
@@ -1499,39 +1499,39 @@ does not remove user launch configurations.
 
 **Scenario range:** 1.827. **Test file:** `lex/test_project/tests/init/test_1dc_ui_mixin_handlers.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dc](batches.md).
 
-### 1dd. lex.ui tables: a date-range filter and a "contains" filter ✅
+### 1dd. lex.ui tables: a date column is filtered by a range of days ✅
 
-**What it tests:** `ui.filter(field, kind="dates")` and `ui.filter(field, kind="text")` filter a `@ui.rows` table on the server over every row, only on the fields the table offers, beside its dropdowns.
+**What it tests:** `filters=` names columns; a `date` or `datetime` column of a `@ui.rows` table is filtered by a range of days, any other by a dropdown of its values - on the server, over every row, only on the fields the table offers.
 
-**Why a regression matters:** a history that cannot be narrowed to a month, a date filter that drops the last day, or a filter on a field the table does not offer.
+**Why a regression matters:** a list that cannot be narrowed to a month, a range that drops its last day, or a filter on a field the table does not offer.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.828 | A history is filtered by dates and by words | the toolbar has a date-range picker and a text box beside the dropdown; a month keeps its first to last day (a datetime on the last evening included, an undated row never); an open start or end; every word must match in any case; both together; clearing empties them; a field the table does not offer and a date that is not a day change nothing; a model table and an unknown kind are refused |
+| 1.828 | A date column is filtered by a range of days | the kind column has a dropdown and the date column a date-range picker; a month keeps its first to last day (a datetime on the last evening included, an undated row never); an open start or end; the range and the dropdown together; clearing empties the picker; a range for a field that is no date filter and a date that is not a day change nothing |
 
 **Scenario range:** 1.828. **Test file:** `lex/test_project/tests/init/test_1dd_ui_table_filters.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dd](batches.md).
 
-### 1de. lex.ui handlers may send a Reflex event as it is ✅
+### 1de. lex.ui handlers may hand on to another state's handler ✅
 
-**What it tests:** A handler body returns or yields another state's handler, or an event spec such as `rx.call_script(...)`, among its lex.ui results; the browser gets it as it is, in order.
+**What it tests:** A handler body returns or yields another state's handler among its lex.ui results; the browser runs it in order. Reflex's own raw events stay in the custom region.
 
-**Why a regression matters:** a converted handler that cannot chain to the handler it used to start, or a result order the browser does not keep.
+**Why a regression matters:** a handler that cannot chain to another state, a result order the browser does not keep, or a browser script slipping out of an ordinary handler.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.829 | A handler sends a reflex event after its results | the Reflex events are results like the others, in the order written; they reach the browser as they are, after the toast before them; a plain object is still refused with the handler's name and what a handler may return |
+| 1.829 | A handler hands on to another states handler | the other state's handlers are results like the toast, in the order written, and reach the browser as they are; a browser script, a redirect and a plain object are refused with the handler's name and where raw events go |
 
 **Scenario range:** 1.829. **Test file:** `lex/test_project/tests/init/test_1de_ui_reflex_events.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1de](batches.md).
 
-### 1df. lex.ui: a button that says why it cannot be pressed; a typed download; is another job running ✅
+### 1df. lex.ui: a button that says why it cannot be pressed; a download the browser can place ✅
 
-**What it tests:** `ui.button(disabled=<reason or row field>)` keeps a blocked button in place with its reason; `ui.download(media_type=)`; `self.is_running(Other.job)` in a body.
+**What it tests:** `ui.button(disabled=<reason or row field>)` keeps a blocked button in place with its reason; `ui.download` tells the browser what a file built from data is, from its name.
 
-**Why a regression matters:** a button that vanishes or stays pressable for a row it cannot act on, a file the browser cannot place, or an overlap a body cannot see.
+**Why a regression matters:** a button that vanishes or stays pressable for a row it cannot act on, a yes/no value shown as a reason, or a PDF the browser treats as text.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.830 | A button says why it cannot be pressed and a file what it is | each row's button is blocked exactly when its row has a reason, stays focusable and shows the reason; a fixed reason is shown; the download carries its media type; a reason that is not a sentence or a field is refused |
-| 1.831 | A body asks whether another job is running | the export sees the build running while it runs, then not; outside a body the question is refused |
+| 1.830 | A button says why it cannot be pressed | each row's button is blocked exactly when its row has a reason, stays focusable and shows it; a fixed reason is shown; a yes/no field and True are refused with what to give instead |
+| 1.831 | A download tells the browser what the file is | a file built from data carries the media type its name says; a download by URL carries none |
 
-**Scenario range:** 1.830 – 1.831. **Test file:** `lex/test_project/tests/init/test_1df_ui_button_disabled_download_type.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1df](batches.md).
+**Scenario range:** 1.830 – 1.831. **Test file:** `lex/test_project/tests/init/test_1df_ui_button_disabled.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1df](batches.md).
