@@ -1,14 +1,13 @@
 
 
-### 1ew. lex.ui pages: a closed section mounts what it holds when opened; a title from the state; actions ✅
+### 1ex. lex.ui: a handler brings a section or a table into view -- ui.scroll_to ✅
 
-**What it tests:** a closed section's chart sits under a condition on its client-side opened state (set by a click), its table does not; an open section mounts at once; a state title and actions in a form's result compile into RFDS's section; a record page, a tab and the navigation refuse them with what to write.
+**What it tests:** the ids `ui.scroll_to(title)` and `ui.scroll_to(State.rows)` name are the ids the form's section, a record page's section and the rows table are built with; a handler's results keep their order; the events are Reflex's scroll_to of those ids; anything else is refused with what to write.
 
-**Why a regression matters:** A chart drawn at zero size, a closed section's count lost, or a title or an action silently dropped.
+**Why a regression matters:** A scroll that goes nowhere because the result's id and the part's id differ.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.1032 | A closed section mounts its content when opened, its table at once | the chart under a cond on rfdsLexopened; the data table not; onClick sets it; an open section's chart not under the cond |
-| 1.1033 | A section's title may be a state value, and it takes actions | form result: lines_title and rfds-section-actions with the button; record title, record actions, tab actions, a text in actions refused; nav section state title refused; a number title refused |
+| 1.1034 | A handler brings a section or a table into view | errors-found on a form's section and a record page's; the table's box id; run() results Toast then ScrollTo; to_events are scroll events with those ids; empty string, a number, an action refused |
 
-**Scenario range:** 1.1032 – 1.1033. **Test file:** `lex/test_project/tests/init/test_1ew_ui_section_opened_title_actions.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ew](batches.md).
+**Scenario range:** 1.1034. **Test file:** `lex/test_project/tests/init/test_1ex_ui_scroll_to.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ex](batches.md).

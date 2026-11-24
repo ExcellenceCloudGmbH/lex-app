@@ -520,7 +520,10 @@ class Table(Part):
         props.update(self._paging(state))
         caption = say(ctx.caption) if ctx.caption else say(ctx.page.replace("_", " ").capitalize())
         table = rfds.data_table(state=state, columns=specs, caption=caption, **props)
-        return rx.box(table, on_mount=state.open, on_unmount=state.close, width="100%")
+        from lex.lex_app.reflex.ui.pages.kinds import table_anchor
+
+        return rx.box(table, on_mount=state.open, on_unmount=state.close, width="100%",
+                      id=table_anchor(self.source))          # ui.scroll_to(State.rows) brings it into view
 
 
 def _export_columns(cols: list[Column]) -> tuple[tuple[str, str], ...]:

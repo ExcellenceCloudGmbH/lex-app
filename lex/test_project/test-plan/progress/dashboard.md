@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 147 | 1033 | 972 | 3 | 0 |
+| 1. Init — Project Bootstrap | 148 | 1034 | 973 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -172,6 +172,7 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1eu | lex.ui frame: areas nav= does not list follow the listed ones; a typo is still refused | 1.103 | complete | 1 | 0 | 0 | 1.960 still holds (its typo is a lex.ui page's). These tests fail on an unlisted raw area refused, areas out of order, or a lex.ui typo accepted. |
 | 1ev | lex reflex check follows the project's own imports from its dashboards | 1.1031 | complete | 1 | 0 | 0 | The files are parsed, never imported. These tests fail on an imported project module left unchecked, or a module outside the project read. |
 | 1ew | lex.ui pages: a closed section mounts what it holds when opened; a title from the state; actions | 1.1032-1.1033 | complete | 2 | 0 | 0 | The opened state is RFDS's client_state (rfdsLexopened<n>). These tests fail on a closed section's chart mounted at once, its table deferred, or a state title or actions accepted where they cannot show. |
+| 1ex | lex.ui: a handler brings a section or a table into view -- ui.scroll_to | 1.1034 | complete | 1 | 0 | 0 | 1cm's 1.783 lists scroll_to among the public names (a new name). These tests fail on an id mismatch between the result and the built part, or a wrong argument accepted. |
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |
 | 1h |  | 1.47-1.50 | complete | 15 | 0 | 0 | `requests.get` patched, network-free |

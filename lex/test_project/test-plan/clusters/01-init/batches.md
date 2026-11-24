@@ -1,21 +1,20 @@
 
 
-### Batch 1ew — lex.ui pages: a closed section mounts what it holds when opened; a title from the state; actions ✅
+### Batch 1ex — lex.ui: a handler brings a section or a table into view -- ui.scroll_to ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.1032 – 1.1033 |
+| Scenario range | 1.1034 |
 | Type | U |
-| Files covered | `lex/lex_app/reflex/ui/pages/kinds.py` (`section(title=, actions=)`, `Section.titled`, `_content`, `fixed`, `_render`), `lex/lex_app/reflex/ui/pages/forms.py` (a tab's section), `lex/lex_app/reflex/ui/pages/frame.py` (a navigation section) |
-| Test file | `lex/test_project/tests/init/test_1ew_ui_section_opened_title_actions.py` |
-| Test classes | `TestCluster01ew_SectionOpenedTitleActions` (1.1032–1.1033) |
+| Files covered | `lex/lex_app/reflex/ui/results.py` (`scroll_to`, `ScrollTo`, `split`, `to_events`), `lex/lex_app/reflex/ui/pages/kinds.py` (`section_anchor`, `table_anchor`, a titled section's id), `lex/lex_app/reflex/ui/pages/tables.py` (a rows table's id), `lex/ui.py` |
+| Test file | `lex/test_project/tests/init/test_1ex_ui_scroll_to.py` |
+| Test classes | `TestCluster01ex_ScrollTo` (1.1034) |
 | Fixtures | none |
-| Tests landed | **2 pass / 0 fail** |
+| Tests landed | **1 pass / 0 fail** |
 | Status | ✅ Complete |
 
 Section 6.22 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.1032 | A closed section mounts its content when opened, its table at once | the chart under a cond on rfdsLexopened; the data table not; onClick sets it; an open section's chart not under the cond |
-| 1.1033 | A section's title may be a state value, and it takes actions | form result: lines_title and rfds-section-actions with the button; record title, record actions, tab actions, a text in actions refused; nav section state title refused; a number title refused |
+| 1.1034 | A handler brings a section or a table into view | errors-found on a form's section and a record page's; the table's box id; run() results Toast then ScrollTo; to_events are scroll events with those ids; empty string, a number, an action refused |

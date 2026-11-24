@@ -106,6 +106,8 @@ class Section(Part):
         if opened is not None:
             # A click on the closed section can only be on its summary: the content mounts from then on.
             extra["on_click"] = opened.set_value(True)
+        if isinstance(self.title, str):
+            extra["id"] = section_anchor(self.title)         # ui.scroll_to("<title>") brings it into view
         return rfds.section(content, title=title, collapsible=self.collapsed, default_open=not self.collapsed,
                             **extra)
 
@@ -213,6 +215,18 @@ def _rfds(ctx: Build, build: Callable[[], Any]) -> Any:
     except (ValueError, TypeError) as wrong:
         raise ctx.fail(f"RFDS's page layout refuses this page: {wrong}",
                        "The sentence above is RFDS's own: it names the limit the page goes over.") from wrong
+
+
+def section_anchor(title: str) -> str:
+    """The id of the section titled ``title`` on its page (``ui.scroll_to("Lines")`` scrolls to it)."""
+    return _section_ids([title])[0]
+
+
+def table_anchor(handler: Any) -> str:
+    """The id of the table over the ``@ui.rows`` ``handler`` on its page."""
+    from lex.lex_app.reflex.ui.pages import rows_table
+
+    return "table-" + slug(rows_table.handler_key(handler).replace(".", "-").replace("_", "-"))
 
 
 def _section_ids(titles: list) -> list:

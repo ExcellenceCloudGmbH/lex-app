@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1033
+max_scenario: 1034
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2838,3 +2838,13 @@ letters:
       xfail: 0
     note: >-
       The opened state is RFDS's client_state (rfdsLexopened<n>). These tests fail on a closed section's chart mounted at once, its table deferred, or a state title or actions accepted where they cannot show.
+  ex:
+    title: 'lex.ui: a handler brings a section or a table into view -- ui.scroll_to'
+    scenarios: 1.1034
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      1cm's 1.783 lists scroll_to among the public names (a new name). These tests fail on an id mismatch between the result and the built part, or a wrong argument accepted.

@@ -1281,6 +1281,18 @@ lex-app project. (The table gaps of the same round are section 5.15 of the table
   a tab, which have no section heading of their own, `actions=` is refused: "Put the buttons inside
   the section, or give the page `actions=[...]`". A navigation section refuses both.
 
+- **`ui.scroll_to(part)`: a handler brings a part into view (batch 1ex).** Only `rx.scroll_to("<dom
+  id>")` in a `@ui.custom` handler could, with an id the author had to guess. A handler now returns
+  `ui.scroll_to("Errors found")` -- a section, named by its title as the page names it -- or
+  `ui.scroll_to(OrdersState.lines)` -- the table over that `@ui.rows` handler. lex-app gives the parts
+  those ids (a titled section: the anchor a record page already gives its sections, `section_anchor`;
+  a rows table: `table_anchor`, from its handler's name) and turns the result into Reflex's
+  `scroll_to` event, in order with the handler's other results. A part not on the page is not
+  scrolled to, and nothing fails. Two sections of one title on a page: the first is reached. *Not
+  added:* a model table by its model (several tables may show one model -- its section is named
+  instead), a section whose title is a state value (reached through its table). *Name:* Reflex's
+  own (`rx.scroll_to`); `ui.focus`, `ui.show` were considered.
+
 ## 7. Order of building
 
 One spec, four steps. Each ends by porting real pages of the reviewed project, in the scratchpad

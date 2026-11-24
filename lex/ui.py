@@ -45,7 +45,8 @@
 ``@ui.custom``              a raw Reflex handler, marked for review
 ``ui.goto/toast/download``  what a handler returns; ``ui.toast(link=ui.link(...))`` offers to
                             open something; ``ui.refresh(State.rows)`` makes the tables of
-                            another state read again
+                            another state read again; ``ui.scroll_to("Errors")`` brings a
+                            section (by its title) or ``ui.scroll_to(State.rows)`` a table into view
 ``ui.progress``             what a job yields
 ``ui.private``              a state field kept in the server's memory only, for its user, for a
                             while: ``_report: dict = ui.private()``; a ``@ui.rows`` handler reads
@@ -152,7 +153,7 @@ from lex.lex_app.reflex.ui.pages.parts import PageError
 from lex.lex_app.reflex.ui.pages.tables import column, table
 from lex.lex_app.reflex.ui.pages.vocab import button, custom_block, each, fact, link, message, status, switch, text
 from lex.lex_app.reflex.ui.private import private
-from lex.lex_app.reflex.ui.results import Refuse, download, goto, progress, refresh, toast
+from lex.lex_app.reflex.ui.results import Refuse, download, goto, progress, refresh, scroll_to, toast
 from lex.lex_app.reflex.ui.rows import rows
 from lex.lex_app.reflex.ui.runs import cancel, failed, loaded, progress_of, running
 from lex.lex_app.reflex.ui.state import State
@@ -161,6 +162,6 @@ __all__ = [
     "ApiError", "PageError", "Refuse", "State", "action", "address", "button", "calculation", "cancel", "column",
     "create", "custom", "custom_block", "dashboard", "delete", "download", "each", "edit", "embed", "fact",
     "failed", "field", "form", "frame", "goto", "job", "link", "load", "loaded", "message", "page", "permission", "private", "progress",
-    "progress_of", "read", "record", "reflex_page", "refresh", "rows", "rule", "running", "section", "signed_in", "status",
+    "progress_of", "read", "record", "reflex_page", "refresh", "rows", "rule", "running", "scroll_to", "section", "signed_in", "status",
     "step", "switch", "table", "testing", "text", "toast",
 ]
