@@ -1239,6 +1239,21 @@ banners; per-page frames.
 
 ---
 
+### 6.22 What rewrites of real dashboards still needed (2026-11-24, batches 1eu onward)
+
+Gaps in pages and the frame found while rewriting dashboards onto lex.ui, each a need of any
+lex-app project. (The table gaps of the same round are section 5.15 of the tables design.)
+
+- **Areas the frame does not list follow the listed ones (batch 1eu).** `ui.frame(nav=[...])` refused
+  any page whose area it did not list, so a project that still had raw pages in areas of their own
+  ("Admin", "Tools") had to list every one of them or the app did not start. Now `nav=` orders the
+  areas it names; every other area follows, in the order its first page was declared. The typo check
+  stays for the pages the author writes now: a `@ui.page` whose area neither `nav=` nor any raw page
+  (`ui.reflex_page`, `lex_page`) has is refused, naming the listed areas and the raw pages' areas to
+  choose from. A raw page is never refused (its area is what the old app called it). A `@ui.page`
+  may join a raw page's area without listing it. *Not added:* refusing a listed area that no page has
+  -- raw pages may be listed after the frame is checked.
+
 ## 7. Order of building
 
 One spec, four steps. Each ends by porting real pages of the reviewed project, in the scratchpad

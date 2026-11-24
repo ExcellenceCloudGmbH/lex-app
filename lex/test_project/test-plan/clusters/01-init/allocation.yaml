@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1029
+max_scenario: 1030
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2808,3 +2808,13 @@ letters:
       xfail: 0
     note: >-
       1cx's 1.809 and 1eh's 1.998 now expect the export/totals refusal's new words (it names self.api.all). These tests fail on a row read twice or missed, an unbounded read, or a model date filter not sent.
+  eu:
+    title: 'lex.ui frame: areas nav= does not list follow the listed ones; a typo is still refused'
+    scenarios: 1.1030
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      1.960 still holds (its typo is a lex.ui page's). These tests fail on an unlisted raw area refused, areas out of order, or a lex.ui typo accepted.

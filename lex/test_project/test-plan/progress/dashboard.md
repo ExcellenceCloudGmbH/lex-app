@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 144 | 1029 | 968 | 3 | 0 |
+| 1. Init — Project Bootstrap | 145 | 1030 | 969 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -169,6 +169,7 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1er | lex.ui tables: the rows a table shows reach the browser and are never stored with the state | 1.1024-1.1025 | complete | 2 | 0 | 0 | Pins the data-protection rule "no person in any state's pickle" for tables. Fails on a row value, a total or a filter choice in a stored state, or on a table that cannot read its rows again after the store left them out. |
 | 1es | lex.ui: a foreign key shows the related record's name, in a model table, a run's history and its facts | 1.1026-1.1027 | complete | 2 | 0 | 0 | The name is lex-app's own `<fk>__short_description` (str of the related record). These tests fail on an id shown in a foreign key's column or fact, a sort sent by the name key, or the id lost from the row. |
 | 1et | lex.ui: every record through self.api.all, and a model table filtered by a range of days | 1.1028-1.1029 | complete | 2 | 0 | 0 | 1cx's 1.809 and 1eh's 1.998 now expect the export/totals refusal's new words (it names self.api.all). These tests fail on a row read twice or missed, an unbounded read, or a model date filter not sent. |
+| 1eu | lex.ui frame: areas nav= does not list follow the listed ones; a typo is still refused | 1.103 | complete | 1 | 0 | 0 | 1.960 still holds (its typo is a lex.ui page's). These tests fail on an unlisted raw area refused, areas out of order, or a lex.ui typo accepted. |
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |
 | 1h |  | 1.47-1.50 | complete | 15 | 0 | 0 | `requests.get` patched, network-free |
