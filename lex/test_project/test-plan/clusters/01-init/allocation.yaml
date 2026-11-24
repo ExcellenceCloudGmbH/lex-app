@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 831
+max_scenario: 851
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2447,3 +2447,43 @@ letters:
     note: >-
       `ui.button(disabled=<reason>)` and a download's media type from its file name. These tests fail on a button
       that vanishes or stays pressable for a row it cannot act on, or a file the browser cannot place.
+  dh:
+    title: 'lex.ui forms: what was entered reaches the handler as Python values, or as a message at its field'
+    scenarios: 1.833-1.836
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      a field's value turned into its kind's Python value, or a sentence for its field; one set of fields per handler; `ui.fact` takes the form kinds. These tests fail on a text where a number was promised, a wrong value reaching the handler's body, a message nobody can act on, or one handler silently receiving two sets of fields.
+  di:
+    title: 'lex.ui forms: the handler runs once, with checked values; the page follows what it did'
+    scenarios: 1.837-1.841
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      through Reflex's own event processor: values checked before the body, the result flag, a job's progress, a wizard's steps, a new visit. These tests fail on a body that runs on unchecked values, a result that outlives the input it belongs to, or a wizard that runs its handler once per step.
+  dj:
+    title: 'lex.ui pages: the form kind -- fields, one submit, a result; a wizard; a tool'
+    scenarios: 1.842-1.846
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      the form page built from RFDS's page header, form and inputs; a tool with a job and a result; a wizard; load= and @ui.page; every build-time error. These tests fail on a field sent while the user types, a submit button that can be pressed twice, a result shown before there is one, or an error that does not say the page, the slot and what to write.
+  dk:
+    title: 'lex.ui: a button that asks first -- confirm=, ask= -- and that shows its handler running'
+    scenarios: 1.847-1.851
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      RFDS's confirmation and dialog opened from a button, one per button as written; a dangerous button must ask; ask= values checked like a form's; every button shows its handler running. These tests fail on a dangerous action that runs on one click, a dialog per table row, a reason reaching the handler unchecked, or a button pressable again while its handler runs.

@@ -1535,3 +1535,66 @@ does not remove user launch configurations.
 | 1.831 | A download tells the browser what the file is | a file built from data carries the media type its name says; a download by URL carries none |
 
 **Scenario range:** 1.830 – 1.831. **Test file:** `lex/test_project/tests/init/test_1df_ui_button_disabled.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1df](batches.md).
+
+### 1dh. lex.ui forms: what was entered reaches the handler as Python values, or as a message at its field ✅
+
+**What it tests:** a field's value turned into its kind's Python value, or a sentence for its field; one set of fields per handler; `ui.fact` takes the form kinds.
+
+**Why a regression matters:** a text where a number was promised, a wrong value reaching the handler's body, a message nobody can act on, or one handler silently receiving two sets of fields.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.833 | Each kind reaches the handler as its Python value | text stripped; number int or Decimal; money and percent Decimal; date; date and time in the app's zone; year int; box bool; choice text; empties are "", False or None; undeclared fields dropped |
+| 1.834 | A wrong or missing value is a message for its field | required, not a number, NaN, infinity, not a date, not four digits, a choice outside its options (fixed or a state field) each have their sentence |
+| 1.835 | A handler receives one set of fields | the same fields again are accepted; others are refused naming the handler and where the first set was declared |
+| 1.836 | A fact shows the kinds a field takes | date formatted by RFDS, year without separator, bool as Yes/No, choice as it is; an unknown kind lists the kinds |
+
+**Scenario range:** 1.833 – 1.836. **Test file:** `lex/test_project/tests/init/test_1dh_ui_form_values.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dh](batches.md).
+
+### 1di. lex.ui forms: the handler runs once, with checked values; the page follows what it did ✅
+
+**What it tests:** through Reflex's own event processor: values checked before the body, the result flag, a job's progress, a wizard's steps, a new visit.
+
+**Why a regression matters:** a body that runs on unchecked values, a result that outlives the input it belongs to, or a wizard that runs its handler once per step.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.837 | The values are checked before the handlers body runs | with problems the body does not run and each field has its message; filled in, it runs once with a Decimal and the result flag is set |
+| 1.838 | A refusal and a failure are shown and no result appears | a refusal in its own words, a failure with a reference, neither sets the result; sending again takes the old result away, also when refused at a field |
+| 1.839 | A job reports its progress and then its result | an empty year does not start the job; progress before the result; rows stay on the server; a refused job shows no result |
+| 1.840 | A wizard sends one form and runs its handler once | an empty step stays with its message; a filled one moves on; Back; only the last step runs the body with every value; an earlier problem returns there |
+| 1.841 | A new visit starts the form over | the opener clears messages, steps, results and an open dialog |
+
+**Scenario range:** 1.837 – 1.841. **Test file:** `lex/test_project/tests/init/test_1di_ui_form_submit.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1di](batches.md).
+
+### 1dj. lex.ui pages: the form kind -- fields, one submit, a result; a wizard; a tool ✅
+
+**What it tests:** the form page built from RFDS's page header, form and inputs; a tool with a job and a result; a wizard; load= and @ui.page; every build-time error.
+
+**Why a regression matters:** a field sent while the user types, a submit button that can be pressed twice, a result shown before there is one, or an error that does not say the page, the slot and what to write.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.842 | A form page draws each field and sends the form once | RFDS's input per kind, labels, help, required mark, the server's message per field, dropdown or type-ahead, the submit button after the handler showing it running; one event: the submit |
+| 1.843 | A tool is a form with a result | a job's progress and Stop; the result behind its flag, full width, with its table, section and download; one primary button |
+| 1.844 | Steps make the same form a wizard | RFDS's stepper, one form with the other steps hidden, Continue then the handler's name, Back |
+| 1.845 | A form waits for its load and is a page like any other | registered with its load; skeleton until loaded; a field starts from the state; a result section's load is a part load |
+| 1.846 | A form declared wrongly says the page, the slot and what to write | twenty refusals read word for word: key twice, unknown kind, file, options misplaced or wrong, other state, currency, fields/steps, submit, values argument, a handler with other fields; a field in a section |
+
+**Scenario range:** 1.842 – 1.846. **Test file:** `lex/test_project/tests/init/test_1dj_ui_form_page.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dj](batches.md).
+
+### 1dk. lex.ui: a button that asks first -- confirm=, ask= -- and that shows its handler running ✅
+
+**What it tests:** RFDS's confirmation and dialog opened from a button, one per button as written; a dangerous button must ask; ask= values checked like a form's; every button shows its handler running.
+
+**Why a regression matters:** a dangerous action that runs on one click, a dialog per table row, a reason reaching the handler unchecked, or a button pressable again while its handler runs.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.847 | Confirm asks before the handler runs | the button opens RFDS's confirmation beside the page; agreeing closes it, then runs the handler; vague questions refused |
+| 1.848 | A dangerous button must ask | refused as a button, a menu entry and a row action, with what to write; one dialog per table, with the row's key |
+| 1.849 | Ask opens a small dialog and hands its values to the handler | RFDS's dialog with RFDS's form; empty: stays open with the message; filled: closes and the body gets the key and the values; wrong handler or fields refused |
+| 1.850 | A button shows its handler running | action and job buttons load while running; a row's button only for its key; a raw handler or a page link not |
+| 1.851 | The dialog is opened and closed on the server | asking records the dialog and values; dismissing forgets them |
+
+**Scenario range:** 1.847 – 1.851. **Test file:** `lex/test_project/tests/init/test_1dk_ui_button_confirm_ask.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dk](batches.md).
