@@ -3380,3 +3380,71 @@ such a collision.
 | 1.863 | A field named like a route argument stops the app with a sentence | a lex.ui field and computed var, a plain Reflex field, an inherited one; a page the app added, a declared one, an optional argument, a route without its leading slash: a `ValueError` naming the field, its state and module and the route, saying to rename the field; Reflex itself refuses each name |
 | 1.864 | What Reflex lets through starts | an argument named like a backend field, an event handler, a static part of a path, or nothing any state has: the app starts; Reflex lets each through too |
 | 1.865 | The route check runs before the pages are built | `ui.install` calls `check_app_routes`, which checks the state fields; a helper's name (`[user]`) is still refused first, with its own sentence |
+
+### Batch 1ds — lex.ui forms: a choice searched on the server ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.900 – 1.903 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/forms.py` (`Expect.search`, `searched`, `search`, `check`, `clean`, `MATCHES`), `lex/lex_app/reflex/ui/pages/forms.py` (`field`, `Field.check`, `Field.expect`, `Field.control`), `lex/lex_app/reflex/ui/state.py` (`ui_search`, `ui_matches`, `_ui_offered`) |
+| Test file | `lex/test_project/tests/init/test_1ds_ui_form_searched_choice.py` |
+| Test classes | `TestCluster01ds_SearchedChoice` (1.900–1.903) |
+| Fixtures | a neutral orders state: 120 customers (with an e-mail each), regions, rows without a label |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+`options=` a `@ui.rows` handler, on top of the forms of 1dh-1dl. What building settled is section 6.15 of
+`docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.900 | A search offers a page of matches and nothing else of the rows | the rows handler gets the tidied text; at most `MATCHES`, each `{value, label}`; no other field in any update; without `search` the labels are matched, folded; rows without a label: logged with what to write, a reference at the field; an unknown field ignored |
+| 1.901 | The server accepts only a value it offered to the tab | an offered id reaches the body as the row gave it; an existing but unoffered or a forged id refused at the field; required; an earlier search's value still accepted; nothing offered, nothing accepted |
+| 1.902 | The field is RFDS's combobox searching on the server | server-search mode (`shouldFilter:false`) over `ui_matches`; typing and opening send `ui_search`; the id under the key, the label shown; compiled; in a step and ask=, the dialog hands the key and the id |
+| 1.903 | A searched choice declared wrongly | several from a search, a start value, an action as options, one field searching two rows handlers: each names page, slot and what to write |
+
+### Batch 1dt — lex.ui: a refusal shown above a form's submit button, with a title ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.904 – 1.907 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/results.py` (`Refuse`), `lex/lex_app/reflex/ui/handlers.py` (`_classify`, `_toast`, `_in_place`, `action`, `job`), `lex/lex_app/reflex/ui/forms.py` (`receive`, `refused`, `done`), `lex/lex_app/reflex/ui/pages/forms.py` (`Form._page`, `dialog`), `lex/lex_app/reflex/ui/state.py` (`ui_refused`), `lex/lex_app/reflex/ui/testing.py` (`fields`) |
+| Test file | `lex/test_project/tests/init/test_1dt_ui_refuse_in_place.py` |
+| Test classes | `TestCluster01dt_RefuseInPlace` (1.904–1.907) |
+| Fixtures | a neutral exports state: a form, a job form, row buttons that ask |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+What building settled is section 6.15 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`; the failures
+table of the action-state design (6.5) gains the form's row.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.904 | Outside a form a refusal is a toast headed by its title | `Refuse(title=)` kept; RFDS's warning toast with the title first and the sentence as its description; without a title the sentence alone; nothing kept in place; a title that is no text refused |
+| 1.905 | In a form the refusal stays above the button until the form is sent again | `ui_refused[key]` title and sentence, no toast; cleared by the next send, also one with a field problem, by a success and by a new visit; API "not permitted" kept too; an unexpected error a toast, not kept; a job's refusal kept |
+| 1.906 | The form shows it above its submit button | RFDS's inline message inside the form, before the action bar; warning tone, `role="alert"`, the title line; compiled; a wizard too |
+| 1.907 | A dialog that asked stays open with the refusal | the dialog's inline message above its buttons; an action's dialog stays open with it, closes on success; a job's dialog closed at the start, its refusal a titled toast |
+
+### Batch 1du — lex.ui: a toast that offers to open the result elsewhere ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.908 – 1.910 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/results.py` (`toast`, `Toast.link`, `to_events`), `lex/lex_app/reflex/ui/pages/vocab.py` (`Link.target`), `lex/lex_app/reflex/ui/testing.py` (`Result.toasts`) |
+| Test file | `lex/test_project/tests/init/test_1du_ui_toast_link.py` |
+| Test classes | `TestCluster01du_ToastLink` (1.908–1.910) |
+| Fixtures | a neutral export state (a job and an action that end with a linked toast); a page stand-in |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+What building settled is section 6.15 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.908 | A toast link leads where a ui.link leads | a page with encoded values and a parameter, a raw Reflex page, lex-app's record page, an outside address; which leave the dashboards |
+| 1.909 | The toast is RFDS's toast with its action | through `ui.testing.run`: the toast with its link; RFDS's toast with one action worded as the link, redirecting (outside as outside); 10 s with an action; none without |
+| 1.910 | A toast link written wrongly is refused where it is written | not a ui.link, a button, `visible=`, a missing or unknown page value, an empty key: each says what to write |
+

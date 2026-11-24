@@ -1656,3 +1656,48 @@ does not remove user launch configurations.
 | 1.865 | The route check runs before the pages are built | `ui.install` calls `check_app_routes`, which checks the state fields; a helper's name (`[user]`) is still refused first, with its own sentence |
 
 **Scenario range:** 1.863 – 1.865. **Test file:** `lex/test_project/tests/init/test_1do_ui_route_argument_fields.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1do](batches.md).
+
+### 1ds. lex.ui forms: a choice searched on the server ✅
+
+**What it tests:** `ui.field(key, options=State.rows_handler)` -- RFDS's server-search combobox over a `@ui.rows` handler; a page of `{value, label}` matches; the value checked against what the tab was offered; in a form, a step and a button's ask=.
+
+**Why a regression matters:** every customer in the page, a row's other fields (an e-mail address) in the browser, a forged id reaching the handler's body, or an empty box until the user types.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.900 | A search offers a page of matches and nothing else of the rows | the tidied text; at most `MATCHES` `{value, label}`; no other field reaches the browser; labels matched when the handler does not search; rows without a label fail as a table's; an unknown field ignored |
+| 1.901 | The server accepts only a value it offered to the tab | the row's id for the body; unoffered or forged ids refused at the field; required; earlier searches' values kept |
+| 1.902 | The field is RFDS's combobox searching on the server | server-search mode over `ui_matches`; `ui_search` on typing and opening; the id sent, the label shown; compiled; in a step and ask= |
+| 1.903 | A searched choice declared wrongly | several, a start value, an action as options, two rows handlers for one field |
+
+**Scenario range:** 1.900 – 1.903. **Test file:** `lex/test_project/tests/init/test_1ds_ui_form_searched_choice.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ds](batches.md).
+
+### 1dt. lex.ui: a refusal shown above a form's submit button, with a title ✅
+
+**What it tests:** `ui.Refuse(message, title=)` -- in a form, and in an action's ask= dialog, RFDS's inline message above the submit button until the form is sent again; elsewhere a toast headed by the title.
+
+**Why a regression matters:** a refusal the user never sees, one that stays after the form was sent again, the same sentence twice, or a title that is lost.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.904 | Outside a form a refusal is a toast headed by its title | the title first, the sentence as the description; without a title as before; nothing kept in place |
+| 1.905 | In a form the refusal stays above the button until the form is sent again | kept per handler, no toast; cleared by every send and a new visit; API refusals too; errors stay toasts; jobs too |
+| 1.906 | The form shows it above its submit button | RFDS's inline message before the action bar, warning, announced, titled; compiled; a wizard too |
+| 1.907 | A dialog that asked stays open with the refusal | an action's dialog keeps it and closes on success; a job's dialog closed, its refusal a toast |
+
+**Scenario range:** 1.904 – 1.907. **Test file:** `lex/test_project/tests/init/test_1dt_ui_refuse_in_place.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dt](batches.md).
+
+### 1du. lex.ui: a toast that offers to open the result elsewhere ✅
+
+**What it tests:** `ui.toast(..., link=ui.link(...))` -- the targets and checks of every link, run when the handler makes the toast; RFDS's toast with one action.
+
+**Why a regression matters:** a toast without its button, a button that leads to the wrong page, or a link whose mistake is found only when a user presses it.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.908 | A toast link leads where a ui.link leads | page, raw page, record, outside address |
+| 1.909 | The toast is RFDS's toast with its action | one action, worded as the link, redirecting; longer duration |
+| 1.910 | A toast link written wrongly is refused where it is written | each mistake says what to write |
+
+**Scenario range:** 1.908 – 1.910. **Test file:** `lex/test_project/tests/init/test_1du_ui_toast_link.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1du](batches.md).
+

@@ -543,7 +543,7 @@ Built on 2026-11-24 after a spike against RFDS 1.0.0 (`ui.form`, `ui.field`, `ui
 - **`kind=` is one list for showing and for entering.** `ui.fact` now takes `date`, `year` (no
   thousands separator), `bool` (the words Yes and No), `choice` and `choices` (joined by commas) too.
 - **A choice among many is a type-ahead box over a list the page holds; a server-searched choice is
-  not built.** `options=` takes a list, a dict of value to wording, or a field of the handler's own
+  not built** (since built without a new handler kind: see 6.15). `options=` takes a list, a dict of value to wording, or a field of the handler's own
   state (filled by the page's load), checked against that field on the server. RFDS's `combobox`
   searches on the server only through an event handler and a results field per field: in lex.ui that
   would be a sixth handler kind or a generated state per field, for one input. Left out rather than
@@ -603,6 +603,70 @@ def invoice_report():
                 ui.button("Download", InvoiceReportState.download)],
     )
 ```
+
+
+### 6.15 A searched choice, a refusal in place, a toast with a link
+
+Built on 2026-11-24 (batches 1ds-1du), on top of 6.14:
+
+- **A choice searched on the server is `options=` a `@ui.rows` handler -- no new handler kind.** 6.14
+  left it out because RFDS's combobox searches only through an event handler and a results field per
+  input. The handler the author writes already exists: a rows handler that takes `search` receives the
+  typed text (one without `search` returns every row and lex-app matches the words against the labels,
+  folded as RFDS's browser filter folds them). The event handler and the results field are lex-app's,
+  shared by every searched field: `ui.State.ui_search(field, text)` and `ui_matches[field]`, keyed by
+  the field's id (the receiving handler's module-qualified name and the field's key). The browser names
+  only that id; the rows handler is looked up in the server's registry and runs as the user, as a
+  table's. Each row gives **`id`** (what the handler receives; an `int` stays an `int`, anything else
+  arrives as text) and **`label`** (the words the user reads) -- named keys rather than "the first
+  field that is not the id", which depends on a dict's order and is harder to explain.
+- **Only a page of matches reaches the browser** (`forms.MATCHES`, 50), each `{value, label}`: none of
+  a row's other fields. The first page is asked for when the field appears (`on_mount`), so the list is
+  ready when it opens; RFDS debounces typing (250 ms) and a newer search supersedes an older one.
+- **The server accepts only a value it offered to this tab.** Every value offered is remembered on the
+  server (`_ui_offered`, a backend field: never sent), so a value chosen from an earlier search stays
+  valid while the user types on; a forged or merely existing value is refused at the field ("Choose one
+  of the options."). Past 1,000 remembered values only the latest search's count. A failed search
+  (the rows handler raised, or a row without `id` or `label`) is handled as a table's: logged with what
+  to write and a reference, the reference shown at the field.
+- **RFDS's server-search combobox shows its value as it is**, not an option's label. lex.ui gives the
+  combobox the chosen match's label (under a name the server ignores, `<key>__shown`) and sends the id
+  beside it in a hidden input under the field's key. *Cost:* the chosen item carries no check mark in
+  the open list.
+- **A searched choice starts empty and chooses one.** `value=` is refused (the server cannot word, or
+  accept, a value it never offered); `kind="choices"` with a searched source is refused: RFDS's
+  multi-select has no server search. *Cost:* an edit form cannot show the current customer in the box.
+- **It works in a form, a wizard's step and a button's `ask=`**, as every field. A project's unit test
+  sends `ui_search` through `ui.testing.Harness` before it sends the form.
+- **A form's refusal is shown in the form, above its submit button** -- where the user is looking --
+  in RFDS's `inline_message` (warning tone, as the toast it replaces; `role="alert"`: it is new and the
+  form did not do what was asked). It is kept per handler (`ui_refused[key] = {title, message}`) and
+  leaves when the form is sent again, whatever comes of that send, and on a new visit -- as the result
+  of 6.14 does. It is not also a toast: RFDS's rule is that a warning is never *only* a toast, and the
+  same sentence twice, one of them persistent, is noise. A refusal by lex-app's API (not permitted, a
+  4xx) is a refusal too; an unexpected failure stays a toast with its reference, since nothing in the
+  form can fix it. One way to refuse, `raise ui.Refuse(...)`, wherever the handler runs: no
+  form-error return value was added.
+- **`ui.Refuse(message, title=)`: an optional short heading.** In a form it heads the inline message;
+  outside a form the refusal is a toast as before, its first line the title and its second the
+  sentence (RFDS's toast `description`). *Considered:* a `heading=` word; `title=` is the word the
+  page kinds, sections and RFDS's own messages already use.
+- **An action's `ask=` dialog stays open until the action succeeds**, so its refusal shows in the
+  dialog, above its buttons; before, it closed as soon as the values passed. A job's dialog still
+  closes when the job starts -- the user keeps working while it runs -- so a job's refusal from a
+  dialog is a toast, headed by its title. `confirm=` dialogs (no form) close first, as before.
+- **A toast offers to open something with `link=ui.link(...)`**: `return ui.toast("Your export is
+  ready.", link=ui.link("Open", to=history_page, key=report_id))`. No action API was invented: the
+  link is written as every link is, with the same targets (`to=` a page or a `ui.reflex_page`,
+  `record=(Model, pk)`, `href=` an outside address) and the same checks, run when the handler makes
+  the toast, so a wrong link fails the handler, not the user's click ("ui.toast(link=): a link to page
+  `export_page` (/exports/[key]) is missing key. ... Write `to=export_page, key=...`."). It becomes
+  RFDS's `ToastAction` -- one button, the link's words, opening the address as `ui.link` would
+  (`record=` and `href=` as outside addresses) -- and RFDS keeps a success or info toast with an action
+  open 10 seconds. `visible=` is refused: a toast's link is always shown. RFDS's rule that a toast's
+  action is also reachable on the page is the author's, said in `ui.toast`'s docstring. *Considered:*
+  `action=` (RFDS's word, but it takes an event) and a `ui.toast_action`; both are a second way to say
+  where something leads.
 
 ---
 

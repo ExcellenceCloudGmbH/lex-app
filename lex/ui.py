@@ -39,10 +39,12 @@
 ``@ui.job``                 long work with progress; the user keeps working
 ``@ui.rows``                a table's rows, as a list of dicts; read-only, read as the user
 ``@ui.custom``              a raw Reflex handler, marked for review
-``ui.goto/toast/download``  what a handler returns; ``ui.refresh(State.rows)`` makes the
-                            tables of another state read again
+``ui.goto/toast/download``  what a handler returns; ``ui.toast(link=ui.link(...))`` offers to
+                            open something; ``ui.refresh(State.rows)`` makes the tables of
+                            another state read again
 ``ui.progress``             what a job yields
-``ui.Refuse``               an expected refusal, shown in its own words
+``ui.Refuse``               an expected refusal, shown in its own words (``title=`` heads it): in
+                            a form above its submit button, elsewhere as a toast
 ``ui.ApiError``             lex-app's API refused a call (``.status``, ``.denied``,
                             ``.detail``); uncaught, it is shown to the user
 ``requires=``               ``ui.read/create/edit/delete(Model)``, ``ui.permission()``,
@@ -56,7 +58,8 @@ progress_of/cancel``        event of a Cancel button
 ``ui.record/list/form``     the page kinds: named slots, placed by lex-app (``ui.list`` is
                             left out of ``import *``, which would hide Python's ``list``)
 ``ui.field/step``           a form's inputs, and a wizard's steps; the handler gets ``values``.
-                            ``ui.button(confirm=, ask=)`` asks before its handler runs
+                            ``options=`` a ``@ui.rows`` handler searches on the server as the user
+                            types. ``ui.button(confirm=, ask=)`` asks before its handler runs
 ``ui.section``              a titled part of a page; ``load=`` makes it load on its own
 ``ui.text/fact/status/      what fills the slots; none takes a styling argument
 message/column/

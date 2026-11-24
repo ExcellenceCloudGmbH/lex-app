@@ -12,11 +12,19 @@ RECORDER: list | None = None
 
 
 class Refuse(Exception):
-    """An expected refusal: ``message`` is shown to the user as written, and nothing is logged."""
+    """An expected refusal: ``message`` is shown to the user as written, and nothing is logged.
 
-    def __init__(self, message: str):
+    ``title`` is an optional short heading above it: ``ui.Refuse("No order in this region has an
+    invoice.", title="Nothing to export")``. A form's handler's refusal is shown in the form, above
+    its submit button, until the form is sent again; elsewhere it is a toast, headed by the title.
+    """
+
+    def __init__(self, message: str, *, title: str = ""):
+        if not isinstance(title, str):
+            raise TypeError(f"ui.Refuse(title=) is a short text, such as title=\"Nothing to export\"; got {title!r}")
         super().__init__(message)
         self.message = str(message)
+        self.title = title
 
 
 @dataclasses.dataclass(frozen=True)
@@ -30,6 +38,7 @@ class Toast:
     message: str
     tone: str = "info"
     description: str = ""
+    link: tuple = ()                    # (its words, the address, whether it leaves the dashboards)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -62,11 +71,34 @@ def goto(path: str, *, replace: bool = False) -> Goto:
     return Goto(path, bool(replace))
 
 
-def toast(message: str, *, tone: str = "info", description: str = "") -> Toast:
-    """Show a short message; ``tone`` is one of info, success, warning, error."""
+def toast(message: str, *, tone: str = "info", description: str = "", link: Any = None) -> Toast:
+    """Show a short message; ``tone`` is one of info, success, warning, error.
+
+    ``link=`` puts one button in the toast, written as every link is: ``link=ui.link("Open",
+    to=history_page, key=report_id)`` -- a page, a ``ui.reflex_page``, ``record=(Model, pk)`` or
+    ``href=`` an outside address. RFDS keeps a success or info toast with a button open for 10
+    seconds; what the button opens must also be reachable on the page, as RFDS asks.
+    """
     if tone not in TONES:
         raise ValueError(f"ui.toast() tone must be one of {', '.join(TONES)}; got {tone!r}")
-    return Toast(str(message), tone, str(description))
+    return Toast(str(message), tone, str(description), _toast_link(link) if link is not None else ())
+
+
+def _toast_link(link: Any) -> tuple:
+    """A ``ui.link`` as (its words, the address, whether it leaves the dashboards), checked now."""
+    from lex.lex_app.reflex.ui.pages import vocab
+    from lex.lex_app.reflex.ui.pages.parts import Build, PageError
+
+    if not isinstance(link, vocab.Link):
+        got = f"a ui.{type(link).__name__.lower()}" if isinstance(link, vocab.Part) else repr(link)
+        raise TypeError(f"ui.toast(link=) takes a ui.link: `link=ui.link(\"Open\", to=history_page)`; got {got}.")
+    if link.visible is not None:
+        raise ValueError("ui.toast(link=): a toast's link is always shown; leave `visible=` out.")
+    try:
+        where, outside = link.target(Build(page="toast"))
+    except PageError as wrong:              # "Page `toast`: <problem>\n<what to write>"
+        raise ValueError("ui.toast(link=): " + str(wrong).split(": ", 1)[1].replace("\n", " ")) from None
+    return (str(link.label), str(where), bool(outside))
 
 
 def download(*, url: str | None = None, filename: str | None = None, data: Any = None) -> Download:
@@ -184,7 +216,12 @@ def to_events(items: list) -> list:
         elif isinstance(item, Toast):
             import rfds
 
-            extra = {"description": item.description} if item.description else {}
+            extra: dict = {"description": item.description} if item.description else {}
+            if item.link:
+                from rfds.components.feedback import ToastAction
+
+                label, where, outside = item.link
+                extra["action"] = ToastAction(label, rx.redirect(where, is_external=outside))
             events.append(getattr(rfds.toast, item.tone)(item.message, **extra))
         elif _is_state_handler(item):
             events.append(item)
