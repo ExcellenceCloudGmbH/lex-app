@@ -3086,23 +3086,44 @@ could only link to `@ui.page` functions, so its rows lost their links. 1.783's n
 | --- | --- | --- |
 | 1.824 | A raw Reflex page is somewhere a link may lead | the address is the route with its value encoded as one piece, and is the kind of address a table follows; the table's rows link by their key; the link and the button lead there; a missing or unknown value, and a route that is no route, are refused with what to write; an app without a declared page does not start, naming the route |
 
-### Batch 1dg — Reflex config: the npm packages RFDS's browser code needs ✅
+### Batch 1db — lex.ui's part of lex-app's app, and every page in lex-app's chrome ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.832 |
+| Scenario range | 1.825 – 1.826 |
 | Type | U |
-| Files covered | `lex/lex_app/reflex/config.py` (`lex_config`) |
-| Test file | `lex/test_project/tests/init/test_1dg_reflex_frontend_packages.py` |
-| Test classes | `TestCluster01dg_ReflexFrontendPackages` (1.832) |
-| Fixtures | none (reads RFDS's installed `rfds_form.js`) |
-| Tests landed | **1 pass / 0 fail** |
+| Files covered | `lex/lex_app/reflex/ui/pages/declare.py` (`install`), `lex/lex_app/reflex/app.py`, `lex/ui.py` |
+| Test file | `lex/test_project/tests/init/test_1db_ui_install.py` |
+| Test classes | `TestCluster01db_Install` (1.825–1.826) |
+| Fixtures | `rx.page` and the app's `add_page` recorded |
+| Tests landed | **2 pass / 0 fail** |
 | Status | ✅ Complete |
 
-Found while running the Reflex docs site, which has lex.ui tables with search but no RFDS form or number input: its
-dev server could not resolve `react-number-format`. Letters 1db–1df and scenarios to 1.831 are taken on other open
-branches, so this batch starts at 1dg / 1.832.
+First built as a project-frame hook (`ui.chrome`, a public `ui.install`) for the reviewed customer project, then
+withdrawn after an independent review (design note `2026-11-24-reflex-ui-project-chrome-design.md`); what stays is
+`create_app`'s one internal step. 1.778 and 1.805 read `create_app`'s call of it.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.832 | Every package RFDS's form script imports is installed | each npm package `rfds_form.js` imports (the script behind a lex.ui table's clearable search box) is installed by Reflex, by Radix, or by `lex_config()`'s frontend packages, `react-number-format` pinned to RFDS's own version; a project's own frontend packages are added beside lex-app's, not in place of them |
+| 1.825 | Create app hands lex ui its pages in one step | the declared page is registered once; the error page is added after the user's grants; the jobs' clock is registered once; the routes are checked after the pages; create_app runs the step, and lex.ui offers no app or chrome hook |
+| 1.826 | Every page is in lex apps chrome after the grants | a page and the error page are in lex-app's chrome; the page's load events are the grants, then the opener - nothing of the project's between them |
+
+### Batch 1dc — lex.ui handlers declared on a state mixin are each state's own ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.827 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/handlers.py` (`own_handlers`), `lex/lex_app/reflex/ui/state.py`, `lex/lex_app/reflex/ui/rows.py` |
+| Test file | `lex/test_project/tests/init/test_1dc_ui_mixin_handlers.py` |
+| Test classes | `TestCluster01dc_MixinHandlers` (1.827) |
+| Fixtures | a mixin with a job and an action, two states using it; `ui.testing.Harness` |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Found while moving the reviewed customer project's handlers to lex.ui: an export shared by every section of a page
+showed every section busy while one exported, and ignored a second section's export as a repeat.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.827 | A handler from a mixin is each states own | each state keeps the handler under its own name, so a view of one state's running export does not show the other's; the second export runs too instead of being ignored as a repeat; a handler written on the state itself keeps its name |

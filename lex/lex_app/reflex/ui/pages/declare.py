@@ -167,6 +167,28 @@ def finalize() -> None:
         declared.done = True
 
 
+def install(app: Any) -> None:
+    """lex.ui's part of lex-app's app (``create_app``): the declared ``@ui.page`` pages, the page a
+    failed load goes to (``/ui-error``), the clock that ends abandoned jobs (once), and the route check.
+
+    Called by ``create_app`` once the project's module is loaded; a project does not call it.
+    """
+    import rfds
+
+    from lex.lex_app.reflex.access import LexAccessState
+    from lex.lex_app.reflex.ui import runs
+    from lex.lex_app.reflex.ui.state import ERROR_ROUTE, check_app_routes, error_page
+
+    rfds.toast  # noqa: B018 - defines states on first use; imported mid-event they would register too late
+    if not getattr(app, "_lex_ui_installed", False):
+        app.register_lifespan_task(runs.heartbeat)
+        app._lex_ui_installed = True
+    finalize()                                     # the project's @ui.page pages
+    app.add_page(error_page, route=ERROR_ROUTE, title="This page could not be opened",
+                 on_load=[LexAccessState.load])
+    check_app_routes(app)
+
+
 def embed(part: Any, *, name: str = "embedded") -> Any:
     """One lex.ui part -- a ``ui.table``, a ``ui.section`` -- as a Reflex component, for a page
     that is not (yet) written with ``@ui.page``.

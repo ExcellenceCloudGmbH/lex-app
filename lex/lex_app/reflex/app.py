@@ -86,29 +86,21 @@ def create_app():
     app.add_middleware(DjangoConnectionMiddleware())
     app.add_middleware(GrantsRefreshMiddleware())
     devproxy.install(app)
-    from lex.lex_app.reflex.ui import runs as ui_runs
-
-    app.register_lifespan_task(ui_runs.heartbeat)
     from lex.lex_app.reflex.ui.handlers import register_page
-    from lex.lex_app.reflex.ui.state import ERROR_ROUTE, error_page
+    from lex.lex_app.reflex.ui.pages import declare
     from lex.lex_app.reflex.ui.state import State as UiState
 
     _load_lazy_states()  # rfds.toast defines states; imported mid-event, they would register too late
     structure = load_structure()
-    from lex.lex_app.reflex.ui.pages import declare
-
-    declare.finalize()  # the project's module is loaded: hand its @ui.page pages to lex-app
+    # The project's module is loaded: its @ui.page pages, /ui-error, the jobs' clock and the route check.
+    declare.install(app)
     register_page("/", [], [], "")
     app.add_page(
         dashboard_page(structure),
         route="/",
         on_load=[LexAccessState.load, LexDashboardState.resolve, UiState.ui_open("/")],
     )
-    app.add_page(error_page, route=ERROR_ROUTE, title="This page could not be opened", on_load=[LexAccessState.load])
     app.add_page(_signing_out, route="/logout", title="Signing out", on_load=LexUser.sign_out)
-    from lex.lex_app.reflex.ui.state import check_app_routes
-
-    check_app_routes(app)  # after the project's pages: a route argument named like a ui.State helper hides it
     return app
 
 

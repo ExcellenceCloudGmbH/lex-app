@@ -1474,14 +1474,27 @@ does not remove user launch configurations.
 
 **Scenario range:** 1.824. **Test file:** `lex/test_project/tests/init/test_1da_ui_reflex_page.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1da](batches.md).
 
-### 1dg. Reflex config: the npm packages RFDS's browser code needs ✅
+### 1db. lex.ui's part of lex-app's app, and every page in lex-app's chrome ✅
 
-**What it tests:** a lex.ui table with `search=True` draws RFDS's clearable search input, whose clear button imports from `rfds_form.js`; that script imports `react-number-format`, which RFDS declares only on its form and number inputs. `lex_config()` installs it, and keeps a project's own `frontend_packages` beside it.
+**What it tests:** `create_app` hands lex.ui's pages to the app in one internal step (the declared `@ui.page` pages, `/ui-error`, the jobs' clock, the route check), and every `@ui.page` is in lex-app's chrome after the user's grants. lex.ui has no hook for a project's own frame or gate (the 2026-11-24 `ui.chrome`/`ui.install` was withdrawn after review).
 
-**Why a regression matters:** a project whose dashboards stop building (the dev server cannot resolve the import), or one that lists its own packages and silently loses lex-app's.
+**Why a regression matters:** a page registered twice, without its error page, or outside lex-app's chrome.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.832 | Every package RFDS's form script imports is installed | each npm package `rfds_form.js` imports (the script behind a lex.ui table's clearable search box) is installed by Reflex, by Radix, or by `lex_config()`'s frontend packages, `react-number-format` pinned to RFDS's own version; a project's own frontend packages are added beside lex-app's, not in place of them |
+| 1.825 | Create app hands lex ui its pages in one step | the declared page is registered once; the error page is added after the user's grants; the jobs' clock is registered once; the routes are checked after the pages; create_app runs the step, and lex.ui offers no app or chrome hook |
+| 1.826 | Every page is in lex apps chrome after the grants | a page and the error page are in lex-app's chrome; the page's load events are the grants, then the opener - nothing of the project's between them |
 
-**Scenario range:** 1.832. **Test file:** `lex/test_project/tests/init/test_1dg_reflex_frontend_packages.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dg](batches.md).
+**Scenario range:** 1.825 – 1.826. **Test file:** `lex/test_project/tests/init/test_1db_ui_install.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1db](batches.md).
+
+### 1dc. lex.ui handlers declared on a state mixin are each state's own ✅
+
+**What it tests:** A handler shared through a Reflex state mixin keeps its running status and its repeat guard per state that uses the mixin.
+
+**Why a regression matters:** a button that stays busy, or a press that silently does nothing, because another state is running "the same" handler.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.827 | A handler from a mixin is each states own | each state keeps the handler under its own name, so a view of one state's running export does not show the other's; the second export runs too instead of being ignored as a repeat; a handler written on the state itself keeps its name |
+
+**Scenario range:** 1.827. **Test file:** `lex/test_project/tests/init/test_1dc_ui_mixin_handlers.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dc](batches.md).
