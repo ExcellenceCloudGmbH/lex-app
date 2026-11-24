@@ -523,8 +523,6 @@ class Form(kinds.Kind):
             raise ctx.at("result").fail("`tabs=True` shows the result's sections one at a time, and it has 0.",
                                         "Give `result=` two or more `ui.section(title, ...)`s, one per tab, or leave "
                                         "`tabs=` out.")
-        if self.keep:
-            rules.keep(handler)
         if self.load is not None:
             ctx = dataclasses.replace(ctx, under_load=True)
 
@@ -566,8 +564,50 @@ class Form(kinds.Kind):
             after = dataclasses.replace(ctx.at("result"), under_load=True,
                                         caption=self.title if isinstance(self.title, str) else "")
             # Its result takes the page's width: it is where the tables are.
-            whole.append(rx.cond(State.ui_done.get(key, False), rfds.page(rfds.stack(*self._result(after)))))
+            shown_after = self._result(after)
+            whole.append(rx.cond(State.ui_done.get(key, False), rfds.page(rfds.stack(*shown_after))))
+        else:
+            shown_after = []
+        if self.keep:
+            rules.keep(handler, self._kept_states(ctx.at("result"), handler, shown_after))
         return kinds.states(ctx, self.load, rx.fragment(*whole), "rect")
+
+    def _kept_states(self, ctx: Build, handler: Any, result: list) -> list:
+        """The states a kept result lives in besides the submit handler's: those its tables read.
+
+        Refuses a result that shows a field of the page's load's state (another state than the
+        submit handler's) that the load resets on every visit: kept, the result would come back
+        without it.
+        """
+        from lex.lex_app.reflex.ui.pages.rows_table import LexRowsTableState
+        from lex.lex_app.reflex.ui.state import State as UiState
+
+        read: dict[str, set] = {}
+        for var in rx.fragment(*result)._get_vars(include_children=True):
+            data = var._get_all_var_data()
+            for name, names in (dict(data.field_dependencies) if data is not None else {}).items():
+                read.setdefault(name, set()).update(names)
+        states: list = []
+        load_state = getattr(self.load, "state", None)
+        for name, names in sorted(read.items()):
+            try:
+                cls = rx.State.get_class_substate(name)
+            except Exception:  # noqa: BLE001 - not a state of this app's tree
+                continue
+            if issubclass(cls, LexRowsTableState):
+                states.append(cls.owner)
+                continue
+            if cls is handler.state or cls is not load_state or not issubclass(cls, UiState):
+                continue
+            exempt = set(getattr(self.load.fn, "__ui_options__", {}).get("keep") or ())
+            reset = sorted(field for field in names if field not in exempt and not field.startswith("ui_"))
+            if reset:
+                load = f"{cls.__name__}.{self.load.fn.__name__}"
+                raise ctx.fail(f"the kept result shows {cls.__name__}.{reset[0]}, which the page's load {load} "
+                               "resets on every visit: the result would come back without it.",
+                               f"Keep it in {handler.state.__name__}, the state the form submits to (a kept form "
+                               f"keeps that state's fields), or write `@ui.load(keep=(\"{reset[0]}\",))` on {load}.")
+        return states
 
 
 def form(*, title: Any, load: Any = None, fields: Any = (), steps: Any = (), submit: Any = None,
@@ -600,9 +640,11 @@ def form(*, title: Any, load: Any = None, fields: Any = (), steps: Any = (), sub
 
     A new visit starts the form over: its result leaves. ``keep=True`` keeps the result when the
     user leaves the page and comes back -- a job that finished meanwhile shows what it found, one
-    still running its progress -- for as long as what the result shows is kept: a ``ui.private``
-    field needs ``keep=True`` too, and a field the page's ``load=`` resets needs that load's
-    ``keep=``. A kept form also keeps its refusal above its submit button, shows its handler's
+    still running its progress -- for as long as what the result shows is kept. The one ``keep=True``
+    is enough: the private fields of the submit handler's state, and of the states whose rows the
+    result's tables read, stay across visits, and a load of those states does not reset them. A
+    result that shows a field of another state, which the page's load resets, is refused when the
+    page is built, saying what to write. A kept form also keeps its refusal above its submit button, shows its handler's
     last other failure under it, and says so when its result is no longer kept. What was typed is
     not kept by lex-app (it may be personal): to show it again, the handler sets a field and the
     input starts from it (a searched choice starts empty, also on a kept form)::

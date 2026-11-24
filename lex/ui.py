@@ -61,6 +61,8 @@ progress_of/cancel``        event of a Cancel button
 ``@ui.dashboard``           a page that is not a route (the project's ``main()``)
 ``ui.record/list/form``     the page kinds: named slots, placed by lex-app (``ui.list`` is
                             left out of ``import *``, which would hide Python's ``list``)
+``ui.form(keep=True)``      the result is still there when the user comes back: what its
+                            state and its tables' states hold stays across visits
 ``ui.field/step``           a form's inputs, and a wizard's steps; the handler gets ``values``.
                             ``options=`` a ``@ui.rows`` handler searches on the server as the user
                             types. ``ui.button(confirm=, ask=)`` asks before its handler runs

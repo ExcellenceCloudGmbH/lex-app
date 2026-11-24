@@ -752,8 +752,8 @@ Built in batch 1dx.
   option (the result is declared on the page, not the handler), keeping every form (an entry form
   should start over).
 - **What was typed is not kept by lex-app** (it may be personal): a field shows it again through
-  `value=` on a state field the handler sets, which the load keeps -- `ui.field("customer",
-  value=ReportState.customer)`, `self.customer = values["customer"]`, `@ui.load(keep=("customer",))`.
+  `value=` on a state field the handler sets -- `ui.field("customer", value=ReportState.customer)`,
+  `self.customer = values["customer"]` (the kept form keeps that state's fields; see below).
 - **A kept result shows only while what it shows is kept.** On a new visit the opener checks the
   submit handler's state: if a `ui.private(keep=True)` field of it is gone (its idle time or age
   passed, another process, another user), the result does not show over nothing; the form says,
@@ -773,8 +773,17 @@ Built in batch 1dx.
 - **A searched choice (6.15) starts empty on a kept form too**: `value=` is refused for it, and the
   values offered to the tab (`_ui_offered`) are not part of the visit, so a value chosen before the
   visit away is still accepted when the user chooses it again.
-- *Cost:* the result's fields must be kept by the page's load too (its `keep=`, or `ui.private(keep=True)`);
-  lex-app cannot see which fields a result reads, so it does not check this.
+- **One `keep=True` is enough** (review, 2026-11-24; this replaces the first build's cost, "the
+  result's fields must be kept by the page's load too ... lex-app does not check this", which took
+  three declarations nothing checked). A kept form's result lives in the submit handler's state and
+  in the states of the `@ui.rows` handlers its result's tables read (found from the result's own
+  vars). Their `ui.private` fields stay across visits as if declared `keep=True`, and a load of
+  those states keeps all their fields (it still runs and sets what it sets). The one case lex-app
+  cannot imply is a result that shows a field of *another* state that the page's load resets: that
+  is refused when the page is built -- "Keep it in ReportState, the state the form submits to, or
+  write `@ui.load(keep=("note",))` on HeaderState.open." *Considered first:* checking the three
+  declarations and refusing what is missing (three things to write for one wish), and implying keep
+  for every state the result shows (a load of an unrelated, shared state would stop resetting).
 - **A reconnect is not a new visit** (review, 2026-11-24). Reflex sends the page's `on_load` again
   whenever its socket reconnects (`state.js`: `hydrate` and `on_load_internal` on every connect), so
   a laptop waking or a network blip used to drop the tab's private values and start every form

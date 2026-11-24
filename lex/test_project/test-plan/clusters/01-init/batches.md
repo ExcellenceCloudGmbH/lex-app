@@ -3570,13 +3570,13 @@ form's `result=`. What building settled is section 6.17 of `docs/superpowers/spe
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.930 – 1.935, 1.936 |
+| Scenario range | 1.930 – 1.935, 1.936, 1.937 |
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/pages/forms.py` (`form` keep=, the failure under a kept form), `lex/lex_app/reflex/ui/forms.py` (`keep`, `kept`, `gone_message`), `lex/lex_app/reflex/ui/state.py` (`ui_open`) |
 | Test file | `lex/test_project/tests/init/test_1dx_ui_form_keep.py` |
-| Test classes | `TestCluster01dx_FormKeep` (1.930–1.935, 1.936) |
+| Test classes | `TestCluster01dx_FormKeep` (1.930–1.935, 1.936, 1.937) |
 | Fixtures | a neutral invoice report state (a job held at a gate, a kept private result, a load that keeps the customer) |
-| Tests landed | **7 pass / 0 fail** |
+| Tests landed | **8 pass / 0 fail** |
 | Status | ✅ Complete |
 
 `keep=` on `ui.form`, after checking what `@ui.load(keep=)` already gave: the fields survived, the result flag did not. What building settled is section 6.18 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`. Test 1.841 (a new visit starts a form over) still holds for a form that is not kept.
@@ -3584,9 +3584,10 @@ form's `result=`. What building settled is section 6.17 of `docs/superpowers/spe
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.930 | A kept form shows what its job found after the user was away | back while the job runs: running and its progress; back after: the result flag and the rows; the field starts from what was typed; a form not kept starts over |
-| 1.931 | A kept result whose data is gone says so | within the private idle time the result shows; past it, no result and the sentence under the form; a private field not kept does not decide; a failure while away stays to be shown; sending again clears it |
+| 1.931 | A kept result whose data is gone says so | within the private idle time the result shows; past it, no result and the sentence under the form; a second private field of the state is kept too (1.937); a failure while away stays to be shown; sending again clears it |
 | 1.932 | The kept form page compiles and shows its failure in place | RFDS's inline message bound to ui.failed for a kept form only; the field's start from the state; compiled with Reflex's page compiler; registered with its state; keep= True or False only |
 | 1.933 | A kept form with a load keeps what the load keeps | after a revisit and the load: the kept private result and the field in the load's keep= survive; what the load does not keep is reset |
 | 1.934 | A kept form keeps its refusal above its submit button | a ui.Refuse with a title stays above the button across a visit for a kept form and leaves for a form not kept; the line under a kept form does not repeat it; sending again clears both |
 | 1.935 | A kept form with tabs and a searched choice | keep=True with tabs=True compiles with its search; back within the idle time the tab's table reads the kept private value; a customer offered before the visit is still accepted; past the idle time the form and the tab's table say it is gone |
 | 1.936 | A reconnect is not a new visit | hydrate and on_load again on a new connection for the same address keep the visit count, a private value not kept and both forms' results, and run the loads without resetting; a link to the same page on the same connection, and a reconnect on another address, are new visits |
+| 1.937 | One keep=True keeps what the result shows | with no keep on the state, a private result and a field shown come back after a visit and the page's load of the same state; a result showing another state's field the page's load resets is refused at page build with @ui.load(keep=(...)) to write |

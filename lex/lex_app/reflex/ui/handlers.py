@@ -862,10 +862,12 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                         own = type(workcopy.raw(self))
                         name = own.get_full_name()
                         done = list(self._ui_reset)
+                        # A kept form's result lives in this state: the load keeps all of it.
+                        keeping = workcopy.fields_of(own) if forms.keeps(own) else kept
                         if not by_opener:                 # on mount: every run starts from a clean state
-                            workcopy.reset(self, keep=kept)
+                            workcopy.reset(self, keep=keeping)
                         elif name not in done:            # once per visit: a sibling load's data stays
-                            workcopy.reset(self, keep=kept)
+                            workcopy.reset(self, keep=keeping)
                             self._ui_reset = [*done, name]
                         if failure is None:
                             try:

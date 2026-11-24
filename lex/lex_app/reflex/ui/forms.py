@@ -208,16 +208,29 @@ async def search(state: Any, field: str, number: int) -> None:
 
 #: Handler key -> its state class, for the forms declared ``keep=True``: their result stays across visits.
 _KEPT: dict[str, Any] = {}
+#: The full names of the states a kept form's result lives in: the submit handler's, and those of the
+#: ``@ui.rows`` handlers its result's tables read. Their private values stay across visits and a load
+#: does not reset them.
+_KEPT_STATES: set[str] = set()
 
 
-def keep(handler: Any) -> None:
-    """Record that the form of ``handler`` keeps its result when the user leaves the page and comes back."""
+def keep(handler: Any, states: Any = ()) -> None:
+    """Record that the form of ``handler`` keeps its result when the user leaves the page and comes back.
+
+    ``states``: the other states its result lives in (the states of the rows handlers it reads).
+    """
     _KEPT[runs.key_of(handler)] = handler.state
+    _KEPT_STATES.update(one.get_full_name() for one in (handler.state, *states))
 
 
 def kept() -> dict[str, Any]:
     """Handler key -> state class, for every form declared ``keep=True``."""
     return dict(_KEPT)
+
+
+def keeps(state_cls: Any) -> bool:
+    """Whether a kept form's result lives in ``state_cls``: its values stay across visits, a load keeps it."""
+    return state_cls.get_full_name() in _KEPT_STATES
 
 
 def gone_message() -> str:

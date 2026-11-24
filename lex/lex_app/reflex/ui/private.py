@@ -363,18 +363,28 @@ def gone_in(state: Any) -> bool:
     """Whether a private field of ``state`` kept across visits (``keep=True``) had a value that is gone.
 
     A field that is not kept leaves with every visit: it does not decide whether a kept form's
-    result can show again (a result that reads it says it is gone where it reads it).
+    result can show again (a result that reads it says it is gone where it reads it). Every private
+    field of a state a kept form's result lives in is kept.
     """
-    return any(peek(state, field) is GONE for field in fields(type(_raw(state))).values() if field.keep)
+    from lex.lex_app.reflex.ui import forms
+
+    every = forms.keeps(type(_raw(state)))          # a kept form's state: all its private fields are kept
+    return any(peek(state, field) is GONE for field in fields(type(_raw(state))).values() if field.keep or every)
 
 
 # -- the clock and the page opener ---------------------------------------------------------
 
 
 def leave(tab: str) -> int:
-    """The tab opened a page: drop its values that are not kept across visits; returns how many."""
+    """The tab opened a page: drop its values that are not kept across visits; returns how many.
+
+    A value is kept when its field says ``keep=True``, or when a kept form's result lives in its state.
+    """
+    from lex.lex_app.reflex.ui import forms
+
     with _LOCK:
-        gone = [key for key, entry in _STORE.items() if key[0] == tab and not entry.field.keep]
+        gone = [key for key, entry in _STORE.items()
+                if key[0] == tab and not entry.field.keep and not forms.keeps(entry.field.owner)]
         for key in gone:
             del _STORE[key]
     return len(gone)
