@@ -3894,3 +3894,25 @@ Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | --- | --- | --- |
 | 1.1014 | The banner says what the project says, to whom it concerns | RFDS's banner in the shell's banner region, tone warning; anna's sentence; carl none; ben's failing function logged, none; a state value and a fixed sentence; not hidden in lex-app's frame |
 | 1.1015 | The banner is one message | text, ui.text, a list, a function without the user refused with what to write |
+
+### Batch 1eo — lex.ui frame: a page the user may not open looks like a missing one -- refused_as_missing ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1016 – 1.1019 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/frame.py` (`refused_as_missing=`), `lex/lex_app/reflex/shell.py` (`lex_page`, `lex_chrome`, `side_nav`, `not_found_body`, `not_found_page`), `lex/lex_app/reflex/ui/state.py` (`_ui_start`, `error_page`), `lex/lex_app/reflex/app.py` (`create_app` adds lex-app's 404 page) |
+| Test file | `lex/test_project/tests/init/test_1eo_ui_frame_refused_as_missing.py` |
+| Test classes | `TestCluster01eo_RefusedAsMissing` (1.1016–1.1019) |
+| Fixtures | pages declared per test (`FrameCase` from 1eb); `ui.testing.Harness` for the opener, with the opener's permission answer patched (RFDS's resolver needs a signed-in identity) |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1016 | A refused page is drawn as a missing one | no access-denied notice; the not-found body and the breadcrumbs under the opener's answer; the tab title a Var falling back to 404; an all-guarded area waits for one entry; without the switch the notice and the title stay |
+| 1.1017 | The opener decides a permission page on the server | carl refused: no, no load; anna granted: yes, her load ran; a rule's page refused for carl |
+| 1.1018 | lex-app's not-found page looks the same | the 404 page in lex-app's frame with the same body; /ui-error's refusal says not found, other failures keep Try again; create_app adds it unless the project has a 404 page |
+| 1.1019 | refused_as_missing written wrongly | a non-bool refused; beside denied= or request_access= refused, saying the notice is never shown |

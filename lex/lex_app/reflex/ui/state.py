@@ -297,10 +297,17 @@ class State(rx.State):
 
         tables = [] if again else rows_table.reopen_events(page)    # a table on screen: the new record's rows
         refused = entry is None or not _page_permitted(self, entry.requires)
-        if not refused and entry.rules:                 # the project's rules, asked on the server
-            refusal = await _page_refusal(self, entry.rules)
+        from lex.lex_app.reflex.ui.pages import frame
+
+        # A page shown as missing when refused (ui.frame(refused_as_missing=True)) is decided here for its
+        # permissions too: the browser is told only yes or no.
+        concealed = entry is not None and frame.current().refused_as_missing and bool(
+            entry.rules or frame._strings(entry.requires))
+        if concealed or (not refused and entry.rules):  # the project's rules, asked on the server
+            refusal = "" if refused else (await _page_refusal(self, entry.rules) if entry.rules else None)
             self.ui_access = {**dict(self.ui_access),
-                              page: {"granted": "yes" if refusal is None else "no", "message": refusal or ""}}
+                              page: {"granted": "yes" if refusal is None else "no",
+                                     "message": "" if concealed else refusal or ""}}
             refused = refusal is not None
         if refused:
             self._ui_pending_loads, self._ui_optional_loads, self._ui_started = [], [], []
@@ -413,7 +420,8 @@ def error_page() -> rx.Component:
     """What ``/ui-error`` shows: why the page could not be opened, a reference, and a way back."""
     import rfds
 
-    from lex.lex_app.reflex.shell import denied_notice, lex_chrome
+    from lex.lex_app.reflex.shell import denied_notice, lex_chrome, not_found_notice
+    from lex.lex_app.reflex.ui.pages import frame
 
     retry = rfds.link("Try again", href=State.ui_error.get("path", "/"))
     title = State.ui_error.get("title", "This page could not be opened")
@@ -422,7 +430,8 @@ def error_page() -> rx.Component:
         rfds.page_header(title="This page could not be opened", path=ERROR_ROUTE),
         rx.cond(
             State.ui_error.get("kind", "error") == "denied",
-            denied_notice(message=message.to(str)),        # the refusal's sentence, the project's way out
+            # the refusal's sentence and the project's way out; or, refused as missing, what a missing page says
+            not_found_notice() if frame.current().refused_as_missing else denied_notice(message=message.to(str)),
             rfds.empty_state(kind="error", title=title, description=message, primary_action=retry),
         ),
     ))

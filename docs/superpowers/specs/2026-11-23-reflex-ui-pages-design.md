@@ -1163,7 +1163,8 @@ permissions from Keycloak's grants with the user's token (not what the browser w
 thread with the entry's own values (none for a listed page, the link's for a link). Only the answers
 reach the browser: `ui_frame_shown`, the keys of the entries that may be drawn. A guarded entry is not
 drawn until the answer has come, so the first page of a new tab is right, and an entry whose rule fails
-is not drawn (logged). This replaces 6.19's "a rule cannot hide an entry": it now does, and a raw
+is not drawn (logged). An area all of whose entries are guarded is drawn, heading and all, only while one
+of them is: a heading without entries would only say that something is there. This replaces 6.19's "a rule cannot hide an entry": it now does, and a raw
 page's `requires=` may be a rule too (it still only hides the entry; lex-app does not guard a raw page).
 The same answers guard the user menu's and the header's links. *Considered:* RFDS's navigation
 permission checker over the browser's permissions (6.19; rules cannot be asked there, and the browser
@@ -1212,7 +1213,10 @@ no opener, and the opener holds the tab while it asks.
   permissions as well as for rules (a page refused by a permission would still say "no access"); one
   switch says it once. With it a guarded page is decided by the opener on the server (as a rule's
   page is), and a refused load's `/ui-error` shows the same not-found page. `denied=` and
-  `request_access=` word a notice it never shows, so they are refused beside it. lex-app now adds its own
+  `request_access=` word a notice it never shows, so they are refused beside it. The opener tells the
+  browser only "yes" or "no" for such a page, never the rule's sentence. A page declared with `@lex_page`
+  before `ui.frame(...)` runs keeps its own tab title (the switch is read when the page is declared);
+  `@ui.page`s are declared after the module is loaded, so theirs always follow it. lex-app now adds its own
   not-found page (Reflex's `404` route, in lex-app's frame, RFDS's empty state with a way to the
   overview), so that a missing page and a refused one look the same. *Limit:* the page's code is in the
   app's bundle like every page's; this hides the page from the user's screen, not from someone reading the

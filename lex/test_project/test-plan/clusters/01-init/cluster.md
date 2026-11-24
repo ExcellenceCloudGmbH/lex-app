@@ -2012,3 +2012,18 @@ does not remove user launch configurations.
 | 1.1015 | The banner is one message | text, ui.text, a list, a function without the user refused with what to write |
 
 **Scenario range:** 1.1014 – 1.1015. **Test file:** `lex/test_project/tests/init/test_1en_ui_frame_banner.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1en](batches.md).
+
+### 1eo. lex.ui frame: a page the user may not open looks like a missing one -- refused_as_missing ✅
+
+**What it tests:** `ui.frame(refused_as_missing=True)`: a page refused by a permission or a rule shows lex-app's not-found body, its breadcrumbs and its tab title waiting for the opener's server-side answer; an area whose entries are all guarded waits for one; a refused load's /ui-error says not found; lex-app adds its own not-found page at Reflex's 404 route in its frame, with the same body.
+
+**Why a regression matters:** A refused page that still says no access or shows its title or breadcrumbs, a permitted user who sees not found, or a missing page that looks different from a refused one.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1016 | A refused page is drawn as a missing one | no access-denied notice; the not-found body and the breadcrumbs under the opener's answer; the tab title a Var falling back to 404; an all-guarded area waits for one entry; without the switch the notice and the title stay |
+| 1.1017 | The opener decides a permission page on the server | carl refused: no, no load; anna granted: yes, her load ran; a rule's page refused for carl |
+| 1.1018 | lex-app's not-found page looks the same | the 404 page in lex-app's frame with the same body; /ui-error's refusal says not found, other failures keep Try again; create_app adds it unless the project has a 404 page |
+| 1.1019 | refused_as_missing written wrongly | a non-bool refused; beside denied= or request_access= refused, saying the notice is never shown |
+
+**Scenario range:** 1.1016 – 1.1019. **Test file:** `lex/test_project/tests/init/test_1eo_ui_frame_refused_as_missing.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1eo](batches.md).

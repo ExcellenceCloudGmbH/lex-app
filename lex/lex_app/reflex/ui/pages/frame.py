@@ -34,6 +34,7 @@ class Frame:
     actions: tuple = ()                 # parts in the header band, before the user menu
     user_menu: tuple = ()               # ui.links in the user menu, above "Sign out"
     banner: Any = None                  # a ui.message above every page
+    refused_as_missing: bool = False    # a refused page looks like a page that does not exist
     module: str = ""
 
     def section(self, title: str) -> "NavLinks | None":
@@ -71,7 +72,7 @@ class OpenedPage:
 
 def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign_out: Any = None,
           opened: Any = None, nav_footer: Any = None, search: Any = None, actions: Any = (),
-          user_menu: Any = (), banner: Any = None) -> None:
+          user_menu: Any = (), banner: Any = None, refused_as_missing: bool = False) -> None:
     """Configure lex-app's frame for this project: call it once, in the dashboard module.
 
     ``nav`` is the navigation's areas in the order they are listed: the same words a page names
@@ -142,6 +143,13 @@ def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign
 
         ui.frame(banner=ui.message(config_problem, tone="warning"))
 
+    ``refused_as_missing=True``: a page the user may not open -- by a permission or a rule -- looks like a
+    page that does not exist: lex-app's not-found page instead of the no-access notice, with the browser
+    tab's title, the breadcrumbs and its navigation entry gone too; decided by the page's opener on the
+    server. For applications that must not reveal which pages exist. (The page's code is in the app's
+    bundle like every page's: this hides it from the screen, not from someone reading the bundle.)
+    ``denied`` and ``request_access`` word a notice it never shows, so they are refused beside it.
+
     ``sign_out`` is where the user menu's "Sign out" leads: a page (``@ui.page`` or
     ``ui.reflex_page``) or an ``https://`` address. By default it is lex-app's ``/logout``, which
     ends the dashboard's sign-in and lex-app's; a project's address should end there too, or the
@@ -161,10 +169,17 @@ def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign
                         f"denied=\"Ask your administrator for access.\"; got {denied!r}.")
     if opened is not None:
         _check_opened(opened)
+    if not isinstance(refused_as_missing, bool):
+        raise TypeError(f"ui.frame(refused_as_missing=) takes True or False; got {refused_as_missing!r}. "
+                        "refused_as_missing=True shows a page the user may not open as a page that does not exist.")
+    if refused_as_missing and (denied is not None or request_access is not None):
+        given = "denied=" if denied is not None else "request_access="
+        raise ValueError(f"ui.frame(refused_as_missing=True) shows a refused page as a missing one, so it never shows "
+                         f"the no-access notice that {given} words. Leave {given} out, or refused_as_missing out.")
     areas, sections = _areas(nav)
     _FRAME = Frame(nav=areas, sections=sections, nav_footer=_footer(nav_footer), opened=opened,
                    search=None if search is None else _search(search), actions=_actions(actions),
-                   user_menu=_menu(user_menu), banner=_banner(banner), sign_out="" if sign_out is None else target(sign_out, argument="sign_out"),
+                   user_menu=_menu(user_menu), banner=_banner(banner), refused_as_missing=refused_as_missing, sign_out="" if sign_out is None else target(sign_out, argument="sign_out"),
                    denied=denied or "",
                    request_access="" if request_access is None else target(request_access, argument="request_access",
                                                                            mail=True),

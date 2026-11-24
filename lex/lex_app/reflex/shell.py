@@ -459,6 +459,22 @@ def header_search() -> Any:
     return rx.form(box, on_submit=UiState.ui_frame_search, reset_on_submit=False, class_name="lex-header-search")
 
 
+def _any_shown(section: Any, drawn: Any) -> Any:
+    """A section whose entries are all guarded, drawn only while the server shows one of them: a heading
+    without entries would only say that something is there."""
+    import functools
+
+    import reflex as rx
+
+    from lex.lex_app.reflex.ui.state import State as UiState
+
+    keys = [item.permission for item in section.items]
+    if not keys or any(key is None for key in keys):
+        return drawn
+    return rx.cond(functools.reduce(lambda one, other: one | other,
+                                    [UiState.ui_frame_shown.contains(key) for key in keys]), drawn)
+
+
 def side_nav() -> Any:
     """RFDS's side navigation of this project: its sections in order, the per-user ones among them, and its foot."""
     import rfds
@@ -471,7 +487,7 @@ def side_nav() -> Any:
 
         drawn = rfds.side_nav(*(one for one in layout if isinstance(one, NavSection)))
     built = iter(list(drawn.children))
-    children = [next(built) if isinstance(one, NavSection) else _per_user(one) for one in layout]
+    children = [_any_shown(one, next(built)) if isinstance(one, NavSection) else _per_user(one) for one in layout]
     footer = _nav_footer()
     drawn.children = [*children, *built, *([footer] if footer is not None else [])]
     return drawn
@@ -519,8 +535,51 @@ def denied_notice(message: Any = None):
                          switch_account_href=sign_out_href())
 
 
-def _decided(route: str, body: Any) -> Any:
-    """``body`` once the opener has asked the page's rules and they granted; their refusal otherwise.
+#: The title of a page that does not exist -- Reflex's, so a refused page's tab says what a missing one's does.
+def not_found_title() -> str:
+    from reflex_base.constants.route import Page404
+
+    return Page404.TITLE
+
+
+def not_found_notice() -> Any:
+    """What a page that does not exist says: RFDS's empty state, with the way to the overview."""
+    import rfds
+
+    from lex.lex_app.reflex.ui.pages.parts import say
+
+    return rfds.empty_state(kind="error", title=say("This page does not exist"),
+                            description=say("Check the address, or go to the overview."),
+                            primary_action=rfds.link(say("Overview"), href="/"))
+
+
+def not_found_body(path: Any) -> Any:
+    """The body of lex-app's not-found page: the same for a missing page and a refused one
+    (``ui.frame(refused_as_missing=True)``)."""
+    import rfds
+
+    from lex.lex_app.reflex.ui.pages.parts import say
+
+    return rfds.page(rfds.page_header(title=say("Page not found"), path=path), not_found_notice())
+
+
+def not_found_page() -> Any:
+    """lex-app's not-found page (Reflex's ``404`` route), in lex-app's frame; ``create_app`` adds it."""
+    from reflex_base.constants.route import Page404
+
+    return lex_chrome(not_found_body("/" + Page404.SLUG))
+
+
+def _granted(route: str) -> Any:
+    """What the opener answered for the page at ``route``: "yes", "no", or '' until it has."""
+    from lex.lex_app.reflex.ui.state import State as UiState
+
+    return UiState.ui_access.get(route, {}).get("granted", "").to(str)
+
+
+def _decided(route: str, body: Any, *, missing: bool = False) -> Any:
+    """``body`` once the opener has asked the page's rules and they granted; their refusal otherwise --
+    the no-access notice, or with ``missing`` the not-found page's body.
 
     Until the opener has answered for this page nothing is shown.
     """
@@ -528,14 +587,23 @@ def _decided(route: str, body: Any) -> Any:
 
     from lex.lex_app.reflex.ui.state import State as UiState
 
-    answer = UiState.ui_access.get(route, {})
-    granted = answer.get("granted", "").to(str)
-    message = answer.get("message", "").to(str)
-    refused = rx.cond(message != "", denied_notice(message=message), denied_notice())
+    granted = _granted(route)
+    if missing:
+        refused = not_found_body(route)
+    else:
+        message = UiState.ui_access.get(route, {}).get("message", "").to(str)
+        refused = rx.cond(message != "", denied_notice(message=message), denied_notice())
     return rx.cond(granted == "yes", body, rx.cond(granted == "no", refused, rx.fragment()))
 
 
-def lex_chrome(body, *, embedded=None, route=None):
+def _conceals(needed: tuple, rules: tuple) -> bool:
+    """Whether a page with these requirements is shown as missing when refused (``refused_as_missing``)."""
+    from lex.lex_app.reflex.ui.pages import frame
+
+    return frame.current().refused_as_missing and bool(needed or rules)
+
+
+def lex_chrome(body, *, embedded=None, route=None, missing=False):
     """``body`` in lex-app's chrome: RFDS's shell standalone, the bare page inside lex-app.
 
     With the page's ``route``, the page is headed by its breadcrumbs (:func:`breadcrumbs`), inside
@@ -571,6 +639,9 @@ def lex_chrome(body, *, embedded=None, route=None):
     trail = breadcrumbs(route)
     if trail is not None:
         body = rx.fragment(trail, body)
+    if missing:
+        # A page refused as missing gives nothing away: its breadcrumbs wait for the opener's answer too.
+        body = _decided(route, body, missing=True)
     from lex.lex_app.reflex.ui.pages import frame
     from lex.lex_app.reflex.ui.state import State as UiState
 
@@ -647,6 +718,8 @@ def lex_page(
 
         def page():
             body = page_fn()
+            if _conceals(needed, _rules):
+                return lex_chrome(body, route=route, missing=True)
             if _rules:
                 body = _decided(route, body)
             for one in reversed(needed):
@@ -667,7 +740,9 @@ def lex_page(
         required, optional, others = page_loads(on_load)
         register_page(route, required, optional, needed[0] if len(needed) == 1 else needed, _rules, title)
         loads: list[Any] = [LexAccessState.load, *others, UiState.ui_open(route)]
-        rx.page(route=route, title=title, on_load=loads, **page_kwargs)(page)
+        # A page refused as missing: its tab says what a missing page's does until the opener has granted.
+        shown_title = rx.cond(_granted(route) == "yes", title, not_found_title()) if _conceals(needed, _rules) else title
+        rx.page(route=route, title=shown_title, on_load=loads, **page_kwargs)(page)
         return page_fn
 
     return decorator
