@@ -186,7 +186,8 @@ class Harness:
 
         state = await self._state(state_cls)
         values = workcopy.snapshot(state)
-        for name in ("ui_running", "ui_failed", "ui_progress", "ui_progress_message", "ui_visit", "ui_error"):
+        for name in ("ui_running", "ui_failed", "ui_progress", "ui_progress_message", "ui_visit", "ui_error",
+                     "ui_invalid", "ui_step", "ui_done", "ui_asking"):
             values[name] = workcopy._plain(getattr(state, name))
         return values
 
@@ -283,6 +284,11 @@ class Result:
     @property
     def error(self) -> str:
         return next((o.message for o in self.outcomes if o.kind == "error"), "")
+
+    @property
+    def invalid(self) -> dict:
+        """Field key -> what was wrong with the value sent for it; empty when the handler's body ran."""
+        return {name.rpartition("|")[2]: text for name, text in self.fields["ui_invalid"].items()}
 
     @property
     def running(self) -> dict:

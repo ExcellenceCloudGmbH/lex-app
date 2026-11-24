@@ -53,6 +53,11 @@ group_page.__ui_page__ = links.info_of("/groups/[key]", "group_page")
 CTX = Build(page="fund", route="/funds/[key]")
 
 
+def _CLOSE():
+    """A dangerous action; it asks first, as every dangerous action must (1.848)."""
+    return vocab.button("Close fund", KindDesk.close, tone="danger", confirm="Close this fund?")
+
+
 def _record(**slots):
     slots.setdefault("title", KindDesk.name)
     slots.setdefault("sections", [kinds.section("Details", vocab.text("Hello"))])
@@ -183,11 +188,11 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         one = str(_record(actions=[vocab.button("Edit", KindDesk.close)]).build(CTX))
         self.assertIn('"data-rfds-intent":"primary"', one, "the first action is primary")
         two = str(_record(actions=[vocab.button("Edit", KindDesk.close),
-                                   vocab.button("Close fund", KindDesk.close, tone="danger")]).build(CTX))
+                                   _CLOSE()]).build(CTX))
         self.assertIn('"data-rfds-intent":"danger"', two, "one further action stays a button")
         self.assertNotIn("rfds-menu-item-label", two, "and is not put in a menu")
         three = str(_record(actions=[vocab.button("Edit", KindDesk.close),
-                                     vocab.button("Close fund", KindDesk.close, tone="danger"),
+                                     _CLOSE(),
                                      vocab.link("All groups", to=group_page, key="1")]).build(CTX))
         self.assertIn('"rfds-menu-item-label"},rfdsI18n.t("Close fund", "Close fund"', three,
                       "two or more further actions are menu entries, translated")
@@ -197,11 +202,11 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
                                     vocab.link("All groups", to=group_page, key="1")]).build(CTX))
         self.assertNotIn('"data-rfds-tone":"danger"', calm, "and only a dangerous one has it")
         edit = vocab.button("Edit", KindDesk.close, visible=ui.edit(Group))
-        gated = str(_record(actions=[edit, vocab.button("Close fund", KindDesk.close, tone="danger")]).build(CTX))
+        gated = str(_record(actions=[edit, _CLOSE()]).build(CTX))
         self.assertIn('"data-rfds-intent":"primary"', gated, "a primary action with visible= stays primary")
         self.assertIn('"data-rfds-intent":"danger"', gated, "and the action beside it is still built")
         self.assertFalse(edit.primary, "the kind marks a copy primary, never the author's part")
-        danger_first = str(_record(actions=[vocab.button("Close fund", KindDesk.close, tone="danger")]).build(CTX))
+        danger_first = str(_record(actions=[_CLOSE()]).build(CTX))
         self.assertNotIn('"data-rfds-intent":"primary"', danger_first, "a dangerous action is never the primary one")
         with self.assertRaises(PageError) as wrong:
             _record(actions=[vocab.text("loose")]).build(CTX)

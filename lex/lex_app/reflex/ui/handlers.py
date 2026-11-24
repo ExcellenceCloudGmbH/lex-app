@@ -17,7 +17,7 @@ from typing import Any, AsyncIterator, Callable
 
 import reflex as rx
 
-from lex.lex_app.reflex.ui import context, guard, pools, results, runs, workcopy
+from lex.lex_app.reflex.ui import context, forms, guard, pools, results, runs, workcopy
 
 logger = logging.getLogger(__name__)
 
@@ -340,8 +340,18 @@ def action(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any
         requirements = guard.normalise(requires)
 
         async def run(self, *args: Any, **kwargs: Any):
-            arg = runs.arg_key(args, kwargs)
+            receives = forms.of(fn)                  # a form's or a dialog's handler: its values are checked first
+            arg = runs.arg_key(args, kwargs) if receives is None else ""
             session, failure = await _session(self, requirements)   # who is acting, what they may do
+            if failure is None and receives is not None:
+                try:
+                    args, arg, go = forms.receive(self, key, fn, receives, args, kwargs)
+                    kwargs = {}
+                except Exception as exc:  # noqa: BLE001 - reported below, like a failure of the body
+                    failure = exc
+                else:
+                    if not go:
+                        return                       # a field has a problem, or a wizard has steps left
             if failure is None:
                 try:                                 # the state to return to
                     inv = context.Invocation(handler=key, kind="action", session=session,
@@ -383,6 +393,8 @@ def action(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any
                     for event in results.to_events([_toast(outcome)]):
                         yield event
                 else:
+                    if receives is not None:
+                        forms.done(self, key)
                     for event in _tables_of(self):        # its state's tables read again
                         yield event
             finally:
@@ -430,7 +442,8 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
         async def wrapper(self, *args: Any, **kwargs: Any):
             from reflex_base.event.context import EventContext
 
-            arg = runs.arg_key(args, kwargs)               # what the view sees: the first argument
+            receives = forms.of(fn)                        # a form's or a dialog's handler: its values are checked first
+            arg = runs.arg_key(args, kwargs) if receives is None else ""   # what the view sees: the first argument
             call = runs.call_key(fn, args, kwargs)         # what makes a repeat: every argument
             token = EventContext.get().token
             run = runs.claim(token, key, call)
@@ -456,6 +469,15 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                 try:
                     # Resolved before the user's lock is taken: nothing inside a block below raises.
                     session, failure = await _session(self, requirements)
+                    if failure is None and receives is not None:
+                        async with self:
+                            try:
+                                args, arg, go = forms.receive(self, key, fn, receives, args, kwargs)
+                                kwargs = {}
+                            except Exception as exc:  # noqa: BLE001 - reported below, outside the block
+                                failure, go = exc, True
+                        if not go:
+                            return                        # a field has a problem, or a wizard has steps left
                     if failure is None:
                         async with self:                  # the first copy, and the "running" mark
                             own = type(workcopy.raw(self))
@@ -492,6 +514,9 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                             if not discard:
                                 for event in results.to_events(found):
                                     yield event
+                    if receives is not None and not stopped:
+                        async with self:
+                            forms.done(self, key)
                     for event in _tables_of(self):            # its state's tables read again
                         yield event
                 except Exception as exc:  # noqa: BLE001 - the body has finished here; reported to the user

@@ -26,6 +26,12 @@ class Build:
     caption: str = ""                   # the title a table in this part is named by (its section's)
     under_load: bool = False            # the part appears only after a load has finished
     page_search: bool = False           # a list page's table: its search is the page's, kept in the address
+    #: The dialogs of the page's buttons (``confirm=``, ``ask=``): one list for the whole page,
+    #: shared by every copy of this context, and placed beside the page when it is built.
+    overlays: list = dataclasses.field(default_factory=list)
+    #: What opens each of them, by the button as written: a button built twice (a table draws its
+    #: row actions more than once) has one dialog.
+    asked: dict = dataclasses.field(default_factory=dict)
 
     def at(self, slot: str, place: str | None = None) -> "Build":
         return dataclasses.replace(self, slot=slot, place=place or self.place)
@@ -67,6 +73,16 @@ class Part:
     def _wrap(self, ctx: Build, component: rx.Component) -> rx.Component:
         """``component`` as the page shows it: only to whom, and when, ``visible`` says."""
         return shown(ctx, component, self.visible)
+
+
+def with_overlays(ctx: Build, component: rx.Component) -> rx.Component:
+    """``component`` with the dialogs its buttons open; they are taken from ``ctx``, so placed once."""
+    if not ctx.overlays:
+        return component
+    dialogs = list(ctx.overlays)
+    ctx.overlays.clear()
+    ctx.asked.clear()
+    return rx.fragment(component, *dialogs)
 
 
 def shown(ctx: Build, component: rx.Component, visible: Any) -> rx.Component:

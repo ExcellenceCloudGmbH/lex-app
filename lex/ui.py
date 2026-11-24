@@ -53,8 +53,10 @@ progress_of/cancel``        event of a Cancel button
 ``ui.testing``              run a handler in a unit test
 ``@ui.page``                where a page lives: its route, navigation, who may see it
 ``@ui.dashboard``           a page that is not a route (the project's ``main()``)
-``ui.record/list``          the page kinds: named slots, placed by lex-app (``ui.list`` is
+``ui.record/list/form``     the page kinds: named slots, placed by lex-app (``ui.list`` is
                             left out of ``import *``, which would hide Python's ``list``)
+``ui.field/step``           a form's inputs, and a wizard's steps; the handler gets ``values``.
+                            ``ui.button(confirm=, ask=)`` asks before its handler runs
 ``ui.section``              a titled part of a page; ``load=`` makes it load on its own
 ``ui.text/fact/status/      what fills the slots; none takes a styling argument
 message/column/
@@ -79,6 +81,7 @@ from lex.lex_app.reflex.ui import testing
 from lex.lex_app.reflex.ui.guard import create, delete, edit, permission, read, signed_in
 from lex.lex_app.reflex.ui.handlers import action, custom, job, load
 from lex.lex_app.reflex.ui.pages.declare import dashboard, embed, page
+from lex.lex_app.reflex.ui.pages.forms import field, form, step
 from lex.lex_app.reflex.ui.pages.links import address, reflex_page
 from lex.lex_app.reflex.ui.pages.kinds import list_ as list  # noqa: A001 - ui.list is the page kind
 from lex.lex_app.reflex.ui.pages.kinds import record, section
@@ -93,7 +96,7 @@ from lex.lex_app.reflex.ui.state import State
 __all__ = [
     "ApiError", "PageError", "Refuse", "State", "action", "address", "button", "cancel", "column",
     "create", "custom", "custom_block", "dashboard", "delete", "download", "each", "edit", "embed", "fact",
-    "failed", "goto", "job", "link", "load", "loaded", "message", "page", "permission", "progress",
+    "failed", "field", "form", "goto", "job", "link", "load", "loaded", "message", "page", "permission", "progress",
     "progress_of", "read", "record", "reflex_page", "refresh", "rows", "running", "section", "signed_in", "status",
-    "switch", "table", "testing", "text", "toast",
+    "step", "switch", "table", "testing", "text", "toast",
 ]
