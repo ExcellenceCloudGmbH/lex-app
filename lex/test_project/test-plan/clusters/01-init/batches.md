@@ -1,15 +1,15 @@
 
 
-### Batch 1er — lex.ui tables: the rows a table shows reach the browser and are never stored with the state ✅
+### Batch 1es — lex.ui: a foreign key shows the related record's name, in a model table, a run's history and its facts ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.1024 – 1.1025 |
-| Type | U |
-| Files covered | `lex/lex_app/reflex/data.py` (`RowsNotStored`, `rows_read`, `table_state(not_stored=)`), `lex/lex_app/reflex/ui/pages/rows_table.py` (`go`, `shown_on`, `restore_events`), `lex/lex_app/reflex/ui/pages/tables.py`, `lex/lex_app/reflex/ui/state.py` (`ui_open` sends `restore`) |
-| Test file | `lex/test_project/tests/init/test_1er_ui_table_rows_not_stored.py` |
-| Test classes | `TestCluster01er_TableRowsNotStored` (1.1024–1.1025) |
-| Fixtures | `ui.testing.Harness`; Reflex's `BaseStateToken.serialize` (what Redis and disk store) and `pickle` |
+| Scenario range | 1.1026 – 1.1027 |
+| Type | E |
+| Files covered | `lex/lex_app/reflex/data.py` (`shown_field`, `lex_columns`, `lex_grid_columns`, `LexTableState` ordering), `lex/lex_app/reflex/ui/pages/tables.py`, `lex/lex_app/reflex/ui/pages/calculation.py` (`_value`, `_inputs_shown`), `lex/lex_app/reflex/ui/context.py` (`Api.list(fields=)`) |
+| Test file | `lex/test_project/tests/init/test_1es_ui_foreign_key_names.py` |
+| Test classes | `TestCluster01es_ForeignKeyNames` (1.1026–1.1027) |
+| Fixtures | `E2ETestCase` with `UI_FK_MODELS` (`UiCustomer`, `UiCustomerReport`, new in `tests/init/models.py`); `ViewsClient` from `_ui_calc_aids` |
 | Tests landed | **2 pass / 0 fail** |
 | Status | ✅ Complete |
 
@@ -17,5 +17,5 @@ Section 5.15 of `docs/superpowers/specs/2026-11-23-reflex-ui-tables-design.md`.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.1024 | A table's rows reach the browser and no stored state | the browser's updates carry name, pay, team; no BaseStateToken.serialize or pickle of any state of the tab holds them or the total; stored: no rows, count kept, _rows_dropped; restore reads nothing when not dropped, reads again when dropped |
-| 1.1025 | Every ui.table is not stored; a row link survives the store | a ui.table model table is rows_not_stored and told to restore by its page; lex_table's state is not; a row's own address left out of the pickle, the click still redirects to it |
+| 1.1026 | A model table's foreign key shows the related record's name | column field customer__short_description headed Customer; rows carry names and ids through the real list view; desc sort sends -customer and returns beta first; lex_columns/lex_grid_columns; Api.list(fields=[customer]) keeps the name |
+| 1.1027 | A calculation's history and run show the customer's name | the past runs' column is customer__short_description; the run's input fact and result fact read run[customer__short_description] |

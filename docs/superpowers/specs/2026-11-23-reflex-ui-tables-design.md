@@ -480,6 +480,18 @@ Gaps found while rewriting dashboards onto lex.ui, each a need of any lex-app pr
   restore). *Cost:* a reconnect, or an event in another worker, reads the page of rows again;
   what the user typed in the search box and chose in a filter is still stored.
 
+- **A foreign key shows the related record's name (batch 1es).** lex-app's API sends a foreign key
+  as the related record's id and, beside it, `<fk>__short_description` (`str(related)`, the model
+  author's name for a record; `base_serializers._batch_add_fk_display_names`), which lex-app's grid
+  shows. A model table's foreign-key column (`ui.table(Model, columns=["customer"])`), `lex_columns`,
+  `lex_grid_columns`, a calculation's past runs and a run's facts (its inputs and `result=`) now show
+  that name. The author still writes the field's name; the column's row field is the name's key
+  (`data.shown_field`). Sorting the column sends the key (`ordering=customer`), as lex-app's grid
+  sorts a foreign key: the API cannot sort by `str(record)`. The row keeps the id, so a row's action
+  gets the id; `where=` and filters keep working on the key; a row's link is the table's own key, as
+  before. `self.api.list(fields=["customer"])` keeps the name beside the id. A `@ui.rows` table
+  over `self.api.list` rows names the column `customer__short_description` itself.
+
 ## 6. Limits and risks
 
 - **The address on mount.** Step 1 found that Reflex sends a component's mount event with the

@@ -326,6 +326,21 @@ def visible_fields(model: Any) -> list[Any]:
     ]
 
 
+#: The key lex-app's API adds beside a foreign key with the related record's name (``str(record)``).
+NAME_SUFFIX = "__short_description"
+
+
+def shown_field(field: Any) -> str:
+    """The row field a column shows for ``field``: a foreign key's name beside it, else the field itself.
+
+    lex-app's API sends a foreign key as the related record's id, and beside it
+    ``<fk>__short_description``, the related record's name -- what lex-app's own grid shows.
+    """
+    if getattr(field, "many_to_one", False) or getattr(field, "one_to_one", False):
+        return f"{field.name}{NAME_SUFFIX}"
+    return field.name
+
+
 def lex_columns(model: Any, fields: Sequence[str] | None = None, **overrides: Mapping[str, Any]) -> list:
     """RFDS ``column`` specs for ``fields`` of a model (default: :func:`visible_fields`).
 
@@ -345,7 +360,7 @@ def lex_columns(model: Any, fields: Sequence[str] | None = None, **overrides: Ma
             raise ValueError(f"{model.__name__} has no field {name!r}")
         options = {"kind": column_kind(field), **dict(overrides.get(name, {}))}
         header = options.pop("header", None) or str(field.verbose_name).capitalize()
-        specs.append(column(name, header, **options))
+        specs.append(column(shown_field(field), header, **options))
     return specs
 
 
@@ -364,7 +379,7 @@ def lex_grid_columns(model: Any, fields: Sequence[str] | None = None, **override
         kind = column_kind(field)
         options = {"kind": kind if kind in grid_kinds else "text", **dict(overrides.get(name, {}))}
         header = options.pop("header", None) or str(field.verbose_name).capitalize()
-        specs.append(col(name, header, **options))
+        specs.append(col(shown_field(field), header, **options))
     return specs
 
 
@@ -581,7 +596,8 @@ class LexTableState(DataTableMixin, ChosenColumns, RowsNotStored, mixin=True):
         params = scope_params(self.scope) + filter_params(filters)
         if query and type(self).search_field:
             params.append((f"{type(self).search_field}__icontains", query))
-        ordering = ",".join(("-" if level.get("sort") == "desc" else "") + str(level.get("col_id"))
+        # A foreign key's column shows the related record's name and sorts by the key, as lex-app's grid does.
+        ordering = ",".join(("-" if level.get("sort") == "desc" else "") + str(level.get("col_id")).removesuffix(NAME_SUFFIX)
                             for level in sort or [])
         api = await lex_api(self)
         data = await api.list(type(self).resource, page=offset // max(limit, 1) + 1, per_page=limit,

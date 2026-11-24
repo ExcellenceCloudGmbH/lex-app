@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 142 | 1025 | 964 | 3 | 0 |
+| 1. Init — Project Bootstrap | 143 | 1027 | 966 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -167,6 +167,7 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1ep | lex.ui frame: the project's mark in the header, leading home | 1.1020-1.1021 | complete | 2 | 0 | 0 | The look stays lex-app's: RFDS's header has a logo slot for a tenant's mark. These tests fail on a lost mark, a brand that does not lead home, a decorative mark read out, or an unchecked address. |
 | 1eq | lex.ui: a search through self.api matches the model's own text, never created_by | 1.1023 | complete | 1 | 0 | 0 | Fails on a search sent to created_by__icontains (the bug: it was the first text field of every LexModel). |
 | 1er | lex.ui tables: the rows a table shows reach the browser and are never stored with the state | 1.1024-1.1025 | complete | 2 | 0 | 0 | Pins the data-protection rule "no person in any state's pickle" for tables. Fails on a row value, a total or a filter choice in a stored state, or on a table that cannot read its rows again after the store left them out. |
+| 1es | lex.ui: a foreign key shows the related record's name, in a model table, a run's history and its facts | 1.1026-1.1027 | complete | 2 | 0 | 0 | The name is lex-app's own `<fk>__short_description` (str of the related record). These tests fail on an id shown in a foreign key's column or fact, a sort sent by the name key, or the id lost from the row. |
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |
 | 1h |  | 1.47-1.50 | complete | 15 | 0 | 0 | `requests.get` patched, network-free |

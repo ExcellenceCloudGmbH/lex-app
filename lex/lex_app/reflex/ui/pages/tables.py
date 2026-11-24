@@ -245,7 +245,8 @@ class Table(Part):
                 options["render"] = render
             if c.kind in _DRAWN or c.show is not None:
                 options["sortable"] = c.kind in ("status", "tag")
-            specs.append(rfds_column(c.key, header, kind=_RFDS_KIND[c.kind or "text"], **options))
+            field = (given or {}).get("field", c.key)       # a model's foreign key: its related record's name
+            specs.append(rfds_column(field, header, kind=_RFDS_KIND[c.kind or "text"], **options))
         return specs
 
     def _toolbar(self, ctx: Build, state: Any, cols: list[Column], specs: list[dict], *,
@@ -366,7 +367,8 @@ class Table(Part):
             if field is not None and not (field.choices or field.get_internal_type() == "BooleanField"):
                 raise ctx.fail(f"`filters=` names {name}, whose values are not a fixed set.",
                                "A model table filters on fields with choices, or yes/no fields; search the others.")
-        base = {c["field"]: dict(c) for c in data.lex_columns(model, [c.key for c in cols])}
+        # By the name the author wrote: a foreign key's spec shows the related record's name (`<fk>__short_description`).
+        base = {c.key: dict(spec) for c, spec in zip(cols, data.lex_columns(model, [c.key for c in cols]))}
         self._check(ctx, cols, first_kind=base.get(cols[0].key, {}).get("kind") if cols else None)
         specs = self._specs(ctx, cols, base)
         key = model._meta.pk.name

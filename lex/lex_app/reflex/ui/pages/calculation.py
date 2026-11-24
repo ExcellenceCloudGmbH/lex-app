@@ -176,7 +176,11 @@ class Calculation(kinds.Kind):
         return rx.fragment(*whole)
 
     def _value(self, field: Any) -> Any:
-        """This run's value of the model's ``field``, typed for how it is shown."""
+        """This run's value of the model's ``field``, typed for how it is shown; a foreign key's related record's name."""
+        from lex.lex_app.reflex.data import shown_field
+
+        if shown_field(field) != field.name:
+            return self.state.run[shown_field(field)].to(str)
         value = self.state.run[field.name]
         kind = _kind(field)
         if kind == "number":
@@ -229,7 +233,8 @@ class Calculation(kinds.Kind):
         by_name = {field.name: field for field in self.model._meta.concrete_fields}
         every = [*self.fields, *(one for step in self.steps for one in step.fields)]
         facts = [vocab.Fact(one.label if one.label is not None else one.key.replace("_", " ").capitalize(),
-                            self._value(by_name[one.key]) if one.is_a not in ("choice", "choices", "text")
+                            self._value(by_name[one.key])
+                            if one.is_a not in ("choice", "choices", "text") or by_name[one.key].is_relation
                             else self.state.run[one.key].to(str),
                             _shown_kind(one, by_name[one.key]))
                  for one in every]

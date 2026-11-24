@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1025
+max_scenario: 1027
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2788,3 +2788,13 @@ letters:
       xfail: 0
     note: >-
       Pins the data-protection rule "no person in any state's pickle" for tables. Fails on a row value, a total or a filter choice in a stored state, or on a table that cannot read its rows again after the store left them out.
+  es:
+    title: 'lex.ui: a foreign key shows the related record''s name, in a model table, a run''s history and its facts'
+    scenarios: 1.1026-1.1027
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      The name is lex-app's own `<fk>__short_description` (str of the related record). These tests fail on an id shown in a foreign key's column or fact, a sort sent by the name key, or the id lost from the row.

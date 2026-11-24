@@ -288,7 +288,9 @@ class Api:
                                  f"are not searched); pass filters={{'<field>__icontains': text}} instead of search=")
             params.append((f"{field}__icontains", str(search)))
         data = self._call("list", model, page=page, per_page=per_page, ordering=ordering, params=params)
-        rows = Rows({name: wire_value(value) for name, value in row.items() if fields is None or name in fields}
+        # A foreign key asked for keeps its related record's name beside it (`<fk>__short_description`).
+        wanted = None if fields is None else {*fields, *(f"{name}__short_description" for name in fields)}
+        rows = Rows({name: wire_value(value) for name, value in row.items() if wanted is None or name in wanted}
                     for row in data["results"])
         rows.count = int(data["count"])
         return rows
