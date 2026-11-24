@@ -622,7 +622,19 @@ Built on 2026-11-24 (batches 1ds-1du), on top of 6.14:
   field that is not the id", which depends on a dict's order and is harder to explain.
 - **Only a page of matches reaches the browser** (`forms.MATCHES`, 50), each `{value, label}`: none of
   a row's other fields. The first page is asked for when the field appears (`on_mount`), so the list is
-  ready when it opens; RFDS debounces typing (250 ms) and a newer search supersedes an older one.
+  ready when it opens; RFDS debounces typing (250 ms).
+- **Searches run per field, and never hold the tab** (review, 2026-11-24). `ui_search` was one
+  Reflex handler marked `supersedes=True`, and Reflex supersedes by (event name, tab): a search in one
+  field cancelled a search running in another field of the same form, and every keystroke held the
+  tab's lock while the rows handler ran. Now `ui_search` is an ordinary event that only records the
+  field's latest search (a number and the text) -- in order with the tab's other events, since Reflex
+  runs a tab's ordinary events one after another -- and returns `ui_search_run(field, number)`, a
+  background event: it copies the state under the lock, runs the rows handler without it, and offers
+  the matches only if that number is still the field's latest. A slow, older search that ends after a
+  newer one is dropped; another field's search is not touched; the user's other clicks go on while a
+  search runs. *Considered first:* only dropping `supersedes` (correct, but each keystroke would wait
+  for the rows handler while holding the tab), and making `ui_search` itself a background event (its
+  order would be the order the lock is taken in, which Reflex's Redis lock does not promise).
 - **The server accepts only a value it offered to this tab.** Every value offered is remembered on the
   server (`_ui_offered`, a backend field: never sent), so a value chosen from an earlier search stays
   valid while the user types on; a forged or merely existing value is refused at the field ("Choose one
@@ -637,7 +649,8 @@ Built on 2026-11-24 (batches 1ds-1du), on top of 6.14:
   accept, a value it never offered); `kind="choices"` with a searched source is refused: RFDS's
   multi-select has no server search. *Cost:* an edit form cannot show the current customer in the box.
 - **It works in a form, a wizard's step and a button's `ask=`**, as every field. A project's unit test
-  sends `ui_search` through `ui.testing.Harness` before it sends the form.
+  sends `ui_search` through `ui.testing.Harness` (awaiting `.wait_all()`, which includes the search's
+  run) before it sends the form.
 - **A form's refusal is shown in the form, above its submit button** -- where the user is looking --
   in RFDS's `inline_message` (warning tone, as the toast it replaces; `role="alert"`: it is new and the
   form did not do what was asked). It is kept per handler (`ui_refused[key] = {title, message}`) and

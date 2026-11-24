@@ -6,7 +6,8 @@ each value into a Python value. A value that does not pass never reaches the bod
 kept for the field (``ui_invalid``) and the handler ends there.
 
 A choice searched on the server (``options=`` a ``@ui.rows`` handler) is the one field that talks to
-the server before the form is sent: :func:`search` runs the rows handler for what the user typed,
+the server before the form is sent: :func:`ask` records what the user typed, in order, and
+:func:`search` runs the rows handler for it without holding the tab,
 keeps a page of matches for the browser (``ui_matches``) and remembers, on the server only, every
 value it offered to the tab (``_ui_offered``). The form's value is checked against those.
 """
@@ -134,34 +135,75 @@ def _offer(key: str, raw: Any, text: str) -> dict[str, tuple[Any, str]]:
     return found
 
 
-async def search(state: Any, field: str, text: Any) -> None:
-    """The user typed ``text`` into the searched field ``field`` (``""`` when it opens): offer the matches.
+def ask(state: Any, field: str, text: Any) -> Any:
+    """The user typed ``text`` into the searched field ``field`` (``""`` when it opens).
 
-    ``state`` is the tab's ``ui.State``; call while holding its lock. The rows handler runs as the
-    user, as a table's does. A failure is shown at the field, never the exception's text.
+    Runs in order with the tab's other events, and at once: it records what was typed as the
+    field's latest search and returns the event that runs it without holding the tab
+    (:func:`search`). ``None`` for a field the server does not know.
+    """
+    if str(field) not in _SEARCHES:
+        return None
+    text = " ".join(str(text or "").split())[:200]
+    held = dict(state._ui_searching)
+    number = int((held.get(field) or [0])[0]) + 1
+    state._ui_searching = {**held, field: [number, text]}
+    return type(state).ui_search_run(field, number)
+
+
+def _latest(state: Any, field: str, number: int) -> str | None:
+    """What was typed for the search ``number`` of ``field``; ``None`` once a newer search was asked."""
+    held = dict(state._ui_searching).get(field) or [0, ""]
+    return str(held[1]) if int(held[0]) == int(number) else None
+
+
+async def search(state: Any, field: str, number: int) -> None:
+    """Run the search ``number`` of the searched field ``field`` and offer its matches.
+
+    ``state`` is the tab's ``ui.State`` behind a background proxy: the rows handler runs as the user,
+    as a table's does, on a copy taken under the user's lock, while the tab's other events go on.
+    Its matches are offered only if no newer search of the same field was asked meanwhile; each
+    field has its own, so two searched fields never cancel each other. A failure is shown at the
+    field, never the exception's text.
     """
     from lex.lex_app.reflex.ui import rows
 
     found = _SEARCHES.get(str(field))
     if found is None:
         return
-    text = " ".join(str(text or "").split())[:200]
     source = found.source
     key = source.fn.__ui_key__
-    try:
+    async with state:
+        text = _latest(state, field, number)
+        if text is None:
+            return
         owner = await state.get_state(source.state)
-        raw = await rows.read(source, owner, search=text)
-        offered = _offer(key, raw, "" if rows.takes_search(source) else text)
-    except Exception as exc:  # noqa: BLE001 - as a table: logged with a reference, never the exception's text
-        state.ui_invalid = {**dict(state.ui_invalid), found.invalid: rows.describe(exc, key, "")}
-        state.ui_matches = {**dict(state.ui_matches), field: []}
-        return
-    state.ui_matches = {**dict(state.ui_matches),
-                        field: [{"value": value, "label": label} for value, (_, label) in offered.items()]}
-    kept = {**dict(dict(state._ui_offered).get(field) or {}), **{value: one for value, (one, _) in offered.items()}}
-    if len(kept) > OFFERED:
-        kept = {value: one for value, (one, _) in offered.items()}
-    state._ui_offered = {**dict(state._ui_offered), field: kept}
+        try:
+            draft = rows.copy_of(owner)
+        except Exception as exc:  # noqa: BLE001 - reported at the field, below
+            draft, failure = None, exc
+        else:
+            failure = None
+    offered: dict = {}
+    if failure is None:
+        try:
+            raw = await rows.read(source, owner, search=text, draft=draft)
+            offered = _offer(key, raw, "" if rows.takes_search(source) else text)
+        except Exception as exc:  # noqa: BLE001 - as a table: logged with a reference, never the exception's text
+            failure = exc
+    async with state:
+        if _latest(state, field, number) is None:
+            return                                  # a newer search of this field was asked: its matches count
+        if failure is not None:
+            state.ui_invalid = {**dict(state.ui_invalid), found.invalid: rows.describe(failure, key, "")}
+            state.ui_matches = {**dict(state.ui_matches), field: []}
+            return
+        state.ui_matches = {**dict(state.ui_matches),
+                            field: [{"value": value, "label": label} for value, (_, label) in offered.items()]}
+        kept = {**dict(dict(state._ui_offered).get(field) or {}), **{value: one for value, (one, _) in offered.items()}}
+        if len(kept) > OFFERED:
+            kept = {value: one for value, (one, _) in offered.items()}
+        state._ui_offered = {**dict(state._ui_offered), field: kept}
 
 
 #: Handler key -> its state class, for the forms declared ``keep=True``: their result stays across visits.

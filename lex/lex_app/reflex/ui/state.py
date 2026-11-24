@@ -167,6 +167,9 @@ class State(rx.State):
     _ui_load_runs: dict[str, str] = {}
     #: Searched field id -> every value offered to this tab (as text) -> the row's id: what a form accepts.
     _ui_offered: dict[str, dict] = {}
+    #: Searched field id -> [the number of its latest search, what was typed]: an older search's
+    #: matches, arriving later, are dropped.
+    _ui_searching: dict[str, list] = {}
     #: "State.field" -> the stamp of the value a ``ui.private`` field holds in the server's memory.
     #: Only the stamp is part of the state: the value itself is never stored with it.
     _ui_private: dict[str, str] = {}
@@ -266,16 +269,24 @@ class State(rx.State):
         if not open:
             self.ui_asking, self.ui_asking_args = "", []
 
-    @rx.event(supersedes=True)
-    async def ui_search(self, field: str, text: str = ""):
+    @rx.event
+    def ui_search(self, field: str, text: str = ""):
         """A searched choice opened (``text`` is ``""``), or the user typed into it: offer the matches.
 
         Only the field's id comes from the browser: the rows handler that searches is looked up in
-        the server's registry, and runs as the user.
+        the server's registry, and runs as the user. This records the search, in order with the
+        tab's other events; :meth:`ui_search_run` runs it without holding the tab.
         """
         from lex.lex_app.reflex.ui import forms
 
-        await forms.search(self, field, text)
+        return forms.ask(self, field, text)
+
+    @rx.event(background=True)
+    async def ui_search_run(self, field: str, number: int):
+        """Run the search ``number`` of ``field``; its matches count only while it is the field's latest."""
+        from lex.lex_app.reflex.ui import forms
+
+        await forms.search(self, field, number)
 
     @rx.event
     def ui_step_back(self, key: str):

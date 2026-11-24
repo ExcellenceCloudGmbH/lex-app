@@ -11,7 +11,7 @@ is refused at the field. A regression is a list of every customer in the page, a
 fields (an e-mail address) in the browser, a forged id reaching the handler's body, or an empty
 box until the user types.
 
-Cluster 1ds -- scenarios 1.900-1.903. Type: U.
+Cluster 1ds -- scenarios 1.900-1.903, 1.912. Type: U.
 Covers: lex/lex_app/reflex/ui/forms.py (Expect.search, check, clean, search, MATCHES),
 lex/lex_app/reflex/ui/pages/forms.py (field, Field.check, Field.expect, Field.control),
 lex/lex_app/reflex/ui/state.py (ui_search, ui_matches).
@@ -92,6 +92,42 @@ class OrdersState(ui.State):
         return None
 
 
+#: Holds the warehouses search while it is set: a slow search in another system.
+SLOW = {"gate": None}
+
+
+class DeliveryState(ui.State):
+    """A delivery: a customer and a warehouse, each searched on the server, on one form."""
+
+    got: dict = {}
+    clicks: int = 0
+
+    @ui.rows
+    def customers(self, search):
+        return [row for row in CUSTOMERS if search.casefold() in row["label"].casefold()]
+
+    @ui.rows
+    def warehouses(self, search):
+        gate = SLOW["gate"]
+        if gate is not None and search == "slow" and not gate.wait(5):
+            raise RuntimeError("the gate was never opened")
+        return [{"id": f"w{n}", "label": f"Warehouse {search} {n}"} for n in range(1, 3)]
+
+    @ui.action
+    def deliver(self, values):
+        self.got = dict(values)
+
+    @ui.action
+    def click(self):
+        self.clicks += 1
+
+
+def deliver_order():
+    return ui.form(title="Deliver", submit=DeliveryState.deliver,
+                   fields=[ui.field("customer", options=DeliveryState.customers),
+                           ui.field("warehouse", options=DeliveryState.warehouses)])
+
+
 def place_order():
     return ui.form(title="Place order", submit=OrdersState.place,
                    fields=[ui.field("customer", options=OrdersState.customers, required=True)])
@@ -121,7 +157,7 @@ def _assigning():
 
 def _build() -> None:
     """What lex-app does when it registers the pages: each is built, which tells the handlers their fields."""
-    for page in (place_order, route_order, broken_order, plan_order):
+    for page in (place_order, route_order, broken_order, plan_order, deliver_order):
         page().build(Build(page=page.__name__, route=f"/{page.__name__}"))
     _assigning()
 
@@ -145,7 +181,7 @@ async def _session(steps):
 async def _search(harness, handler, text: str) -> list:
     """The user typed ``text`` into the searched field of ``handler``'s form; the matches the browser got."""
     field = _searched(handler)
-    await (await harness.send(State, "ui_search", field=field, text=text))
+    await (await harness.send(State, "ui_search", field=field, text=text)).wait_all()
     return list(dict((await harness._state(State)).ui_matches).get(field, []))
 
 
@@ -326,3 +362,50 @@ class TestCluster01ds_SearchedChoice(SimpleTestCase):
                          "Page `orders`, slot `fields`: field `customer` of `OrdersState.place` searches "
                          "`OrdersState.regions`; elsewhere it searches `OrdersState.customers`.\n"
                          "A handler receives one set of fields: give this form or button a handler of its own.")
+
+    # -- 1.912 ---------------------------------------------------------
+    def test_1_912_two_searched_fields_on_one_form_never_cancel_each_other(self) -> None:
+        """
+        Scenario 1.912: two searched choices on one form, through Reflex's event processor.
+        Given: a form with a searched customer and a searched warehouse; the warehouses search
+               for "slow" is held (a slow system).
+        When:  the user types "slow" into the warehouse, then, while it runs, types into the
+               customer and presses another button; then types "fast" into the warehouse; then
+               the slow search ends.
+        Then:  the customer's matches arrive while the warehouse search still runs, and the
+               button's action runs meanwhile (the search does not hold the tab); the customer's
+               search does not cancel the warehouse's; the warehouse shows the matches of what
+               was typed last ("fast"), never the slow, older search's that ended after it.
+        """
+        import threading
+
+        customer, warehouse = (next(one.search for one in forms.of(DeliveryState.deliver.fn.__ui_fn__).fields
+                                    if one.key == key) for key in ("customer", "warehouse"))
+        SLOW["gate"] = threading.Event()
+        self.addCleanup(SLOW.update, {"gate": None})
+
+        async def matches(harness, field):
+            return [one["label"] for one in dict((await harness._state(State)).ui_matches).get(field, [])]
+
+        async def steps(harness):
+            slow = await harness.send(State, "ui_search", field=warehouse, text="slow")
+            await asyncio.sleep(0.05)
+            await (await harness.send(State, "ui_search", field=customer, text="Customer 00")).wait_all()
+            await asyncio.wait_for((await harness.send(DeliveryState, "click")).wait_all(), 2)
+            during = (await matches(harness, customer), await matches(harness, warehouse),
+                      (await harness.fields(DeliveryState))["clicks"])
+            await (await harness.send(State, "ui_search", field=warehouse, text="fast")).wait_all()
+            fast = await matches(harness, warehouse)
+            SLOW["gate"].set()
+            await asyncio.wait_for(slow.wait_all(), 5)
+            await asyncio.sleep(0.05)
+            return during, fast, await matches(harness, warehouse), await matches(harness, customer)
+
+        during, fast, after, customers = asyncio.run(_session(steps))
+        self.assertEqual(len(during[0]), 9, "the customer's matches came while the warehouse was searched")
+        self.assertEqual(during[1], [], "the slow warehouse search was still running")
+        self.assertEqual(during[2], 1, "another button worked meanwhile: the search does not hold the tab")
+        self.assertEqual(fast, ["Warehouse fast 1", "Warehouse fast 2"])
+        self.assertEqual(after, ["Warehouse fast 1", "Warehouse fast 2"],
+                         "the older, slow search ending later does not replace what was typed last")
+        self.assertEqual(len(customers), 9, "and nothing cancelled the customer's matches")

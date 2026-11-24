@@ -1669,8 +1669,9 @@ does not remove user launch configurations.
 | 1.901 | The server accepts only a value it offered to the tab | the row's id for the body; unoffered or forged ids refused at the field; required; earlier searches' values kept |
 | 1.902 | The field is RFDS's combobox searching on the server | server-search mode over `ui_matches`; `ui_search` on typing and opening; the id sent, the label shown; compiled; in a step and ask= |
 | 1.903 | A searched choice declared wrongly | several, a start value, an action as options, two rows handlers for one field |
+| 1.912 | Two searched fields on one form never cancel each other | through Reflex's event processor: a field's matches arrive while another field's slow search runs, another button works meanwhile, and the slow, older search ending after a newer one does not replace the newer matches |
 
-**Scenario range:** 1.900 – 1.903. **Test file:** `lex/test_project/tests/init/test_1ds_ui_form_searched_choice.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ds](batches.md).
+**Scenario range:** 1.900 – 1.903, 1.912. **Test file:** `lex/test_project/tests/init/test_1ds_ui_form_searched_choice.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ds](batches.md).
 
 ### 1dt. lex.ui: a refusal shown above a form's submit button, with a title ✅
 

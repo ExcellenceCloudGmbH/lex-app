@@ -369,7 +369,7 @@ class TestCluster01dx_FormKeep(SimpleTestCase):
 
         async def steps(harness):
             with patch.object(private, "_now", lambda: now[0]):
-                await (await harness.send(State, "ui_search", field=field, text="ac"))
+                await (await harness.send(State, "ui_search", field=field, text="ac")).wait_all()
                 offered = list(dict((await harness._state(State)).ui_matches).get(field, []))
                 await (await harness.send(TallyState, "tally", values={"customer": "7"}))
                 await _open(harness, "/elsewhere")
