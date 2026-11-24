@@ -2429,10 +2429,11 @@ letters:
     scenarios: '1.829'
     status: complete
     tests:
-      pass: 1
+      pass: 2
       skip: 0
       xfail: 0
     note: >-
       A handler body may return or yield another state's handler among its results; raw Reflex events stay in the
       custom region. These tests fail on a handler that cannot chain to another state, or a browser script slipping
-      out of an ordinary handler.
+      out of an ordinary handler, or a hand-on that could only fail later in the browser (a @ui.rows
+      handler, or a handler of the running handler's own state).

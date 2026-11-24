@@ -96,8 +96,12 @@ def progress(fraction: float, message: str = "") -> Progress:
     return Progress(min(1.0, max(0.0, float(fraction))), str(message))
 
 
-def split(value: Any, *, handler: str) -> tuple[list, Progress | None]:
-    """A handler's returned or yielded value as (results, progress report)."""
+def split(value: Any, *, handler: str, state: str | None = None) -> tuple[list, Progress | None]:
+    """A handler's returned or yielded value as (results, progress report).
+
+    ``state`` is the full name of the running handler's state: a handler of that same state is
+    refused, since one handler does not start another.
+    """
     items = ([] if value is None else [value] if isinstance(value, Refresh)
              else list(value) if isinstance(value, (list, tuple)) else [value])
     out: list = []
@@ -107,7 +111,10 @@ def split(value: Any, *, handler: str) -> tuple[list, Progress | None]:
             continue
         if isinstance(item, Progress):
             report = item
-        elif isinstance(item, (Goto, Toast, Download, Refresh)) or _is_state_handler(item):
+        elif isinstance(item, (Goto, Toast, Download, Refresh)):
+            out.append(item)
+        elif _is_state_handler(item):
+            _check_hand_on(item, handler=handler, state=state)
             out.append(item)
         else:
             raise TypeError(
@@ -129,6 +136,20 @@ def _is_state_handler(item: Any) -> bool:
 
     target = item.handler if isinstance(item, EventSpec) else item
     return isinstance(target, EventHandler) and bool(target.state_full_name)
+
+
+def _check_hand_on(item: Any, *, handler: str, state: str | None) -> None:
+    """Refuse, when the handler returns, a hand-on that could only fail later in the browser."""
+    from reflex.event import EventSpec
+
+    target = item.handler if isinstance(item, EventSpec) else item
+    name = getattr(target.fn, "__ui_key__", target.fn.__qualname__)
+    if getattr(target.fn, "__ui_kind__", None) == "rows":
+        raise TypeError(f"{handler} returned the @ui.rows handler {name}. A table reads it; to make its tables "
+                        f"read again, return ui.refresh({name}).")
+    if state is not None and target.state_full_name == state:
+        raise TypeError(f"{handler} returned {name}, a handler of its own state; one handler does not start "
+                        "another. Put the shared work in a method whose name starts with `_` and call it.")
 
 
 def _external(path: str) -> bool:
