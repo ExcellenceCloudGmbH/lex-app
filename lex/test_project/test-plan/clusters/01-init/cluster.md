@@ -1875,3 +1875,65 @@ does not remove user launch configurations.
 | 1.939 | The docstrings a reader learns from say what the code does | ui.State names self.tab_id and self.progress as the only helper safe from another thread; ui.form says one keep=True is enough and a computed var never reads a private field; the field summary names currency= and lines=; no docstring line past 110 characters |
 
 **Scenario range:** 1.930 – 1.935, 1.936, 1.937, 1.939. **Test file:** `lex/test_project/tests/init/test_1dx_ui_form_keep.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dx](batches.md).
+
+### 1ef. lex.ui calculation pages: the page kind, its form, a run started as the user -- ui.calculation ✅
+
+**What it tests:** `ui.calculation(Model, ...)`: the kind and its build-time checks; the form's values created as a record and its run started through lex-app's API as the user, with Celery off and on; `self.api.calculate` and `self.api.log`.
+
+**Why a regression matters:** a record created past the model's permissions, a run nobody can trace to its user, a page that blocks while the run goes, or a run whose log the grid cannot find.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.980 | The page is declared with form words and checked against the model | compiles to RFDS's form with a Calculate button; one state per page; lex-app's load; a model that is no calculation, an unknown field, a needed field left out, the status as an input, no fields: refused with what to write |
+| 1.981 | The form creates the record as the user and starts its run in-process | the record's values; create view then Calculate request; the browser at ?run=<key>; SUCCESS with what calculate() computed; the log under the grid's run id |
+| 1.982 | A user the model does not let create is refused above the button | no record; the refusal in ui_refused of the form's handler; the browser stays |
+| 1.983 | With Celery on the run goes to a worker and the page does not wait | dispatched once, never in-process; the record IN_PROGRESS; the browser already at the run |
+| 1.984 | self.api.calculate and self.api.log are the grid's Calculate and log | [] before a run; IN_PROGRESS at once; the run's Markdown log after; its newest line |
+
+**Scenario range:** 1.980 – 1.984. **Test file:** `lex/test_project/tests/init/test_1ef_ui_calculation_start.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1ef](batches.md).
+
+### 1eg. lex.ui calculation pages: one run, followed until it ends -- its result, its error, its log ✅
+
+**What it tests:** a calculation page's run view: following a run with Celery off and on, its result with the model's fields, its error, its log, a reader the model refuses, leaving.
+
+**Why a regression matters:** a page that says running for ever, a result shown before the run ended, a traceback shown to a user, or a run shown to a reader the model refuses.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.985 | The run's view shows the model's fields as the run's values | compiles; a field alone is a fact with the model's label; no descriptor reaches the page; badge, progress that follows, error, log; another model's field refused |
+| 1.986 | A run in lex-app's process is followed until it ends | IN_PROGRESS then SUCCESS; the newest logged line or Running as progress; the run's values and log; the following ends by itself |
+| 1.987 | A run on a worker is followed until the worker reports | still IN_PROGRESS and followed while the worker has not reported; SUCCESS and the worker's values after its success callback |
+| 1.988 | A failed run shows its error in its own words | ERROR; the exception's text without the traceback; the failed run's log kept |
+| 1.989 | A run the reader may not read is no run to them | nothing of the run in the state; the error page says There is no run N., as for a missing key |
+| 1.990 | Leaving stops the watching, never the run | the follow job ends on a new visit; the run still ends in SUCCESS |
+
+**Scenario range:** 1.985 – 1.990. **Test file:** `lex/test_project/tests/init/test_1eg_ui_calculation_run.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1eg](batches.md).
+
+### 1eh. lex.ui calculation pages: the past runs -- a model table, each row opening its run ✅
+
+**What it tests:** a calculation page's past runs: `history=ui.table(Model, ...)` completed by lex-app (status, row link, newest first), its refusals, and its rows read as the user.
+
+**Why a regression matters:** a past run nobody can open, a list that starts with the oldest run, or runs shown that the model would not show the reader.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.991 | The past runs are a model table lex-app completes | compiled under Past runs; the status column added last, in the badge's words; each row a link to ?run=<key>; -id first; the author's search kept; the author's table unchanged |
+| 1.992 | Past runs written wrongly say what to write | another model, open=, where=, not a table |
+| 1.993 | The past runs are read as the user, newest first | three runs, newest first with their status, through lex-app's list view; none for a reader the model's permission_read refuses |
+
+**Scenario range:** 1.991 – 1.993. **Test file:** `lex/test_project/tests/init/test_1eh_ui_calculation_history.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1eh](batches.md).
+
+### 1ei. lex.ui calculation pages: a file the run produced, and stopping a run ✅
+
+**What it tests:** a calculation page's file download and Stop, and the whole page declared with `@ui.page`.
+
+**Why a regression matters:** a file downloaded past lex-app's checks, a Stop that pretends to stop a run that goes on, or a page left saying running after a stop.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.994 | A file the run produced is downloaded as the user | a button labelled as the model labels the field; the run's CSV and stored name through lex-app's download view; a forged field refused |
+| 1.995 | Stop cancels a run on a worker and the page says so | the worker's task revoked; the record and the page CANCELLED; following ended; no failure |
+| 1.996 | A run in lex-app's process cannot be stopped and the page says so | refused in words; the run still ends in SUCCESS; a later Stop: already ended |
+| 1.997 | The whole page declared with ui.page compiles | registered with lex-app's load; compiled with the form, the past runs, the progress and Stop asking Stop this run? behind the edit permission |
+
+**Scenario range:** 1.994 – 1.997. **Test file:** `lex/test_project/tests/init/test_1ei_ui_calculation_file_stop.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1ei](batches.md).

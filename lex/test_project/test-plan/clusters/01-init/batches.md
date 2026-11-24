@@ -3694,3 +3694,93 @@ What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-refl
 | 1.975 | Not for a refused or failed page, and a failure is only logged | a page without loads at once; a rule-refused page and a failed load not; a raising function logged with the route |
 | 1.976 | The function is checked when the frame is configured | text, one argument and async refused with what to write |
 | 1.977 | A reconnect of the same page does not open it again | with the frame's opened= and the review's same visit: a reconnect runs the page's load again but calls the function once a visit; a link to the same page is a new opening; a page without loads likewise |
+
+### Batch 1ef — lex.ui calculation pages: the page kind, its form, a run started as the user -- ui.calculation ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.980 – 1.984 |
+| Type | E |
+| Files covered | `lex/lex_app/reflex/ui/pages/calculation.py` (`calculation`, its checks, the form view), `lex/lex_app/reflex/ui/calculations.py` (the page's state, `calculate`), `lex/lex_app/reflex/data.py` (`LexApi.calculate`, `LexApi.log`), `lex/lex_app/reflex/ui/context.py` (`self.api.calculate`, `self.api.log`) |
+| Test file | `lex/test_project/tests/init/test_1ef_ui_calculation_start.py` |
+| Test classes | `TestCluster01ef_CalculationStart` (1.980–1.984) |
+| Fixtures | `UiRegionReport` (a calculation model with a gate and permission switches) and `UiRegionReportLine` in the cluster's models; `_ui_calc_aids.Session`: the harness with `self.api` = lex.ui's own API client answered by lex-app's real views through the signed-in `APIClient` |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+
+The calculation page kind of section 6.20 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`, first piece: the kind, its checks against the model, its form and the start of a run. The handlers run in `ui.testing.Harness` against lex-app's real views.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.980 | The page is declared with form words and checked against the model | compiles to RFDS's form with a Calculate button; one state per page; lex-app's load; a model that is no calculation, an unknown field, a needed field left out, the status as an input, no fields: refused with what to write |
+| 1.981 | The form creates the record as the user and starts its run in-process | the record's values; create view then Calculate request; the browser at ?run=<key>; SUCCESS with what calculate() computed; the log under the grid's run id |
+| 1.982 | A user the model does not let create is refused above the button | no record; the refusal in ui_refused of the form's handler; the browser stays |
+| 1.983 | With Celery on the run goes to a worker and the page does not wait | dispatched once, never in-process; the record IN_PROGRESS; the browser already at the run |
+| 1.984 | self.api.calculate and self.api.log are the grid's Calculate and log | [] before a run; IN_PROGRESS at once; the run's Markdown log after; its newest line |
+
+### Batch 1eg — lex.ui calculation pages: one run, followed until it ends -- its result, its error, its log ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.985 – 1.990 |
+| Type | E |
+| Files covered | `lex/lex_app/reflex/ui/pages/calculation.py` (the run's view, the result written with the model's fields), `lex/lex_app/reflex/ui/calculations.py` (`open`, `follow`, `error_words`, `newest_line`) |
+| Test file | `lex/test_project/tests/init/test_1eg_ui_calculation_run.py` |
+| Test classes | `TestCluster01eg_CalculationRun` (1.985–1.990) |
+| Fixtures | the 1ef models and `_ui_calc_aids.Session`; lex-app's log cache left running (`e2e_unpatch`); a recorded worker whose report is lex-app's own task success callback |
+| Tests landed | **6 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Second piece of the calculation page (section 6.20 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`). Found while building: lex-app answers a record outside the reader's permission_read with 404, so the page says "There is no run N." for both.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.985 | The run's view shows the model's fields as the run's values | compiles; a field alone is a fact with the model's label; no descriptor reaches the page; badge, progress that follows, error, log; another model's field refused |
+| 1.986 | A run in lex-app's process is followed until it ends | IN_PROGRESS then SUCCESS; the newest logged line or Running as progress; the run's values and log; the following ends by itself |
+| 1.987 | A run on a worker is followed until the worker reports | still IN_PROGRESS and followed while the worker has not reported; SUCCESS and the worker's values after its success callback |
+| 1.988 | A failed run shows its error in its own words | ERROR; the exception's text without the traceback; the failed run's log kept |
+| 1.989 | A run the reader may not read is no run to them | nothing of the run in the state; the error page says There is no run N., as for a missing key |
+| 1.990 | Leaving stops the watching, never the run | the follow job ends on a new visit; the run still ends in SUCCESS |
+
+### Batch 1eh — lex.ui calculation pages: the past runs -- a model table, each row opening its run ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.991 – 1.993 |
+| Type | E |
+| Files covered | `lex/lex_app/reflex/ui/pages/calculation.py` (`history=`, the status column), `lex/lex_app/reflex/ui/pages/tables.py` (a model table's row link and order set by its page kind; a status column's words), `lex/lex_app/reflex/data.py` (`LexTableState.default_ordering`) |
+| Test file | `lex/test_project/tests/init/test_1eh_ui_calculation_history.py` |
+| Test classes | `TestCluster01eh_CalculationHistory` (1.991–1.993) |
+| Fixtures | the 1ef models; `_ui_calc_aids.ViewsClient` for the table's rows read through lex-app's list view |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Third piece of the calculation page (section 6.20 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`).
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.991 | The past runs are a model table lex-app completes | compiled under Past runs; the status column added last, in the badge's words; each row a link to ?run=<key>; -id first; the author's search kept; the author's table unchanged |
+| 1.992 | Past runs written wrongly say what to write | another model, open=, where=, not a table |
+| 1.993 | The past runs are read as the user, newest first | three runs, newest first with their status, through lex-app's list view; none for a reader the model's permission_read refuses |
+
+### Batch 1ei — lex.ui calculation pages: a file the run produced, and stopping a run ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.994 – 1.997 |
+| Type | E |
+| Files covered | `lex/lex_app/reflex/ui/pages/calculation.py` (a FileField alone in `result=`, Stop), `lex/lex_app/reflex/ui/calculations.py` (`download`, `stop`), `lex/lex_app/reflex/data.py` (`LexApi.file`, `LexApi._send`), `lex/lex_app/reflex/ui/context.py` (`self.api.file`) |
+| Test file | `lex/test_project/tests/init/test_1ei_ui_calculation_file_stop.py` |
+| Test classes | `TestCluster01ei_CalculationFileAndStop` (1.994–1.997) |
+| Fixtures | the 1ef models, `UiRegionReport.with_file` writing a CSV into `report_file` (deleted after each test); lex-app's record of running calculations left running (`e2e_unpatch`); a recorded worker task and revoke |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Fourth piece of the calculation page (section 6.20 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`). lex-app cancels only runs on a worker (`CalculationModel.cancel` answers 409 `sync_calculation_not_cancellable` otherwise); the page words that refusal.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.994 | A file the run produced is downloaded as the user | a button labelled as the model labels the field; the run's CSV and stored name through lex-app's download view; a forged field refused |
+| 1.995 | Stop cancels a run on a worker and the page says so | the worker's task revoked; the record and the page CANCELLED; following ended; no failure |
+| 1.996 | A run in lex-app's process cannot be stopped and the page says so | refused in words; the run still ends in SUCCESS; a later Stop: already ended |
+| 1.997 | The whole page declared with ui.page compiles | registered with lex-app's load; compiled with the form, the past runs, the progress and Stop asking Stop this run? behind the edit permission |

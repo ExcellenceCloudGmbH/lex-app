@@ -165,7 +165,8 @@ class TestCluster01cm_Namespace(TestCase):
                  "form", "field", "step",                                                    # and batch 1dj these
                  "private",                                                                  # and batch 1dv this
                  "frame",                                                                    # and batch 1eb this
-                 "rule"}                                                                     # and batch 1ed this
+                 "rule",                                                                     # and batch 1ed this
+                 "calculation"}                                                              # and batch 1ef this
         self.assertEqual(sorted(set(ui.__all__) - pages), sorted(expected),
                          "nothing else is public beside the page names")
 

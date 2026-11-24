@@ -40,6 +40,8 @@ class Column:
     tones: tuple = ()
     open: str | None = None
     show: Callable[[Any], Any] | None = None
+    #: Set by a page kind, never by ``ui.column()``: the words a status column shows for its values.
+    words: tuple = ()
 
 
 def column(key: str, *, label: str | None = None, kind: str | None = None, currency: str | None = None,
@@ -137,6 +139,10 @@ class Table(Part):
     page_size: int = 25
     choose_columns: bool = False
     totals_of_all: bool = False
+    #: Set by a page kind, never by ``ui.table()``: where each row of a model table leads (an address
+    #: template with ``{<key>}``), and the order of its rows until the user sorts (``"-id"``).
+    row_link: str | None = None
+    ordering: str = ""
 
     def build(self, ctx: Build) -> rx.Component:
         # A model table reads through the API as the user; without the grant it could only show an error.
@@ -370,6 +376,8 @@ class Table(Part):
                 raise ctx.fail("`open=` names a field, which only a `@ui.rows` table's rows can carry.",
                                "Give a page: `open=fund`.")
             props["row_href"] = links.row_href(ctx, self.open, key)
+        if self.row_link is not None:
+            props["row_href"] = self.row_link
         empty = self._empty()
         if empty is not None:
             props["empty"] = empty
@@ -391,7 +399,7 @@ class Table(Part):
         state = data.table_state(model, columns=specs, search_field=search_field, filters=self.where,
                                  page_size=self.page_size,
                                  row_fields=tuple(sorted(used)), choice_fields=tuple(self.filters),
-                                 scope_fields=tuple(dict(self.where or {})))
+                                 scope_fields=tuple(dict(self.where or {})), ordering=self.ordering)
         rows_table._CACHE_BY_TABLE[self] = state
         options = {}
         for name in self.filters:
@@ -522,11 +530,11 @@ def _renderer(ctx: Build, c: Column) -> Callable[[Any], rx.Component] | None:
         return lambda row: rx.cond(row[target].to(str) != "", rfds.link(row[field].to(str), href=row[target].to(str)),
                                    rx.el.span(row[field].to(str)))
     if c.kind == "status":
-        tones = dict(c.tones)
+        tones, words = dict(c.tones), dict(c.words)
 
         def status(row: Any) -> rx.Component:
             word = row[field].to(str)
-            badge = rx.match(word, *[(w, rfds.lozenge(say(w), tone=t)) for w, t in tones.items()],
+            badge = rx.match(word, *[(w, rfds.lozenge(say(words.get(w, w)), tone=t)) for w, t in tones.items()],
                              rfds.lozenge(word, tone="neutral")) if tones else rfds.lozenge(word, tone="neutral")
             return rx.cond(word != "", badge, rfds.empty_value())
 

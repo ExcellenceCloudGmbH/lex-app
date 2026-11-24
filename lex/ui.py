@@ -54,6 +54,10 @@
                             a form above its submit button, elsewhere as a toast
 ``ui.ApiError``             lex-app's API refused a call (``.status``, ``.denied``,
                             ``.detail``); uncaught, it is shown to the user
+``self.api``                lex-app's API as the user: ``list/get/create/update/delete``, and for
+                            a calculation ``calculate(Model, pk)`` (as the Calculate button),
+                            ``log(Model, pk)`` (its newest run's log); ``file(Model, pk, field)``
+                            a record's file, downloaded as the user
 ``requires=``               ``ui.read/create/edit/delete(Model)``, ``ui.permission()``,
                             ``ui.signed_in``, a project's ``@ui.rule`` -- needed to query the
                             database directly; on a page and on every handler
@@ -77,6 +81,10 @@ progress_of/cancel``        event of a Cancel button
                             left out of ``import *``, which would hide Python's ``list``)
 ``ui.form(keep=True)``      the result is still there when the user comes back: what its
                             state and its tables' states hold stays across visits
+``ui.calculation``          the page of a lex-app calculation model: a form for a run's inputs
+                            (created and started as the user), the run while it goes, its
+                            result, the past runs; ``?run=<key>`` is one run. A field of the run
+                            is written as the model's: ``RegionReport.orders``
 ``ui.field/step``           a form's inputs, and a wizard's steps; the handler gets ``values``.
                             ``options=`` a ``@ui.rows`` handler searches on the server as the user
                             types. ``ui.button(confirm=, ask=)`` asks before its handler runs
@@ -109,6 +117,7 @@ from lex.lex_app.reflex.data import LexApiError as ApiError
 from lex.lex_app.reflex.ui import testing
 from lex.lex_app.reflex.ui.guard import create, delete, edit, permission, read, rule, signed_in
 from lex.lex_app.reflex.ui.handlers import action, custom, job, load
+from lex.lex_app.reflex.ui.pages.calculation import calculation
 from lex.lex_app.reflex.ui.pages.declare import dashboard, embed, page
 from lex.lex_app.reflex.ui.pages.forms import field, form, step
 from lex.lex_app.reflex.ui.pages.frame import frame
@@ -125,7 +134,7 @@ from lex.lex_app.reflex.ui.runs import cancel, failed, loaded, progress_of, runn
 from lex.lex_app.reflex.ui.state import State
 
 __all__ = [
-    "ApiError", "PageError", "Refuse", "State", "action", "address", "button", "cancel", "column",
+    "ApiError", "PageError", "Refuse", "State", "action", "address", "button", "calculation", "cancel", "column",
     "create", "custom", "custom_block", "dashboard", "delete", "download", "each", "edit", "embed", "fact",
     "failed", "field", "form", "frame", "goto", "job", "link", "load", "loaded", "message", "page", "permission", "private", "progress",
     "progress_of", "read", "record", "reflex_page", "refresh", "rows", "rule", "running", "section", "signed_in", "status",
