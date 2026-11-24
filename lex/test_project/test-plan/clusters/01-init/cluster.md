@@ -1774,8 +1774,9 @@ does not remove user launch configurations.
 | 1.926 | A private field declared wrongly says what to write | a public name, no type, a plain Reflex state, a limit of 0 or True, keep= not a bool; the empty value from the type; neither a backend var nor a var |
 | 1.911 | A computed var reading a private field is refused when the class is defined | a cached var, a cache=False var and one reading it through a helper method are refused with the var, the field, @ui.rows and copying into a field; one over a backend field stays |
 | 1.913 | One user cannot fill the memory, and signing out drops their values | with LEX_UI_PRIVATE_MB_PER_USER=1 a user's own least recently used value goes, never another user's older one; a value larger than the allowance is refused with a sentence naming the setting and not kept; LexUser.sign_out drops every value of that user only |
+| 1.938 | An inherited private field is one value in every handler | a child state's action and job read and write the parent's private field alike as self._lines; the parent sees the child's write; the child's load does not reset it; the value is kept under the declaring state |
 
-**Scenario range:** 1.920 – 1.926, 1.911, 1.913. **Test file:** `lex/test_project/tests/init/test_1dv_ui_private.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dv](batches.md).
+**Scenario range:** 1.920 – 1.926, 1.911, 1.913, 1.938. **Test file:** `lex/test_project/tests/init/test_1dv_ui_private.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dv](batches.md).
 
 ### 1dw. lex.ui: a limit on how many runs of a job go at once -- @ui.job(limit=) ✅
 

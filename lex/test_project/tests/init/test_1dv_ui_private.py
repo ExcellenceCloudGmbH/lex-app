@@ -11,7 +11,7 @@ never another user's. A regression is personal data in a state pickle or in the 
 one user wrote read by another, a value that outlives its limits, or a page that silently shows
 nothing (or old data) where the value was.
 
-Cluster 1dv -- scenarios 1.920-1.926, 1.911, 1.913. Type: U.
+Cluster 1dv -- scenarios 1.920-1.926, 1.911, 1.913, 1.938. Type: U.
 Covers: lex/lex_app/reflex/ui/private.py, lex/lex_app/reflex/ui/workcopy.py (fields_of, snapshot,
 restore, reset, Draft), lex/lex_app/reflex/ui/state.py (_ui_private, ui_open),
 lex/lex_app/reflex/ui/context.py (user_id_of), lex/lex_app/reflex/ui/testing.py (GONE),
@@ -94,6 +94,43 @@ class QuotaState(ui.State):
     @ui.action
     def write(self, name: str, kilobytes: int):
         setattr(self, f"_{name}", "x" * (kilobytes * 1024))
+
+
+class LedgerBase(ui.State):
+    """A state declaring a private field, and a state that inherits it."""
+
+    _lines: list = ui.private()
+    seen: str = ""
+
+    @ui.action
+    def show(self):
+        self.seen = repr(self._lines)
+
+
+class LedgerChild(LedgerBase):
+    """Reflex makes it a substate of LedgerBase: an inherited field is the parent's."""
+
+    note: str = ""
+
+    @ui.action
+    def write(self):
+        self._lines = [1, 2]
+
+    @ui.action
+    def read(self):
+        self.note = repr(self._lines)
+
+    @ui.job
+    def read_later(self):
+        self.note = repr(self._lines)
+
+    @ui.job
+    def write_later(self):
+        self._lines = [3]
+
+    @ui.load
+    def open(self):
+        self.note = "opened"
 
 
 def _session(steps, user: str = "tester"):
@@ -485,3 +522,40 @@ class TestCluster01dv_Private(SimpleTestCase):
         self.assertEqual(after_big, ["_b", "_c"], "and is not kept")
         self.assertEqual(signed_out, [], "signing out drops every value of the user")
         self.assertEqual(held("bob"), ["_report"], "and only theirs")
+
+    # -- 1.938 ---------------------------------------------------------
+    def test_1_938_an_inherited_private_field_is_one_value_in_every_handler(self) -> None:
+        """
+        Scenario 1.938: a private field declared on a parent state, used from a child state.
+        Given: `LedgerBase._lines = ui.private()` and `LedgerChild(LedgerBase)`, which Reflex
+               makes a substate whose inherited fields are the parent's.
+        When:  the child's action writes `self._lines`; the child's action and job read it; the
+               child's job writes it; the parent reads it; the child's load runs.
+        Then:  there is one value, kept under the state that declares the field: the child's
+               action and job read and write it alike as `self._lines`, the parent sees what the
+               child wrote, and the child's load does not reset a field it only inherits.
+        """
+        async def steps(harness):
+            await (await harness.send(LedgerChild, "write"))
+            await (await harness.send(LedgerChild, "read"))
+            action = (await harness.fields(LedgerChild))["note"]
+            await (await harness.send(LedgerChild, "read_later"))
+            await asyncio.sleep(0.05)
+            job = (await harness.fields(LedgerChild))["note"]
+            await (await harness.send(LedgerChild, "write_later"))
+            await asyncio.sleep(0.05)
+            await (await harness.send(LedgerBase, "show"))
+            parent = (await harness.fields(LedgerBase))["seen"]
+            await (await harness.send(LedgerChild, "open"))
+            await asyncio.sleep(0.05)
+            await (await harness.send(LedgerBase, "show"))
+            after_load = (await harness.fields(LedgerBase))["seen"]
+            return action, job, parent, after_load, list(harness.outcomes), [key[1].rsplit(".", 1)[1] for key in private._STORE]
+
+        action, job, parent, after_load, outcomes, kept_under = _session(steps)
+        self.assertEqual(outcomes, [], "nothing failed")
+        self.assertEqual((action, job), ("[1, 2]", "[1, 2]"), "the child's action and job read it alike")
+        self.assertEqual(parent, "[3]", "the parent sees what the child's job wrote: one value")
+        self.assertEqual(after_load, "[3]", "the child's load does not reset a field it only inherits")
+        self.assertEqual(kept_under, ["lex___test_project___tests___init___test_1dv_ui_private____ledger_base"],
+                         "kept under the state that declares it")

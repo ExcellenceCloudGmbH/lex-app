@@ -263,8 +263,8 @@ def check_computed(state_cls: Any) -> None:
 # -- what a state holds ------------------------------------------------------------------
 
 
-def fields(state_cls: Any) -> dict[str, Private]:
-    """The private fields a state class declares itself (and through its mixins), by name."""
+def _declared(state_cls: Any) -> dict[str, Private]:
+    """The private fields ``state_cls`` declares itself and through its mixins (not those it inherits)."""
     found: dict[str, Private] = {}
     mixins = getattr(state_cls, "_mixins", lambda: [])()
     for klass in (*mixins, state_cls):
@@ -272,6 +272,28 @@ def fields(state_cls: Any) -> dict[str, Private]:
             if isinstance(value, Private):
                 found[name] = value
     return found
+
+
+def fields(state_cls: Any, *, inherited: bool = True) -> dict[str, Private]:
+    """The private fields of a state class, by name: its own, and (``inherited``) those of the states
+    it inherits from -- one value each, kept under the state that declares it (:func:`declarer`)."""
+    found: dict[str, Private] = {}
+    for klass in (reversed(state_cls.__mro__) if inherited else (state_cls,)):
+        if isinstance(klass, type) and hasattr(klass, "get_full_name") and not getattr(klass, "_mixin", False):
+            found.update(_declared(klass))
+    return found
+
+
+def declarer(state_cls: Any, name: str) -> Any:
+    """The state that declares the private field ``name`` of ``state_cls`` (a mixin's: the state using it).
+
+    A child state inherits its parent's field as Reflex inherits a field: the parent's one value.
+    """
+    for klass in reversed(state_cls.__mro__):
+        if isinstance(klass, type) and hasattr(klass, "get_full_name") and not getattr(klass, "_mixin", False) \
+                and name in _declared(klass):
+            return klass
+    return state_cls
 
 
 def _raw(state: Any) -> Any:
@@ -285,7 +307,7 @@ def _where(state: Any, field: Private) -> tuple[tuple[str, str, str], str]:
         tab = str(target.router.session.client_token or "")
     except Exception:  # noqa: BLE001 - a state without router data comes from no tab
         tab = ""
-    name = type(target).get_full_name()
+    name = declarer(type(target), field.name).get_full_name()      # a child's inherited field: the parent's value
     return (tab, name, field.name), f"{name}.{field.name}"
 
 
@@ -384,7 +406,7 @@ def leave(tab: str) -> int:
 
     with _LOCK:
         gone = [key for key, entry in _STORE.items()
-                if key[0] == tab and not entry.field.keep and not forms.keeps(entry.field.owner)]
+                if key[0] == tab and not entry.field.keep and not forms.keeps(key[1])]
         for key in gone:
             del _STORE[key]
     return len(gone)

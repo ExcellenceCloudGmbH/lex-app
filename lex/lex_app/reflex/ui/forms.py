@@ -246,8 +246,9 @@ def kept() -> dict[str, Any]:
 
 
 def keeps(state_cls: Any) -> bool:
-    """Whether a kept form's result lives in ``state_cls``: its values stay across visits, a load keeps it."""
-    return state_cls.get_full_name() in _KEPT_STATES
+    """Whether a kept form's result lives in ``state_cls`` (a state class, or its full name): its values stay
+    across visits, a load keeps it."""
+    return (state_cls if isinstance(state_cls, str) else state_cls.get_full_name()) in _KEPT_STATES
 
 
 def gone_message() -> str:

@@ -735,6 +735,13 @@ class PayrollState(ui.State):
   (also through the methods it calls); one that reads a private field is refused when the class is
   defined: read it in a `@ui.rows` handler, or make the var an ordinary field set where the private
   one is written. A computed var over a backend field (`_name`) is Reflex's own and stays.
+- **A child state's inherited private field is the parent's one value** (review, 2026-11-24). Reflex
+  makes a subclass of a state its substate, whose inherited fields are the parent's. A private field
+  was kept under the state that happened to be read, and a child's job could not see it at all
+  (the child's action could): two behaviours. Now a value is kept under the state that declares the
+  field (for a mixin's, the state using the mixin), and a child reads and writes it as `self._lines`
+  in an action, a load and a job alike. A child's load does not reset a private field it only
+  inherits -- the parent's load does, as for every inherited field.
 - **`ui.testing`**: `fields={"_report": {...}}` seeds it and `result.fields["_report"]` reads it,
   as for every field; `ui.testing.GONE` seeds a value that is gone (to test the refusal) and is what
   `result.fields` holds for one.

@@ -2590,10 +2590,10 @@ letters:
       `ui.form(..., tabs=True)`: the result's sections as RFDS's tabs, each title its tab, what they share above; compiled with Reflex's page compiler; a tab's permission is RFDS's; every mistake refused. These tests fail on a second way to write tabs, a tab whose content is lost, a tab a user may not see drawn anyway, or a mistake that only shows in the browser.
   dv:
     title: 'lex.ui: a result held privately on the server -- ui.private'
-    scenarios: 1.920-1.926, 1.911, 1.913
+    scenarios: 1.920-1.926, 1.911, 1.913, 1.938
     status: complete
     tests:
-      pass: 9
+      pass: 10
       skip: 0
       xfail: 0
     note: >-
