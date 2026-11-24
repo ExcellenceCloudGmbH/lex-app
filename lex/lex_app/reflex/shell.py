@@ -116,6 +116,39 @@ def nav_sections() -> tuple:
     return tuple(sections)
 
 
+@dataclasses.dataclass(frozen=True)
+class ProjectChrome:
+    """A project's own chrome for its ``@ui.page`` pages (see :func:`lex.lex_app.reflex.ui.chrome`)."""
+
+    frame: Callable[[Any, str], Any]
+    first: Callable[[str], Any] | None = None
+
+
+#: The project's chrome, when it brings its own; ``None`` keeps lex-app's.
+_PROJECT_CHROME: list[ProjectChrome] = []
+
+
+def project_chrome() -> ProjectChrome | None:
+    return _PROJECT_CHROME[0] if _PROJECT_CHROME else None
+
+
+def framed(body: Any, route: str) -> Any:
+    """``body`` in the project's own frame when it has one, else in lex-app's chrome."""
+    chrome = project_chrome()
+    return chrome.frame(body, route) if chrome is not None else lex_chrome(body)
+
+
+def first_loads(route: str) -> list:
+    """The project's own load events that run before a page's own (its gate), or none."""
+    chrome = project_chrome()
+    if chrome is None or chrome.first is None:
+        return []
+    events = chrome.first(route)
+    if events is None:
+        return []
+    return list(events) if isinstance(events, (list, tuple)) else [events]
+
+
 def lex_chrome(body, *, embedded=None):
     """``body`` in lex-app's chrome: RFDS's shell standalone, the bare page inside lex-app.
 
@@ -170,7 +203,7 @@ def lex_page(
     on_load: Any = None,
     **page_kwargs: Any,
 ) -> Callable[[Callable[[], Any]], Callable[[], Any]]:
-    """Add a signed-in page to the dashboards, in lex-app's chrome.
+    """Add a signed-in page to the dashboards, in lex-app's chrome (or the project's, :func:`~lex.lex_app.reflex.ui.chrome`).
 
     Args:
         route: The page's path, e.g. ``"/cash"``.
@@ -218,7 +251,7 @@ def lex_page(
                 from rfds.patterns.security import access_denied
 
                 body = can(requires, body, fallback=access_denied(inline=True))
-            return lex_chrome(body)
+            return framed(body, route)
 
         page.__name__ = page_fn.__name__
         page.__qualname__ = page_fn.__qualname__
@@ -231,7 +264,7 @@ def lex_page(
         # which names only the route; the loads and the permission stay on the server.
         required, optional, others = page_loads(on_load)
         register_page(route, required, optional, requires or "")
-        loads: list[Any] = [LexAccessState.load, *others, UiState.ui_open(route)]
+        loads: list[Any] = [LexAccessState.load, *first_loads(route), *others, UiState.ui_open(route)]
         rx.page(route=route, title=title, on_load=loads, **page_kwargs)(page)
         return page_fn
 

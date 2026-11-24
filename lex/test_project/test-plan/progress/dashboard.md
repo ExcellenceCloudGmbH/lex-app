@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 103 | 824 | 798 | 3 | 0 |
+| 1. Init — Project Bootstrap | 104 | 826 | 800 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -127,6 +127,7 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1cz | lex.ui tables: a table that leaves the screen keeps none of its rows | 1.823 | complete | 1 | 0 | 0 | A table's rows stay in the tab's state only while it is on screen; `close` drops its page, count, totals and filter choices. These tests fail on a person's data left in a state nobody looks at any more. |
 | 1d |  | 1.23-1.30 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1da | lex.ui links: a raw Reflex page as somewhere a link may lead | 1.824 | complete | 1 | 0 | 0 | `ui.reflex_page("/route")` declares a raw Reflex page as a link target for `ui.address`, `open=`, `ui.link` and `ui.button`. These tests fail on a converted table whose rows cannot be opened, or a row link built from a string. |
+| 1db | lex.ui pages in a project's own chrome, in a project's own app | 1.825-1.826 | complete | 2 | 0 | 0 | `ui.chrome(frame, first=)` puts every `@ui.page` and the failed-load page in the project's frame, after the project's gate; `ui.install(app)` puts lex.ui into a project's own Reflex app. These tests fail on a converted page that looks unlike its neighbours, or a page load that runs before the gate it relies on. |
 | 1e |  | 1.30-1.43 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |

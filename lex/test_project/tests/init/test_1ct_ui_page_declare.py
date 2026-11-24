@@ -286,7 +286,8 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
             f"two loads of one dashboard on one state are refused: each would clear the other: {one_state.exception}")
         self.assertIn('rfdsI18n.t("Model", "Model"', str(Model.reflex_main()), "and the function receives the model")
         source = inspect.getsource(lex_app_module.create_app)
-        self.assertLess(source.index("load_structure()"), source.index("declare.finalize()"),
+        self.assertLess(source.index("load_structure()"), source.index("declare.install(app)"),
                         "the project's module is loaded before its pages are registered")
-        self.assertLess(source.index("declare.finalize()"), source.index("dashboard_page(structure)"),
+        self.assertLess(source.index("declare.install(app)"), source.index("dashboard_page(structure)"),
                         "and the pages are registered before the app's pages are added")
+        self.assertIn("finalize()", inspect.getsource(declare.install), "install registers the declared pages")

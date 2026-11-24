@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 824
+max_scenario: 826
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2389,3 +2389,15 @@ letters:
     note: >-
       `ui.reflex_page("/route")` declares a raw Reflex page as a link target for `ui.address`, `open=`, `ui.link` and
       `ui.button`. These tests fail on a converted table whose rows cannot be opened, or a row link built from a string.
+  db:
+    title: 'lex.ui pages in a project''s own chrome, in a project''s own app'
+    scenarios: 1.825-1.826
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.chrome(frame, first=)` puts every `@ui.page` and the failed-load page in the project's frame, after the
+      project's gate; `ui.install(app)` puts lex.ui into a project's own Reflex app. These tests fail on a converted
+      page that looks unlike its neighbours, or a page load that runs before the gate it relies on.

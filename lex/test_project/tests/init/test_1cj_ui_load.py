@@ -745,6 +745,9 @@ class TestCluster01cj_Load(TestCase):
             with self.assertRaises(ValueError, msg=f"create_app refuses {route}") as raised:
                 check(app_routes, declared)
             self.assertIn(route, str(raised.exception), "the message names the route")
-        self.assertIn("check_app_routes(app)", source, "create_app checks the app's routes")
-        self.assertLess(source.index("load_structure()"), source.index("check_app_routes(app)"),
+        from lex.lex_app.reflex.ui.pages import declare
+
+        self.assertIn("check_app_routes(app)", inspect.getsource(declare.install),
+                      "create_app checks the app's routes, through ui.install")
+        self.assertLess(source.index("load_structure()"), source.index("declare.install(app)"),
                         "it checks once the project's pages are declared")
