@@ -79,3 +79,32 @@ def test_rendering_a_page_twice_runs_its_code_once():
     second = render_page(page)
     assert second is first
     assert docs_site._t_g_runs == [1]
+
+
+def test_the_demo_frame_is_bordered_and_the_card_has_a_reset_button():
+    from docs_site.render.live import demo_card
+
+    card = str(demo_card("1", rx.text("hi")))
+    assert "1px solid var(--gray-a6)" in card
+    assert "var(--radius-3)" in card
+    assert "Reset sample data" in card
+
+
+def test_reset_empties_the_tab_and_rereads_the_page_tables():
+    from types import SimpleNamespace
+
+    from docs_site.sandbox.reset import SampleData
+    from docs_site.sandbox.store import STORE
+
+    page = PageModule("t/reset")
+    page.run(_STATE)
+    to_component(page.value('ui.table(Funds.rows, columns=["name"])'), "t/reset#1")
+    STORE.tab("tab-reset").rows["Fund"].clear()
+    STORE.tab("tab-other").rows["Fund"].clear()
+    stub = SimpleNamespace(router=SimpleNamespace(session=SimpleNamespace(client_token="tab-reset"),
+                                                  page=SimpleNamespace(path="/t/reset")))
+    events = SampleData.reset_sample_data.fn(stub)
+    assert len(STORE.tab("tab-reset").rows["Fund"]) == 6
+    assert STORE.tab("tab-other").rows["Fund"] == []
+    assert len(events) == 2              # the toast, and the reread of the page's one table
+    STORE.reset("tab-other")

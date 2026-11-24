@@ -125,8 +125,10 @@ start-up instead of lex-app's sign-in hand-off.
   the same filters and search arguments), over an in-memory store.
 - **Sample data:** Funds, Investors and Commitments, with dated rows for history-style examples.
   Small (tens of rows), defined in Python, loaded from a seed function.
-- **Per tab:** each browser tab gets its own copy of the store, keyed on Reflex's client token, and
-  a reload resets it. One reader's edits never reach another reader. Nothing is persisted. Copies
+- **Per tab:** each browser tab gets its own copy of the store, keyed on Reflex's client token. The
+  token lives in the tab's sessionStorage, so a reload keeps the copy and a new tab starts fresh;
+  each demo card has a "Reset sample data" button that starts the tab's copy over. One reader's
+  edits never reach another reader. Nothing is persisted. Copies
   for idle tabs are dropped after 30 minutes.
 - **Switching grants in a demo:** each demo card has a "Viewing as" switch with two roles, Editor
   (every grant on the sample models) and Viewer (`read` only). The role belongs to the tab, so a

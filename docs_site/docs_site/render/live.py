@@ -20,8 +20,10 @@ class PageModule:
     """
 
     def __init__(self, slug: str):
+        from docs_site.sandbox.reset import page_module
+
         self.slug = slug
-        name = "docs_site.pages." + slug.replace("/", "_").replace("-", "_")
+        name = page_module("/" + slug)
         module = sys.modules.get(name)
         if module is None:
             module = types.ModuleType(name)
@@ -57,11 +59,15 @@ def to_component(value: Any, name: str) -> rx.Component:
 
 
 def demo_card(code: str | None, component: rx.Component) -> rx.Component:
+    from docs_site.sandbox import reset
     from docs_site.sandbox.role import switch
 
-    shown = [rx.hstack(rx.text("Viewing as", size="1", color_scheme="gray"), switch(),
-                       justify="end", width="100%"),
-             rx.box(component, class_name="docs-demo-frame", width="100%")]
+    shown = [rx.hstack(reset.button(), rx.spacer(),
+                       rx.text("Viewing as", size="1", color_scheme="gray"), switch(),
+                       align="center", width="100%"),
+             rx.box(component, class_name="docs-demo-frame", width="100%",
+                    border="1px solid var(--gray-a6)", border_radius="var(--radius-3)",
+                    padding="16px", background="var(--gray-a2)")]
     if code is not None:
         shown.insert(0, rx.code_block(code.rstrip("\n"), language="python", can_copy=True))
     return rx.vstack(*shown, spacing="3", align="stretch", class_name="docs-demo")

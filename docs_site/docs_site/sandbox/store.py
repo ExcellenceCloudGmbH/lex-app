@@ -1,7 +1,9 @@
 """A copy of the sample data per browser tab, in this process's memory.
 
-A reader's edits never reach another reader, a reload of the page (a new tab token) starts from
-the seed, and a tab idle for ``idle_seconds`` is dropped. One backend process only: the copies
+A reader's edits never reach another reader. The copy belongs to the browser tab (Reflex's client
+token, kept in the tab's sessionStorage): a reload keeps it, a new tab starts from the seed, and
+``reset`` (the "Reset sample data" button) starts it over. A tab idle for ``idle_seconds`` is
+dropped. One backend process only: the copies
 are not shared between processes.
 """
 
