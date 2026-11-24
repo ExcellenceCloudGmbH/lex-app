@@ -1474,18 +1474,18 @@ does not remove user launch configurations.
 
 **Scenario range:** 1.824. **Test file:** `lex/test_project/tests/init/test_1da_ui_reflex_page.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1da](batches.md).
 
-### 1db. lex.ui pages in a project's own chrome, in a project's own app ✅
+### 1db. lex.ui's part of lex-app's app, and every page in lex-app's chrome ✅
 
-**What it tests:** A project with its own frame, gate and app module writes pages with `@ui.page`: `ui.chrome(frame, first=)` puts every page (and the failed-load page) in the project's frame, with the project's gate loading before the page's loads; `ui.install(app)` puts lex.ui into the project's own `rx.App`.
+**What it tests:** `create_app` hands lex.ui's pages to the app in one internal step (the declared `@ui.page` pages, `/ui-error`, the jobs' clock, the route check), and every `@ui.page` is in lex-app's chrome after the user's grants. lex.ui has no hook for a project's own frame or gate (the 2026-11-24 `ui.chrome`/`ui.install` was withdrawn after review).
 
-**Why a regression matters:** a converted page that suddenly looks and behaves unlike its neighbours, or a page load that runs before the gate it relies on.
+**Why a regression matters:** a page registered twice, without its error page, or outside lex-app's chrome.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.825 | A page in the projects own frame after its gate | the page is in the project's frame, not lex-app's chrome; its load events are the grants, then the project's gate for that route, then the opener; the error page is in the frame too; without ui.chrome lex-app's chrome; a non-function is refused |
-| 1.826 | Install puts lex ui into a projects own app | the declared page is registered; the error page is added with the grants and the project's gate as its loads; the jobs' clock is registered once; the routes are checked after the project's pages |
+| 1.825 | Create app hands lex ui its pages in one step | the declared page is registered once; the error page is added after the user's grants; the jobs' clock is registered once; the routes are checked after the pages; create_app runs the step, and lex.ui offers no app or chrome hook |
+| 1.826 | Every page is in lex apps chrome after the grants | a page and the error page are in lex-app's chrome; the page's load events are the grants, then the opener - nothing of the project's between them |
 
-**Scenario range:** 1.825 – 1.826. **Test file:** `lex/test_project/tests/init/test_1db_ui_project_chrome.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1db](batches.md).
+**Scenario range:** 1.825 – 1.826. **Test file:** `lex/test_project/tests/init/test_1db_ui_install.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1db](batches.md).
 
 ### 1dc. lex.ui handlers declared on a state mixin are each state's own ✅
 
