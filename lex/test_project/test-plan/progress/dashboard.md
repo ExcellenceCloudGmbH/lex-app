@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 125 | 952 | 879 | 3 | 0 |
+| 1. Init — Project Bootstrap | 129 | 976 | 896 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -150,6 +150,10 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1dz | lex.ui pages: a section closed until the user opens it, saying how many rows it holds | 1.947-1.949 | complete | 3 | 0 | 0 | `ui.section(title, ..., collapsed=True)`: RFDS's section as a native disclosure in a form's result= and in ui.embed, its title counting its table's rows once read; refused on a record page. These tests fail on a detail that shows open, a count shown before the rows are read, or a closed section on a page where RFDS cannot close one. |
 | 1e |  | 1.30-1.43 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1ea | lex.ui pages: a tool's result as tabs -- one section at a time, as on a record page | 1.950-1.952 | complete | 3 | 0 | 0 | `ui.form(..., tabs=True)`: the result's sections as RFDS's tabs, each title its tab, what they share above; compiled with Reflex's page compiler; a tab's permission is RFDS's; every mistake refused. These tests fail on a second way to write tabs, a tab whose content is lost, a tab a user may not see drawn anyway, or a mistake that only shows in the browser. |
+| 1eb | lex.ui frame: the navigation in areas, in the project's order, and the way to sign out | 1.960-1.964 | complete | 5 | 0 | 0 | `ui.frame(nav=[...], sign_out=)` once in the dashboard module; `nav=` on `@ui.page` names the page's area, on `ui.reflex_page(nav=, title=, icon=, requires=)` too; a page with route arguments is in its area unlisted; the current entry's area marked; compiled with Reflex's page compiler. These tests fail on areas in import order, an area made by a typo, a raw page that cannot be listed, a second frame from another module, or a sign-out to an unchecked address. |
+| 1ec | lex.ui frame: breadcrumbs from the area and the page, written by no page | 1.965-1.967 | complete | 3 | 0 | 0 | The frame shows RFDS's breadcrumbs: the area, the listed page whose table opens the page (else whose button or link leads to it), the page with a state title. These tests fail on a page that loses its trail, a parent that is the wrong list, or a record title that breaks the page. |
+| 1ed | lex.ui frame: a project's no-access sentence and way out, and its own access rules | 1.968-1.973 | complete | 6 | 0 | 0 | `ui.frame(denied=, request_access=)` words RFDS's access-denied notice on refused pages and /ui-error; `@ui.rule` in `requires=` on pages and handlers, asked on the server on a worker thread once per event, failing closed. These tests fail on a refused page that strands the user, lex-app's sentence where the project gave one, a rule the browser decides, a rule asked twice per event, or a rule that fails open. |
+| 1ee | lex.ui frame: a project's function runs when a page has opened -- ui.frame(opened=) | 1.974-1.976 | complete | 3 | 0 | 0 | `opened(user, page)` after the page's required loads (at once without them), on a worker thread, not awaited; the page's route, address, title as the load left it, area and values; not for a refused or failed page; failures logged. These tests fail on a page that waits for the bookkeeping, an entry for a refused or failed page, or a recently-used entry without the record's name. |
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |
 | 1h |  | 1.47-1.50 | complete | 15 | 0 | 0 | `requests.get` patched, network-free |

@@ -3586,3 +3586,92 @@ form's `result=`. What building settled is section 6.17 of `docs/superpowers/spe
 | 1.933 | A kept form with a load keeps what the load keeps | after a revisit and the load: the kept private result and the field in the load's keep= survive; what the load does not keep is reset |
 | 1.934 | A kept form keeps its refusal above its submit button | a ui.Refuse with a title stays above the button across a visit for a kept form and leaves for a form not kept; the line under a kept form does not repeat it; sending again clears both |
 | 1.935 | A kept form with tabs and a searched choice | keep=True with tabs=True compiles with its search; back within the idle time the tab's table reads the kept private value; a customer offered before the visit is still accepted; past the idle time the form and the tab's table say it is gone |
+
+### Batch 1eb — lex.ui frame: the navigation in areas, in the project's order, and the way to sign out ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.960 – 1.964 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/frame.py` (`frame`, `target`), `lex/lex_app/reflex/shell.py` (`list_in_nav`, `nav_sections`, `check_nav`, `check_area`, `sign_out_href`), `lex/lex_app/reflex/ui/pages/declare.py` (`page`, `finalize`), `lex/lex_app/reflex/ui/pages/links.py` (`reflex_page`), `lex/lex_app/reflex/_js/lex_rfds.css` |
+| Test file | `lex/test_project/tests/init/test_1eb_ui_frame_nav.py` |
+| Test classes | `TestCluster01eb_FrameNav` (1.960–1.964) |
+| Fixtures | neutral orders, reports and regions pages; the frame's registries emptied per test |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+
+What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.960 | Areas come in the project's order and pages in theirs | ui.frame(nav=) order; declaration order with a raw page among them; a record page in its area unlisted; without ui.frame first-declared order; a typo'd area stops the start naming the page and the areas |
+| 1.961 | The frame is configured once, with checked arguments | a reload replaces it; another module refused naming the first; a single area as text, an area twice, an empty name refused |
+| 1.962 | A raw Reflex page joins an area with the same words | nav=, title=, icon=, requires= make its entry; still a link target; nav= without title=, title=/icon=/requires= without nav= refused |
+| 1.963 | The current entry and its area are marked in a compiled page | Reflex's page compiler; aria-current per entry; lex-app's stylesheet marks the area heading |
+| 1.964 | The user menu signs out where the project says | /logout by default; an https:// address or a page's route; a route as text, http:// and a page needing values refused; the title is still LEX_DASHBOARD_TITLE |
+
+### Batch 1ec — lex.ui frame: breadcrumbs from the area and the page, written by no page ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.965 – 1.967 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/shell.py` (`Place`, `place_of`, `breadcrumbs`, `lex_chrome`), `lex/lex_app/reflex/ui/pages/declare.py` (`leads_to`, `_place_pages`) |
+| Test file | `lex/test_project/tests/init/test_1ec_ui_breadcrumbs.py` |
+| Test classes | `TestCluster01ec_Breadcrumbs` (1.965–1.967) |
+| Fixtures | neutral orders, reports and regions pages; the frame's registries emptied per test |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.965 | The trail comes from the area, the parent and the page | a listed page; a record opened by the list's table; a form a button leads to; no area, no trail |
+| 1.966 | A table that opens a page is its parent before a link | an earlier link loses to the list's table; a page's own nav= is its area, its list still the parent |
+| 1.967 | The frame draws the trail and it compiles | Reflex's page compiler; area text, parent link, state title; a raw @lex_page in an area; none without an area or a route |
+
+### Batch 1ed — lex.ui frame: a project's no-access sentence and way out, and its own access rules ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.968 – 1.973 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/frame.py` (`denied=`, `request_access=`), `lex/lex_app/reflex/shell.py` (`denied_notice`, `_decided`, `lex_page`), `lex/lex_app/reflex/ui/state.py` (`error_page`, `ui_open`, `ui_access`), `lex/lex_app/reflex/ui/guard.py` (`Rule`, `rule`, `normalise`, `rules_of`), `lex/lex_app/reflex/ui/handlers.py` (`_refusal`, `rule_refusal`, `_classify`), `lex/lex_app/reflex/ui/context.py` (`Session.rules`), `lex/lex_app/reflex/ui/pages/declare.py` (`page` requires=), `lex/lex_app/reflex/ui/pages/parts.py` (`shown`) |
+| Test file | `lex/test_project/tests/init/test_1ed_ui_access.py` |
+| Test classes | `TestCluster01ed_NoAccess, TestCluster01ed_Rules` (1.968–1.973) |
+| Fixtures | neutral orders, reports and regions pages; the frame's registries emptied per test |
+| Tests landed | **6 pass / 0 fail** |
+| Status | ✅ Complete |
+
+What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.968 | A refused page says the project's sentence and offers its way out | RFDS's notice by default; the project's sentence, request page, mailto and sign-out; wrong targets refused |
+| 1.969 | The page a refused load goes to offers the same way out | /ui-error's denied branch is the notice; other failures keep Try again |
+| 1.970 | A handler guarded by a rule runs only when it grants | granted, refused with lex-app's sentence, refused with the rule's; user and values given; on a worker thread |
+| 1.971 | A rule is asked once per event and fails closed | named twice, asked once per press; raising or answering wrongly refuses with the standard error |
+| 1.972 | A page guarded by a rule is decided by the opener | compiled cond on ui_access with the notice; granted starts the load, refused none and keeps its sentence; a list with a permission hides the entry |
+| 1.973 | A rule written wrongly is refused with what to write | wrong arguments; a plain function in requires=; a rule in visible=; a raw page's requires=; still callable |
+
+### Batch 1ee — lex.ui frame: a project's function runs when a page has opened -- ui.frame(opened=) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.974 – 1.976 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/frame.py` (`opened=`, `OpenedPage`, `page_opened`), `lex/lex_app/reflex/ui/state.py` (`ui_open`), `lex/lex_app/reflex/ui/handlers.py` (load wind-up, `register_page`) |
+| Test file | `lex/test_project/tests/init/test_1ee_ui_page_opened.py` |
+| Test classes | `TestCluster01ee_PageOpened` (1.974–1.976) |
+| Fixtures | neutral orders, reports and regions pages; the frame's registries emptied per test |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.974 | The project's function runs after the loads and never holds the page | not before the load; the load finishes while it waits; route, address, state title, area, values; worker thread |
+| 1.975 | Not for a refused or failed page, and a failure is only logged | a page without loads at once; a rule-refused page and a failed load not; a raising function logged with the route |
+| 1.976 | The function is checked when the frame is configured | text, one argument and async refused with what to write |

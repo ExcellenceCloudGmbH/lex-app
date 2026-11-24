@@ -716,7 +716,8 @@ class PageLoads:
     optional: tuple = ()
     requires: Any = ""                  # a permission string, or a tuple of them
     rules: tuple = ()                   # the project's rules (``@ui.rule``) the page requires
-    title: Any = None                   # the page's title: a sentence, or a state value
+    #: The page's title (a sentence, or a state value), for ``ui.frame(opened=)``; not part of what is started.
+    title: Any = dataclasses.field(default=None, compare=False)
 
 
 #: Route -> the page's loads and permission, filled by ``lex_page`` on the server. The opener

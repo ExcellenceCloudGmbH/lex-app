@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 952
+max_scenario: 976
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2618,3 +2618,43 @@ letters:
       xfail: 0
     note: >-
       `ui.form(..., keep=True)`: the result flag survives a new visit; back while the job runs its progress, back after it the result; a kept private result that is gone is said under the form; a kept form shows its last failure in place and keeps its refusal above its submit button, not twice; with tabs=True a tab's table reads the kept private value; a searched choice's earlier offer is still accepted; what was typed returns through value=. These tests fail on a kept form that comes back empty, a result shown over data that is gone, or a failure while away that is never shown.
+  eb:
+    title: 'lex.ui frame: the navigation in areas, in the project''s order, and the way to sign out'
+    scenarios: 1.960-1.964
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.frame(nav=[...], sign_out=)` once in the dashboard module; `nav=` on `@ui.page` names the page's area, on `ui.reflex_page(nav=, title=, icon=, requires=)` too; a page with route arguments is in its area unlisted; the current entry's area marked; compiled with Reflex's page compiler. These tests fail on areas in import order, an area made by a typo, a raw page that cannot be listed, a second frame from another module, or a sign-out to an unchecked address.
+  ec:
+    title: 'lex.ui frame: breadcrumbs from the area and the page, written by no page'
+    scenarios: 1.965-1.967
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      The frame shows RFDS's breadcrumbs: the area, the listed page whose table opens the page (else whose button or link leads to it), the page with a state title. These tests fail on a page that loses its trail, a parent that is the wrong list, or a record title that breaks the page.
+  ed:
+    title: 'lex.ui frame: a project''s no-access sentence and way out, and its own access rules'
+    scenarios: 1.968-1.973
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.frame(denied=, request_access=)` words RFDS's access-denied notice on refused pages and /ui-error; `@ui.rule` in `requires=` on pages and handlers, asked on the server on a worker thread once per event, failing closed. These tests fail on a refused page that strands the user, lex-app's sentence where the project gave one, a rule the browser decides, a rule asked twice per event, or a rule that fails open.
+  ee:
+    title: 'lex.ui frame: a project''s function runs when a page has opened -- ui.frame(opened=)'
+    scenarios: 1.974-1.976
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      `opened(user, page)` after the page's required loads (at once without them), on a worker thread, not awaited; the page's route, address, title as the load left it, area and values; not for a refused or failed page; failures logged. These tests fail on a page that waits for the bookkeeping, an entry for a refused or failed page, or a recently-used entry without the record's name.
