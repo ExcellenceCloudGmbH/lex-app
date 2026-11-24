@@ -3833,3 +3833,24 @@ Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | 1.1006 | A per-user section lists what its function returns | compiled under the heading from ui_frame_links; anna's page address with its value and an outside address, words as they are; a link with requires= left out and logged; carl: none |
 | 1.1007 | A link the user may not open is not drawn | a link's requires=, the page it leads to, a rule asked with the link's values: all three for anna, none for carl |
 | 1.1008 | A link at the foot, and the frame's words in a page | RFDS's navigation footer with a link or a text; a button refused; badge=, requires=, icon= on a link in a page refused with what to write |
+
+### Batch 1el — lex.ui frame: the header band -- a search box, a status hint, a bell with a count ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1009 – 1.1011 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/pages/frame.py` (`search=`, `actions=`, `entries`, `decide`), `lex/lex_app/reflex/shell.py` (`header_actions`, `header_link`, `header_search`, `lex_chrome`), `lex/lex_app/reflex/ui/state.py` (`ui_frame_values`, `ui_frame_type`, `ui_frame_search`) |
+| Test file | `lex/test_project/tests/init/test_1el_ui_frame_header.py` |
+| Test classes | `TestCluster01el_FrameHeader` (1.1009–1.1011) |
+| Fixtures | pages declared per test (`FrameCase` from 1eb); `ui.testing.Harness` per user, with the events the server sends captured; a `ui.State` with an action for a header button |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1009 | The header's actions are lex.ui parts | compiled in rfds-header-actions before the user menu; anna's status Sync delayed, count 4, the bell hers; ben's failing status logged, no bell; ui.fact and ui.section refused naming ui.custom_block |
+| 1.1010 | The search box opens the project's search page | RFDS's search box in the header's search slot; Enter redirects to /search?q=north%20east%20%26%20co; an empty box to the page without it |
+| 1.1011 | A search page must take one value | no parameter, two, a route argument, a route as text refused with what to write; a raw page with params= accepted |

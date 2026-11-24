@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1008
+max_scenario: 1011
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2718,3 +2718,13 @@ letters:
       xfail: 0
     note: >-
       A function of the user stands for every value the frame shows; it runs on a worker thread when a page opens, once per event; its failure is logged and leaves its part empty. These tests fail on a section lost from the navigation, a count or a per-user entry decided in the browser, a link drawn for a user who may not open it, or `badge=`/`requires=`/`icon=` accepted in a page.
+  el:
+    title: 'lex.ui frame: the header band -- a search box, a status hint, a bell with a count'
+    scenarios: 1.1009-1.1011
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      The header's words and counts come from functions of the user, decided on the server when a page opens; the search page and its parameter are the server's, only the text comes from the browser. These tests fail on a header part lost, a count or status computed in the browser, a bell drawn for a user who may not open the inbox, or a search box that cannot reach the search page.

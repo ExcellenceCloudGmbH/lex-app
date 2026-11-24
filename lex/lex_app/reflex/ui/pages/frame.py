@@ -30,6 +30,8 @@ class Frame:
     #: The sections of ``nav=`` given as ``ui.section``: their title, their links, or a function of the user.
     sections: tuple["NavLinks", ...] = ()
     nav_footer: Any = None              # a ui.link or ui.text at the foot of the navigation
+    search: tuple[str, str] | None = None   # the search page's route and the parameter it reads
+    actions: tuple = ()                 # parts in the header band, before the user menu
     module: str = ""
 
     def section(self, title: str) -> "NavLinks | None":
@@ -66,7 +68,7 @@ class OpenedPage:
 
 
 def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign_out: Any = None,
-          opened: Any = None, nav_footer: Any = None) -> None:
+          opened: Any = None, nav_footer: Any = None, search: Any = None, actions: Any = ()) -> None:
     """Configure lex-app's frame for this project: call it once, in the dashboard module.
 
     ``nav`` is the navigation's areas in the order they are listed: the same words a page names
@@ -112,6 +114,17 @@ def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign
     listed page's ``requires=`` -- is decided on the server too, and not drawn. ``nav_footer`` is one
     ``ui.link`` or ``ui.text`` at the foot of the navigation: a version label, a link to help.
 
+    ``search`` is the project's search page -- a page that takes one query parameter, ``params=["q"]`` --
+    and puts RFDS's search box in the header: Enter opens that page with what was typed. ``actions`` are
+    a few parts in the header band before the user menu: ``ui.link`` (with ``icon=``, ``badge=``,
+    ``requires=``, as in the navigation), ``ui.button``, ``ui.status``, ``ui.text`` and
+    ``ui.custom_block``; a status's word or a text's sentence may be a function of the user, and the
+    part is hidden while it answers nothing::
+
+        ui.frame(search=search_page,
+                 actions=[ui.status(sync_state, tone="warning"),
+                          ui.link("Notifications", to=inbox, icon="notification", badge=unread)])
+
     ``sign_out`` is where the user menu's "Sign out" leads: a page (``@ui.page`` or
     ``ui.reflex_page``) or an ``https://`` address. By default it is lex-app's ``/logout``, which
     ends the dashboard's sign-in and lex-app's; a project's address should end there too, or the
@@ -132,7 +145,8 @@ def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign
     if opened is not None:
         _check_opened(opened)
     areas, sections = _areas(nav)
-    _FRAME = Frame(nav=areas, sections=sections, nav_footer=_footer(nav_footer), opened=opened, sign_out="" if sign_out is None else target(sign_out, argument="sign_out"),
+    _FRAME = Frame(nav=areas, sections=sections, nav_footer=_footer(nav_footer), opened=opened,
+                   search=None if search is None else _search(search), actions=_actions(actions), sign_out="" if sign_out is None else target(sign_out, argument="sign_out"),
                    denied=denied or "",
                    request_access="" if request_access is None else target(request_access, argument="request_access",
                                                                            mail=True),
@@ -194,6 +208,44 @@ def _section(section: Any) -> NavLinks:
                             f"user that returns them; got {_named(one)}.")
         entry_link(one, f"the section {title!r}")
     return NavLinks(title, links=content)
+
+
+def _search(page: Any) -> tuple[str, str]:
+    """The search page's route and the one query parameter the box fills."""
+    from lex.lex_app.reflex.ui.pages import links
+
+    info = links.page_info(page)
+    if info is None:
+        raise TypeError(f"ui.frame(search=) takes the search page -- a function declared with @ui.page, or "
+                        f"ui.reflex_page(\"/route\", params=[\"q\"]); got {page!r}. A route is not written as text.")
+    if info.arguments:
+        raise ValueError(f"ui.frame(search=): page `{info.name}` ({info.route}) needs route values; the search page "
+                         "takes what was typed as its one query parameter, and no route arguments.")
+    if len(info.params) != 1:
+        raise ValueError(f"ui.frame(search=): page `{info.name}` ({info.route}) takes {len(info.params)} query "
+                         f"parameters; the search page takes exactly one, what was typed: declare it with "
+                         f"params=[\"q\"] and read self.params.get(\"q\").")
+    return info.route, info.params[0]
+
+
+#: What the header's actions slot takes.
+_ACTION_PARTS = "ui.link, ui.button, ui.status, ui.text or ui.custom_block(..., reason=...)"
+
+
+def _actions(actions: Any) -> tuple:
+    from lex.lex_app.reflex.ui.pages.vocab import Button, CustomBlock, Link, Status, Text
+
+    items = (actions,) if not isinstance(actions, (list, tuple)) else tuple(actions)
+    for index, part in enumerate(items):
+        if isinstance(part, Link):
+            entry_link(part, "actions=")
+        elif isinstance(part, (Status, Text)):
+            words = part.word if isinstance(part, Status) else part.sentence
+            if _plain_function(words):
+                of_user(words, f"actions=, the {'status' if isinstance(part, Status) else 'text'}")
+        elif not isinstance(part, (Button, CustomBlock)):
+            raise TypeError(f"ui.frame(actions=) takes {_ACTION_PARTS}; got {_named(part)}.")
+    return items
 
 
 def _footer(part: Any) -> Any:
@@ -431,6 +483,7 @@ class Entry:
     key: str
     guard: Guard = Guard()
     badge: Any = None                   # a function of the user, a state value, or None
+    value: Any = None                   # a function of the user giving a word or a sentence
 
 
 def entries() -> list[Entry]:
@@ -445,6 +498,23 @@ def entries() -> list[Entry]:
                   for index, link in enumerate(section.links)]
     if configured.nav_footer is not None and hasattr(configured.nav_footer, "requires"):
         found.append(Entry("nav_footer", link_guard(configured.nav_footer), configured.nav_footer.badge))
+    found += _placed("actions", configured.actions)
+    return found
+
+
+def _placed(place: str, parts: tuple) -> list[Entry]:
+    """The entries of a list of frame parts: a link's guard and count, a status's or a text's words."""
+    from lex.lex_app.reflex.ui.pages.vocab import Link, Status, Text
+
+    found: list[Entry] = []
+    for index, part in enumerate(parts):
+        key = link_key(place, index)
+        if isinstance(part, Link):
+            found.append(Entry(key, link_guard(part), part.badge))
+        elif isinstance(part, (Status, Text)):
+            words = part.word if isinstance(part, Status) else part.sentence
+            if _plain_function(words):
+                found.append(Entry(key, value=words))
     return found
 
 
@@ -465,7 +535,7 @@ def guards() -> dict[str, Guard]:
 
 def deciding() -> bool:
     """Whether the frame has anything the server decides when a page opens."""
-    return any(entry.guard or _plain_function(entry.badge) for entry in entries()) or any(
+    return any(entry.guard or _plain_function(entry.badge) or entry.value is not None for entry in entries()) or any(
         section.of_user is not None for section in current().sections)
 
 
@@ -476,6 +546,7 @@ class Answers:
     shown: list[str] = dataclasses.field(default_factory=list)
     counts: dict[str, int] = dataclasses.field(default_factory=dict)
     links: dict[str, list[dict[str, str]]] = dataclasses.field(default_factory=dict)
+    values: dict[str, str] = dataclasses.field(default_factory=dict)
 
 
 async def decide(state: Any) -> Answers:
@@ -534,12 +605,15 @@ async def decide(state: Any) -> Answers:
     found = entries()
     guarded = [entry for entry in found if entry.guard]
     counted = [entry for entry in found if _plain_function(entry.badge)]
+    worded = [entry for entry in found if entry.value is not None]
     sections = [section for section in current().sections if section.of_user is not None]
     results = await asyncio.gather(*(may(e.key, e.guard) for e in guarded), *(call(e.badge, e.key) for e in counted),
+                                   *(call(e.value, e.key) for e in worded),
                                    *(call(one.of_user, one.title) for one in sections))
     granted = results[:len(guarded)]
     counts = results[len(guarded):len(guarded) + len(counted)]
-    given = results[len(guarded) + len(counted):]
+    words = results[len(guarded) + len(counted):len(guarded) + len(counted) + len(worded)]
+    given = results[len(guarded) + len(counted) + len(worded):]
     answers = Answers(shown=[entry.key for entry, yes in zip(guarded, granted) if yes])
     for entry, count in zip(counted, counts):
         if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
@@ -547,6 +621,12 @@ async def decide(state: Any) -> Answers:
         elif count is not None:
             logger.error("lex.ui: the frame's function %s answered %r for %s; a badge is a whole number, 0 or more",
                          _name(entry.badge), count, entry.key)
+    for entry, said in zip(worded, words):
+        if isinstance(said, str) and said.strip():
+            answers.values[entry.key] = said
+        elif said is not None and said != "":
+            logger.error("lex.ui: the frame's function %s answered %r for %s; it returns the words to show, or None",
+                         _name(entry.value), said, entry.key)
     for section, links in zip(sections, given):
         answers.links[per_user_key(section.title)] = _user_links(section, links)
     return answers

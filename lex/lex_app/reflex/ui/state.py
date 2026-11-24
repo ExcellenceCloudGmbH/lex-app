@@ -198,6 +198,10 @@ class State(rx.State):
     ui_frame_counts: dict[str, int] = {}
     #: Per-user section key -> its links for this user: ``{"label", "href", "outside", "initial"}``.
     ui_frame_links: dict[str, list[dict[str, str]]] = {}
+    #: Part key -> its words (a status's, a text's, the banner's), as the server answered them.
+    ui_frame_values: dict[str, str] = {}
+    #: What is typed in the header's search box (``ui.frame(search=)``).
+    ui_frame_query: str = ""
 
     _ui_boots: dict[str, str] = {}
     _ui_pending_loads: list[str] = []
@@ -334,6 +338,30 @@ class State(rx.State):
             self.ui_frame_shown = answers.shown
             self.ui_frame_counts = answers.counts
             self.ui_frame_links = answers.links
+            self.ui_frame_values = answers.values
+
+    @rx.event
+    def ui_frame_type(self, text: str = ""):
+        """The user typed in the header's search box."""
+        self.ui_frame_query = str(text)[:500]
+
+    @rx.event
+    def ui_frame_search(self, form_data: dict | None = None):
+        """Enter in the header's search box: the project's search page, with what was typed.
+
+        The page and its parameter are the server's (``ui.frame(search=)``); only the text comes from
+        the browser, encoded into the one value.
+        """
+        from urllib.parse import quote
+
+        from lex.lex_app.reflex.ui.pages import frame
+
+        search = frame.current().search
+        if search is None:
+            return None
+        route, name = search
+        text = self.ui_frame_query.strip()
+        return rx.redirect(f"{route}?{name}={quote(text, safe='')}" if text else route)
 
     @rx.event
     def ui_cancel(self, key: str):

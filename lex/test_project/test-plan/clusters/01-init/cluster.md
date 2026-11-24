@@ -1972,3 +1972,17 @@ does not remove user launch configurations.
 | 1.1008 | A link at the foot, and the frame's words in a page | RFDS's navigation footer with a link or a text; a button refused; badge=, requires=, icon= on a link in a page refused with what to write |
 
 **Scenario range:** 1.1004 – 1.1008. **Test file:** `lex/test_project/tests/init/test_1ek_ui_frame_nav_links.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ek](batches.md).
+
+### 1el. lex.ui frame: the header band -- a search box, a status hint, a bell with a count ✅
+
+**What it tests:** `ui.frame(actions=[...])`: `ui.link` (icon, count, guard), `ui.button`, `ui.status` and `ui.text` (words from a function of the user), `ui.custom_block` in RFDS's header actions slot before the user menu; `ui.frame(search=page)`: RFDS's search box in the header's search slot, Enter opening the page with what was typed in its one query parameter.
+
+**Why a regression matters:** A header that drops them, a search that leads where the browser says, a count or a hint computed in the browser, or a header link drawn for a user who may not open it.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1009 | The header's actions are lex.ui parts | compiled in rfds-header-actions before the user menu; anna's status Sync delayed, count 4, the bell hers; ben's failing status logged, no bell; ui.fact and ui.section refused naming ui.custom_block |
+| 1.1010 | The search box opens the project's search page | RFDS's search box in the header's search slot; Enter redirects to /search?q=north%20east%20%26%20co; an empty box to the page without it |
+| 1.1011 | A search page must take one value | no parameter, two, a route argument, a route as text refused with what to write; a raw page with params= accepted |
+
+**Scenario range:** 1.1009 – 1.1011. **Test file:** `lex/test_project/tests/init/test_1el_ui_frame_header.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1el](batches.md).

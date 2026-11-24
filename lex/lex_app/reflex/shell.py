@@ -337,6 +337,91 @@ def _nav_footer() -> Any:
     return rx.el.div(content, class_name="rfds-side-nav-footer lex-nav-footer")
 
 
+def _shown_if_decided(key: str, component: Any) -> Any:
+    """``component``, drawn only once the server has answered that this user may see the entry ``key``."""
+    import reflex as rx
+
+    from lex.lex_app.reflex.ui.pages import frame
+    from lex.lex_app.reflex.ui.state import State as UiState
+
+    if key not in frame.guards():
+        return component
+    return rx.cond(UiState.ui_frame_shown.contains(key), component)
+
+
+def frame_value(key: str) -> Any:
+    """The words the server answered for the frame's part ``key`` (a function of the user)."""
+    from lex.lex_app.reflex.ui.state import State as UiState
+
+    return UiState.ui_frame_values.get(key, "").to(str)
+
+
+def header_link(key: str, link: Any) -> Any:
+    """A ``ui.link`` of the header: its icon, its words and its count, drawn on the server's answer."""
+    import reflex as rx
+    import rfds
+    from rfds.icons import icon
+
+    from lex.lex_app.reflex.ui.pages import frame
+    from lex.lex_app.reflex.ui.pages.parts import say
+
+    href, outside = frame.href_of(link)
+    content: list[Any] = []
+    if link.icon:
+        content.append(icon(link.icon, size="sm"))
+    content.append(rx.el.span(say(link.label), class_name="lex-header-label"))
+    count = badge_of(key, link.badge)
+    if count is not None:
+        content.append(rx.cond(count > 0, rfds.count_badge(count, label=say(link.label))))
+    drawn = rfds.link(*content, href=href, external=outside, tone="neutral", underline="auto",
+                      class_name="lex-header-link")
+    return _shown_if_decided(key, drawn)
+
+
+def header_actions() -> tuple:
+    """``ui.frame(actions=)`` as the header band's parts: a status's or a text's words from a function of
+    the user shown while it answers something; links on the server's answer; the rest as in a page."""
+    import reflex as rx
+    import rfds
+
+    from lex.lex_app.reflex.ui.pages import frame
+    from lex.lex_app.reflex.ui.pages.parts import Build, say, with_overlays
+    from lex.lex_app.reflex.ui.pages.vocab import Link, Status, Text
+
+    ctx = Build(page="ui.frame", slot="actions")
+    drawn: list[Any] = []
+    for index, part in enumerate(frame.current().actions):
+        key = frame.link_key("actions", index)
+        if isinstance(part, Link):
+            drawn.append(header_link(key, part))
+            continue
+        words = part.word if isinstance(part, Status) else part.sentence if isinstance(part, Text) else None
+        if words is not None and frame._plain_function(words):
+            value = frame_value(key)
+            shown = (rfds.lozenge(value, tone=part.tone) if isinstance(part, Status) else rx.text(value, size="2"))
+            drawn.append(part._wrap(ctx, rx.cond(value != "", shown)))
+            continue
+        drawn.append(part.build(ctx))
+    return (with_overlays(ctx, rx.fragment(*drawn)),) if drawn else ()
+
+
+def header_search() -> Any:
+    """RFDS's search box in the header, when ``ui.frame(search=)`` names the project's search page:
+    Enter opens it with what was typed (:meth:`State.ui_frame_search`)."""
+    import reflex as rx
+    import rfds
+
+    from lex.lex_app.reflex.ui.pages import frame
+    from lex.lex_app.reflex.ui.pages.parts import say
+    from lex.lex_app.reflex.ui.state import State as UiState
+
+    if frame.current().search is None:
+        return None
+    box = rfds.search_input(value=UiState.ui_frame_query, on_change=UiState.ui_frame_type, label=say("Search"),
+                            id="lex-frame-search")
+    return rx.form(box, on_submit=UiState.ui_frame_search, reset_on_submit=False, class_name="lex-header-search")
+
+
 def side_nav() -> Any:
     """RFDS's side navigation of this project: its sections in order, the per-user ones among them, and its foot."""
     import rfds
@@ -435,6 +520,8 @@ def lex_chrome(body, *, embedded=None, route=None):
     header = rfds.header(
         product=product_name(),
         environment=environment(),
+        search=header_search(),
+        actions=header_actions(),
         # `?is_logout_enabled=false` leaves the user's name without the way out.
         user_menu=rx.cond(
             LexDashboardState.logout_enabled,
