@@ -10,7 +10,7 @@ def test_nav_and_content_agree():
 def test_a_page_has_a_title_and_anchored_headings():
     page = content.load("pages/record")
     assert page.title == "ui.record"
-    assert all(anchor == content.anchor(text) for _, text, anchor in page.headings)
+    assert all(anchor.startswith(content.anchor(text)) for _, text, anchor in page.headings)
 
 
 def test_anchor_is_stable_and_url_safe():

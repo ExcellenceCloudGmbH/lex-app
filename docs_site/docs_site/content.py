@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
-from reflex_docgen.markdown import Document, HeadingBlock, parse_document
+from reflex_docgen.markdown import (
+    DirectiveBlock, Document, HeadingBlock, ListBlock, QuoteBlock, parse_document,
+)
 
 from docs_site import reference
 
@@ -14,6 +16,37 @@ CONTENT = Path(__file__).resolve().parents[1] / "content"
 
 def anchor(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def unique_anchor(text: str, used: set[str]) -> str:
+    """``anchor(text)``, with "-2", "-3"... when the page already has that id; ``used`` is the
+    page's ids so far, and gets this one."""
+    base = out = anchor(text)
+    n = 1
+    while out in used:
+        n += 1
+        out = f"{base}-{n}"
+    used.add(out)
+    return out
+
+
+def rendered_headings(blocks, live: bool = True):
+    """The headings the page renders as headings, in the order it renders them (as
+    ``render.blocks`` does): inside lists, quotes and directives too, except a ``tabs``
+    directive's ``##`` lines, which are tab titles. Off-live pages show directives as code."""
+    for block in blocks:
+        if isinstance(block, HeadingBlock):
+            yield block
+        elif isinstance(block, ListBlock):
+            for item in block.items:
+                yield from rendered_headings(item.children, live)
+        elif isinstance(block, QuoteBlock):
+            yield from rendered_headings(block.children, live)
+        elif isinstance(block, DirectiveBlock) and live:
+            children = block.children
+            if block.name == "tabs":
+                children = [c for c in children if not (isinstance(c, HeadingBlock) and c.level == 2)]
+            yield from rendered_headings(children, live)
 
 
 def plain(spans) -> str:
@@ -44,6 +77,20 @@ def all_slugs() -> list[str]:
     return files + [f"reference/{group}" for group in reference.GROUPS]
 
 
+def headings_of(document: Document, live: bool = True) -> list[tuple[int, str, str]]:
+    """The page's ``##``/``###`` headings (the "On this page" list): level, text and the id the
+    rendered heading carries, de-duplicated over every heading the page renders."""
+    top = {id(b) for b in document.blocks}
+    used: set[str] = set()
+    out = []
+    for block in rendered_headings(document.blocks, live):
+        text = plain(block.children)
+        anchor_id = unique_anchor(text, used)
+        if id(block) in top and block.level in (2, 3):
+            out.append((block.level, text, anchor_id))
+    return out
+
+
 @cache
 def load(slug: str) -> Page:
     if slug.startswith("reference/"):
@@ -53,7 +100,6 @@ def load(slug: str) -> Page:
     document = parse_document(source)
     meta = document.metadata or {}
     title = str(meta.get("title") or slug.rsplit("/", 1)[-1].replace("-", " ").capitalize())
-    headings = [(b.level, plain(b.children), anchor(plain(b.children)))
-                for b in document.blocks if isinstance(b, HeadingBlock) and b.level in (2, 3)]
+    headings = headings_of(document, live=not slug.startswith("reference/"))
     return Page(slug=slug, title=title, description=str(meta.get("description") or ""),
                 source=source, document=document, headings=headings)

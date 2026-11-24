@@ -8,7 +8,7 @@ from reflex_docgen.markdown import (
 )
 from reflex_docgen.markdown.transformer import DocumentTransformer
 
-from docs_site.content import Page, anchor, plain
+from docs_site.content import Page, plain, unique_anchor
 
 _HEADING_SIZE = {1: "7", 2: "6", 3: "5", 4: "4"}
 _TONE = {"info": "info", "success": "success", "warning": "warning", "danger": "danger", "error": "danger"}
@@ -25,6 +25,7 @@ class LexDocTransformer(DocumentTransformer[rx.Component]):
 
             self.module = PageModule(page.slug)
         self._demos = 0
+        self._anchors: set[str] = set()     # this page's heading ids so far (content.unique_anchor)
 
     # -- the page ---------------------------------------------------------------
     def transform(self, document: Document) -> rx.Component:
@@ -38,7 +39,7 @@ class LexDocTransformer(DocumentTransformer[rx.Component]):
     def heading(self, block: HeadingBlock) -> rx.Component:
         text = plain(block.children)
         return rx.heading(*self.transform_spans(block.children), as_=f"h{block.level}",
-                          size=_HEADING_SIZE.get(block.level, "3"), id=anchor(text))
+                          size=_HEADING_SIZE.get(block.level, "3"), id=unique_anchor(text, self._anchors))
 
     def text_block(self, block: TextBlock) -> rx.Component:
         return rx.text(*self.transform_spans(block.children), as_="p")

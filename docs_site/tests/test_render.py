@@ -35,3 +35,18 @@ def test_a_table():
 
 def test_toc_lists_the_headings():
     assert "#setup-steps" in str(toc(_page("## Setup steps\n")))
+
+
+def test_a_repeated_heading_gets_a_numbered_anchor_in_the_toc_and_the_page():
+    from docs_site.content import headings_of
+
+    source = ("## Setup\n\nOne.\n\n## Usage\n\n### Setup\n\nTwo.\n\n"
+              "```md alert info\n#### Setup\n```\n\n## Setup 2\n\nThree.\n")
+    doc = parse_document(source)
+    headings = headings_of(doc)
+    assert [a for _, _, a in headings] == ["setup", "usage", "setup-2", "setup-2-2"]
+    page = Page(slug="t/dup", title="D", description="", source=source, document=doc, headings=headings)
+    built = str(render_page(page))
+    for anchor_id in ("setup", "setup-2", "setup-3", "setup-2-2"):
+        assert f'"{anchor_id}"' in built, anchor_id
+    assert "#setup-2-2" in str(toc(page))

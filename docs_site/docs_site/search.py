@@ -7,7 +7,7 @@ import reflex as rx
 import rfds
 from reflex_docgen.markdown import HeadingBlock, TextBlock
 
-from docs_site.content import all_slugs, anchor, load, plain
+from docs_site.content import all_slugs, load, plain
 
 
 @dataclass(frozen=True)
@@ -24,14 +24,15 @@ def build_index() -> list[Entry]:
     out: list[Entry] = []
     for slug in all_slugs():
         page = load(slug)
-        heading, words = "", []
+        anchors = iter(a for _, _, a in page.headings)     # the same headings, in order, de-duplicated
+        heading, anchor_id, words = "", "", []
         for block in page.document.blocks:
             if isinstance(block, HeadingBlock) and block.level in (2, 3):
-                out.append(Entry(slug, page.title, heading, anchor(heading) if heading else "", " ".join(words)))
-                heading, words = plain(block.children), []
+                out.append(Entry(slug, page.title, heading, anchor_id, " ".join(words)))
+                heading, anchor_id, words = plain(block.children), next(anchors), []
             elif isinstance(block, TextBlock):
                 words.append(plain(block.children))
-        out.append(Entry(slug, page.title, heading, anchor(heading) if heading else "", " ".join(words)))
+        out.append(Entry(slug, page.title, heading, anchor_id, " ".join(words)))
     return out
 
 
