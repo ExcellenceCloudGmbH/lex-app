@@ -56,7 +56,10 @@
 progress_of/cancel``        event of a Cancel button
 ``ui.loaded``               whether a load has finished since the page opened
 ``ui.testing``              run a handler in a unit test
-``@ui.page``                where a page lives: its route, navigation, who may see it
+``@ui.page``                where a page lives: its route, its area of the navigation (``nav=``),
+                            who may see it
+``ui.frame``                lex-app's frame for this project, set once in the dashboard module:
+                            ``nav=[...]`` the areas' order
 ``@ui.dashboard``           a page that is not a route (the project's ``main()``)
 ``ui.record/list/form``     the page kinds: named slots, placed by lex-app (``ui.list`` is
                             left out of ``import *``, which would hide Python's ``list``)
@@ -75,7 +78,8 @@ button/link``
                             ``filters=``, ``export=``, ``totals=``, ``row_actions=``,
                             ``choose_columns=``, ``page_size=`` (``None``: every row, up to 200)
 ``ui.address``              a page's address, for a row that leads to a page of its own
-``ui.reflex_page``          a page written in raw Reflex, as somewhere a link may lead
+``ui.reflex_page``          a page written in raw Reflex, as somewhere a link may lead;
+                            ``nav=``, ``title=`` list it in an area of the navigation
 ``ui.custom_block``         a raw component, marked for review with its reason
 ``ui.embed``                the other way round: one lex.ui part inside a raw Reflex page,
                             for moving a project a table at a time
@@ -91,6 +95,7 @@ from lex.lex_app.reflex.ui.guard import create, delete, edit, permission, read, 
 from lex.lex_app.reflex.ui.handlers import action, custom, job, load
 from lex.lex_app.reflex.ui.pages.declare import dashboard, embed, page
 from lex.lex_app.reflex.ui.pages.forms import field, form, step
+from lex.lex_app.reflex.ui.pages.frame import frame
 from lex.lex_app.reflex.ui.pages.links import address, reflex_page
 from lex.lex_app.reflex.ui.pages.kinds import list_ as list  # noqa: A001 - ui.list is the page kind
 from lex.lex_app.reflex.ui.pages.kinds import record, section
@@ -106,7 +111,7 @@ from lex.lex_app.reflex.ui.state import State
 __all__ = [
     "ApiError", "PageError", "Refuse", "State", "action", "address", "button", "cancel", "column",
     "create", "custom", "custom_block", "dashboard", "delete", "download", "each", "edit", "embed", "fact",
-    "failed", "field", "form", "goto", "job", "link", "load", "loaded", "message", "page", "permission", "private", "progress",
+    "failed", "field", "form", "frame", "goto", "job", "link", "load", "loaded", "message", "page", "permission", "private", "progress",
     "progress_of", "read", "record", "reflex_page", "refresh", "rows", "running", "section", "signed_in", "status",
     "step", "switch", "table", "testing", "text", "toast",
 ]

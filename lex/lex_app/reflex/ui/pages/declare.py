@@ -107,6 +107,12 @@ def page(route: str, *, nav: str | None = None, icon: str | None = None, require
          params: Any = ()) -> Callable[[Callable[[], Any]], Callable[[], Any]]:
     """Declare a page: its address, its place in the navigation, who may see it.
 
+    ``nav`` names the page's area in the navigation (``nav="Orders"``); the page is listed there, by
+    its title, after the pages declared before it. ``ui.frame(nav=[...])`` gives the areas' order.
+    A page with route arguments (``/orders/[key]``) is in its area -- its breadcrumbs say so -- but
+    not listed: it opens from the page that leads to it. Without ``nav`` a page is reached by links
+    only.
+
     The function returns a page kind and does nothing else: lex-app calls it when it registers
     the pages -- after the whole module is loaded, so it may name pages declared further down --
     and again when the page is built. A page that is declared wrongly stops the app from starting,
@@ -129,6 +135,13 @@ def page(route: str, *, nav: str | None = None, icon: str | None = None, require
                              f"`{fn.__name__}` needs a route of its own.")
         fn.__ui_page__ = links.info_of(route, fn.__name__, params)
         _DECLARED[route] = Declared(fn, fn.__ui_page__, nav, icon, permission)
+        if nav and not fn.__ui_page__.arguments:      # a page with route arguments is in its area, not listed
+            from lex.lex_app.reflex.shell import NavEntry, list_in_nav
+
+            # Its place in the area is where it is declared, among raw pages too; its title, from the
+            # kind, replaces the name when lex-app registers the page.
+            list_in_nav(NavEntry(route=route, label=fn.__name__.replace("_", " ").capitalize(), section=nav,
+                                 icon=icon, permission=permission))
         return fn
 
     return decorator
@@ -150,7 +163,8 @@ def finalize() -> None:
         name = declared.fn.__name__
         kind = _kind_of(declared.fn)
         title = kind.title
-        if declared.nav and not isinstance(title, str):
+        listed = declared.nav if not declared.info.arguments else None
+        if listed and not isinstance(title, str):
             raise PageError(f"Page `{name}`: a page listed in the navigation needs a fixed title.\n"
                             "Give the kind `title=\"...\"`, or leave `nav=` out.")
         required, optional = _loads(name, kind)
@@ -162,9 +176,15 @@ def finalize() -> None:
         body.__name__ = name
         body.__qualname__ = declared.fn.__qualname__
         lex_page(route, title=title if isinstance(title, str) else name.replace("_", " ").capitalize(),
-                 nav=declared.nav, icon=declared.icon, requires=declared.permission)(body)
+                 nav=listed, icon=declared.icon, requires=declared.permission)(body)
         handlers.register_page(route, required, optional, declared.permission or "")
         declared.done = True
+    from lex.lex_app.reflex.shell import check_area, check_nav
+
+    check_nav({route: declared.fn.__name__ for route, declared in _DECLARED.items()})
+    for route, declared in _DECLARED.items():
+        if declared.nav and declared.info.arguments:
+            check_area(route, declared.nav, declared.fn.__name__)
 
 
 def install(app: Any) -> None:

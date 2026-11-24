@@ -790,7 +790,9 @@ itself on every page). *Not added:* the product name stays `LEX_DASHBOARD_TITLE`
 since the look is lex-app's (section 8).
 
 - **Areas are `nav=`.** A page's `nav="Orders"` already listed it under a heading; that heading is
-  its area. `ui.frame(nav=[...])` -- the same word -- gives the areas' order; a page whose `nav=` is
+  its area. A page with route arguments (`/orders/[key]`) cannot be opened from the navigation, so its
+  `nav=` places it in the area -- its breadcrumbs, as section 1's example writes it -- without listing it.
+  `ui.frame(nav=[...])` -- the same word -- gives the areas' order; a page whose `nav=` is
   not in that list stops the start with the list to choose from (a typo would make a new area).
   Without it, areas come in the order their first page is declared. Pages in an area keep their
   declaration order, `@ui.page`s and raw pages alike (a `@ui.page` takes its place when declared).
@@ -800,11 +802,11 @@ since the look is lex-app's (section 8).
   `ui.reflex_page("/legacy", nav="Tools", title="Legacy export", icon="download")` -- `title=` is its
   label, as on `@lex_page`; its `requires=` only hides its entry, since lex-app does not guard a raw page.
 - **Breadcrumbs come from the area and the page.** The frame shows RFDS's breadcrumbs above the page:
-  the area (text, an area is not a page), then the page. A page that is not in the navigation takes
-  the area of its parent: the first page in the navigation whose table opens it (`open=`), else whose
-  button or link leads to it (`to=`), in declaration order -- `Orders / Orders / Order 7`. The parent
-  is a link; the current page's title may be a state value. A page with no area has no breadcrumbs. No
-  page writes a crumb. *Cost:* one level of parent only; a page of a record's record shows its area and
+  the area (text, an area is not a page), then the page. A page that is not listed in the navigation
+  has a parent: the first listed page whose table opens it (`open=`), else whose button or link leads
+  to it (`to=`), in declaration order -- `Orders / Orders / Order 7`; without a `nav=` of its own it
+  takes its parent's area. The parent is a link; the current page's title may be a state value. A
+  page with no area has no breadcrumbs. No page writes a crumb. *Cost:* one level of parent only; a page of a record's record shows its area and
   itself.
 - **No access: `denied=` and `request_access=`.** RFDS's access-denied notice (`rfds.access_denied`)
   is what every refused page shows, with the project's sentence (`denied=`) instead of RFDS's and a

@@ -63,6 +63,46 @@ def clear_nav() -> None:
     _NAV.clear()
 
 
+def list_in_nav(entry: NavEntry) -> None:
+    """List ``entry`` in the navigation; a page listed again (a reload, or its title known later)
+    keeps its place."""
+    places = [i for i, known in enumerate(_NAV) if known.route == entry.route]
+    if places:
+        _NAV[places[0]] = entry
+    else:
+        _NAV.append(entry)
+
+
+def _areas() -> list[str]:
+    """The areas in the order the navigation lists them: ``ui.frame(nav=)``'s, else first declared first."""
+    from lex.lex_app.reflex.ui.pages import frame
+
+    order = list(frame.current().nav)
+    return order + [area for area in dict.fromkeys(entry.section for entry in _NAV) if area not in order]
+
+
+def check_nav(names: dict[str, str] | None = None) -> None:
+    """Refuse a page listed in an area ``ui.frame(nav=)`` does not list (a typo would make a new area).
+
+    ``names`` gives the page function's name for a route, for the message.
+    """
+    for entry in _NAV:
+        check_area(entry.route, entry.section, (names or {}).get(entry.route))
+
+
+def check_area(route: str, area: str, name: str | None = None) -> None:
+    """Refuse the area ``area`` of the page at ``route`` when ``ui.frame(nav=)`` does not list it."""
+    from lex.lex_app.reflex.ui.pages import frame
+    from lex.lex_app.reflex.ui.pages.parts import PageError
+
+    order = frame.current().nav
+    if order and area not in order:
+        page = f"Page `{name}` ({route})" if name else f"The page at {route}"
+        listed = ", ".join(repr(one) for one in order)
+        raise PageError(f"{page} is in nav={area!r}, which ui.frame(nav=[{listed}]) does not list.\n"
+                        f"Write one of {listed}, or add {area!r} to ui.frame(nav=).")
+
+
 def _slug(text: str) -> str:
     return re.sub(r"[^0-9a-z]+", "_", text.lower()).strip("_") or "page"
 
@@ -86,7 +126,7 @@ def environment() -> str:
 
 
 def nav_sections() -> tuple:
-    """The side navigation: the overview first, then each heading's pages."""
+    """The side navigation: the overview first, then each area's pages, in ``ui.frame(nav=)``'s order."""
     from rfds.components.navigation.side_nav import NavItem, NavSection
 
     if not _NAV:
@@ -96,10 +136,12 @@ def nav_sections() -> tuple:
             items=(NavItem("lex.nav.overview", "Overview", "/", icon="dashboard", exact=True),)
         )
     ]
-    headings: dict[str, list[NavEntry]] = {}
+    headings: dict[str, list[NavEntry]] = {area: [] for area in _areas()}
     for entry in _NAV:
-        headings.setdefault(entry.section, []).append(entry)
+        headings[entry.section].append(entry)
     for heading, entries in headings.items():
+        if not entries:
+            continue
         items = tuple(
             NavItem(
                 f"lex.nav.{_slug(entry.route)}",
@@ -204,12 +246,7 @@ def lex_page(
         if nav:
             # A page registered again -- a hot reload re-imports its module --
             # keeps its place in the navigation.
-            entry = NavEntry(route=route, label=title, section=nav, icon=icon, permission=requires)
-            places = [i for i, known in enumerate(_NAV) if known.route == route]
-            if places:
-                _NAV[places[0]] = entry
-            else:
-                _NAV.append(entry)
+            list_in_nav(NavEntry(route=route, label=title, section=nav, icon=icon, permission=requires))
 
         def page():
             body = page_fn()
