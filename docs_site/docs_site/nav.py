@@ -31,21 +31,23 @@ NAV: tuple[Section, ...] = (
     Section("pages", "Pages", "Where a page lives, and the page kinds that decide how it looks.", (
         Group("Declaring pages", ("pages/ui-page",)),
         Group("Page kinds", ("pages/record", "pages/list")),
-        Group("Parts", ("pages/tables",)),
+        Group("Parts", ("pages/tables", "pages/buttons-and-links")),
     )),
     Section("state-and-actions", "State & actions", "Plain Python handlers; lex-app does the plumbing.", (
         Group("State", ("state-and-actions/state",)),
-        Group("Handlers", ("state-and-actions/action", "state-and-actions/job", "state-and-actions/load")),
+        Group("Handlers", ("state-and-actions/action", "state-and-actions/job", "state-and-actions/load",
+                              "state-and-actions/refresh")),
     )),
     Section("data-and-permissions", "Data & permissions", "Reading and writing records as the signed-in user.", (
         Group("Data", ("data-and-permissions/api",)),
         Group("Permissions", ("data-and-permissions/can", "data-and-permissions/grants")),
     )),
     Section("look-and-chrome", "Look & chrome", "lex-app's design and frame, and dashboards inside lex-app.", (
-        Group("Look & chrome", ("look-and-chrome/look", "look-and-chrome/embedding")),
+        Group("Look & chrome", ("look-and-chrome/look", "look-and-chrome/embedding",
+                                  "look-and-chrome/raw-reflex")),
     )),
     Section("ship-it", "Ship it", "Sign-in, checks and deployment.", (
-        Group("Ship it", ("ship-it/sign-in", "ship-it/deploying", "ship-it/check")),
+        Group("Ship it", ("ship-it/sign-in", "ship-it/testing", "ship-it/check", "ship-it/deploying")),
     )),
     Section("reference", "API reference", "Every name lex.ui exports, with its signature.", (
         Group("API reference", tuple(f"reference/{g}" for g in reference.GROUPS)),
