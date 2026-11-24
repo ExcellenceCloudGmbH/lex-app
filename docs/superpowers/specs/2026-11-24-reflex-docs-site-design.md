@@ -109,9 +109,9 @@ commit.
 
 - A demo's code runs in a module namespace per page, as `reflex-docgen` already does for `exec`.
   States a page defines get a page-scoped name, so two pages can both define `Tickets`.
-- A full-page demo (a function decorated with `@ui.page`, or one returning `ui.record`/`ui.list`)
-  is drawn in a frame sized like a desktop or a phone, with a toggle, so the page's own chrome
-  does not clash with the docs layout.
+- A demo that returns a page kind (`ui.record`/`ui.list`) is drawn with `ui.dashboard` inside a
+  bordered frame, so it reads as a page and not as part of the docs. (A desktop/phone width toggle
+  is later work.)
 
 ## Sandbox
 
@@ -128,31 +128,46 @@ start-up instead of lex-app's sign-in hand-off.
 - **Per tab:** each browser tab gets its own copy of the store, keyed on Reflex's client token, and
   a reload resets it. One reader's edits never reach another reader. Nothing is persisted. Copies
   for idle tabs are dropped after 30 minutes.
-- **Switching grants in a demo:** a page can render a demo as another user, e.g.
-  `demo(as_grants=[(Fund, "read")])` in the fence options, so permission examples really hide the
-  button or refuse the action.
+- **Switching grants in a demo:** each demo card has a "Viewing as" switch with two roles, Editor
+  (every grant on the sample models) and Viewer (`read` only). The role belongs to the tab, so a
+  permission example really hides the button or refuses the action once the reader switches.
 - **Guards:** `SandboxApi` refuses anything outside the sample models; a job demo is capped at a
   few seconds of simulated work.
 
-### Risk to settle first
+### Settled while planning (2026-11-24)
 
-Model-bound tables (`ui.table(Model)`) may fetch rows from lex-app's REST API in the browser rather
-than through `self.api`. If they do, the sandbox also needs a small fake of that endpoint inside
-the docs app, answering from the same per-tab store. The first task of the plan reads
-`lex/lex_app/reflex/ui/pages/tables.py` and `lex/lex_app/reflex/data.py` and settles this before
-anything else is built. The same task checks what the sample "models" must be for `_resource_name`
-and the table code to accept them (plain classes, or Django models in an app that never migrates).
+- **Model-bound tables are not live in the first release.** `ui.table(Model)` reads
+  `model._meta.concrete_fields` (a real Django model) and fetches its rows on the server through
+  `LexTableState._fetch_page` → `lex_api(self)` → `LexApi(current_access_token(state))`, an HTTP
+  call to lex-app's REST API with the signed-in user's token. It does not go through `self.api`
+  or the lex.ui resolver, so the sandbox cannot answer it without a change in lex-app. Pages about
+  `ui.table(Model)` show it as a plain code block; the live table demos use `@ui.rows` tables,
+  which do go through `self.api`. Making model tables sandboxable (a seam in `lex_api`) is a later
+  lex-app change with its own tests.
+- **Sample models are plain classes with a `_meta` stand-in** (`app_label`, `model_name`). That is
+  all `_resource_name` (grants), `model_id` and the `requires=` checks read.
+- **Demos are components, not routes.** A demo that returns a page kind (`ui.record`, `ui.list`) is
+  drawn with `ui.dashboard`; one that returns a part (`ui.table`, `ui.section`) with `ui.embed`.
+  Both build without a route and without sign-in. `@ui.page` appears in code blocks only: it
+  registers a signed-in route, which the docs app does not have.
+- **`reflex-docgen` is pinned to 0.9.5.** 0.10.0 needs `reflex>=0.10`; RFDS 1.0.0 needs
+  `reflex<0.10`, and lex-app pins `reflex==0.9.13`.
+- **Search runs in the app's backend** (the site has one anyway), over an index built at start-up.
+  Still no third-party service.
+- **One backend process.** The per-tab sandbox store lives in the process's memory, so the site
+  runs one backend worker with Reflex's in-memory state manager.
 
 ## Search
 
-A client-side index built at compile time from titles, headings and paragraph text, shipped as one
-static JSON asset and searched in the browser. No server and no third-party service.
+An index built at start-up from titles, headings and paragraph text, searched by a state in the
+app's own backend as the reader types. No third-party service.
 
 ## CI and local checks
 
 A `docs_site` job on PRs touching `lex/ui.py`, `lex/lex_app/reflex/**` or `docs_site/**`:
 
-1. The app compiles (`reflex export --no-zip` or the equivalent compile step), with no network.
+1. The app compiles (`app._compile(dry_run=True)`, as lex-app's own compiled-app tests do), with
+   no network.
 2. Every `exec` and `demo` block runs, and every demo returns a component.
 3. `nav.py` and `content/` match, both ways.
 4. Internal links and anchors resolve.
