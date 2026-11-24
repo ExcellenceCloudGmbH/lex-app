@@ -56,7 +56,8 @@ progress_of/cancel``        event of a Cancel button
 ``ui.record/list/form``     the page kinds: named slots, placed by lex-app (``ui.list`` is
                             left out of ``import *``, which would hide Python's ``list``)
 ``ui.field/step``           a form's inputs, and a wizard's steps; the handler gets ``values``.
-                            ``ui.button(confirm=, ask=)`` asks before its handler runs
+                            ``options=`` a ``@ui.rows`` handler searches on the server as the user
+                            types. ``ui.button(confirm=, ask=)`` asks before its handler runs
 ``ui.section``              a titled part of a page; ``load=`` makes it load on its own
 ``ui.text/fact/status/      what fills the slots; none takes a styling argument
 message/column/

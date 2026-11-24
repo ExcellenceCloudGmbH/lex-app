@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 855
+max_scenario: 903
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2498,3 +2498,13 @@ letters:
       xfail: 0
     note: >-
       `ui.field(kind="choices", options=...)`: RFDS's checkbox group up to 12 fixed options, its multi-select above or for options from the state; the handler gets a `list[str]` in the order of the options, `[]` for none, checked on the server; in a form, a step and a button's ask=; `ui.fact` shows the kind joined by commas. These tests fail on a text where a list was promised, a value that is no option reaching the body, a required field passing with nothing ticked, or a field that calls the server on every tick.
+  ds:
+    title: 'lex.ui forms: a choice searched on the server -- one record among thousands, as the user types'
+    scenarios: 1.900-1.903
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.field(key, options=State.rows_handler)`: RFDS's combobox in its server-search mode over a `@ui.rows` handler, a page of `{value, label}` matches per search, the first when the field opens; the value checked against what the tab was offered; in a form, a step and ask=. These tests fail on every customer in the page, a row's other fields in the browser, a forged id reaching the body, or an empty box until the user types.

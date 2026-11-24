@@ -16,7 +16,7 @@ from typing import Any, ClassVar
 import reflex as rx
 
 from lex.lex_app.reflex.ui import forms as rules
-from lex.lex_app.reflex.ui import runs
+from lex.lex_app.reflex.ui import rows, runs
 from lex.lex_app.reflex.ui.pages import kinds, tables, vocab
 from lex.lex_app.reflex.ui.pages.parts import Build, Part, called, say, shown, slug, take
 
@@ -43,6 +43,15 @@ class Field(Part):
     currency: Any = None
 
     @property
+    def searches(self) -> bool:
+        """Whether the options are searched on the server: ``options=`` is a ``@ui.rows`` handler."""
+        return rows.is_rows(self.options)
+
+    def searched_id(self, handler: Any) -> str:
+        """The field's id among searched fields: the handler that receives it, and its key."""
+        return f"{rules.ident(handler)}|{self.key}"
+
+    @property
     def is_a(self) -> str:
         """The field's kind: as given; a field with options is a choice; else text."""
         return self.kind or ("choice" if self.options is not None else "text")
@@ -64,6 +73,20 @@ class Field(Part):
             raise ctx.fail(f"field `{self.key}` has `options=` and the kind `{kind}`.",
                            "Only a choice has options: leave `kind=` out for one of them, or write "
                            "`kind=\"choices\"` for several.")
+        kind_of = getattr(getattr(self.options, "fn", None), "__ui_kind__", "")
+        if kind_of and kind_of != "rows":
+            body = self.options.fn.__ui_fn__
+            raise ctx.fail(f"field `{self.key}` got `{'.'.join(body.__qualname__.split('.')[-2:])}`, an "
+                           f"`@ui.{kind_of}`, as its options.", "Options searched on the server come from a "
+                           "`@ui.rows` handler: `options=OrdersState.customers`.")
+        if self.searches and kind == "choices":
+            raise ctx.fail(f"field `{self.key}` chooses several from `{self.options.fn.__ui_key__}`, a search.",
+                           "A search offers one choice: leave `kind=` out. Several are chosen from `options=` a "
+                           "list or a field of the state.")
+        if self.searches and self.value is not None:
+            raise ctx.fail(f"field `{self.key}` is searched on the server and starts as {called(self.value)}.",
+                           "A searched choice starts empty -- the server accepts only what it offered: "
+                           "leave `value=` out.")
         if kind in _CHOICES and self.options is None:
             raise ctx.fail(f"field `{self.key}` is a choice without `options=`.",
                            "Give what can be chosen: `options=[\"open\", \"closed\"]`, or "
@@ -103,6 +126,14 @@ class Field(Part):
 
     def expect(self, ctx: Build, handler: Any) -> rules.Expect:
         """The field as the server checks it."""
+        if self.searches:
+            ident = self.searched_id(handler)
+            other = rules.searched(ident, self.options, f"{runs.key_of(handler)}|{self.key}")
+            if other:
+                raise ctx.fail(f"field `{self.key}` of `{runs.key_of(handler)}` searches "
+                               f"`{self.options.fn.__ui_key__}`; elsewhere it searches `{other}`.",
+                               "A handler receives one set of fields: give this form or button a handler of its own.")
+            return rules.Expect(self.key, "choice", bool(self.required), search=ident)
         fixed, field = self.choices(ctx, handler)[1:] if self.is_a in _CHOICES else (None, "")
         return rules.Expect(self.key, self.is_a, bool(self.required), fixed, field)
 
@@ -164,6 +195,8 @@ class Field(Part):
             return rfds.date_input(value=held.value, on_change=held.set_value, width="sm", **common)
         if kind == "bool":
             return rfds.checkbox(checked=held.value, on_change=held.set_value, **common)
+        if self.searches:
+            return self._searched(handler, common, resets)
         options = self.choices(ctx, handler)[0]
         short = isinstance(options, list) and len(options) <= DROPDOWN_OPTIONS
         if kind == "choices":
@@ -173,6 +206,35 @@ class Field(Part):
         if short:
             return rfds.select(options=options, value=held.value, on_change=held.set_value, **common)
         return rfds.combobox(options=options, value=held.value, on_change=held.set_value, **common)
+
+    def _searched(self, handler: Any, common: dict, resets: list | None) -> rx.Component:
+        """RFDS's combobox in its server-search mode, over the matches the server keeps for this field.
+
+        The combobox shows and sends what it holds as its value. Here it holds the chosen match's
+        label, under a name the server ignores; the id is held beside it and sent under the
+        field's key. The first page of matches is asked for when the field appears.
+        """
+        import rfds
+        from rfds.components.inputs._shared import client_state
+
+        from lex.lex_app.reflex.ui.state import State
+
+        ident = self.searched_id(handler)
+        matches = State.ui_matches.get(ident, [])
+        chosen, words = client_state("lexField", ""), client_state("lexWords", "")
+        if resets is not None:
+            resets.extend([chosen.set_value(""), words.set_value("")])
+
+        def pick(value: rx.Var) -> list:
+            label = rx.Var(_js_expr=f"((({matches}) || []).find((one) => one.value === {value})?.label ?? {value})",
+                           _var_type=str, _var_data=rx.vars.VarData.merge(matches._get_all_var_data(),
+                                                                          value._get_all_var_data()))
+            return [chosen.set_value(value), words.set_value(label)]
+
+        box = rfds.combobox(options=matches, on_search=lambda text: State.ui_search(ident, text), value=words.value,
+                            on_change=pick, **{**common, "name": f"{self.key}__shown"})
+        return rx.fragment(box, rx.el.input(type="hidden", name=self.key, value=chosen.value),
+                           on_mount=State.ui_search(ident, ""))
 
     def _render(self, ctx: Build) -> rx.Component:
         raise ctx.fail(f"field `{self.key}` stands outside a form.",
@@ -203,7 +265,23 @@ def field(key: str, *, label: Any = None, kind: str | None = None, options: Any 
     Nothing entered arrives as ``None`` (``""`` for text, ``False`` for a box, ``[]`` for
     several). ``options=`` is a list of texts, a dict of value to wording, or a field of the
     handler's own state; a field with options is a choice, and ``kind="choices"`` lets the user
-    choose several of them. ``label`` defaults to the key with a capital; ``help`` is a sentence
+    choose several of them.
+
+    One among thousands, or among names that must not all reach the browser, is searched on the
+    server: ``options=`` names a ``@ui.rows`` handler, whose rows give ``id`` (what the handler
+    receives; a number stays a number) and ``label`` (the words the user reads)::
+
+        @ui.rows
+        def customers(self, search):
+            return [{"id": c.id, "label": c.name} for c in find_customers(self.user, search)]
+
+        ui.field("customer", options=OrdersState.customers, required=True)
+
+    The user types; the rows handler runs as the user and the browser gets a page of matches,
+    id and label only. A rows handler without ``search`` returns every row, and lex-app matches
+    the typed words against the labels. The first page is there when the field opens. The value
+    sent back must be one this browser tab was offered, else it is refused at the field. A
+    searched choice starts empty (no ``value=``) and chooses one (not ``kind="choices"``). ``label`` defaults to the key with a capital; ``help`` is a sentence
     under it; ``value`` is what the field starts with (a value -- a list for several -- or a
     state value the page's load filled). ``required=True`` (for several: at least one) and the
     kind are checked before the handler runs, and the message is shown at the field.

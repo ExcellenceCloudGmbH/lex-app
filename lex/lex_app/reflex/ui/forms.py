@@ -4,6 +4,11 @@ A form is submitted once, to one handler. Before that handler's body runs, lex-a
 browser sent against the fields the page declared -- required, and the field's kind -- and turns
 each value into a Python value. A value that does not pass never reaches the body: its message is
 kept for the field (``ui_invalid``) and the handler ends there.
+
+A choice searched on the server (``options=`` a ``@ui.rows`` handler) is the one field that talks to
+the server before the form is sent: :func:`search` runs the rows handler for what the user typed,
+keeps a page of matches for the browser (``ui_matches``) and remembers, on the server only, every
+value it offered to the tab (``_ui_offered``). The form's value is checked against those.
 """
 
 from __future__ import annotations
@@ -22,6 +27,11 @@ KINDS = ("text", "number", "money", "percent", "date", "datetime", "year", "bool
 #: The name of the handler argument that receives a form's values.
 VALUES = "values"
 
+#: How many matches a searched choice offers at a time: the first page of what the search found.
+MATCHES = 50
+#: Most values a searched choice remembers having offered to a tab; past it, only the latest search's count.
+OFFERED = 1000
+
 _YES = (True, "on", "true", "True", "1", "yes")
 
 
@@ -34,6 +44,7 @@ class Expect:
     required: bool = False
     options: tuple | None = None        # a fixed choice's values (one or several)
     options_field: str = ""             # options from the state: the field of the handler's state holding them
+    search: str = ""                    # searched on the server: the field's id, under which the offered values are kept
 
 
 @dataclasses.dataclass(frozen=True)
@@ -65,6 +76,91 @@ def register(handler: Any, receives: Receives) -> None:
                          f"the same as these. A handler receives one set of fields: give this form or button a "
                          f"handler of its own.")
     _RECEIVES[name] = receives
+
+
+@dataclasses.dataclass(frozen=True)
+class Search:
+    """A choice searched on the server: the rows handler that searches, and the field's key in ``ui_invalid``."""
+
+    source: Any
+    invalid: str
+
+
+#: Searched field id (``module.State.handler|key``) -> its search. Filled when a page is built; the
+#: browser names only the id, and an id that is not here is ignored.
+_SEARCHES: dict[str, Search] = {}
+
+
+def searched(field: str, source: Any, invalid: str) -> str:
+    """Record that the field ``field`` is searched by the rows handler ``source``.
+
+    Returns ``""``, or the rows handler the field already searches when it is another one.
+    """
+    known = _SEARCHES.get(field)
+    if known is not None and known.source.fn.__ui_key__ != source.fn.__ui_key__:
+        return known.source.fn.__ui_key__
+    _SEARCHES[field] = Search(source, invalid)
+    return ""
+
+
+def _offer(key: str, raw: Any, text: str) -> dict[str, tuple[Any, str]]:
+    """A page of the rows ``raw`` as matches: the value as text -> (the row's id, its label).
+
+    ``text`` is what the user typed when the rows handler does not search itself: its words are
+    then matched against the labels, folded as RFDS's browser filter folds them.
+    """
+    from rfds.components.inputs.combobox import fold_match
+
+    from lex.lex_app.reflex.ui import rows
+
+    found: dict[str, tuple[Any, str]] = {}
+    for index, row in enumerate(rows.checked(key, raw)):
+        missing = [name for name in ("id", "label") if row.get(name) in (None, "")]
+        if missing:
+            raise rows.RowsError(f"{key}: row {index} has no {' and no '.join(missing)}. The rows of a choice give "
+                                 "`id`, the value the handler receives, and `label`, the words the user reads: "
+                                 "`{\"id\": order.id, \"label\": order.name}`.")
+        ident, label = row["id"], str(row["label"])
+        if text and not fold_match(text, label):
+            continue
+        value = str(ident)
+        if value in found:
+            raise rows.RowsError(f"{key}: two rows have the id {value!r}; `id` is different on every row.")
+        # A number stays a number for the handler; anything else arrives as the text the browser sent.
+        found[value] = (ident if isinstance(ident, int) and not isinstance(ident, bool) else value, label)
+        if len(found) == MATCHES:
+            break
+    return found
+
+
+async def search(state: Any, field: str, text: Any) -> None:
+    """The user typed ``text`` into the searched field ``field`` (``""`` when it opens): offer the matches.
+
+    ``state`` is the tab's ``ui.State``; call while holding its lock. The rows handler runs as the
+    user, as a table's does. A failure is shown at the field, never the exception's text.
+    """
+    from lex.lex_app.reflex.ui import rows
+
+    found = _SEARCHES.get(str(field))
+    if found is None:
+        return
+    text = " ".join(str(text or "").split())[:200]
+    source = found.source
+    key = source.fn.__ui_key__
+    try:
+        owner = await state.get_state(source.state)
+        raw = await rows.read(source, owner, search=text)
+        offered = _offer(key, raw, "" if rows.takes_search(source) else text)
+    except Exception as exc:  # noqa: BLE001 - as a table: logged with a reference, never the exception's text
+        state.ui_invalid = {**dict(state.ui_invalid), found.invalid: rows.describe(exc, key, "")}
+        state.ui_matches = {**dict(state.ui_matches), field: []}
+        return
+    state.ui_matches = {**dict(state.ui_matches),
+                        field: [{"value": value, "label": label} for value, (_, label) in offered.items()]}
+    kept = {**dict(dict(state._ui_offered).get(field) or {}), **{value: one for value, (one, _) in offered.items()}}
+    if len(kept) > OFFERED:
+        kept = {value: one for value, (one, _) in offered.items()}
+    state._ui_offered = {**dict(state._ui_offered), field: kept}
 
 
 def of(fn: Any) -> Receives | None:
@@ -148,9 +244,11 @@ def clean(expect: Expect, raw: Any, options: Any = None) -> tuple[Any, str]:
     if kind == "choice":
         value = str(raw)
         allowed = expect.options if expect.options is not None else options
+        if expect.search:                       # only what the server offered to this tab
+            allowed = options or {}
         if allowed is not None and value not in {str(one) for one in allowed}:
             return None, _say("option", "Choose one of the options.")
-        return value, ""
+        return (allowed[value] if expect.search else value), ""
     if kind in ("number", "money", "percent"):
         number = _number(raw)
         if number is None:
@@ -186,6 +284,9 @@ def check(receives: Receives, raw: Any, state: Any = None) -> tuple[dict, dict]:
     problems: dict[str, str] = {}
     for expect in receives.fields:
         options = getattr(state, expect.options_field, None) if expect.options_field and state is not None else None
+        if expect.search:
+            held = getattr(state, "_ui_offered", None) if state is not None else None
+            options = dict(dict(held or {}).get(expect.search) or {})
         values[expect.key], problem = clean(expect, given.get(expect.key), options)
         if problem:
             problems[expect.key] = problem

@@ -3308,3 +3308,27 @@ kinds gains `choices`, and the message for options on a field that is no choice 
 | 1.853 | The field is RFDS's input for several and sends nothing while picking | checkbox group up to 12 fixed options, multi-select above or from the state; label, help, required mark, the server's message; `value=` a list or a state value; one event: the submit; compiled with Reflex's page compiler; in a step and in ask= |
 | 1.854 | A run hands the body the checked list | through Reflex's event processor and `ui.testing.run`: the list in option order; nothing ticked or no option is a message at the field and no run; a wizard's last step; a dialog's row key and list |
 | 1.855 | Several choices declared wrongly, and shown | no options, non-text options, a start that is no list, options on another kind, the kinds listed; `ui.fact(kind="choices")` joined by commas |
+
+### Batch 1ds — lex.ui forms: a choice searched on the server ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.900 – 1.903 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/forms.py` (`Expect.search`, `searched`, `search`, `check`, `clean`, `MATCHES`), `lex/lex_app/reflex/ui/pages/forms.py` (`field`, `Field.check`, `Field.expect`, `Field.control`), `lex/lex_app/reflex/ui/state.py` (`ui_search`, `ui_matches`, `_ui_offered`) |
+| Test file | `lex/test_project/tests/init/test_1ds_ui_form_searched_choice.py` |
+| Test classes | `TestCluster01ds_SearchedChoice` (1.900–1.903) |
+| Fixtures | a neutral orders state: 120 customers (with an e-mail each), regions, rows without a label |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+`options=` a `@ui.rows` handler, on top of the forms of 1dh-1dl. What building settled is section 6.15 of
+`docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.900 | A search offers a page of matches and nothing else of the rows | the rows handler gets the tidied text; at most `MATCHES`, each `{value, label}`; no other field in any update; without `search` the labels are matched, folded; rows without a label: logged with what to write, a reference at the field; an unknown field ignored |
+| 1.901 | The server accepts only a value it offered to the tab | an offered id reaches the body as the row gave it; an existing but unoffered or a forged id refused at the field; required; an earlier search's value still accepted; nothing offered, nothing accepted |
+| 1.902 | The field is RFDS's combobox searching on the server | server-search mode (`shouldFilter:false`) over `ui_matches`; typing and opening send `ui_search`; the id under the key, the label shown; compiled; in a step and ask=, the dialog hands the key and the id |
+| 1.903 | A searched choice declared wrongly | several from a search, a start value, an action as options, one field searching two rows handlers: each names page, slot and what to write |
+

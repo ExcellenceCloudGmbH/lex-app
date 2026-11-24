@@ -1613,3 +1613,19 @@ does not remove user launch configurations.
 | 1.855 | Several choices declared wrongly, and shown | no options, non-text options, a start that is no list, options on another kind, the kinds listed; `ui.fact(kind="choices")` joined by commas |
 
 **Scenario range:** 1.852 – 1.855. **Test file:** `lex/test_project/tests/init/test_1dl_ui_form_choices.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dl](batches.md).
+
+### 1ds. lex.ui forms: a choice searched on the server ✅
+
+**What it tests:** `ui.field(key, options=State.rows_handler)` -- RFDS's server-search combobox over a `@ui.rows` handler; a page of `{value, label}` matches; the value checked against what the tab was offered; in a form, a step and a button's ask=.
+
+**Why a regression matters:** every customer in the page, a row's other fields (an e-mail address) in the browser, a forged id reaching the handler's body, or an empty box until the user types.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.900 | A search offers a page of matches and nothing else of the rows | the tidied text; at most `MATCHES` `{value, label}`; no other field reaches the browser; labels matched when the handler does not search; rows without a label fail as a table's; an unknown field ignored |
+| 1.901 | The server accepts only a value it offered to the tab | the row's id for the body; unoffered or forged ids refused at the field; required; earlier searches' values kept |
+| 1.902 | The field is RFDS's combobox searching on the server | server-search mode over `ui_matches`; `ui_search` on typing and opening; the id sent, the label shown; compiled; in a step and ask= |
+| 1.903 | A searched choice declared wrongly | several, a start value, an action as options, two rows handlers for one field |
+
+**Scenario range:** 1.900 – 1.903. **Test file:** `lex/test_project/tests/init/test_1ds_ui_form_searched_choice.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ds](batches.md).
+
