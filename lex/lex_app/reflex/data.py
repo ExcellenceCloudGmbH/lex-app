@@ -459,6 +459,8 @@ class LexTableState(DataTableMixin, ChosenColumns, mixin=True):
     #: The fixed filters' fields the browser may send when the table appears (``ui.table(where=)``);
     #: ``None``: any, as ``lex_table`` has always allowed.
     scope_fields: ClassVar[tuple[str, ...] | None] = None
+    #: The order of the rows until the user sorts a column (``"-id"``: newest first); ``""``: the model's.
+    default_ordering: ClassVar[str] = ""
 
     def _store_filter(self, key: str, value: Mapping[str, Any]) -> bool:
         allowed = type(self).choice_fields
@@ -510,7 +512,7 @@ class LexTableState(DataTableMixin, ChosenColumns, mixin=True):
                             for level in sort or [])
         api = await lex_api(self)
         data = await api.list(type(self).resource, page=offset // max(limit, 1) + 1, per_page=limit,
-                              ordering=ordering or None, params=params)
+                              ordering=ordering or type(self).default_ordering or None, params=params)
         return [{k: wire_value(v) for k, v in row.items()} for row in data["results"]], data["count"]
 
 
@@ -627,7 +629,7 @@ def _filters_identity(filters: Mapping[str, Any] | None) -> tuple:
 def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_field: str = "",
                 page_size: int = 25, filters: Mapping[str, Any] | None = None,
                 row_fields: Sequence[str] = (), choice_fields: Sequence[str] | None = None,
-                scope_fields: Sequence[str] | None = None) -> type:
+                scope_fields: Sequence[str] | None = None, ordering: str = "") -> type:
     """The :class:`LexTableState` for one table of ``model`` (one class per distinct table).
 
     The table opens at ``page_size`` rows, which is also among the sizes the
@@ -646,6 +648,8 @@ def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_fiel
         classvars["choice_fields"] = tuple(choice_fields)
     if scope_fields is not None:
         classvars["scope_fields"] = tuple(scope_fields)
+    if ordering:
+        classvars["default_ordering"] = str(ordering)
     return _state_for(LexTableState, model, classvars, defaults={"page_size": int(page_size)},
                       identity=_filters_identity(filters))
 

@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 990
+max_scenario: 993
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2638,3 +2638,13 @@ letters:
       xfail: 0
     note: >-
       `?run=<key>` on a calculation page: the run read through lex-app's API as the user and followed (a `@ui.job(stop_on_leave=True)` started by the progress part) until its status settles, the same with Celery off (lex-app's process) and on (a worker's report); the progress message is the run's newest logged line; the result written with the model's own fields (`RegionReport.orders`); the error in its own words without the traceback; the log, also of a failed run; a run outside the reader's permission_read is no run to them. These tests fail on a page that says running for ever, a traceback shown to a user, or a run shown to a reader the model refuses.
+  eh:
+    title: 'lex.ui calculation pages: the past runs -- a model table, each row opening its run'
+    scenarios: 1.991-1.993
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      `history=ui.table(Model, columns=[...])`: under the form, titled Past runs; lex-app adds the status column in the badge's words, each row's link to `?run=<key>`, and the newest run first, without new table arguments; a table of another model, `open=`, `where=` or no table refused; the rows read as the user, so the model's permission_read decides. These tests fail on a past run nobody can open, the oldest run first, or runs the model would not show the reader.

@@ -905,6 +905,10 @@ open the run's address, and orders the newest run first. Who sees which runs is 
 `permission_list`/`permission_read`, as on every model table. A table of another model is refused, so
 is `open=` (the page decides where a run leads) and a `where=` (the past runs are the model's). *Considered:*
 `history=["region", "year"]` -- a second way to list columns, without search or filters.
+*Built (1eh):* the table is written once, under the form, titled "Past runs". What lex-app adds goes
+through fields a page kind fills and `ui.table()`/`ui.column()` do not take -- the row's address
+template, the order until the user sorts (`"-id"`, new on lex-app's model table state as
+`default_ordering`), and the status column's words -- so the table vocabulary gains no argument.
 
 **Permissions come from the model.** The page's `requires=` is the author's (normally
 `ui.read(Model)`). The form is shown to users who may create the model (`visible=ui.create(Model)`), Stop

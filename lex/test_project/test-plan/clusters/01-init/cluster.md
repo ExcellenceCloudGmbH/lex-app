@@ -1828,3 +1828,17 @@ does not remove user launch configurations.
 | 1.990 | Leaving stops the watching, never the run | the follow job ends on a new visit; the run still ends in SUCCESS |
 
 **Scenario range:** 1.985 – 1.990. **Test file:** `lex/test_project/tests/init/test_1eg_ui_calculation_run.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1eg](batches.md).
+
+### 1eh. lex.ui calculation pages: the past runs -- a model table, each row opening its run ✅
+
+**What it tests:** a calculation page's past runs: `history=ui.table(Model, ...)` completed by lex-app (status, row link, newest first), its refusals, and its rows read as the user.
+
+**Why a regression matters:** a past run nobody can open, a list that starts with the oldest run, or runs shown that the model would not show the reader.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.991 | The past runs are a model table lex-app completes | compiled under Past runs; the status column added last, in the badge's words; each row a link to ?run=<key>; -id first; the author's search kept; the author's table unchanged |
+| 1.992 | Past runs written wrongly say what to write | another model, open=, where=, not a table |
+| 1.993 | The past runs are read as the user, newest first | three runs, newest first with their status, through lex-app's list view; none for a reader the model's permission_read refuses |
+
+**Scenario range:** 1.991 – 1.993. **Test file:** `lex/test_project/tests/init/test_1eh_ui_calculation_history.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1eh](batches.md).

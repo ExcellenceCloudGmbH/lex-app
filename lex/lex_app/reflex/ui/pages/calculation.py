@@ -37,6 +37,15 @@ _BADGES = {
 }
 
 
+def _status_column() -> Any:
+    """The past runs' status column: the run's status in the badge's words and tones."""
+    from lex.lex_app.reflex.ui.pages import tables
+
+    found = tables.column("is_calculated", label="Status", kind="status",
+                          tones={word: tone for word, (_, tone) in _BADGES.items()})
+    return dataclasses.replace(found, words=tuple((word, text) for word, (text, _) in _BADGES.items()))
+
+
 def _field_of(value: Any) -> Any:
     """The Django field ``value`` names when it is a model's field as the class holds it (``Model.name``)."""
     from django.db import models
@@ -121,10 +130,41 @@ class Calculation(kinds.Kind):
                 f"Add `ui.field(\"{missing[0]}\")`, or give the model's field a default.")
 
     # -- the views ----------------------------------------------------------------------------------
+    def _history(self, ctx: Build) -> Any:
+        """The past runs: the author's table over the model, with the status, a link to each run, newest first."""
+        from lex.lex_app.reflex.ui.pages import tables
+
+        name = self.model.__name__
+        at = ctx.at("history")
+        example = f"`history=ui.table({name}, columns=[...])`"
+        if not isinstance(self.history, tables.Table) or self.history.source is not self.model:
+            got = (f"a table of {getattr(self.history.source, '__name__', self.history.source)}"
+                   if isinstance(self.history, tables.Table) else called(self.history))
+            raise at.fail(f"got {got}; the past runs are {name}'s.", f"Write {example}.")
+        if self.history.open is not None:
+            raise at.fail("the table has `open=`; each past run opens its own view on this page.", "Leave `open=` out.")
+        if self.history.where is not None:
+            raise at.fail("the table has `where=`; the past runs are the model's, as the user may see them.",
+                          "Leave `where=` out: the model's permission_list and permission_read decide.")
+        columns = list(self.history.columns)
+        if "is_calculated" not in [getattr(one, "key", one) for one in columns]:
+            columns.append(_status_column())
+        key = self.model._meta.pk.name
+        return dataclasses.replace(self.history, columns=tuple(columns),
+                                   row_link=f"{ctx.route or '/'}?{runtime.RUN}={{{key}}}", ordering=f"-{key}")
+
     def _new(self, ctx: Build) -> rx.Component:
-        """The form for a new run, to users who may create one."""
+        """The form for a new run, to users who may create one; under it, the past runs."""
+        import rfds
+
         form = forms.Form(self.title, None, self.fields, self.steps, self.state.calculate, (), self.actions)
-        return shown(ctx, form._page(ctx), guard.create(self.model))
+        whole = [shown(ctx, form._page(ctx), guard.create(self.model))]
+        if self.history is not None:
+            history = self._history(ctx)
+            self.built_history = history
+            at = dataclasses.replace(ctx.at("history"), caption="Past runs", under_load=True)
+            whole.append(rfds.page(rfds.section(history.build(at), title=say("Past runs"))))
+        return rx.fragment(*whole)
 
     def _value(self, field: Any) -> Any:
         """This run's value of the model's ``field``, typed for how it is shown."""

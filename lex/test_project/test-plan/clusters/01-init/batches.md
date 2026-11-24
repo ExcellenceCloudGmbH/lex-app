@@ -3633,3 +3633,24 @@ Second piece of the calculation page (section 6.19 of `docs/superpowers/specs/20
 | 1.988 | A failed run shows its error in its own words | ERROR; the exception's text without the traceback; the failed run's log kept |
 | 1.989 | A run the reader may not read is no run to them | nothing of the run in the state; the error page says There is no run N., as for a missing key |
 | 1.990 | Leaving stops the watching, never the run | the follow job ends on a new visit; the run still ends in SUCCESS |
+
+### Batch 1eh — lex.ui calculation pages: the past runs -- a model table, each row opening its run ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.991 – 1.993 |
+| Type | E |
+| Files covered | `lex/lex_app/reflex/ui/pages/calculation.py` (`history=`, the status column), `lex/lex_app/reflex/ui/pages/tables.py` (a model table's row link and order set by its page kind; a status column's words), `lex/lex_app/reflex/data.py` (`LexTableState.default_ordering`) |
+| Test file | `lex/test_project/tests/init/test_1eh_ui_calculation_history.py` |
+| Test classes | `TestCluster01eh_CalculationHistory` (1.991–1.993) |
+| Fixtures | the 1ef models; `_ui_calc_aids.ViewsClient` for the table's rows read through lex-app's list view |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Third piece of the calculation page (section 6.19 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`).
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.991 | The past runs are a model table lex-app completes | compiled under Past runs; the status column added last, in the badge's words; each row a link to ?run=<key>; -id first; the author's search kept; the author's table unchanged |
+| 1.992 | Past runs written wrongly say what to write | another model, open=, where=, not a table |
+| 1.993 | The past runs are read as the user, newest first | three runs, newest first with their status, through lex-app's list view; none for a reader the model's permission_read refuses |
