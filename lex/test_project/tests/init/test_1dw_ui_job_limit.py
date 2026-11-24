@@ -8,7 +8,7 @@ a refused press that changes the page or holds a place, or a place that is never
 (after a failure, a cancel, a refusal or a form's wrong field), which would lock the job for
 everyone.
 
-Cluster 1dw -- scenarios 1.927-1.929. Type: U.
+Cluster 1dw -- scenarios 1.927-1.929, 1.915. Type: U.
 Covers: lex/lex_app/reflex/ui/handlers.py (job, _limit_message), lex/lex_app/reflex/ui/runs.py
 (take_place, give_place).
 Run: python -m lex pytest lex/test_project/tests/init/test_1dw_ui_job_limit.py -v
@@ -81,6 +81,28 @@ class ExportState(ui.State):
         worker.join()
         if failed:
             raise failed[0]
+
+
+def _exports_in(module: str):
+    """A state `Exports` with a job `run(limit=1)`, written in the module ``module``: same names, another module."""
+    import sys
+    import types
+
+    made = sys.modules.setdefault(module, types.ModuleType(module))     # importable: Reflex pickles its states
+    space = made.__dict__
+    space.update({"ui": ui, "GATE": GATE, "RAN": RAN})
+    exec(  # noqa: S102 - a second module's class, for the test only
+        "class Exports(ui.State):\n"
+        "    @ui.job(limit=1)\n"
+        "    def run(self):\n"
+        "        if not GATE['open'].wait(5):\n"
+        "            raise RuntimeError('the gate was never opened')\n"
+        "        RAN.append(__name__)\n", space)
+    return space["Exports"]
+
+
+EXPORTS_A = _exports_in("lex_test_limits_orders")
+EXPORTS_B = _exports_in("lex_test_limits_invoices")
 
 
 async def _until(condition, failure: str) -> None:
@@ -180,7 +202,7 @@ class TestCluster01dw_JobLimit(SimpleTestCase):
 
         async def cancelled(harness):
             running = await harness.send(ExportState, "stoppable")
-            await _until(lambda: runs._PLACES.get("ExportState.stoppable") == 1, "the job never took its place")
+            await _until(lambda: runs._PLACES.get(f"{__name__}.ExportState.stoppable") == 1, "the job never took its place")
             await (await harness.send(ui.State, "ui_cancel", key="ExportState.stoppable"))
             await running
             return dict(runs._PLACES)
@@ -204,7 +226,7 @@ class TestCluster01dw_JobLimit(SimpleTestCase):
             return held
 
         STOPPED.clear()
-        self.assertEqual(_session(crunched), [{"ExportState.crunch": 1}] * 2,
+        self.assertEqual(_session(crunched), [{f"{__name__}.ExportState.crunch": 1}] * 2,
                          "a run reporting through self.progress holds its place while it reports")
         self.assertEqual((STOPPED, runs._PLACES), ([GeneratorExit] * 2, {}),
                          "its thread got the stop at its next report, and the place was given back")
@@ -219,7 +241,7 @@ class TestCluster01dw_JobLimit(SimpleTestCase):
         async def pressed_twice(harness):
             await harness.set_fields(ui.State, ui_done={key: True})          # an earlier result shows
             first = await harness.send(ExportState, "build_report", values={"year": "2025"})
-            await _until(lambda: runs._PLACES.get(key) == 1, "the first run never took its place")
+            await _until(lambda: runs._PLACES.get(f"{__name__}.{key}") == 1, "the first run never took its place")
             harness.outcomes.clear()
             harness.results.clear()
             await (await harness.send(ExportState, "build_report", values={"year": "x"}))
@@ -258,3 +280,30 @@ class TestCluster01dw_JobLimit(SimpleTestCase):
         self.assertEqual(ExportState.export.fn.__ui_options__["limit"], 2)
         self.assertEqual(ExportState.build_report.fn.__ui_again__.keywords["limit"], 1,
                          "a mixin's copy is decorated again with the same limit")
+
+    # -- 1.915 ---------------------------------------------------------
+    def test_1_915_two_jobs_of_the_same_name_in_two_modules_have_their_own_places(self) -> None:
+        """
+        Scenario 1.915: the limit is per job, not per name.
+        Given: two modules that each define `class Exports(ui.State)` with `@ui.job(limit=1) def run`.
+        When:  the first module's job runs (held at a gate) and the second's is pressed in another
+               tab.
+        Then:  the second runs beside it: each job has its own place, counted in each server
+               process; neither is refused with the other's limit.
+        """
+        async def steps(harness):
+            first = await harness.send(EXPORTS_A, "run")
+            await _until(lambda: runs._PLACES, "the first job never took its place")
+            harness.token = "tab2"                  # another user's tab: the limit is for all users together
+            second = await harness.send(EXPORTS_B, "run")
+            await asyncio.sleep(0.1)
+            GATE["open"].set()
+            await first
+            await second
+            await asyncio.sleep(0.05)
+            return list(harness.outcomes)
+
+        outcomes = _session(steps)
+        self.assertEqual(outcomes, [], "neither job was refused for the other's limit")
+        self.assertEqual(sorted(RAN), ["lex_test_limits_invoices", "lex_test_limits_orders"], "both ran")
+        self.assertEqual(runs._PLACES, {}, "and both gave their place back")

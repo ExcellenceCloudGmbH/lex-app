@@ -110,7 +110,7 @@ def release(token: str, key: str, arg: str) -> None:
         _ACTIVE.pop((token, key, arg), None)
 
 
-#: Job key -> how many of its runs hold a place under its ``limit=`` in this process.
+#: Job id (module and qualified name) -> how many of its runs hold a place under its ``limit=`` in this process.
 _PLACES: dict[str, int] = {}
 
 

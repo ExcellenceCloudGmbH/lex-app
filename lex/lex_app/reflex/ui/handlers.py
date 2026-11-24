@@ -613,8 +613,8 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
     stop its next ``yield`` would (``GeneratorExit``), so the library stops too. In an action or a
     load it raises an error saying it belongs in a job; after the job ended, one saying so.
 
-    ``limit=2`` lets at most two runs of the job go at once in this server process, for all users
-    together (an expensive read of another system). A press beyond that is refused at once, not
+    ``limit=2`` lets at most two runs of the job go at once in each server process, for all users
+    together (an expensive read of another system); one user may hold every place. A press beyond that is refused at once, not
     queued: "Export is already running 2 times. Try again in a moment." -- a toast, and
     ``ui.failed``. A form's job is told so in a toast too, not above its submit button: it is about
     the press, not about what was entered, and it no longer holds once a run ends.
@@ -626,6 +626,7 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
     def decorate(fn: Callable[..., Any]) -> Any:
         _check_plain(fn, "job")
         key = fn.__qualname__
+        place = f"{fn.__module__}.{fn.__qualname__}"       # limit=: two modules may both have Exports.run
         requirements = guard.normalise(requires)
 
         @functools.wraps(fn)
@@ -656,7 +657,7 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                             self.ui_failed = {**dict(self.ui_failed), key: message}
                 finally:
                     if placed:
-                        runs.give_place(key)
+                        runs.give_place(place)
                     runs.release(token, key, call)
 
             try:
@@ -664,7 +665,7 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                     # Resolved before the user's lock is taken: nothing inside a block below raises.
                     session, failure = await _session(self, requirements)
                     if failure is None and limit is not None:
-                        placed = runs.take_place(key, limit)
+                        placed = runs.take_place(place, limit)
                         if not placed:                    # refused at once, before the values: nothing else changes
                             failure = busy = results.Refuse(_limit_message(fn, limit))
                     if failure is None and receives is not None:

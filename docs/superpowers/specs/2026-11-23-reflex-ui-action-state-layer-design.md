@@ -761,7 +761,9 @@ def export(self, region):
     ...
 ```
 
-- **Counted in this server process, for all users and tabs together**, from the run's start (after
+- **Counted in each server process, for all users and tabs together** -- one user may hold every
+  place --, per job (its module and qualified name: two modules may both have `Exports.run`; review,
+  2026-11-24, it was the qualified name alone), from the run's start (after
   `requires=`) to its wind-up, however it ends: success, failure, refusal, cancel, a form's wrong
   field. Like the job pool (`LEX_UI_JOB_THREADS`), it is per process: with several backend workers
   each allows N. A run waiting for a pool thread holds its place. A run reporting through
@@ -779,6 +781,10 @@ def export(self, region):
   *Considered first:* the pool's own size (`LEX_UI_JOB_THREADS`, for every job at once), and
   queueing (a queued press would wait unseen).
 - `limit=` is a whole number, 1 or more; anything else is refused when the state is written.
+- *Not built: a limit shared by every process* (a counter in Redis). The review asked; the projects
+  being moved to lex.ui had the same limit per process, so nothing a user could do is lost, and a
+  shared counter needs a lease that a killed process gives back (the heartbeat's job), which is a
+  feature of its own. With N backend processes a job runs at most N x `limit` times at once.
 
 ---
 
