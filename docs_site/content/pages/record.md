@@ -20,9 +20,11 @@ from docs_site.sandbox.models import Commitment, Fund, Investor
 
 def every(api, model, **options):
     """Every matching record: self.api.list returns one page of them at a time."""
+    ordering = options.pop("ordering", None)
+    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
     rows, page = [], 1
     while True:
-        found = api.list(model, page=page, per_page=100, **options)
+        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
         rows.extend(found)
         if not found or len(rows) >= found.count:
             return rows
@@ -80,9 +82,11 @@ from myproject.models import Commitment, Fund, Investor
 
 def every(api, model, **options):
     """Every matching record: self.api.list returns one page of them at a time."""
+    ordering = options.pop("ordering", None)
+    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
     rows, page = [], 1
     while True:
-        found = api.list(model, page=page, per_page=100, **options)
+        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
         rows.extend(found)
         if not found or len(rows) >= found.count:
             return rows

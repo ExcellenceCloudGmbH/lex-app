@@ -87,3 +87,48 @@ def test_every_reads_past_the_first_page():
     assert api.list(Fund).count == 256 and len(api.list(Fund)) == 25
     assert len(every(api, Fund)) == 256
     assert len(every(api, Fund, filters={"status": "investing"})) == 253
+
+
+EVERY = '''def every(api, model, **options):
+    """Every matching record: self.api.list returns one page of them at a time."""
+    ordering = options.pop("ordering", None)
+    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
+    rows, page = [], 1
+    while True:
+        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
+        rows.extend(found)
+        if not found or len(rows) >= found.count:
+            return rows
+        page += 1
+'''
+
+
+def test_every_copy_of_the_every_helper_is_the_same():
+    copies = []
+    for path in sorted(content.CONTENT.rglob("*.md")):
+        for match in re.finditer(r"^def every\(.*?(?=^\S|^```)", path.read_text(encoding="utf-8"),
+                                 re.M | re.S):
+            copies.append((path.name, match.group(0).rstrip("\n") + "\n"))
+    assert len(copies) >= 11
+    for name, text in copies:
+        assert text == EVERY, f"{name}: its every() differs from the canonical one"
+
+
+def test_every_breaks_ties_on_the_id():
+    from docs_site.sandbox.api import SandboxApi
+    from docs_site.sandbox.models import Fund
+    from docs_site.sandbox.store import Store
+
+    calls = []
+
+    class Spy(SandboxApi):
+        def list(self, model, **kwargs):
+            calls.append(kwargs.get("ordering"))
+            return super().list(model, **kwargs)
+
+    namespace: dict = {}
+    exec(EVERY, namespace)
+    api = Spy(Store().tab("every"))
+    assert [r["id"] for r in namespace["every"](api, Fund)] == [1, 2, 3, 4, 5, 6]
+    namespace["every"](api, Fund, ordering="-vintage")
+    assert calls == ["id", "-vintage,id"]

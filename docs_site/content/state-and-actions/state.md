@@ -110,9 +110,11 @@ The examples on this site use this helper:
 ```python
 def every(api, model, **options):
     """Every matching record: self.api.list returns one page of them at a time."""
+    ordering = options.pop("ordering", None)
+    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
     rows, page = [], 1
     while True:
-        found = api.list(model, page=page, per_page=100, **options)
+        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
         rows.extend(found)
         if not found or len(rows) >= found.count:
             return rows
@@ -122,6 +124,11 @@ def every(api, model, **options):
 `every(self.api, Fund, filters={"status": "investing"}, ordering="name")` takes the same
 `filters=`, `search=` and `ordering=` as `list`. For a count alone, `self.api.list(Model).count`
 needs no loop.
+
+The helper always sorts, and ends the sort with the record's `id`. lex-app adds no order of its
+own, and two records that tie on `ordering=` can come back in any order, so without the `id` a
+record could turn up on two pages and another on none. If your model's key has another name, use
+that instead of `id`.
 
 ## Another state
 
