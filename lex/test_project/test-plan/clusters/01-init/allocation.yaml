@@ -2868,3 +2868,13 @@ letters:
       xfail: 0
     note: >-
       The limit is RFDS's MAX_GRID_TABLES (4), read from RFDS. 1cs's 1.800 expects these words instead of RFDS's quoted sentence.
+  ez:
+    title: 'lex.ui forms: a field of several choices can be emptied at once -- its Clear'
+    scenarios: 1.1036
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      The Clear carries data-lex-clear=<key>. These tests fail on a several-choice field without its Clear, a Clear always shown, or a Clear that does not empty the browser's value.

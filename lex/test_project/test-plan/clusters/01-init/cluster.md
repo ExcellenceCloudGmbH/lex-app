@@ -1,13 +1,13 @@
 
 
-### 1fa. lex.ui pages: more than four tables on a record page refused in lex.ui's words, with the way out ✅
+### 1ez. lex.ui forms: a field of several choices can be emptied at once -- its Clear ✅
 
-**What it tests:** four tables on a record page compile; five, with or without tabs, are refused before RFDS is asked, naming the count, the sections, that tabs do not lift it, and a page of its own led to by a link; RFDS's pointer to tab navigation is not repeated.
+**What it tests:** each several-choice field (multi-select past twelve options, checkbox group below) has a Clear under a condition on something being chosen, which sets the field's browser value to the empty list; a single choice has none.
 
-**Why a regression matters:** A page past RFDS's rule accepted, or a refusal that sends the author to tabs, which do not help.
+**Why a regression matters:** A long choice that can only be undone one option at a time, or a Clear that leaves values behind.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.1037 | More than four tables is refused with the way out | four compile; five refused with and without tabs: slot sections, 5 tables in Lines (2), Invoices, Payments, Shipments, at most 4, with tabs=True too, a page of their own, ui.link to order_invoices; no 'use tab navigation' |
+| 1.1036 | Several choices can be emptied at once | Clear for regions (multi-select) and kinds (checkbox group) under a cond, none for main; the multi-select compiled; onClick sets the client state to []; .length > 0 |
 
-**Scenario range:** 1.1037. **Test file:** `lex/test_project/tests/init/test_1fa_ui_record_table_limit.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1fa](batches.md).
+**Scenario range:** 1.1036. **Test file:** `lex/test_project/tests/init/test_1ez_ui_choices_clear.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ez](batches.md).

@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 150 | 1037 | 975 | 3 | 0 |
+| 1. Init — Project Bootstrap | 151 | 1037 | 976 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -174,6 +174,7 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1ew | lex.ui pages: a closed section mounts what it holds when opened; a title from the state; actions | 1.1032-1.1033 | complete | 2 | 0 | 0 | The opened state is RFDS's client_state (rfdsLexopened<n>). These tests fail on a closed section's chart mounted at once, its table deferred, or a state title or actions accepted where they cannot show. |
 | 1ex | lex.ui: a handler brings a section or a table into view -- ui.scroll_to | 1.1034 | complete | 1 | 0 | 0 | 1cm's 1.783 lists scroll_to among the public names (a new name). These tests fail on an id mismatch between the result and the built part, or a wrong argument accepted. |
 | 1ey | lex.ui pages: a tab shown only while the state says so -- visible= a state value on a tab | 1.1035 | complete | 1 | 0 | 0 | 1ea's 1.952 changed its given: a state value on a later tab is now accepted, so the case is a state value on the first tab, plus visible= that is neither; 1cs's 1.800 expects the record refusal's added pointer to tabs=True. |
+| 1ez | lex.ui forms: a field of several choices can be emptied at once -- its Clear | 1.1036 | complete | 1 | 0 | 0 | The Clear carries data-lex-clear=<key>. These tests fail on a several-choice field without its Clear, a Clear always shown, or a Clear that does not empty the browser's value. |
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1fa | lex.ui pages: more than four tables on a record page refused in lex.ui's words, with the way out | 1.1037 | complete | 1 | 0 | 0 | The limit is RFDS's MAX_GRID_TABLES (4), read from RFDS. 1cs's 1.800 expects these words instead of RFDS's quoted sentence. |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |

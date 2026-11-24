@@ -211,7 +211,12 @@ class Field(Part):
         if kind == "choices":
             # RFDS: a checkbox group for several of a short list, its multi-select above 12 options.
             pick = rfds.checkbox_group if short else rfds.multi_select
-            return pick(options=options, value=held.value, on_change=held.set_value, **common)
+            # RFDS's multi-select has no way to empty it at once; the value is the browser's, so a
+            # "Clear" beside it empties it there, shown while something is chosen.
+            clear = rfds.button(say("Clear"), intent="tertiary", size="sm", on_click=held.set_value([]),
+                                custom_attrs={"data-lex-clear": self.key})
+            return rx.fragment(pick(options=options, value=held.value, on_change=held.set_value, **common),
+                               rx.cond(held.value.to(list).length() > 0, clear))
         if short:
             return rfds.select(options=options, value=held.value, on_change=held.set_value, **common)
         return rfds.combobox(options=options, value=held.value, on_change=held.set_value, **common)

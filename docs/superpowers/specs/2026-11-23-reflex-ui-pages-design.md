@@ -1315,6 +1315,13 @@ lex-app project. (The table gaps of the same round are section 5.15 of the table
   `where=` name the record) led to from a section by `ui.link(..., to=page, key=...)`. A form's result
   and a list page are RFDS pages without that rule. 1cs's 1.800 expects the new words.
 
+- **A "Clear" beside several choices (batch 1ez).** `ui.field(..., kind="choices")` over more than twelve
+  options is RFDS's multi-select, which has no way to empty it at once. Its value is the browser's (a
+  client state, sent with the form), so lex.ui draws RFDS's tertiary button "Clear" beside the field,
+  which sets that value to the empty list -- no round trip, no change to RFDS -- shown only while
+  something is chosen. The same for the checkbox group of a short list (one rule for "several").
+  A single choice has none (it is changed by choosing another). No argument.
+
 ## 7. Order of building
 
 One spec, four steps. Each ends by porting real pages of the reviewed project, in the scratchpad
