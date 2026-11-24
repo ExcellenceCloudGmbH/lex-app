@@ -1626,8 +1626,9 @@ does not remove user launch configurations.
 | 1.857 | After Stop the next report raises the stop a yield would | Stop and leaving a `stop_on_leave` page: `GeneratorExit` in the calling thread; the library stops; the body's cleanup runs; changes since the last yield discarded; no error; nothing running |
 | 1.858 | Elsewhere self.progress says it belongs in a job | an action, a load, a job that has ended: `RuntimeError` naming `self.progress` and `@ui.job`; nothing reported |
 | 1.859 | progress is a name a ui.State reserves | a property the browser cannot call; a field, computed var or method named `progress` refused when the class is defined; the route argument `[progress]` refused; `lex reflex check` reports it |
+| 1.914 | A flood of reports never waits, and the page gets the latest | 200 self.progress calls from a library's thread return at once; the browser gets at most about four reports a second, in order, always the last; a call after the job ended says the job has ended |
 
-**Scenario range:** 1.856 – 1.859. **Test file:** `lex/test_project/tests/init/test_1dm_ui_job_progress_callback.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dm](batches.md).
+**Scenario range:** 1.856 – 1.859, 1.914. **Test file:** `lex/test_project/tests/init/test_1dm_ui_job_progress_callback.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dm](batches.md).
 
 ### 1dn. lex.ui forms: a text field of several lines -- ui.field(key, lines=6) ✅
 

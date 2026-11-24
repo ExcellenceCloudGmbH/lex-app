@@ -12,7 +12,7 @@ regression is a progress bar frozen while a library works, a Stop button the lib
 half-finished fields written from a foreign thread, or a field called ``progress`` that silently
 hides the helper.
 
-Cluster 1dm -- scenarios 1.856-1.859. Type: U.
+Cluster 1dm -- scenarios 1.856-1.859, 1.914. Type: U.
 Covers: lex/lex_app/reflex/ui/handlers.py (job, _drive, reporter), lex/lex_app/reflex/ui/state.py
 (State.progress), lex/lex_app/reflex/ui/context.py (RESERVED), lex/lex_app/reflex/ui/checks.py
 (reserved names).
@@ -122,6 +122,17 @@ class ReportsState(ui.State):
             raise
 
     @ui.job
+    def flood(self):
+        def work() -> None:
+            started = time.monotonic()
+            for step in range(1, 201):
+                self.progress(step / 200, f"Step {step}")
+            SEEN.append(time.monotonic() - started)
+        worker = threading.Thread(target=work, name="flood-worker")
+        worker.start()
+        worker.join()
+
+    @ui.job
     def keep(self):
         KEPT.append(self.progress)
 
@@ -177,16 +188,18 @@ class TestCluster01dm_JobProgressCallback(SimpleTestCase):
                worker thread, and a job calling self.progress on its own thread beside a
                ``yield ui.progress(...)``.
         When:  each runs through Reflex's event processor.
-        Then:  the browser is sent each fraction and message, in order, as for a yield; the
+        Then:  the browser is sent the fractions and messages, in order, as for a yield (the
+               latest of reports close together, 1.914); the
                callback ran on the library's thread; a report sends only the progress -- the
                field the body changed before it reaches the browser at the end, not with the
                callback's reports; the job ends as usual, with its result and nothing running.
         """
         built = testing.run(ReportsState, "build", year=2026)
         self.assertEqual(SEEN, ["reports-worker"], "the library called back from its own thread")
-        self.assertEqual(_reports(built.updates, ReportsState.build),
-                         [(1 / 3, "Part 1 of 3"), (2 / 3, "Part 2 of 3"), (1.0, "Part 3 of 3")],
-                         "each report reached the browser, in order, with its message")
+        sent = _reports(built.updates, ReportsState.build)
+        self.assertEqual(sent[-1], (1.0, "Part 3 of 3"), "the latest report reached the browser, with its message")
+        self.assertTrue(set(sent) <= {(1 / 3, "Part 1 of 3"), (2 / 3, "Part 2 of 3"), (1.0, "Part 3 of 3")}
+                        and sent == sorted(sent), "in order; reports close together are folded into the latest (1.914)")
         key = runs.key_of(ReportsState.build)
         for update in built.updates:
             if key in (update.get("ui_progress") or {}):
@@ -255,7 +268,8 @@ class TestCluster01dm_JobProgressCallback(SimpleTestCase):
                call after it ended.
         When:  each calls it.
         Then:  it raises a RuntimeError that says self.progress belongs in a @ui.job (its body or
-               a thread the body started), and reports nothing.
+               a thread the body started), and reports nothing; after the job ended, that the
+               job has ended.
         """
         for handler in ("save", "fill"):
             with self.subTest(handler=handler):
@@ -267,8 +281,8 @@ class TestCluster01dm_JobProgressCallback(SimpleTestCase):
         testing.run(ReportsState, "keep")
         with self.assertRaises(RuntimeError) as ended:
             KEPT[0](0.5, "too late")
-        self.assertIn("@ui.job", str(ended.exception), "after the job ended it says the same")
-        self.assertIn("while the job runs", str(ended.exception))
+        self.assertIn("self.progress", str(ended.exception), "after the job ended it names the helper")
+        self.assertIn("the job has ended", str(ended.exception), "and says the job has ended (1.914)")
 
     # -- 1.859 ---------------------------------------------------------
     def test_1_859_progress_is_a_name_a_ui_state_reserves(self) -> None:
@@ -317,3 +331,26 @@ class TestCluster01dm_JobProgressCallback(SimpleTestCase):
         self.assertEqual([(f.level, f.message.split(":")[0]) for f in found], [("error", "Runs.progress")],
                          "lex reflex check reports it before the app starts")
         self.assertIn("'progress' is reserved", found[0].message)
+
+    # -- 1.914 ---------------------------------------------------------
+    def test_1_914_a_flood_of_reports_never_waits_and_the_page_gets_the_latest(self) -> None:
+        """
+        Scenario 1.914: a library that reports on every row.
+        Given: a job whose library calls self.progress 200 times, as fast as it can, from its
+               own thread; a job that kept self.progress to call after it ended.
+        When:  it runs through Reflex's event processor; the kept callback is called late.
+        Then:  the library never waits for the page: the 200 calls take a moment, not 200 state
+               round trips; the browser gets at most about four reports a second, never a
+               stale one after a newer, and always the last one ("Step 200"); the late call says
+               the job has ended.
+        """
+        flooded = testing.run(ReportsState, "flood")
+        sent = _reports(flooded.updates, ReportsState.flood)
+        self.assertLess(SEEN[-1], 0.2, "200 reports took a moment: the calls do not wait for the page")
+        self.assertLessEqual(len(sent), 3, "the page got the latest report, not every one")
+        self.assertEqual(sent[-1], (1.0, "Step 200"), "and always the last")
+        self.assertEqual(sent, sorted(sent), "never an older report after a newer one")
+        testing.run(ReportsState, "keep")
+        with self.assertRaises(RuntimeError) as ended:
+            KEPT[0](0.5, "too late")
+        self.assertIn("the job has ended", str(ended.exception))

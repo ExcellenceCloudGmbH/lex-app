@@ -219,7 +219,7 @@ nothing.
 | `self.params` | The page's route and query values: `self.params.section`, `self.params.get("w")` |
 | `self.can(Model, "edit")` | Whether Keycloak grants the user that scope on the model (model-wide grants only, as `has_permission` today) |
 | `self.state(Other)` | Another state of the same user, to read or change. In an action it is the live state; in a load or job it is a working copy merged like `self`. |
-| `self.progress(fraction, message)` | In a job only: shows its progress, as `yield ui.progress(...)` does, also from a thread the body started (a library's callback). See `@ui.job` in 6.4. |
+| `self.progress(fraction, message)` | In a job only: shows its progress, as `yield ui.progress(...)` does, also from a thread the body started (a library's callback); it never waits, and the page gets the latest report, up to four a second. The only part of `self` safe from another thread. See `@ui.job` in 6.4. |
 
 The helpers' names are reserved. A `ui.State` subclass that declares a field (with or without a
 default), a computed var or a method named `user`, `api`, `params`, `can`, `state`, `tab_id` or
@@ -390,11 +390,16 @@ one. A load started on a component's `on_mount` is not tied to the visit (below)
   `report = reports.build(values["year"], on_progress=self.progress)`. It records the same fraction
   and message, from the body's thread or any thread the body started. It writes only the progress:
   the job's other fields wait for its next `yield` or its end, so a library's thread never writes
-  them. Each call waits, like a `yield`, until lex-app has recorded it. Once the job is stopped
-  (a cancel, or `stop_on_leave`), the next call raises `GeneratorExit` -- what the next `yield`
-  raises -- in the thread that made it; a body that ends with it is a stopped run, not a failure.
-  In an action, a load, or after the job ended, it raises a `RuntimeError` saying it belongs in a
-  `@ui.job`. Added 2026-11-24 (batch 1dm), after rewrites of real dashboards needed a helper thread
+  them. A call never waits (review, 2026-11-24; it first waited a whole state round trip per call,
+  slowing a library that reports on every row): it keeps the latest report and returns, and
+  lex-app sends the page at most four reports a second (`REPORTS_PER_SECOND`), the latest each time
+  and always the last one before the job ends. Once the job is stopped (a cancel, or
+  `stop_on_leave`), the next call raises `GeneratorExit` -- what the next `yield` raises -- in the
+  thread that made it, without waiting (a cancel is seen at once, leaving the page at the next
+  report the page receives); a body that ends with it is a stopped run, not a failure. In an action
+  or a load it raises a `RuntimeError` saying it belongs in a `@ui.job`; after the job ended, one
+  saying the job has ended. `self.progress` is the only part of `self` that is safe from another
+  thread: a thread the body started must not read or write the state's fields. Added 2026-11-24 (batch 1dm), after rewrites of real dashboards needed a helper thread
   polling the library to report each step.
 - One run per tab, per job, per set of arguments at a time; a repeat while it runs is ignored. The
   arguments are compared as a whole: `export(2025, 2)` runs beside `export(2025, 1)`.

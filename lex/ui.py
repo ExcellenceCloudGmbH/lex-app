@@ -33,7 +33,9 @@
 ==========================  =====================================================
 ``ui.State``                base class of a page state: ``self.user`` (``.permissions``), ``self.api``,
                             ``self.tab_id`` (the browser tab, for a project's per-tab store),
-                            ``self.params``, ``self.can()``, ``self.state()``
+                            ``self.params``, ``self.can()``, ``self.state()``; in a job
+                            ``self.progress(fraction, message)``, also from a library's thread
+                            (the one part of ``self`` safe there)
 ``@ui.load``                fills the page when it opens
 ``@ui.action``              a short handler, under about a second
 ``@ui.job``                 long work with progress; the user keeps working. ``limit=2``: at

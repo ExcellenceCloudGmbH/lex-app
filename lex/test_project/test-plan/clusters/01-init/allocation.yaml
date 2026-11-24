@@ -2500,10 +2500,10 @@ letters:
       `ui.field(kind="choices", options=...)`: RFDS's checkbox group up to 12 fixed options, its multi-select above or for options from the state; the handler gets a `list[str]` in the order of the options, `[]` for none, checked on the server; in a form, a step and a button's ask=; `ui.fact` shows the kind joined by commas. These tests fail on a text where a list was promised, a value that is no option reaching the body, a required field passing with nothing ticked, or a field that calls the server on every tick.
   dm:
     title: 'lex.ui: a job reports progress from a callback -- self.progress(fraction, message)'
-    scenarios: 1.856-1.859
+    scenarios: 1.856-1.859, 1.914
     status: complete
     tests:
-      pass: 4
+      pass: 5
       skip: 0
       xfail: 0
     note: >-
