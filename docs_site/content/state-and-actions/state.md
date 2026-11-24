@@ -37,6 +37,7 @@ Inside a handler, `self` has helpers for the request it is running for:
 | `self.params` | the page's route and query values: `self.params.key`, `self.params["key"]`, or `self.params.get("w")` for an optional one |
 | `self.state(Other)` | another state of the same user, to read or change |
 | `self.tab_id` | the browser tab the handler runs for, for a per-tab store of your own |
+| `self.progress(fraction, message)` | in a `@ui.job` only: shows its progress, also when a library calls it ([`@ui.job`](/state-and-actions/job#progress-from-a-library)) |
 
 They work only inside a handler body (`@ui.load`, `@ui.action`, `@ui.job`, `@ui.rows`); anywhere
 else they raise an error that says so.
@@ -144,12 +145,14 @@ def pick(self, pk: int):
 
 ## What a state may hold
 
-- A field may not be called `user`, `api`, `params`, `can`, `state` or `tab_id`: those names are the
-  helpers. A state that declares one is refused when the class is defined, with a message saying
+- A field may not be called `user`, `api`, `params`, `can`, `state`, `tab_id` or `progress`: those
+  names are the helpers. A state that declares one is refused when the class is defined, with a message saying
   what to rename.
 - lex-app copies a state's fields - to undo a failed action, and as a job's working copy - so a
   field cannot hold something that cannot be copied, such as a lock or a client. Keep those outside
   the state.
-- What a field holds reaches the browser. Keep what the user may not see out of fields.
+- What a field holds reaches the browser. Keep what the user may not see in a field whose name
+  starts with `_`, which stays on the server, and personal data in a
+  [`ui.private`](/state-and-actions/private) field, which is not stored with the state either.
 
-Next: [`@ui.action`](/state-and-actions/action), what runs when the user clicks.
+Next: [Keeping results private](/state-and-actions/private), for data that must not be stored.

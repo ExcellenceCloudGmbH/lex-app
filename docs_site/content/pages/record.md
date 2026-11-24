@@ -203,6 +203,10 @@ ui.section("Investors", ui.fact("Investors committed", FundInvestors.count, kind
 
 `empty=` is the sentence a section's table shows when it has no rows.
 
+A record page's sections are always open: `collapsed=True`, which closes a section in a
+[form's result](/pages/forms#laying-out-a-result), stops a record page with an error. To show one
+section at a time, give the record `tabs=True`.
+
 On a record page, a section's `visible=` takes a permission, such as `visible=ui.read(Investor)`:
 a user without it still sees the section's heading, with a note that they may not see it. To show
 different content depending on the record, put a `ui.switch(...)` inside the section.

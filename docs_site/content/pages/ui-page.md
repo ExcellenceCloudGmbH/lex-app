@@ -37,9 +37,11 @@ What each argument does:
 - **The route** starts with `/`. A part in brackets, such as `[key]`, is an argument of the address;
   the page's loads read it from `self.params`, so the page function itself takes no arguments.
   Only plain arguments are supported, not optional or catch-all ones. An argument may not be
-  named like a state helper (`user`, `api`, `params`, `can`, `state`, `tab_id`), and no argument
-  or parameter may be named `to`, `record`, `href`, `visible`, `label`, `handler`, `tone` or
-  `icon`, the words a link or button uses itself; the error says what to rename.
+  named like a state helper (`user`, `api`, `params`, `can`, `state`, `tab_id`, `progress`), and
+  no argument or parameter may be named `to`, `record`, `href`, `visible`, `label`, `handler`,
+  `tone` or `icon`, the words a link or button uses itself; the error says what to rename. Nor
+  may it share its name with a field of any state: see
+  [A route argument and a state field](/pages/ui-page#a-route-argument-and-a-state-field).
 - **`nav=`** lists the page in the navigation under that heading, with the page's title as its
   label. Leave it out and the page is reachable by link only. A page in the navigation needs a
   fixed title, a string rather than a state value.
@@ -63,6 +65,21 @@ with an error that names both. lex-app calls every page function when it registe
 after your whole module is loaded, so a page may link to a page declared further down. A page
 declared wrongly - an empty slot, a section where a fact belongs - stops the app from starting,
 with an error that names the page and the slot.
+
+## A route argument and a state field
+
+Reflex makes each route argument a value of every state, and does not build the app's pages
+while any state - yours or a plain Reflex one - has a field or a computed value of the same name.
+Reflex finds this out only when it builds the pages for the browser, long after your tests
+passed. lex-app checks every route when the app starts, and stops it with a sentence that names
+the field, its state and the route:
+
+```text
+route '/regions/[region_code]': its dynamic argument [region_code] has the name of the field RegionsBoard.region_code (in myproject.regions). Reflex makes a route argument a value of every state, and does not build the app's pages while a state has a field of that name. Rename the field, e.g. region_code_value.
+```
+
+A field whose name starts with `_`, or a handler, may share an argument's name: Reflex allows
+those, and so does the check.
 
 ## What a page body is
 

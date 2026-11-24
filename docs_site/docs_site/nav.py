@@ -34,7 +34,7 @@ NAV: tuple[Section, ...] = (
         Group("Parts", ("pages/tables", "pages/buttons-and-links")),
     )),
     Section("state-and-actions", "State & actions", "Plain Python handlers; lex-app does the plumbing.", (
-        Group("State", ("state-and-actions/state",)),
+        Group("State", ("state-and-actions/state", "state-and-actions/private")),
         Group("Handlers", ("state-and-actions/action", "state-and-actions/job", "state-and-actions/load",
                               "state-and-actions/refresh")),
     )),

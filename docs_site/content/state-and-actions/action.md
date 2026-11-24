@@ -115,7 +115,11 @@ records written that way name the user as their creator or editor.
 If the body raises, the state's fields go back to what the browser last saw, and the user is told:
 
 - `raise ui.Refuse("...")` is an expected refusal. Its sentence is shown as written, and nothing
-  is logged.
+  is logged. `title=` adds a short heading: `ui.Refuse("No order in this region has an invoice.",
+  title="Nothing to export")` is a warning toast whose first line is the title and whose second is
+  the sentence. A form's handler shows its refusal in the form instead, above the submit button
+  ([Forms](/pages/forms#when-the-handler-says-no)); an action that a button's `ask=` dialog runs
+  shows it in the dialog, which stays open until the action succeeds.
 - If lex-app's API refuses a call because the request is wrong (a 4xx answer), the API's reason
   is shown; if it refuses for lack of permission, the user is told they are not permitted to do
   this. `ui.ApiError` is that refusal, with `.status`, `.denied` and `.detail`, for a handler that
@@ -134,7 +138,7 @@ An action returns nothing, or one or a list of these:
 
 | Return | What happens |
 | --- | --- |
-| `ui.toast("Saved.", tone="success")` | a short message; tones are info, success, warning, error; `description=` adds a second line |
+| `ui.toast("Saved.", tone="success")` | a short message; tones are info, success, warning, error; `description=` adds a second line; `link=` adds a button ([below](/state-and-actions/action#a-toast-that-opens-something)) |
 | `ui.goto("/funds/7")` | the browser goes to that page; `replace=True` replaces the current entry in its history |
 | `ui.download(data=..., filename="x.csv")` | the user gets a file, or `ui.download(url=...)` for one at an address; the file's name tells the browser what it is (`report.pdf` is a PDF) |
 | `ui.refresh(Other.rows)` | the tables over another state's `@ui.rows` handler read again ([Refreshing other tables](/state-and-actions/refresh)) |
@@ -144,6 +148,31 @@ Results in a list happen in the order written. Anything else - including Reflex'
 such as `rx.call_script` - fails the action with an error saying what may be returned; a raw
 Reflex handler is marked `@ui.custom`. A handler can also
 `yield` one of these partway through: what it changed so far reaches the browser at each `yield`.
+
+## A toast that opens something
+
+`ui.toast(..., link=ui.link(...))` puts one button in the toast, for a result the user may want to
+open now: an export's page, a record, a report in another system. The link is written as every
+[link](/pages/buttons-and-links) is, with the same targets - `to=` a page with its values,
+`record=(Model, pk)`, or `href=` an outside address:
+
+```python
+@ui.job
+def export(self, region):
+    export_id = exports.start(self.user.id, region)
+    ...
+    return ui.toast("Your export is ready.", tone="success",
+                    link=ui.link("Open", to=export_page, key=export_id))
+```
+
+- The link is checked when the handler makes the toast: a page given a value it does not take,
+  or missing one it needs, fails the handler with a sentence saying what to write, not the
+  user's click.
+- A success or info toast with a button stays open 10 seconds, so there is time to press it.
+- The toast's button is always shown: `visible=` on its link is refused. What it opens should
+  also be reachable on the page, for a user who misses the toast.
+
+## Seeing it run
 
 In a page, `ui.running(Sizes.grow)` is true while the action runs, and `ui.failed(Sizes.grow)` is
 the message of its last failure. A button in `row_actions` shows its own row's run as loading.

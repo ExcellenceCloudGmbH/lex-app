@@ -8,7 +8,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "pages": ("page", "dashboard", "reflex_page", "embed", "record", "list", "form", "field", "step"),
     "parts": ("section", "table", "column", "fact", "text", "each", "status", "custom", "custom_block",
               "button", "link", "switch", "address", "message", "progress", "progress_of"),
-    "state": ("State", "action", "job", "load", "rows", "running", "failed", "loaded", "cancel", "refresh"),
+    "state": ("State", "private", "action", "job", "load", "rows", "running", "failed", "loaded", "cancel", "refresh"),
     "results": ("toast", "goto", "download", "Refuse", "ApiError", "PageError"),
     "permissions": ("read", "create", "edit", "delete", "signed_in", "permission"),
     "testing": ("testing",),

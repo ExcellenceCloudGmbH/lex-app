@@ -116,12 +116,76 @@ ui.column("signed_on", label="Signed", kind="date")
 ```
 
 - **`kind=`** says what the values are: `text`, `number`, `money`, `percent`, `date`, `datetime`,
-  `status` (a word with a tone), `tag` (one label) or `tags` (a list of labels).
+  `status` (a word with a tone), `tag` (one label), `tags` (a list of labels), `name` (a person's
+  or a company's name, given room) or `code` (a short identifier such as an order number, kept
+  narrow). There is no width argument: `name` and `code` set the room, and any other column takes
+  the room its values need.
 - **`label=`** is the column's heading; by default it is the field name with spaces for
   underscores, capitalized (`signed_on` becomes "Signed on").
 - **`tones=`** goes with `kind="status"`: which tone each word gets.
 - **`show=`** draws a cell no kind describes: a function of the row that returns `ui.text`,
   `ui.status` or `ui.link`.
+- **`pin=True`** keeps the column in place while the table scrolls sideways. Only the first
+  column, the one that names the row, can be pinned.
+
+## Wide tables and long ones
+
+```python exec
+class Register(ui.State):
+    @ui.rows
+    def rows(self):
+        funds = {row["id"]: row for row in every(self.api, Fund)}
+        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
+        return [
+            {"id": row["id"], "investor": investors[row["investor"]], "reference": f"C-{row['id']:04d}",
+             "fund": funds[row["fund"]]["name"], "signed_on": row["signed_on"], "amount": row["amount"],
+             "currency": funds[row["fund"]]["currency"]}
+            for row in every(self.api, Commitment, ordering="signed_on")
+        ]
+```
+
+```python
+class Register(ui.State):
+    @ui.rows
+    def rows(self):
+        funds = {row["id"]: row for row in every(self.api, Fund)}
+        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
+        return [
+            {"id": row["id"], "investor": investors[row["investor"]], "reference": f"C-{row['id']:04d}",
+             "fund": funds[row["fund"]]["name"], "signed_on": row["signed_on"], "amount": row["amount"],
+             "currency": funds[row["fund"]]["currency"]}
+            for row in every(self.api, Commitment, ordering="signed_on")
+        ]
+```
+
+```python demo
+ui.table(
+    Register.rows,
+    columns=[ui.column("investor", kind="name", pin=True), ui.column("reference", kind="code"), "fund",
+             ui.column("signed_on", label="Signed", kind="date"),
+             ui.column("amount", kind="money", currency="currency")],
+    search=True,
+    totals={"amount": "sum of all rows"},
+    page_size=None,
+    choose_columns=True,
+)
+```
+
+All ten commitments are on one page. Narrow the window and scroll the table sideways: the
+investor stays in place. Open **Columns** to hide a column, move it, or type its width. Search for
+"Rhine": two rows are left, and the totals row, now labelled "Total of all rows", still sums all
+ten, one total per currency.
+
+- **`page_size=None`** shows every row in one scroll, up to 200, the most a table holds in the
+  browser; past 200, the table pages again, so no row is out of reach. `page_size=50` opens at 50
+  rows a page (any number up to 200); the default is 25.
+- **`choose_columns=True`** adds a **Columns** menu where the user hides, orders and sizes the
+  columns (a width from 40 to 1,200 pixels, typed in). The first column always shows and stays
+  first, since it names the row. The choice lasts until the browser tab is closed.
+- **`totals=`** takes `"sum"`, the total of the rows the search and filters leave, or
+  `"sum of all rows"`, the total of every row whatever the user narrows. While a search or a
+  filter is on, the label says which: "Total of matching rows" or "Total of all rows"; otherwise
+  it reads "Total". All totals of one table are of the same kind.
 
 ## Filters
 
@@ -245,6 +309,7 @@ on this site. The demos here use `@ui.rows` tables over sample data.
 
 A model table is shown only to users who may read the model. Its `filters=` work on fields with
 choices or yes/no fields, so a date range is not offered there, and it cannot export or total
-yet; for those, read the rows in a `@ui.rows` handler.
+yet; for those, read the rows in a `@ui.rows` handler. `pin=`, `page_size=` and
+`choose_columns=True` work on a model table too.
 
 Next: [Buttons and links](/pages/buttons-and-links), what a user clicks.

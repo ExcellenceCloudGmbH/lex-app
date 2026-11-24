@@ -79,7 +79,7 @@ reads.
 | --- | --- | --- |
 | a public method (no leading `_`) without a lex.ui decorator | error | Reflex makes every public method of a state something the browser can call |
 | a raw `@rx.event` on a `ui.State` | error | it skips what lex.ui does for a handler; use `@ui.action`, `@ui.job` or `@ui.load`, or mark it `@ui.custom` |
-| a field, computed var or method named `user`, `api`, `params`, `can`, `state` or `tab_id` | error | it would hide the helper of that name in every handler |
+| a field, computed var or method named `user`, `api`, `params`, `can`, `state`, `tab_id` or `progress` | error | it would hide the helper of that name in every handler |
 | `self.<handler>(...)` of the state's own handler, or one it inherits | error | a handler called from another handler's body does not run |
 | a handler that names `.objects` or `._default_manager` without `requires=` | warning | the query is refused when it runs: read through `self.api`, or declare `requires=` |
 | a `@ui.custom` handler | note | listed for review |
