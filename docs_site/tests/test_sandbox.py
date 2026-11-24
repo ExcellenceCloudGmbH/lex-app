@@ -128,3 +128,46 @@ def test_a_lex_ui_handler_reads_the_sandbox():
     result = testing.run(OpenFunds, "open", api=SandboxApi(Store().tab("h")))
     assert result.fields["names"] == ["Northbridge Growth II", "Harbour Infrastructure",
                                       "Alder Credit Opportunities"]
+
+
+def _grants(tab: str, role: str):
+    STORE.reset(tab)
+    STORE.tab(tab).role = role
+    session = asyncio.run(sandbox.resolve(_fake_state(tab)))
+    return asyncio.run(session.permissions())
+
+
+def test_a_viewer_cannot_edit_and_an_editor_can():
+    from lex.lex_app.reflex.ui import guard
+
+    need = (guard.edit(Fund),)
+    assert guard.granted((guard.read(Fund),), _grants("tab-v", "viewer")) is True
+    assert guard.granted(need, _grants("tab-v", "viewer")) is False
+    assert guard.granted(need, _grants("tab-e", "editor")) is True
+    assert guard.granted((guard.delete(Fund),), _grants("tab-e", "editor")) is True
+
+
+def _set_role(tab: str, value):
+    from docs_site.sandbox.role import RoleState
+
+    handler = RoleState.set_role
+    fn = getattr(handler, "fn", handler)
+    stub = SimpleNamespace(router=SimpleNamespace(session=SimpleNamespace(client_token=tab)), role="editor")
+    fn(stub, value)
+    return stub
+
+
+def test_set_role_changes_the_tab_role_and_ignores_bad_values():
+    STORE.reset("tab-s")
+    stub = _set_role("tab-s", "viewer")
+    assert stub.role == "viewer" and STORE.tab("tab-s").role == "viewer"
+    stub = _set_role("tab-s", "admin")
+    assert stub.role == "editor" and STORE.tab("tab-s").role == "viewer"  # stub keeps its own; store unchanged
+    _set_role("tab-s", ["editor"])
+    assert STORE.tab("tab-s").role == "editor"
+
+
+def test_the_switch_builds():
+    from docs_site.sandbox import role
+
+    assert type(role.switch()).__name__ == "SegmentedControlRoot"
