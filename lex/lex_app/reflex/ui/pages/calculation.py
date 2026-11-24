@@ -179,6 +179,8 @@ class Calculation(kinds.Kind):
 
         ``top``: a slot's own item, where a field alone is a fact with the model's label.
         """
+        from django.db import models
+
         field = _field_of(value)
         if field is not None:
             if field.model is not self.model and not issubclass(self.model, field.model):
@@ -187,8 +189,12 @@ class Calculation(kinds.Kind):
                                f"A run's value is written as the model's field: `{self.model.__name__}.<field>`. For "
                                f"records of another model, give the section a `ui.table({field.model.__name__}, "
                                f"where={{...: {self.model.__name__}.id}})`.")
+            label = str(field.verbose_name).capitalize()
+            if top and isinstance(field, models.FileField):      # the run's file: a button that downloads it
+                return vocab.button(label, self.state.download, field.name,
+                                    visible=self.state.run[field.name].to(str) != "")
             if top:
-                return vocab.Fact(str(field.verbose_name).capitalize(), self._value(field), _kind(field))
+                return vocab.Fact(label, self._value(field), _kind(field))
             return self._value(field)
         if isinstance(value, Part) and dataclasses.is_dataclass(value):
             changed = {one.name: self._swap(ctx, getattr(value, one.name)) for one in dataclasses.fields(value)
@@ -236,7 +242,9 @@ class Calculation(kinds.Kind):
                                                            back_href=ctx.route or "/"))
         note = State.ui_progress_message.get(runs.key_of(S.follow), "")
         # The progress part follows the run while it shows: it starts the job that reads the record.
-        progress = rx.box(rfds.progress_bar(None, label=rx.cond(note != "", note, say("Running")), indeterminate=True),
+        stop = vocab.button("Stop", S.stop, confirm="Stop this run?", visible=guard.edit(self.model))
+        progress = rx.box(rfds.stack(rfds.progress_bar(None, label=rx.cond(note != "", note, say("Running")),
+                                                       indeterminate=True), stop.build(ctx.at("stop"))),
                           on_mount=S.follow, width="100%")
         problem = rx.match(
             status,

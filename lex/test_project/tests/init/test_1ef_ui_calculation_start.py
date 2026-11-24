@@ -111,7 +111,7 @@ class TestCluster01ef_CalculationStart(E2ETestCase):
         with self.assertRaises(PageError) as unknown:
             region_reports(fields=[ui.field("region"), ui.field("year"), ui.field("colour")]).build(CTX)
         self.assertIn("field `colour` is not a field of UiRegionReport", str(unknown.exception))
-        self.assertIn("region, revenue, year", str(unknown.exception), "it lists the fields a record is given")
+        self.assertIn("region, report_file, revenue, year", str(unknown.exception), "it lists the fields a record is given")
         with self.assertRaises(PageError) as missing:
             region_reports(fields=[ui.field("region")]).build(CTX)
         self.assertIn("needs `year` when a record is created", str(missing.exception))

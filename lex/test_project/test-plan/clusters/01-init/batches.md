@@ -3654,3 +3654,25 @@ Third piece of the calculation page (section 6.19 of `docs/superpowers/specs/202
 | 1.991 | The past runs are a model table lex-app completes | compiled under Past runs; the status column added last, in the badge's words; each row a link to ?run=<key>; -id first; the author's search kept; the author's table unchanged |
 | 1.992 | Past runs written wrongly say what to write | another model, open=, where=, not a table |
 | 1.993 | The past runs are read as the user, newest first | three runs, newest first with their status, through lex-app's list view; none for a reader the model's permission_read refuses |
+
+### Batch 1ei — lex.ui calculation pages: a file the run produced, and stopping a run ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.994 – 1.997 |
+| Type | E |
+| Files covered | `lex/lex_app/reflex/ui/pages/calculation.py` (a FileField alone in `result=`, Stop), `lex/lex_app/reflex/ui/calculations.py` (`download`, `stop`), `lex/lex_app/reflex/data.py` (`LexApi.file`, `LexApi._send`), `lex/lex_app/reflex/ui/context.py` (`self.api.file`) |
+| Test file | `lex/test_project/tests/init/test_1ei_ui_calculation_file_stop.py` |
+| Test classes | `TestCluster01ei_CalculationFileAndStop` (1.994–1.997) |
+| Fixtures | the 1ef models, `UiRegionReport.with_file` writing a CSV into `report_file` (deleted after each test); lex-app's record of running calculations left running (`e2e_unpatch`); a recorded worker task and revoke |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Fourth piece of the calculation page (section 6.19 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`). lex-app cancels only runs on a worker (`CalculationModel.cancel` answers 409 `sync_calculation_not_cancellable` otherwise); the page words that refusal.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.994 | A file the run produced is downloaded as the user | a button labelled as the model labels the field; the run's CSV and stored name through lex-app's download view; a forged field refused |
+| 1.995 | Stop cancels a run on a worker and the page says so | the worker's task revoked; the record and the page CANCELLED; following ended; no failure |
+| 1.996 | A run in lex-app's process cannot be stopped and the page says so | refused in words; the run still ends in SUCCESS; a later Stop: already ended |
+| 1.997 | The whole page declared with ui.page compiles | registered with lex-app's load; compiled with the form, the past runs, the progress and Stop asking Stop this run? behind the edit permission |

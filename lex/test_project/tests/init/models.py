@@ -41,7 +41,8 @@ class UiRegionReport(CalculationModel):
     ``calculate()`` logs a line, counts the region's orders and writes one line per customer
     (``UiRegionReportLine``). Test controls, reset by every test that uses them: ``gate`` holds
     the run open so a test can watch it in progress; ``may_create`` / ``may_read`` stand for the
-    model's permissions (a user who may not start one, or may not see another's run).
+    model's permissions (a user who may not start one, or may not see another's run); ``with_file``
+    makes the run write a CSV into ``report_file``.
     """
 
     region = models.CharField(max_length=20)
@@ -49,10 +50,12 @@ class UiRegionReport(CalculationModel):
     orders = models.IntegerField(null=True, blank=True)
     revenue = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     calculation_error_message = models.TextField(blank=True, default="")
+    report_file = models.FileField(upload_to="ui_region_reports/", null=True, blank=True)
 
     gate = None
     may_create = True
     may_read = True
+    with_file = False
 
     class Meta:
         app_label = "lex_app"
@@ -90,6 +93,11 @@ class UiRegionReport(CalculationModel):
         self.revenue = "1250.50"
         for customer in ("Acme", "Beta"):
             UiRegionReportLine.objects.create(report=self, customer=customer, amount="625.25")
+        if type(self).with_file:
+            from django.core.files.base import ContentFile
+
+            self.report_file.save(f"region-{self.region}-{self.year}.csv",
+                                  ContentFile(b"customer,amount\nAcme,625.25\nBeta,625.25\n"), save=False)
 
 
 class UiRegionReportLine(LexModel):

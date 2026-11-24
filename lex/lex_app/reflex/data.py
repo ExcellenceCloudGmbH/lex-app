@@ -110,6 +110,13 @@ class LexApi:
         self._client = client
 
     async def _request(self, method: str, path: str, *, params: Any = None, json: Any = None) -> Any:
+        response = await self._send(method, path, params=params, json=json)
+        if response.status_code == 204 or not response.content:
+            return None
+        return response.json()
+
+    async def _send(self, method: str, path: str, *, params: Any = None, json: Any = None) -> Any:
+        """The API's answer to one request; :class:`LexApiError` when it refuses."""
         import httpx
 
         headers = {"Authorization": f"Bearer {self._token}", "Accept": "application/json"}
@@ -128,9 +135,7 @@ class LexApi:
             except ValueError:
                 detail = response.text[:500]
             raise LexApiError(response.status_code, detail)
-        if response.status_code == 204 or not response.content:
-            return None
-        return response.json()
+        return response
 
     async def list(
         self,
@@ -185,6 +190,16 @@ class LexApi:
         name = model_id(model)
         run = f"{name}_{pk}_update_{uuid.uuid4()}"
         return await self._request("PATCH", f"model_entries/{name}/{run}/one/{pk}", json={"calculate": "true"})
+
+    async def file(self, model: Any, pk: Any, field: str) -> dict:
+        """A record's file, as the user may download it through lex-app (its checks and audit entry apply).
+
+        ``{"data": bytes}``, or ``{"url": ...}`` where lex-app's storage serves the file at an address.
+        """
+        response = await self._send("GET", f"{model_id(model)}/file-download", params=[("pk", str(pk)), ("field", field)])
+        if str(response.headers.get("content-type", "")).startswith("application/json"):
+            return {"url": str((response.json() or {}).get("download_url") or "")}
+        return {"data": bytes(response.content)}
 
     async def log(self, model: Any, pk: Any) -> "list[str]":
         """The log of a calculation record's newest run, as the user may read it: one Markdown text per entry.

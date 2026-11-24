@@ -304,6 +304,10 @@ class Api:
         """
         return self._call("calculate", model, pk)
 
+    def file(self, model: Any, pk: Any, field: str) -> dict:
+        """A record's file, downloaded as the user: ``{"data": bytes}``, or ``{"url": ...}`` from a storage that serves it."""
+        return self._call("file", model, pk, field)
+
     def log(self, model: Any, pk: Any) -> list[str]:
         """The log of a calculation record's newest run, one Markdown text per entry (``[]`` before one is stored)."""
         return self._call("log", model, pk)

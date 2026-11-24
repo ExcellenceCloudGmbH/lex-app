@@ -1842,3 +1842,18 @@ does not remove user launch configurations.
 | 1.993 | The past runs are read as the user, newest first | three runs, newest first with their status, through lex-app's list view; none for a reader the model's permission_read refuses |
 
 **Scenario range:** 1.991 – 1.993. **Test file:** `lex/test_project/tests/init/test_1eh_ui_calculation_history.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1eh](batches.md).
+
+### 1ei. lex.ui calculation pages: a file the run produced, and stopping a run ✅
+
+**What it tests:** a calculation page's file download and Stop, and the whole page declared with `@ui.page`.
+
+**Why a regression matters:** a file downloaded past lex-app's checks, a Stop that pretends to stop a run that goes on, or a page left saying running after a stop.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.994 | A file the run produced is downloaded as the user | a button labelled as the model labels the field; the run's CSV and stored name through lex-app's download view; a forged field refused |
+| 1.995 | Stop cancels a run on a worker and the page says so | the worker's task revoked; the record and the page CANCELLED; following ended; no failure |
+| 1.996 | A run in lex-app's process cannot be stopped and the page says so | refused in words; the run still ends in SUCCESS; a later Stop: already ended |
+| 1.997 | The whole page declared with ui.page compiles | registered with lex-app's load; compiled with the form, the past runs, the progress and Stop asking Stop this run? behind the edit permission |
+
+**Scenario range:** 1.994 – 1.997. **Test file:** `lex/test_project/tests/init/test_1ei_ui_calculation_file_stop.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1ei](batches.md).

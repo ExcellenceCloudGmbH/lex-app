@@ -97,7 +97,8 @@ def _read(state: Any, plan: Plan, key: Any) -> dict:
 
 
 def make_state(plan: Plan, counter: Any) -> type:
-    """A ``ui.State`` for one calculation page, with its handlers: ``calculate``, ``open``, ``follow``."""
+    """A ``ui.State`` for one calculation page, with its handlers: ``calculate``, ``open``, ``follow``,
+    ``download`` (a file of the run) and ``stop``."""
     import reflex as rx  # noqa: F401 - Reflex builds the class's vars from its annotations
 
     name = f"Calculation_{plan.model._meta.model_name}_{next(counter)}"
@@ -131,6 +132,37 @@ def make_state(plan: Plan, counter: Any) -> type:
             time.sleep(POLL_SECONDS)
         self.run_log = list(self.api.log(plan.model, self.run_id))
 
+    def download(self, field: str):
+        from django.db import models
+
+        found = next((one for one in plan.model._meta.concrete_fields if one.name == field), None)
+        if not isinstance(found, models.FileField):
+            raise results.Refuse(f"{field} is not a file of {plan.model.__name__}.")
+        stored = str(_read(self, plan, self.run_id).get(field) or "")
+        if not stored:
+            raise results.Refuse(results.message("lex.ui.calculation.no_file", "This run has no file here."))
+        got = self.api.file(plan.model, self.run_id, field)
+        if got.get("url"):
+            return results.download(url=got["url"])
+        return results.download(data=got["data"], filename=stored.rstrip("/").rsplit("/", 1)[-1])
+
+    def stop(self):
+        from lex.lex_app.reflex.data import LexApiError
+
+        try:
+            report = self.api.update(plan.model, self.run_id, {"cancel": "true"})
+        except LexApiError as exc:
+            if exc.status != 409:
+                raise
+            reason = exc.detail.get("reason", "") if isinstance(exc.detail, dict) else ""
+            if reason == "not_in_progress":
+                raise results.Refuse(results.message("lex.ui.calculation.ended", "The run has already ended.")) from None
+            raise results.Refuse(results.message(
+                "lex.ui.calculation.unstoppable",
+                "This run cannot be stopped: lex-app runs it in its own process, where a run goes on to its "
+                "end. A run on a worker can be stopped.")) from None
+        self.run_status = str((report or {}).get("status") or CANCELLED)
+
     namespace: dict[str, Any] = {
         "__module__": __name__,
         "__qualname__": name,
@@ -139,7 +171,8 @@ def make_state(plan: Plan, counter: Any) -> type:
         "run_id": "", "run": {}, "run_status": "", "run_name": "", "run_error": "", "run_log": [],
     }
     made = {"calculate": (handlers.action, calculate), "open": (handlers.load, open),
-            "follow": (lambda fn: handlers.job(fn, stop_on_leave=True), follow)}
+            "follow": (lambda fn: handlers.job(fn, stop_on_leave=True), follow),
+            "download": (handlers.action, download), "stop": (handlers.action, stop)}
     for handler, (decorate, fn) in made.items():
         fn.__name__ = handler
         fn.__qualname__ = f"{name}.{handler}"

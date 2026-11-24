@@ -51,8 +51,9 @@
 ``ui.ApiError``             lex-app's API refused a call (``.status``, ``.denied``,
                             ``.detail``); uncaught, it is shown to the user
 ``self.api``                lex-app's API as the user: ``list/get/create/update/delete``, and for
-                            a calculation ``calculate(Model, pk)`` (as the Calculate button) and
-                            ``log(Model, pk)`` (its newest run's log)
+                            a calculation ``calculate(Model, pk)`` (as the Calculate button),
+                            ``log(Model, pk)`` (its newest run's log); ``file(Model, pk, field)``
+                            a record's file, downloaded as the user
 ``requires=``               ``ui.read/create/edit/delete(Model)``, ``ui.permission()``,
                             ``ui.signed_in`` -- needed to query the database directly
 ``ui.running/failed/        a handler's status, for views; ``ui.cancel`` is the

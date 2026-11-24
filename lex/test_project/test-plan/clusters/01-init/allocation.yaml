@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 993
+max_scenario: 997
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2648,3 +2648,13 @@ letters:
       xfail: 0
     note: >-
       `history=ui.table(Model, columns=[...])`: under the form, titled Past runs; lex-app adds the status column in the badge's words, each row's link to `?run=<key>`, and the newest run first, without new table arguments; a table of another model, `open=`, `where=` or no table refused; the rows read as the user, so the model's permission_read decides. These tests fail on a past run nobody can open, the oldest run first, or runs the model would not show the reader.
+  ei:
+    title: 'lex.ui calculation pages: a file the run produced, and stopping a run'
+    scenarios: 1.994-1.997
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      A FileField of the run alone in `result=` is a button that downloads the run's file through lex-app's download view as the user (`self.api.file`), shown only when the run has one; a forged field refused. Stop (to users who may edit, asking "Stop this run?") is lex-app's cancel: a run on a worker is revoked and CANCELLED and the page stops following; a run in lex-app's own process cannot be stopped and the page says so; after the end, "The run has already ended." The whole page declared with @ui.page compiles. These tests fail on a file downloaded past lex-app's checks, a Stop that pretends, or a page left running after a stop.

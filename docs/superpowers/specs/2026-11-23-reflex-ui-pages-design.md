@@ -807,9 +807,10 @@ def region_reports():
     )
 ```
 
-One new name, `ui.calculation`; everything inside it is form, section and table vocabulary. Two methods
-on `self.api` that a project's own handlers may use too: `self.api.calculate(Model, pk)` and
-`self.api.log(Model, pk)`.
+One new name, `ui.calculation`; everything inside it is form, section and table vocabulary. Three
+methods on `self.api` that a project's own handlers may use too: `self.api.calculate(Model, pk)`,
+`self.api.log(Model, pk)` and `self.api.file(Model, pk, field)` (a record's file through lex-app's
+download view, as the user: `{"data": bytes}`, or `{"url": ...}` where the storage serves it).
 
 **One page, two views.** The page at `/reports/regions` shows the form, and under it the past runs.
 The same page with `?run=42` shows that run: the page of a record. One declaration, one permission,
@@ -918,6 +919,16 @@ write of the page is the user's.
 **What a reader of a past run sees** is that run's view, as it stands: the same badge, inputs, result,
 error and log as the user who ran it saw at the end -- read now, as the reader, so a field the reader
 may not see is missing for them as it is in the grid.
+
+**Stop (built in 1ei).** A button under the progress, to users who may edit the model, asking "Stop this
+run?" (RFDS's confirmation: a stopped run cannot be resumed). It is lex-app's cancel
+(`PATCH ... cancel=true`). lex-app stops only a run on a worker -- it revokes the worker's task and
+writes CANCELLED, which the page then shows; a run in lex-app's own process goes on to its end (the
+cancel answers 409, `sync_calculation_not_cancellable`), and the page says so in words: "This run
+cannot be stopped: lex-app runs it in its own process, where a run goes on to its end. A run on a
+worker can be stopped." After the end: "The run has already ended." The file button is labelled with
+the field's `verbose_name` and shown only when the run has a file; the handler accepts only a
+`FileField` of the model, since its argument comes from the browser.
 
 **Built in four batches:** 1ef the kind, the form and the start (`self.api.calculate`); 1eg the run's
 view, following with and without Celery, the result, the error, the log (`self.api.log`); 1eh the past

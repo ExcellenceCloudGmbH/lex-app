@@ -41,7 +41,21 @@ class ViewsClient:
             finally:
                 close_old_connections()
 
-        return await asyncio.to_thread(call)
+        response = await asyncio.to_thread(call)
+        if getattr(response, "streaming", False):          # a file: httpx reads the whole body
+            return _Read(response.status_code, dict(response.headers), b"".join(response.streaming_content))
+        return response
+
+
+class _Read:
+    """A streamed answer read whole, as httpx gives it."""
+
+    def __init__(self, status_code: int, headers: dict, content: bytes):
+        self.status_code, self.headers, self.content = status_code, headers, content
+        self.text = content.decode("utf-8", "replace")
+
+    def json(self) -> Any:
+        return json.loads(self.content)
 
 
 def _dumps(value: Any) -> str:
