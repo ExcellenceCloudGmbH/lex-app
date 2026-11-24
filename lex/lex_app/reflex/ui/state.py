@@ -38,6 +38,9 @@ def check_app_routes(app: Any) -> None:
                if kwargs.get("route")]
     for route in routes:
         check_route(route)
+    from lex.lex_app.reflex.ui.pages import links
+
+    links.check_reflex_pages(routes)   # a link to a raw page leads to a page the app has
 
 
 def _page_permitted(state: Any, requires: str) -> bool:

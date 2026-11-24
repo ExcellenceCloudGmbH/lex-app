@@ -50,7 +50,7 @@ def person():
 person.__ui_page__ = links.info_of("/people/[key]", "person")
 
 
-class TableDesk(ui.State):
+class PeopleState(ui.State):
     """A page state whose rows a table reads."""
 
     reads: int = 0
@@ -80,27 +80,27 @@ class TableDesk(ui.State):
         DATA["rows"] = [row for row in DATA["rows"] if str(row["id"]) != str(key)]
 
 
-class OtherDesk(ui.State):
+class OtherState(ui.State):
     """Another state, whose handler refreshes the first one's table."""
 
     @ui.action
     def touch(self):
         DATA["rows"] = DATA["rows"][:1]
-        return ui.refresh(TableDesk.people)
+        return ui.refresh(PeopleState.people)
 
 
 def build_people_table(route: str = "/people/[key]", slot: str = "sections", listing: bool = False) -> type:
-    table = ui.table(TableDesk.people, open="goes_to", search=True, filters=["kind", "roles"], export=True,
+    table = ui.table(PeopleState.people, open="goes_to", search=True, filters=["kind", "roles"], export=True,
                      totals={"amount": "sum"},
                      columns=["name", ui.column("roles", kind="tags"),
                               ui.column("amount", kind="money", currency="currency"), ui.column("kind", kind="status")],
-                     row_actions=lambda row: [ui.button("End role", TableDesk.end, row["id"])])
+                     row_actions=lambda row: [ui.button("End role", PeopleState.end, row["id"])])
     table.build(Build(page="person", route=route, slot=slot, caption="Roles", page_search=listing))
     return rows_table._CACHE_BY_TABLE[id(table)]  # this table's state, whatever other test built one before
 
 
 def simple_table(handler) -> type:
-    crowded = handler is TableDesk.crowded
+    crowded = handler is PeopleState.crowded
     ui.table(handler, columns=["name", "kind"] if crowded else ["name"], filters=["kind"] if crowded else ()).build(
         Build(page="person", route="/people/[key]", caption="People"))
     return rows_table._BY_HANDLER[rows_table.handler_key(handler)][-1]
@@ -240,10 +240,10 @@ class TestCluster01cw_RowsTable(SimpleTestCase):
             async with testing.Harness(user="ada", params={"key": "1"}) as h:
                 await h.open_tab("/people/1")
                 await (await h.send(state, "open"))
-                await (await h.send(TableDesk, "end", key="2"))
+                await (await h.send(PeopleState, "end", key="2"))
                 await asyncio.sleep(0.2)
                 after_action = [row["name"] for row in await page_of(h, state)]
-                await (await h.send(OtherDesk, "touch"))
+                await (await h.send(OtherState, "touch"))
                 await asyncio.sleep(0.2)
                 after_refresh = [row["name"] for row in await page_of(h, state)]
                 await (await h.send(state, "close"))
@@ -298,7 +298,7 @@ class TestCluster01cw_RowsTable(SimpleTestCase):
         self.assertEqual(listing.query_param, "q",
                          "a list page keeps its table's search in the address as ?q=")
         self.assertEqual(record.query_param, "", "a table in a record's section does not")
-        gated = ui.table(TableDesk.people, columns=["name"], filters=["name"]).build(
+        gated = ui.table(PeopleState.people, columns=["name"], filters=["name"]).build(
             Build(page="later", route="/later/[key]", caption="Later", under_load=True))
         self.assertNotIn("/later/[key]", rows_table._BY_ROUTE,
                          "a table that appears only after a load is not read again by the page's opener")
@@ -314,8 +314,8 @@ class TestCluster01cw_RowsTable(SimpleTestCase):
                reference and never its detail; a filter of more than 50 values is the table's
                error too (the advice to search goes to the log, with the reference).
         """
-        refusing, failing, crowded = (simple_table(TableDesk.refusing), simple_table(TableDesk.failing),
-                                      simple_table(TableDesk.crowded))
+        refusing, failing, crowded = (simple_table(PeopleState.refusing), simple_table(PeopleState.failing),
+                                      simple_table(PeopleState.crowded))
 
         async def scenario():
             async with testing.Harness(user="ada", params={"key": "1"}) as h:

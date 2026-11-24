@@ -3084,7 +3084,7 @@ could only link to `@ui.page` functions, so its rows lost their links. 1.783's n
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.824 | A raw Reflex page is somewhere a link may lead | the address is the route with its value encoded as one piece, and is the kind of address a table follows; the table's rows link by their key; the link and the button lead there; a missing or unknown value, and a route that is no route, are refused with what to write |
+| 1.824 | A raw Reflex page is somewhere a link may lead | the address is the route with its value encoded as one piece, and is the kind of address a table follows; the table's rows link by their key; the link and the button lead there; a missing or unknown value, and a route that is no route, are refused with what to write; an app without a declared page does not start, naming the route |
 
 ### Batch 1dg — Reflex config: the npm packages RFDS's browser code needs ✅
 
