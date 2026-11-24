@@ -102,6 +102,11 @@ def shown(ctx: Build, component: rx.Component, visible: Any) -> rx.Component:
         from lex.lex_app.reflex.access import permission
 
         return can(permission(visible.target, visible.scope), component)
+    if isinstance(visible, guard.Rule):
+        raise ctx.fail(f"`visible=` got {visible!r}, a project's rule; it is asked on the server, and `visible=` "
+                       "is decided in the browser.",
+                       "Set a state field in the page's load -- `self.may_see = region_team(self.user, "
+                       "self.params)` -- and write `visible=State.may_see`.")
     if isinstance(visible, (list, tuple)):
         if not visible:
             raise ctx.fail("`visible=` got an empty list.", "List at least one permission: `visible=[ui.read(Model)]`.")

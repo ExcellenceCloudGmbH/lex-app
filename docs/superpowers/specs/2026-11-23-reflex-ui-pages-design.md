@@ -812,6 +812,95 @@ Built in batch 1dx.
   the server from the route, so nothing of the browser's can ride on them), and not running the
   loads again (a reload would then never refresh the page's data).
 
+### 6.19 lex-app's frame, configured: areas, breadcrumbs, no access, a page opened, a project's rule (2026-11-24)
+
+A need found while rewriting dashboards: a project with several areas of work ("Orders", "Reports",
+"Tools", each with several pages) had its own navigation in areas, breadcrumbs, a "you have no access"
+page with its own way out, and a "recently used" list. As lex.ui pages they lost all of it, because
+lex-app's frame decides how a page looks (goal 4). A per-project wrapper was built and withdrawn
+(`2026-11-24-reflex-ui-project-chrome-design.md`): it was a second chrome. Instead lex-app's own frame
+takes a few generic parts, each a need of any project with several areas; nothing in it draws.
+
+**One place: `ui.frame(...)`, once, in the dashboard module, beside the `@ui.page`s.**
+
+```python
+ui.frame(nav=["Orders", "Reports", "Tools"],
+         denied="Ask your administrator for access.", request_access=access_request,
+         opened=remember_page, sign_out="https://portal.example.com/sign-out")
+```
+
+*Why there, not in Django settings:* the areas are the same words as the pages' `nav=` beside it, and
+`request_access=`, `opened=` and `sign_out=` are a page, a function and an address that lex-app
+checks as it checks a link (a setting would be a dotted string, checked late). It is called once; a
+second call from another module is refused (a reload of the same module replaces it). Every argument
+is optional. *Considered:* settings (above); one argument per feature on every `@ui.page` (repeats
+itself on every page). *Not added:* the product name stays `LEX_DASHBOARD_TITLE` and the badge
+`LEX_ENVIRONMENT` -- values of a deployment, beside each other in its environment; no logo or colours,
+since the look is lex-app's (section 8).
+
+- **Areas are `nav=`.** A page's `nav="Orders"` already listed it under a heading; that heading is
+  its area. A page with route arguments (`/orders/[key]`) cannot be opened from the navigation, so its
+  `nav=` places it in the area -- its breadcrumbs, as section 1's example writes it -- without listing it.
+  `ui.frame(nav=[...])` -- the same word -- gives the areas' order; a page whose `nav=` is
+  not in that list stops the start with the list to choose from (a typo would make a new area).
+  Without it, areas come in the order their first page is declared. Pages in an area keep their
+  declaration order, `@ui.page`s and raw pages alike (a `@ui.page` takes its place when declared).
+  The current entry is RFDS's rule: its route, or a route below it (`/orders/7` is under `/orders`,
+  so a record page under its list's route marks its list); the area holding the current entry has its
+  heading marked too (lex-app's stylesheet, `:has()`, no state). A raw page joins with the same words:
+  `ui.reflex_page("/legacy", nav="Tools", title="Legacy export", icon="download")` -- `title=` is its
+  label, as on `@lex_page`; its `requires=` only hides its entry, since lex-app does not guard a raw page.
+- **Breadcrumbs come from the area and the page.** The frame shows RFDS's breadcrumbs above the page:
+  the area (text, an area is not a page), then the page. A page that is not listed in the navigation
+  has a parent: the first listed page whose table opens it (`open=`), else whose button or link leads
+  to it (`to=`), in declaration order -- `Orders / Orders / Order 7`; without a `nav=` of its own it
+  takes its parent's area. The parent is a link; the current page's title may be a state value. A
+  page with no area has no breadcrumbs. No page writes a crumb. *Cost:* one level of parent only; a page of a record's record shows its area and
+  itself.
+- **No access: `denied=` and `request_access=`.** RFDS's access-denied notice (`rfds.access_denied`)
+  is what every refused page shows, with the project's sentence (`denied=`) instead of RFDS's and a
+  "Request access" link (`request_access=`: a page, a `ui.reflex_page`, or an `https://` or `mailto:`
+  address). Its "Switch account" link -- sign in with another account -- goes to the sign-out address.
+  The page a refused load goes to (`/ui-error`) shows the same notice. *Considered:* a whole page of the
+  project's (the withdrawn wrapper again); a `ui.link` (RFDS's notice words its links itself).
+- **`sign_out=`** is where the user menu signs out, and where "Switch account" leads: a page or an
+  `https://` address; by default lex-app's `/logout`, which ends the dashboard's sign-in and lex-app's.
+  A project's address should end there too, or the dashboard's sign-in lasts until it expires.
+- **`opened=`: a function lex-app calls when a page opens**, `opened(user, page)`, with the signed-in
+  `ui` user and the page: `page.route`, `page.address` (with its values), `page.title` (a state title
+  as it stands after the load), `page.area`, `page.params`. For a "recently used" list or an audit
+  entry. It runs after the page's required loads succeeded (at once on a page without them), on a
+  worker thread, not awaited: the page never waits for it. A failure is logged, never shown. It is not
+  called for a refused page or one whose load failed.
+- **A project's rule in `requires=`: `@ui.rule`.** `requires=` took lex-app's permissions; a project
+  also has rules of its own ("only the team of the order's region"). A function of the user and the
+  page's values, marked `@ui.rule`, is accepted wherever `requires=` is -- `@ui.page` and every
+  handler -- alone or in a list with permissions:
+
+  ```python
+  @ui.rule
+  def region_team(user, params):
+      if params.get("region") in teams.regions_of(user.id):
+          return True
+      return "Only the region's team sees its report."
+
+  @ui.page("/reports/[region]", nav="Reports", requires=[ui.read(Report), region_team])
+  ```
+
+  It returns `True`, `False`, or the sentence the user is refused with. It runs on the server, on a
+  worker thread (it may query the database), once per event however often it is named, like the
+  user's permissions; a rule that raises, or answers anything but `True`, `False` or a sentence,
+  refuses -- on a handler as an unexpected failure (logged, a reference for the user), on a page with
+  lex-app's no-access sentence (logged). As for any `requires=`, a handler that declares a rule may
+  query the database directly. For a page the opener runs it: a
+  refused page shows the no-access notice with the rule's sentence and starts no load; its navigation
+  entry stays (a rule cannot hide it in the browser). For a handler it is checked with the
+  permissions; its sentence is the refusal. A page's `requires=` now takes a list, as a handler's does.
+  `visible=` does not take a rule (it is decided in the browser); the message says to set a state field
+  in the load instead, where the rule may be called: `region_team(self.user, self.params)`.
+  *Considered:* `ui.permission("...")` with a project string (a Keycloak grant, not a rule); a
+  `requires=` that takes any function (a typo'd handler would pass silently).
+
 ---
 
 ## 7. Order of building
@@ -880,6 +969,7 @@ components are enough for that project, or which one is missing.
 
 ```text
 Declaring        @ui.page(route, nav=, icon=, requires=, params=)      @ui.dashboard
+                 ui.frame(nav=, denied=, request_access=, opened=, sign_out=)      @ui.rule
 
 Kinds            ui.overview(title, load=, figures=, tiles=, sections=, actions=)
                  ui.list(title, load=, filters=, table=, actions=)

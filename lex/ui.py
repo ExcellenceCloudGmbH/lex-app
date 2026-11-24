@@ -55,12 +55,23 @@
 ``ui.ApiError``             lex-app's API refused a call (``.status``, ``.denied``,
                             ``.detail``); uncaught, it is shown to the user
 ``requires=``               ``ui.read/create/edit/delete(Model)``, ``ui.permission()``,
-                            ``ui.signed_in`` -- needed to query the database directly
+                            ``ui.signed_in``, a project's ``@ui.rule`` -- needed to query the
+                            database directly; on a page and on every handler
+``@ui.rule``                a project's own access rule: ``def rule(user, params)`` returns True,
+                            False or the refusal's sentence; asked on the server once per event
 ``ui.running/failed/        a handler's status, for views; ``ui.cancel`` is the
 progress_of/cancel``        event of a Cancel button
 ``ui.loaded``               whether a load has finished since the page opened
 ``ui.testing``              run a handler in a unit test
-``@ui.page``                where a page lives: its route, navigation, who may see it
+``@ui.page``                where a page lives: its route, its area of the navigation (``nav=``),
+                            who may see it. lex-app's frame heads it with its breadcrumbs: the
+                            area, the listed page that opens it, the page
+``ui.frame``                lex-app's frame for this project, set once in the dashboard module:
+                            ``nav=[...]`` the areas' order; ``denied=`` the sentence a refused
+                            user reads, ``request_access=`` their way out (a page, https:// or
+                            mailto:); ``opened=`` a function lex-app calls, not awaited, when a
+                            page has opened: ``opened(user, page)``; ``sign_out=`` where the
+                            user menu signs out (a page or https://; lex-app's /logout by default)
 ``@ui.dashboard``           a page that is not a route (the project's ``main()``)
 ``ui.record/list/form``     the page kinds: named slots, placed by lex-app (``ui.list`` is
                             left out of ``import *``, which would hide Python's ``list``)
@@ -83,7 +94,8 @@ button/link``
                             ``choose_columns=``, ``page_size=`` (up to 200; the pager shows
                             only when the rows do not fit one page)
 ``ui.address``              a page's address, for a row that leads to a page of its own
-``ui.reflex_page``          a page written in raw Reflex, as somewhere a link may lead
+``ui.reflex_page``          a page written in raw Reflex, as somewhere a link may lead;
+                            ``nav=``, ``title=`` list it in an area of the navigation
 ``ui.custom_block``         a raw component, marked for review with its reason
 ``ui.embed``                the other way round: one lex.ui part inside a raw Reflex page,
                             for moving a project a table at a time
@@ -95,10 +107,11 @@ Import this module only in the Reflex process: it defines Reflex states.
 
 from lex.lex_app.reflex.data import LexApiError as ApiError
 from lex.lex_app.reflex.ui import testing
-from lex.lex_app.reflex.ui.guard import create, delete, edit, permission, read, signed_in
+from lex.lex_app.reflex.ui.guard import create, delete, edit, permission, read, rule, signed_in
 from lex.lex_app.reflex.ui.handlers import action, custom, job, load
 from lex.lex_app.reflex.ui.pages.declare import dashboard, embed, page
 from lex.lex_app.reflex.ui.pages.forms import field, form, step
+from lex.lex_app.reflex.ui.pages.frame import frame
 from lex.lex_app.reflex.ui.pages.links import address, reflex_page
 from lex.lex_app.reflex.ui.pages.kinds import list_ as list  # noqa: A001 - ui.list is the page kind
 from lex.lex_app.reflex.ui.pages.kinds import record, section
@@ -114,7 +127,7 @@ from lex.lex_app.reflex.ui.state import State
 __all__ = [
     "ApiError", "PageError", "Refuse", "State", "action", "address", "button", "cancel", "column",
     "create", "custom", "custom_block", "dashboard", "delete", "download", "each", "edit", "embed", "fact",
-    "failed", "field", "form", "goto", "job", "link", "load", "loaded", "message", "page", "permission", "private", "progress",
-    "progress_of", "read", "record", "reflex_page", "refresh", "rows", "running", "section", "signed_in", "status",
+    "failed", "field", "form", "frame", "goto", "job", "link", "load", "loaded", "message", "page", "permission", "private", "progress",
+    "progress_of", "read", "record", "reflex_page", "refresh", "rows", "rule", "running", "section", "signed_in", "status",
     "step", "switch", "table", "testing", "text", "toast",
 ]

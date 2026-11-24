@@ -1,0 +1,1 @@
+/home/syscall/Documents/lex/.claude/worktrees/lex_ui_tables/.venv-oss/lib/python3.12/site-packages/rfds/_vendor/js/rfds_motion.jsx

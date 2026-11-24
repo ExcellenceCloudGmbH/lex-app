@@ -1757,6 +1757,67 @@ does not remove user launch configurations.
 
 **Scenario range:** 1.950 – 1.952. **Test file:** `lex/test_project/tests/init/test_1ea_ui_form_result_tabs.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ea](batches.md).
 
+### 1eb. lex.ui frame: the navigation in areas, in the project's order, and the way to sign out ✅
+
+**What it tests:** `ui.frame(nav=[...], sign_out=)` once in the dashboard module; `nav=` on `@ui.page` names the page's area, on `ui.reflex_page(nav=, title=, icon=, requires=)` too; a page with route arguments is in its area unlisted; the current entry's area marked; compiled with Reflex's page compiler.
+
+**Why a regression matters:** Areas in import order, an area made by a typo, a raw page that cannot be listed, a second frame from another module, or a sign-out to an unchecked address.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.960 | Areas come in the project's order and pages in theirs | ui.frame(nav=) order; declaration order with a raw page among them; a record page in its area unlisted; without ui.frame first-declared order; a typo'd area stops the start naming the page and the areas |
+| 1.961 | The frame is configured once, with checked arguments | a reload replaces it; another module refused naming the first; a single area as text, an area twice, an empty name refused |
+| 1.962 | A raw Reflex page joins an area with the same words | nav=, title=, icon=, requires= make its entry; still a link target; nav= without title=, title=/icon=/requires= without nav= refused |
+| 1.963 | The current entry and its area are marked in a compiled page | Reflex's page compiler; aria-current per entry; lex-app's stylesheet marks the area heading |
+| 1.964 | The user menu signs out where the project says | /logout by default; an https:// address or a page's route; a route as text, http:// and a page needing values refused; the title is still LEX_DASHBOARD_TITLE |
+
+**Scenario range:** 1.960 – 1.964. **Test file:** `lex/test_project/tests/init/test_1eb_ui_frame_nav.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1eb](batches.md).
+
+### 1ec. lex.ui frame: breadcrumbs from the area and the page, written by no page ✅
+
+**What it tests:** The frame shows RFDS's breadcrumbs: the area, the listed page whose table opens the page (else whose button or link leads to it), the page with a state title.
+
+**Why a regression matters:** A page that loses its trail, a parent that is the wrong list, or a record title that breaks the page.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.965 | The trail comes from the area, the parent and the page | a listed page; a record opened by the list's table; a form a button leads to; no area, no trail |
+| 1.966 | A table that opens a page is its parent before a link | an earlier link loses to the list's table; a page's own nav= is its area, its list still the parent |
+| 1.967 | The frame draws the trail and it compiles | Reflex's page compiler; area text, parent link, state title; a raw @lex_page in an area; none without an area or a route |
+
+**Scenario range:** 1.965 – 1.967. **Test file:** `lex/test_project/tests/init/test_1ec_ui_breadcrumbs.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ec](batches.md).
+
+### 1ed. lex.ui frame: a project's no-access sentence and way out, and its own access rules ✅
+
+**What it tests:** `ui.frame(denied=, request_access=)` words RFDS's access-denied notice on refused pages and /ui-error; `@ui.rule` in `requires=` on pages and handlers, asked on the server on a worker thread once per event, failing closed.
+
+**Why a regression matters:** A refused page that strands the user, lex-app's sentence where the project gave one, a rule the browser decides, a rule asked twice per event, or a rule that fails open.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.968 | A refused page says the project's sentence and offers its way out | RFDS's notice by default; the project's sentence, request page, mailto and sign-out; wrong targets refused |
+| 1.969 | The page a refused load goes to offers the same way out | /ui-error's denied branch is the notice; other failures keep Try again |
+| 1.970 | A handler guarded by a rule runs only when it grants | granted, refused with lex-app's sentence, refused with the rule's; user and values given; on a worker thread |
+| 1.971 | A rule is asked once per event and fails closed | named twice, asked once per press; raising or answering wrongly refuses with the standard error |
+| 1.972 | A page guarded by a rule is decided by the opener | compiled cond on ui_access with the notice; granted starts the load, refused none and keeps its sentence; a list with a permission hides the entry |
+| 1.973 | A rule written wrongly is refused with what to write | wrong arguments; a plain function in requires=; a rule in visible=; a raw page's requires=; still callable |
+
+**Scenario range:** 1.968 – 1.973. **Test file:** `lex/test_project/tests/init/test_1ed_ui_access.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ed](batches.md).
+
+### 1ee. lex.ui frame: a project's function runs when a page has opened -- ui.frame(opened=) ✅
+
+**What it tests:** `opened(user, page)` after the page's required loads (at once without them), on a worker thread, not awaited; the page's route, address, title as the load left it, area and values; not for a refused or failed page; failures logged.
+
+**Why a regression matters:** A page that waits for the bookkeeping, an entry for a refused or failed page, or a recently-used entry without the record's name.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.974 | The project's function runs after the loads and never holds the page | not before the load; the load finishes while it waits; route, address, state title, area, values; worker thread |
+| 1.975 | Not for a refused or failed page, and a failure is only logged | a page without loads at once; a rule-refused page and a failed load not; a raising function logged with the route |
+| 1.976 | The function is checked when the frame is configured | text, one argument and async refused with what to write |
+
+**Scenario range:** 1.974 – 1.976. **Test file:** `lex/test_project/tests/init/test_1ee_ui_page_opened.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ee](batches.md).
+
 ### 1dv. lex.ui: a result held privately on the server -- ui.private ✅
 
 **What it tests:** `ui.private()` -- a state field whose value stays in the server process's memory, bound to its tab and user, for a while; never in a state pickle or the browser; a plain refusal once it is gone.
