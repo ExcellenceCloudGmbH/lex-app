@@ -31,6 +31,56 @@ class _SignedIn:
 signed_in = _SignedIn()
 
 
+class Rule:
+    """A project's own access rule, marked ``@ui.rule``: accepted wherever ``requires=`` is."""
+
+    def __init__(self, fn: Any):
+        import functools
+        import inspect
+
+        if not callable(fn) or inspect.iscoroutinefunction(fn):
+            raise TypeError(f"@ui.rule marks a plain function of (user, params); got {fn!r}.")
+        try:
+            names = [p.name for p in inspect.signature(fn).parameters.values()
+                     if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+        except (TypeError, ValueError):
+            names = []
+        if len(names) != 2:
+            raise TypeError(f"@ui.rule {getattr(fn, '__qualname__', fn)} takes {', '.join(names) or 'nothing'}; a rule "
+                            "takes (user, params) -- the signed-in user and the page's values -- and returns True, "
+                            "False or the sentence the user is refused with: def region_team(user, params): ...")
+        self.fn = fn
+        functools.update_wrapper(self, fn)
+
+    def __call__(self, user: Any, params: Any) -> Any:
+        return self.fn(user, params)
+
+    def __repr__(self) -> str:
+        return f"the rule {getattr(self.fn, '__qualname__', self.fn)}"
+
+
+def rule(fn: Any) -> Rule:
+    """Mark a project's own access rule, for ``requires=`` on a page or any handler.
+
+    A rule is a function of the signed-in user and the page's values (``self.params``) that returns
+    ``True``, ``False``, or the sentence the user is refused with::
+
+        @ui.rule
+        def region_team(user, params):
+            if params.get("region") in teams.regions_of(user.id):
+                return True
+            return "Only the region's team sees its report."
+
+        @ui.page("/reports/[region]", requires=region_team)
+        @ui.action(requires=[ui.read(Report), region_team])
+
+    lex-app asks it on the server, on a worker thread (it may query the database), at most once per
+    event; a rule that raises or answers anything else refuses. It stays a plain function: a load
+    may call it to decide what to show, ``region_team(self.user, self.params)``.
+    """
+    return Rule(fn)
+
+
 def permission(target: Any, scope: str) -> Requirement:
     return Requirement(target, str(scope))
 
@@ -62,18 +112,25 @@ def normalise(requires: Any) -> tuple | None:
             "ui.delete(), ui.permission() or ui.signed_in"
         )
     for item in items:
-        if not isinstance(item, (Requirement, _SignedIn)):
+        if not isinstance(item, (Requirement, _SignedIn, Rule)):
+            hint = (f" To use the function {getattr(item, '__qualname__', item)} as a rule of your own, mark it "
+                    "@ui.rule." if callable(item) and not isinstance(item, type) else "")
             raise TypeError(
-                f"requires= takes ui.read(Model), ui.create(), ui.edit(), ui.delete(), ui.permission() "
-                f"or ui.signed_in (or a list of them); got {item!r}"
+                f"requires= takes ui.read(Model), ui.create(), ui.edit(), ui.delete(), ui.permission(), "
+                f"ui.signed_in or a rule marked @ui.rule (or a list of them); got {item!r}.{hint}"
             )
     return items
+
+
+def rules_of(requirements: tuple | None) -> tuple:
+    """The project's rules among ``requirements``, each once."""
+    return tuple(dict.fromkeys(item for item in requirements or () if isinstance(item, Rule)))
 
 
 def granted(requirements: tuple, permissions: list[dict]) -> bool:
     """Whether Keycloak's ``permissions`` meet every requirement (model-wide grants only)."""
     for item in requirements:
-        if isinstance(item, _SignedIn):
+        if isinstance(item, (_SignedIn, Rule)):           # a rule is asked on its own (handlers._refusal)
             continue
         if not any(
             isinstance(grant, dict)

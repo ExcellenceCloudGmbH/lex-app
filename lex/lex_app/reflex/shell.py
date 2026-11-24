@@ -231,6 +231,22 @@ def denied_notice(message: Any = None):
                          switch_account_href=sign_out_href())
 
 
+def _decided(route: str, body: Any) -> Any:
+    """``body`` once the opener has asked the page's rules and they granted; their refusal otherwise.
+
+    Until the opener has answered for this page nothing is shown.
+    """
+    import reflex as rx
+
+    from lex.lex_app.reflex.ui.state import State as UiState
+
+    answer = UiState.ui_access.get(route, {})
+    granted = answer.get("granted", "").to(str)
+    message = answer.get("message", "").to(str)
+    refused = rx.cond(message != "", denied_notice(message=message), denied_notice())
+    return rx.cond(granted == "yes", body, rx.cond(granted == "no", refused, rx.fragment()))
+
+
 def lex_chrome(body, *, embedded=None, route=None):
     """``body`` in lex-app's chrome: RFDS's shell standalone, the bare page inside lex-app.
 
@@ -285,8 +301,9 @@ def lex_page(
     title: str,
     nav: str | None = None,
     icon: str | None = None,
-    requires: str | None = None,
+    requires: Any = None,
     on_load: Any = None,
+    _rules: tuple = (),
     **page_kwargs: Any,
 ) -> Callable[[Callable[[], Any]], Callable[[], Any]]:
     """Add a signed-in page to the dashboards, in lex-app's chrome.
@@ -315,6 +332,8 @@ def lex_page(
 
     check_route(route)              # a route argument named like a ui.State helper would hide it
 
+    needed = (requires,) if isinstance(requires, str) else tuple(requires or ())
+
     def decorator(page_fn: Callable[[], Any]) -> Callable[[], Any]:
         import reflex as rx
 
@@ -323,15 +342,18 @@ def lex_page(
         if nav:
             # A page registered again -- a hot reload re-imports its module --
             # keeps its place in the navigation.
-            list_in_nav(NavEntry(route=route, label=title, section=nav, icon=icon, permission=requires))
+            list_in_nav(NavEntry(route=route, label=title, section=nav, icon=icon,
+                                 permission=needed[0] if needed else None))
             set_place(route, Place(nav, title))
 
         def page():
             body = page_fn()
-            if requires:
+            if _rules:
+                body = _decided(route, body)
+            for one in reversed(needed):
                 from rfds.auth import can
 
-                body = can(requires, body, fallback=denied_notice())
+                body = can(one, body, fallback=denied_notice())
             return lex_chrome(body, route=route)
 
         page.__name__ = page_fn.__name__
@@ -344,7 +366,7 @@ def lex_page(
         # grants are loaded. So they are started by the opener, the page's last load event,
         # which names only the route; the loads and the permission stay on the server.
         required, optional, others = page_loads(on_load)
-        register_page(route, required, optional, requires or "")
+        register_page(route, required, optional, needed[0] if len(needed) == 1 else needed, _rules)
         loads: list[Any] = [LexAccessState.load, *others, UiState.ui_open(route)]
         rx.page(route=route, title=title, on_load=loads, **page_kwargs)(page)
         return page_fn

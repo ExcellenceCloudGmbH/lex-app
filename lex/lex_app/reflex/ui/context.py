@@ -88,6 +88,8 @@ class Session:
     api_client: Any = None
     #: The browser tab the event came from (Reflex's client token): ``self.tab_id``.
     tab: str = ""
+    #: The answers of the project's rules (``@ui.rule``) in this event: each is asked once.
+    rules: dict = dataclasses.field(default_factory=dict)
 
 
 def _params_of(state: Any) -> Params:

@@ -51,7 +51,10 @@
 ``ui.ApiError``             lex-app's API refused a call (``.status``, ``.denied``,
                             ``.detail``); uncaught, it is shown to the user
 ``requires=``               ``ui.read/create/edit/delete(Model)``, ``ui.permission()``,
-                            ``ui.signed_in`` -- needed to query the database directly
+                            ``ui.signed_in``, a project's ``@ui.rule`` -- needed to query the
+                            database directly; on a page and on every handler
+``@ui.rule``                a project's own access rule: ``def rule(user, params)`` returns True,
+                            False or the refusal's sentence; asked on the server once per event
 ``ui.running/failed/        a handler's status, for views; ``ui.cancel`` is the
 progress_of/cancel``        event of a Cancel button
 ``ui.loaded``               whether a load has finished since the page opened
@@ -95,7 +98,7 @@ Import this module only in the Reflex process: it defines Reflex states.
 
 from lex.lex_app.reflex.data import LexApiError as ApiError
 from lex.lex_app.reflex.ui import testing
-from lex.lex_app.reflex.ui.guard import create, delete, edit, permission, read, signed_in
+from lex.lex_app.reflex.ui.guard import create, delete, edit, permission, read, rule, signed_in
 from lex.lex_app.reflex.ui.handlers import action, custom, job, load
 from lex.lex_app.reflex.ui.pages.declare import dashboard, embed, page
 from lex.lex_app.reflex.ui.pages.forms import field, form, step
@@ -116,6 +119,6 @@ __all__ = [
     "ApiError", "PageError", "Refuse", "State", "action", "address", "button", "cancel", "column",
     "create", "custom", "custom_block", "dashboard", "delete", "download", "each", "edit", "embed", "fact",
     "failed", "field", "form", "frame", "goto", "job", "link", "load", "loaded", "message", "page", "permission", "private", "progress",
-    "progress_of", "read", "record", "reflex_page", "refresh", "rows", "running", "section", "signed_in", "status",
+    "progress_of", "read", "record", "reflex_page", "refresh", "rows", "rule", "running", "section", "signed_in", "status",
     "step", "switch", "table", "testing", "text", "toast",
 ]

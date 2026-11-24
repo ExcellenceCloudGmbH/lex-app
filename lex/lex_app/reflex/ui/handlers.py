@@ -40,7 +40,11 @@ class Outcome:
 
 
 class _NotPermitted(Exception):
-    """``requires=`` was not met."""
+    """``requires=`` was not met; ``sentence`` is a rule's own refusal ('' for lex-app's)."""
+
+    def __init__(self, sentence: str = ""):
+        super().__init__(sentence)
+        self.sentence = sentence
 
 
 class _Step:
@@ -130,7 +134,7 @@ def _classify(key: str, exc: BaseException, user: str = "") -> Outcome:
         outcome = Outcome("refused", exc.title, exc.message)
     elif isinstance(exc, _NotPermitted) or (isinstance(exc, LexApiError) and exc.denied):
         logger.warning("lex.ui handler %s was not permitted for user %s", key, user or "(unknown)")
-        outcome = Outcome("denied", "", denied)
+        outcome = Outcome("denied", "", getattr(exc, "sentence", "") or denied)
     elif isinstance(exc, LexApiError) and 400 <= exc.status < 500:
         outcome = Outcome("refused", "", _detail_text(exc.detail) or denied)
     else:
@@ -171,13 +175,43 @@ def _in_place(outcome: Outcome, receives: Any, kind: str) -> bool:
     return receives is not None and outcome.kind != "error" and not (kind == "job" and receives.dialog)
 
 
-async def _denied(session: context.Session, requirements: tuple | None) -> bool:
-    """Whether ``requires=`` is declared and not met."""
+async def _refusal(session: context.Session, requirements: tuple | None) -> str | None:
+    """``None`` when ``requires=`` is met (or not declared); else the refusal's sentence ('' for lex-app's).
+
+    lex-app's permissions first, then the project's rules (:func:`rule_refusal`).
+    """
     if not requirements:
-        return False
-    if all(isinstance(item, type(guard.signed_in)) for item in requirements):
-        return False
-    return not guard.granted(requirements, await session.permissions())
+        return None
+    asked = [item for item in requirements if isinstance(item, guard.Requirement)]
+    if asked and not guard.granted(tuple(asked), await session.permissions()):
+        return ""
+    return await rule_refusal(session, guard.rules_of(requirements))
+
+
+def _ask(rule: guard.Rule, user: context.User, params: context.Params) -> Any:
+    """One rule's answer: True, or the refusal's sentence ('' for lex-app's). Anything else raises."""
+    answer = rule.fn(user, params)
+    if answer is True:
+        return True
+    if answer is False or answer is None:
+        return ""
+    if isinstance(answer, str):
+        return answer
+    raise TypeError(f"{rule!r} answered {answer!r}; a rule returns True, False or the sentence the user is refused with.")
+
+
+async def rule_refusal(session: context.Session, rules: tuple) -> str | None:
+    """Ask the project's ``rules`` for the session's user and page, each at most once per event.
+
+    They run on a worker thread: a rule may query the database. ``None`` when every rule grants;
+    else the first refusal's sentence. A rule that raises raises here: the caller refuses.
+    """
+    for one in rules:
+        if one not in session.rules:
+            session.rules[one] = await pools.run("interactive", _ask, one, session.user, session.params)
+        if session.rules[one] is not True:
+            return session.rules[one]
+    return None
 
 
 async def _session(state: Any, requirements: tuple | None) -> tuple[context.Session | None, Exception | None]:
@@ -191,7 +225,8 @@ async def _session(state: Any, requirements: tuple | None) -> tuple[context.Sess
     except Exception as exc:  # noqa: BLE001 - reported like a failure of the body
         return None, exc
     try:
-        return session, (_NotPermitted() if await _denied(session, requirements) else None)
+        refusal = await _refusal(session, requirements)
+        return session, (None if refusal is None else _NotPermitted(refusal))
     except Exception as exc:  # noqa: BLE001
         return session, exc
 
@@ -679,7 +714,8 @@ class PageLoads:
 
     required: tuple = ()
     optional: tuple = ()
-    requires: str = ""
+    requires: Any = ""                  # a permission string, or a tuple of them
+    rules: tuple = ()                   # the project's rules (``@ui.rule``) the page requires
 
 
 #: Route -> the page's loads and permission, filled by ``lex_page`` on the server. The opener
@@ -687,9 +723,9 @@ class PageLoads:
 _PAGES: dict[str, PageLoads] = {}
 
 
-def register_page(route: str, required: Any, optional: Any, requires: str) -> None:
-    """Record which loads ``route`` starts, and the permission its user must hold for them to start."""
-    _PAGES[route] = PageLoads(tuple(required), tuple(optional), requires or "")
+def register_page(route: str, required: Any, optional: Any, requires: Any, rules: Any = ()) -> None:
+    """Record which loads ``route`` starts, and the permissions and rules its user must meet for them to start."""
+    _PAGES[route] = PageLoads(tuple(required), tuple(optional), requires or "", tuple(rules))
 
 
 def page_of(route: str) -> PageLoads | None:

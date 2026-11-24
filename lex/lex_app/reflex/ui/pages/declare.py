@@ -21,6 +21,7 @@ class Declared:
     permission: str | None
     done: bool = False
     kind: Any = None                    # what the function returned when lex-app registered it
+    rules: tuple = ()                   # the project's rules (``@ui.rule``) in its requires=
 
 
 #: Route -> the page declared for it, until :func:`finalize` hands it to lex-app.
@@ -92,18 +93,18 @@ def _loads(name: str, kind: kinds.Kind) -> tuple[list, list]:
     return page_loads, part_loads
 
 
-def _permission(route: str, requires: Any) -> str | None:
-    """The page's permission string; ``None`` when any signed-in user may see it."""
+def _permission(route: str, requires: Any) -> tuple[tuple[str, ...], tuple]:
+    """The page's permission strings and the project's rules; both empty when any signed-in user may see it."""
     from lex.lex_app.reflex.access import permission
     from lex.lex_app.reflex.ui import guard
 
-    if requires is None or requires is guard.signed_in:
-        return None
-    if isinstance(requires, guard.Requirement):
-        return permission(requires.target, requires.scope)
-    raise TypeError(f"ui.page({route!r}, requires=) takes one permission: ui.read(Model), ui.create(Model), "
-                    f"ui.edit(Model), ui.delete(Model) or ui.permission(...); got {requires!r}. "
-                    "Leave it out for a page any signed-in user may see.")
+    try:
+        items = guard.normalise(requires) or ()
+    except (TypeError, ValueError) as wrong:
+        raise TypeError(f"ui.page({route!r}, requires=): {wrong} Leave it out for a page any signed-in user "
+                        "may see.") from None
+    strings = tuple(permission(item.target, item.scope) for item in items if isinstance(item, guard.Requirement))
+    return strings, guard.rules_of(items)
 
 
 def page(route: str, *, nav: str | None = None, icon: str | None = None, requires: Any = None,
@@ -121,6 +122,10 @@ def page(route: str, *, nav: str | None = None, icon: str | None = None, require
     and again when the page is built. A page that is declared wrongly stops the app from starting,
     with an error that names it.
 
+    ``requires=`` takes what a handler's does -- a permission, ``ui.signed_in``, a project's rule
+    (``@ui.rule``), or a list of them. A rule is asked on the server when the page opens: refused,
+    the page shows the no-access notice with the rule's sentence and starts no load.
+
     ``requires=`` and ``visible=`` decide what is shown, never what is allowed: a value a page
     shows reaches the browser. What a user may read or change is enforced by each handler's own
     ``requires=`` and by lex-app's API, which acts as the user.
@@ -129,7 +134,8 @@ def page(route: str, *, nav: str | None = None, icon: str | None = None, require
         raise ValueError(f"ui.page() routes start with '/', got {route!r}")
     if isinstance(params, str):
         raise TypeError(f"ui.page({route!r}, params=) takes a list of names: params=[{params!r}]")
-    permission = _permission(route, requires)
+    permissions, rules = _permission(route, requires)
+    permission = permissions[0] if len(permissions) == 1 else (permissions or None)
 
     def decorator(fn: Callable[[], Any]) -> Callable[[], Any]:
         known = _DECLARED.get(route)
@@ -137,14 +143,14 @@ def page(route: str, *, nav: str | None = None, icon: str | None = None, require
             raise ValueError(f"ui.page({route!r}): `{known.fn.__name__}` already is the page at this route; "
                              f"`{fn.__name__}` needs a route of its own.")
         fn.__ui_page__ = links.info_of(route, fn.__name__, params)
-        _DECLARED[route] = Declared(fn, fn.__ui_page__, nav, icon, permission)
+        _DECLARED[route] = Declared(fn, fn.__ui_page__, nav, icon, permission, rules=rules)
         if nav and not fn.__ui_page__.arguments:      # a page with route arguments is in its area, not listed
             from lex.lex_app.reflex.shell import NavEntry, list_in_nav
 
             # Its place in the area is where it is declared, among raw pages too; its title, from the
             # kind, replaces the name when lex-app registers the page.
             list_in_nav(NavEntry(route=route, label=fn.__name__.replace("_", " ").capitalize(), section=nav,
-                                 icon=icon, permission=permission))
+                                 icon=icon, permission=permissions[0] if permissions else None))
         return fn
 
     return decorator
@@ -179,8 +185,8 @@ def finalize() -> None:
         body.__name__ = name
         body.__qualname__ = declared.fn.__qualname__
         lex_page(route, title=title if isinstance(title, str) else name.replace("_", " ").capitalize(),
-                 nav=listed, icon=declared.icon, requires=declared.permission)(body)
-        handlers.register_page(route, required, optional, declared.permission or "")
+                 nav=listed, icon=declared.icon, requires=declared.permission, _rules=declared.rules)(body)
+        handlers.register_page(route, required, optional, declared.permission or "", declared.rules)
         declared.done = True
     from lex.lex_app.reflex.shell import check_area, check_nav
 

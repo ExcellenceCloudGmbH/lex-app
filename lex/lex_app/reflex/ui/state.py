@@ -87,15 +87,32 @@ def _progress(state: Any) -> Any:
     return handlers.reporter(state)
 
 
-def _page_permitted(state: Any, requires: str) -> bool:
-    """Whether the signed-in user holds the page's permission string ('' = no requirement)."""
-    if not requires:
+def _page_permitted(state: Any, requires: Any) -> bool:
+    """Whether the signed-in user holds the page's permission strings ('' or () = no requirement)."""
+    needed = (requires,) if isinstance(requires, str) else tuple(requires or ())
+    needed = tuple(one for one in needed if one)
+    if not needed:
         return True
     from rfds.auth import current_identity
 
     from lex.lex_app.reflex.access import lex_permission_resolver
 
-    return requires in lex_permission_resolver(current_identity(state))
+    held = lex_permission_resolver(current_identity(state))
+    return all(one in held for one in needed)
+
+
+async def _page_refusal(state: Any, rules: tuple) -> str | None:
+    """The page's rules asked for this user and page: ``None`` granted, else the refusal's sentence.
+
+    A rule that raises refuses with lex-app's sentence, and is logged: the page never opens by accident.
+    """
+    from lex.lex_app.reflex.ui import handlers
+
+    try:
+        return await handlers.rule_refusal(await context.resolve(state), rules)
+    except Exception:  # noqa: BLE001 - refused, and logged
+        handlers.logger.exception("lex.ui: a rule of page %s failed; the page is refused", state._ui_page)
+        return ""
 
 
 
@@ -148,6 +165,9 @@ class State(rx.State):
     ui_asking_args: list = []
     #: Searched field id -> the matches the user may choose from now: ``{"value", "label"}``, a page of them.
     ui_matches: dict[str, list[dict[str, str]]] = {}
+    #: Page route -> what its rules (``@ui.rule``) answered at its last opening: ``{"granted": "yes"|"no",
+    #: "message": the refusal's sentence}``. A page with rules shows its content only on "yes".
+    ui_access: dict[str, dict[str, str]] = {}
 
     _ui_boots: dict[str, str] = {}
     _ui_pending_loads: list[str] = []
@@ -211,7 +231,13 @@ class State(rx.State):
         from lex.lex_app.reflex.ui.pages import rows_table
 
         tables = rows_table.reopen_events(page)     # a table already on screen: the new record's rows
-        if entry is None or not _page_permitted(self, entry.requires):
+        refused = entry is None or not _page_permitted(self, entry.requires)
+        if not refused and entry.rules:                 # the project's rules, asked on the server
+            refusal = await _page_refusal(self, entry.rules)
+            self.ui_access = {**dict(self.ui_access),
+                              page: {"granted": "yes" if refusal is None else "no", "message": refusal or ""}}
+            refused = refusal is not None
+        if refused:
             self._ui_pending_loads, self._ui_optional_loads, self._ui_started = [], [], []
             return None
         from lex.lex_app.reflex.ui import runs as ui_runs
