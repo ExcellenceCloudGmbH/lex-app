@@ -3674,6 +3674,9 @@ What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-refl
 | 1.972 | A page guarded by a rule is decided by the opener | compiled cond on ui_access with the notice; granted starts the load, refused none and keeps its sentence; a list with a permission hides the entry |
 | 1.973 | A rule written wrongly is refused with what to write | wrong arguments; a plain function in requires=; a rule in visible=; a raw page's requires=; still callable |
 
+Added 2026-11-25: A rule, a frame function and `opened=` read `user.permissions` outside a handler body: lex-app gives the user its permissions first (1.1090).
+
+
 ### Batch 1ee — lex.ui frame: a project's function runs when a page has opened -- ui.frame(opened=) ✅
 
 | Property | Value |
@@ -3695,6 +3698,9 @@ What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-refl
 | 1.975 | Not for a refused or failed page, and a failure is only logged | a page without loads at once; a rule-refused page and a failed load not; a raising function logged with the route |
 | 1.976 | The function is checked when the frame is configured | text, one argument and async refused with what to write |
 | 1.977 | A reconnect of the same page does not open it again | with the frame's opened= and the review's same visit: a reconnect runs the page's load again but calls the function once a visit; a link to the same page is a new opening; a page without loads likewise |
+
+Added 2026-11-25: `opened=` reads `user.permissions` (1.1091).
+
 
 ### Batch 1ef — lex.ui calculation pages: the page kind, its form, a run started as the user -- ui.calculation ✅
 

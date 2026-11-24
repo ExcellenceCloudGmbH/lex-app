@@ -458,7 +458,7 @@ async def page_opened(state: Any, route: str, address: str, session: Any = None)
         title = await _title_of(state, entry.title if entry is not None else None)
         page = OpenedPage(route=route, address=address, title=title, area=place.area if place else "",
                           params=dict(session.params._values))
-        user = session.user
+        user = await context.with_permissions(session)
     except Exception:  # noqa: BLE001 - the page is shown; the project reads the log
         logger.exception("lex.ui: ui.frame(opened=) could not be given page %s", route)
         return
@@ -655,18 +655,24 @@ async def decide(state: Any) -> Answers:
     session = await context.resolve(state)
     held: frozenset[str] | None = None
     asked: dict = {}
+    user = asyncio.ensure_future(context.with_permissions(session))   # read once, for every rule and function
+
+    async def _rule(rule: Any, params: tuple) -> Any:
+        return await pools.run("interactive", handlers._ask, rule, await user, context.Params(dict(params)))
+
+    async def _function(fn: Any) -> Any:
+        return await pools.run("interactive", fn, await user)
 
     def ask(rule: Any, params: tuple) -> Any:
         """A rule's answer for these values, asked once in this event."""
         if (rule, params) not in asked:
-            asked[(rule, params)] = asyncio.ensure_future(
-                pools.run("interactive", handlers._ask, rule, session.user, context.Params(dict(params))))
+            asked[(rule, params)] = asyncio.ensure_future(_rule(rule, params))
         return asked[(rule, params)]
 
     def of(fn: Any) -> Any:
         """A function of the user's answer, called once in this event."""
         if (fn, None) not in asked:
-            asked[(fn, None)] = asyncio.ensure_future(pools.run("interactive", fn, session.user))
+            asked[(fn, None)] = asyncio.ensure_future(_function(fn))
         return asked[(fn, None)]
 
     async def may(key: str, guard: Guard) -> bool:

@@ -271,9 +271,11 @@ async def rule_refusal(session: context.Session, rules: tuple) -> str | None:
     They run on a worker thread: a rule may query the database. ``None`` when every rule grants;
     else the first refusal's sentence. A rule that raises raises here: the caller refuses.
     """
+    user = None
     for one in rules:
         if one not in session.rules:
-            session.rules[one] = await pools.run("interactive", _ask, one, session.user, session.params)
+            user = user or await context.with_permissions(session)
+            session.rules[one] = await pools.run("interactive", _ask, one, user, session.params)
         if session.rules[one] is not True:
             return session.rules[one]
     return None

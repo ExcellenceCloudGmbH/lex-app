@@ -1802,6 +1802,7 @@ does not remove user launch configurations.
 | 1.971 | A rule is asked once per event and fails closed | named twice, asked once per press; raising or answering wrongly refuses with the standard error |
 | 1.972 | A page guarded by a rule is decided by the opener | compiled cond on ui_access with the notice; granted starts the load, refused none and keeps its sentence; a list with a permission hides the entry |
 | 1.973 | A rule written wrongly is refused with what to write | wrong arguments; a plain function in requires=; a rule in visible=; a raw page's requires=; still callable |
+| 1.1090 | A rule reads the user's permissions | `user.permissions` on the rule's worker thread: granted by a held permission, refused with the rule's sentence, never a failure |
 
 **Scenario range:** 1.968 – 1.973. **Test file:** `lex/test_project/tests/init/test_1ed_ui_access.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ed](batches.md).
 
@@ -1817,6 +1818,7 @@ does not remove user launch configurations.
 | 1.975 | Not for a refused or failed page, and a failure is only logged | a page without loads at once; a rule-refused page and a failed load not; a raising function logged with the route |
 | 1.976 | The function is checked when the frame is configured | text, one argument and async refused with what to write |
 | 1.977 | A reconnect of the same page does not open it again | with the frame's opened= and the review's same visit: a reconnect runs the page's load again but calls the function once a visit; a link to the same page is a new opening; a page without loads likewise |
+| 1.1091 | The project's function reads the user's permissions | `ui.frame(opened=)` gets `user.permissions` on its worker thread; no error in the log |
 
 **Scenario range:** 1.974 – 1.977. **Test file:** `lex/test_project/tests/init/test_1ee_ui_page_opened.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ee](batches.md).
 

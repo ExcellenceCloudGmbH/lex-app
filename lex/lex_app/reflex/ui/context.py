@@ -28,23 +28,38 @@ class User:
     name: str = ""
     username: str = ""
     email: str = ""
+    #: The permissions read for a project's rule or frame function, which run outside a handler body.
+    _permissions: tuple | None = dataclasses.field(default=None, compare=False, repr=False)
 
     @property
     def permissions(self) -> list:
         """The user's Keycloak permissions, as Keycloak lists them (``{"rsname": ..., "scopes": [...]}``).
 
         For a project's own logic that takes the permission list; to ask about one model, use
-        ``self.can(Model, "read")``. Only inside a handler body.
+        ``self.can(Model, "read")``. Inside a handler body, a ``@ui.rule``, a function of the user
+        given to ``ui.frame`` and ``ui.frame(opened=)``.
         """
+        if self._permissions is not None:
+            return list(self._permissions)
         inv = active()
         if inv is None:
-            raise RuntimeError("self.user.permissions only works inside a lex.ui handler body")
+            raise RuntimeError("self.user.permissions only works inside a lex.ui handler body, a @ui.rule "
+                               "or a function lex-app's frame calls")
         return list(inv.on_loop(inv.session.permissions()))
 
     @classmethod
     def from_profile(cls, profile: Mapping[str, Any]) -> "User":
         return cls(id=str(profile.get("sub") or ""), name=str(profile.get("name") or ""),
                    username=str(profile.get("preferred_username") or ""), email=str(profile.get("email") or ""))
+
+
+async def with_permissions(session: "Session") -> User:
+    """The session's user, carrying its permissions, for code that runs outside a handler body.
+
+    Rules and the frame's functions of the user run on worker threads, where no handler body is
+    active; their ``user.permissions`` are read here first, on the event loop (cached per token).
+    """
+    return dataclasses.replace(session.user, _permissions=tuple(await session.permissions()))
 
 
 class Params:

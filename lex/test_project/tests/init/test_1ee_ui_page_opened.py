@@ -40,6 +40,11 @@ def remember(user, page):
                    threading.current_thread().name))
 
 
+def with_permissions(user, page):
+    """A project's function that decides by what the user may do, e.g. which pages to remember."""
+    OPENED.append(("permissions", sorted(p.get("rsname") for p in user.permissions)))
+
+
 def broken(user, page):
     raise RuntimeError("the recent-pages table is away")
 
@@ -233,3 +238,24 @@ class TestCluster01ee_PageOpened(FrameCase):
         self.assertEqual((linked, after_link), (first + 1, 2), "a link to the same page is a new opening")
         self.assertEqual([entry[1] for entry in OPENED], ["/orders/[key]", "/orders/[key]", "/orders"],
                          "the list without loads: once for its visit and its reconnect")
+
+    # -- 1.1091 --------------------------------------------------------
+    def test_1_1091_the_projects_function_reads_the_users_permissions(self) -> None:
+        """
+        Scenario 1.1091: ui.frame(opened=) reads user.permissions.
+        Given: ui.frame(opened=with_permissions), a function that reads `user.permissions`.
+        When:  anna, who holds `init.Report:read`, opens the order page.
+        Then:  the function gets her permissions on its worker thread (no handler body is active
+               there; lex-app read them for it) - not an error in the log.
+        """
+        ui.frame(opened=with_permissions)
+
+        async def scenario():
+            async with testing.Harness(user="anna", grants=["init.Report:read"], params={"key": "7"}) as harness:
+                await harness.open_tab("/orders/7")
+                await (await harness.send(State, "ui_open", page="/orders/[key]"))
+                GATE["load"].set()
+                await _until(lambda: OPENED, "the function was never called, or failed")
+
+        asyncio.run(scenario())
+        self.assertEqual(OPENED, [("permissions", ["init.Report"])], "it read the user's permissions")
