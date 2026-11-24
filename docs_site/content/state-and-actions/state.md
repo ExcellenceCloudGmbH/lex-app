@@ -32,7 +32,7 @@ Inside a handler, `self` has helpers for the request it is running for:
 | Helper | What it is |
 | --- | --- |
 | `self.user` | the signed-in user: `.id`, `.name`, `.username`, `.email`, and `.permissions` (their grants as Keycloak lists them) |
-| `self.api` | lex-app's API as that user: `list`, `get`, `create`, `update`, `delete` |
+| `self.api` | lex-app's API as that user: `list`, `get`, `create`, `update`, `delete`; `list` returns one page of records |
 | `self.can(Model, scope)` | whether the user is granted `scope` - `"read"`, `"create"`, `"edit"` or `"delete"` - on the model |
 | `self.params` | the page's route and query values: `self.params.key`, `self.params["key"]`, or `self.params.get("w")` for an optional one |
 | `self.state(Other)` | another state of the same user, to read or change |
@@ -44,6 +44,28 @@ else they raise an error that says so.
 ```python exec
 from lex import ui
 from docs_site.sandbox.models import Fund
+
+
+class WhoAsks(ui.State):
+    name: str = ""
+    may_edit: str = ""
+
+    @ui.load
+    def open(self):
+        self._ask()
+
+    @ui.action
+    def ask_again(self):
+        self._ask()
+
+    def _ask(self):
+        self.name = self.user.name
+        self.may_edit = "Yes" if self.can(Fund, "edit") else "No"
+```
+
+```python
+from lex import ui
+from myproject.models import Fund
 
 
 class WhoAsks(ui.State):
@@ -76,6 +98,30 @@ ui.section(
 Switch **Viewing as** to Viewer and click **Ask again**: the name stays, and "May edit funds"
 turns to No. The load and the action share their work through `_ask`, a method whose name starts
 with `_`: one handler cannot call another, and a method with a leading `_` is not a handler.
+
+## Reading every record
+
+`self.api.list(Model, ...)` returns **one page** of the matching records: 25 unless you pass
+`per_page=`, and the page you ask for with `page=` (the first by default). The rows it returns
+carry `.count`, the number of matching records across all pages. A handler that needs every
+record - a `@ui.rows` table, a total - asks for the pages in turn until it has `.count` of them.
+The examples on this site use this helper:
+
+```python
+def every(api, model, **options):
+    """Every matching record: self.api.list returns one page of them at a time."""
+    rows, page = [], 1
+    while True:
+        found = api.list(model, page=page, per_page=100, **options)
+        rows.extend(found)
+        if not found or len(rows) >= found.count:
+            return rows
+        page += 1
+```
+
+`every(self.api, Fund, filters={"status": "investing"}, ordering="name")` takes the same
+`filters=`, `search=` and `ordering=` as `list`. For a count alone, `self.api.list(Model).count`
+needs no loop.
 
 ## Another state
 

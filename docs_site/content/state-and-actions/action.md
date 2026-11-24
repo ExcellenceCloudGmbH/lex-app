@@ -14,10 +14,51 @@ from lex import ui
 from docs_site.sandbox.models import Fund
 
 
+def every(api, model, **options):
+    """Every matching record: self.api.list returns one page of them at a time."""
+    rows, page = [], 1
+    while True:
+        found = api.list(model, page=page, per_page=100, **options)
+        rows.extend(found)
+        if not found or len(rows) >= found.count:
+            return rows
+        page += 1
+
+
 class Sizes(ui.State):
     @ui.rows
     def rows(self):
-        return self.api.list(Fund, ordering="name")
+        return every(self.api, Fund, ordering="name")
+
+    @ui.action(requires=ui.edit(Fund))
+    def grow(self, pk: int):
+        fund = self.api.get(Fund, pk)
+        if fund["status"] == "closed":
+            raise ui.Refuse(f"{fund['name']} is closed; its size cannot change.")
+        self.api.update(Fund, pk, {"size": fund["size"] + 10_000_000})
+        return ui.toast(f"{fund['name']} grew by 10 million.", tone="success")
+```
+
+```python
+from lex import ui
+from myproject.models import Fund
+
+
+def every(api, model, **options):
+    """Every matching record: self.api.list returns one page of them at a time."""
+    rows, page = [], 1
+    while True:
+        found = api.list(model, page=page, per_page=100, **options)
+        rows.extend(found)
+        if not found or len(rows) >= found.count:
+            return rows
+        page += 1
+
+
+class Sizes(ui.State):
+    @ui.rows
+    def rows(self):
+        return every(self.api, Fund, ordering="name")
 
     @ui.action(requires=ui.edit(Fund))
     def grow(self, pk: int):
@@ -60,8 +101,9 @@ records written that way name the user as their creator or editor.
   warning saying so.
 - The values after the handler in `ui.button("Add 10 million", Sizes.grow, row["id"])` are passed
   to it. They come back from the browser, so check them in the handler.
-- One handler cannot call another (`self.grow(...)` inside an action fails with an error saying
-  so). Put shared work in a method whose name starts with `_` and call it from both.
+- One handler cannot call another. Calling an action from a body (`self.grow(...)`) fails with
+  an error saying so; calling a load or a job does nothing at all, and only `lex reflex check`
+  reports it. Put shared work in a method whose name starts with `_` and call it from both.
 - When it succeeds, the tables that read this state's `@ui.rows` handlers read again.
 
 ## When it fails

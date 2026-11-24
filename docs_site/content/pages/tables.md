@@ -16,20 +16,64 @@ as the user when the table appears, and again on refresh and after an action of 
 it then searches, filters, sorts and pages the rows itself. The handler only reads: setting a
 field of the state there fails.
 
+Return every row, not one page: `self.api.list` returns one page of records at a time (25 by
+default), so a handler that returns it directly shows, searches and totals only that page. The
+`every` helper below asks for the pages in turn; [Reading every
+record](/state-and-actions/state#reading-every-record) explains it.
+
 ```python exec
 from lex import ui
 from docs_site.sandbox.models import Commitment, Fund, Investor
 
 
+def every(api, model, **options):
+    """Every matching record: self.api.list returns one page of them at a time."""
+    rows, page = [], 1
+    while True:
+        found = api.list(model, page=page, per_page=100, **options)
+        rows.extend(found)
+        if not found or len(rows) >= found.count:
+            return rows
+        page += 1
+
+
 class Commitments(ui.State):
     @ui.rows
     def rows(self):
-        funds = {row["id"]: row for row in self.api.list(Fund, per_page=100)}
-        investors = {row["id"]: row["name"] for row in self.api.list(Investor, per_page=100)}
+        funds = {row["id"]: row for row in every(self.api, Fund)}
+        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
         return [
             {"id": row["id"], "investor": investors[row["investor"]], "fund": funds[row["fund"]]["name"],
              "amount": row["amount"], "currency": funds[row["fund"]]["currency"]}
-            for row in self.api.list(Commitment, per_page=100, ordering="-amount")
+            for row in every(self.api, Commitment, ordering="-amount")
+        ]
+```
+
+```python
+from lex import ui
+from myproject.models import Commitment, Fund, Investor
+
+
+def every(api, model, **options):
+    """Every matching record: self.api.list returns one page of them at a time."""
+    rows, page = [], 1
+    while True:
+        found = api.list(model, page=page, per_page=100, **options)
+        rows.extend(found)
+        if not found or len(rows) >= found.count:
+            return rows
+        page += 1
+
+
+class Commitments(ui.State):
+    @ui.rows
+    def rows(self):
+        funds = {row["id"]: row for row in every(self.api, Fund)}
+        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
+        return [
+            {"id": row["id"], "investor": investors[row["investor"]], "fund": funds[row["fund"]]["name"],
+             "amount": row["amount"], "currency": funds[row["fund"]]["currency"]}
+            for row in every(self.api, Commitment, ordering="-amount")
         ]
 ```
 
@@ -77,13 +121,23 @@ ui.column("signed_on", label="Signed", kind="date")
 
 ## Filters
 
-`filters=` names columns to filter on; each gets a dropdown of the values in it.
+`filters=` names columns to filter on; each gets a dropdown of the values in it. A dropdown
+offers at most 50 values. If a filtered column has more, the table cannot read: the user sees
+"Something went wrong" with a reference, and the log says the column has too many values to
+filter. Search such a column instead, with `search=True`.
 
 ```python exec
 class AllFunds(ui.State):
     @ui.rows
     def rows(self):
-        return self.api.list(Fund, ordering="name")
+        return every(self.api, Fund, ordering="name")
+```
+
+```python
+class AllFunds(ui.State):
+    @ui.rows
+    def rows(self):
+        return every(self.api, Fund, ordering="name")
 ```
 
 ```python demo

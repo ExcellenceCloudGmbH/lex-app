@@ -17,6 +17,17 @@ with `_`, because one handler cannot call another.
 from lex import ui
 from docs_site.sandbox.models import Commitment, Fund, Investor
 
+
+def every(api, model, **options):
+    """Every matching record: self.api.list returns one page of them at a time."""
+    rows, page = [], 1
+    while True:
+        found = api.list(model, page=page, per_page=100, **options)
+        rows.extend(found)
+        if not found or len(rows) >= found.count:
+            return rows
+        page += 1
+
 FUND = 2
 
 
@@ -46,11 +57,11 @@ class FundPage(ui.State):
         return ui.download(data="\n".join(lines), filename="commitments.csv")
 
     def _commitments(self):
-        investors = {row["id"]: row["name"] for row in self.api.list(Investor, per_page=100)}
+        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
         return [
             {"id": row["id"], "investor": investors[row["investor"]], "amount": row["amount"],
              "currency": self.currency}
-            for row in self.api.list(Commitment, filters={"fund": FUND}, ordering="signed_on")
+            for row in every(self.api, Commitment, filters={"fund": FUND}, ordering="signed_on")
         ]
 
 
@@ -59,7 +70,67 @@ class FundInvestors(ui.State):
 
     @ui.load
     def open(self):
-        self.count = len({row["investor"] for row in self.api.list(Commitment, filters={"fund": FUND})})
+        self.count = len({row["investor"] for row in every(self.api, Commitment, filters={"fund": FUND})})
+```
+
+```python
+from lex import ui
+from myproject.models import Commitment, Fund, Investor
+
+
+def every(api, model, **options):
+    """Every matching record: self.api.list returns one page of them at a time."""
+    rows, page = [], 1
+    while True:
+        found = api.list(model, page=page, per_page=100, **options)
+        rows.extend(found)
+        if not found or len(rows) >= found.count:
+            return rows
+        page += 1
+
+FUND = 2
+
+
+class FundPage(ui.State):
+    name: str = ""
+    vintage: str = ""
+    status: str = ""
+    size: int = 0
+    currency: str = "EUR"
+
+    @ui.load
+    def open(self):
+        fund = self.api.get(Fund, FUND)
+        self.name = fund["name"]
+        self.vintage = str(fund["vintage"])
+        self.status = fund["status"]
+        self.size = fund["size"]
+        self.currency = fund["currency"]
+
+    @ui.rows
+    def commitments(self):
+        return self._commitments()
+
+    @ui.action
+    def export(self):
+        lines = ["investor,amount", *(f"{row['investor']},{row['amount']}" for row in self._commitments())]
+        return ui.download(data="\n".join(lines), filename="commitments.csv")
+
+    def _commitments(self):
+        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
+        return [
+            {"id": row["id"], "investor": investors[row["investor"]], "amount": row["amount"],
+             "currency": self.currency}
+            for row in every(self.api, Commitment, filters={"fund": FUND}, ordering="signed_on")
+        ]
+
+
+class FundInvestors(ui.State):
+    count: int = 0
+
+    @ui.load
+    def open(self):
+        self.count = len({row["investor"] for row in every(self.api, Commitment, filters={"fund": FUND})})
 ```
 
 ```python demo
@@ -117,7 +188,8 @@ A section holds the components that fill a page: `ui.text`, `ui.fact`, `ui.table
 `ui.status`, `ui.link`, `ui.button`, and `ui.each` and `ui.switch` for repetition and choice. Facts
 next to each other are shown as one list of labels and values.
 
-With `load=`, a section loads on its own, after the page, and shows its own skeleton and its own
+With `load=`, a section loads on its own - after the page's `load=` when the page has one,
+at once when it does not - and shows its own skeleton and its own
 failure - the "Investors" section above. A load belongs to the page or to one section, not both.
 
 ```python

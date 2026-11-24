@@ -13,10 +13,50 @@ from lex import ui
 from docs_site.sandbox.models import Fund
 
 
+def every(api, model, **options):
+    """Every matching record: self.api.list returns one page of them at a time."""
+    rows, page = [], 1
+    while True:
+        found = api.list(model, page=page, per_page=100, **options)
+        rows.extend(found)
+        if not found or len(rows) >= found.count:
+            return rows
+        page += 1
+
+
 class OpenFunds(ui.State):
     @ui.rows
     def rows(self):
-        return self.api.list(Fund, filters={"status__in": ["investing", "fundraising"]}, ordering="-vintage")
+        return every(self.api, Fund, filters={"status__in": ["investing", "fundraising"]}, ordering="-vintage")
+
+    @ui.action(requires=ui.create(Fund))
+    def new_fund(self):
+        number = self.api.list(Fund).count + 1
+        fund = self.api.create(Fund, {"name": f"New fund {number}", "vintage": 2026, "status": "fundraising",
+                                      "size": 0, "currency": "EUR"})
+        return ui.toast(f"{fund['name']} created.", tone="success")
+```
+
+```python
+from lex import ui
+from myproject.models import Fund
+
+
+def every(api, model, **options):
+    """Every matching record: self.api.list returns one page of them at a time."""
+    rows, page = [], 1
+    while True:
+        found = api.list(model, page=page, per_page=100, **options)
+        rows.extend(found)
+        if not found or len(rows) >= found.count:
+            return rows
+        page += 1
+
+
+class OpenFunds(ui.State):
+    @ui.rows
+    def rows(self):
+        return every(self.api, Fund, filters={"status__in": ["investing", "fundraising"]}, ordering="-vintage")
 
     @ui.action(requires=ui.create(Fund))
     def new_fund(self):

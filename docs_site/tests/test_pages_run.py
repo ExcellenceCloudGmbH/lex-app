@@ -58,3 +58,32 @@ def test_a_viewer_cannot_close_a_fund():
     result = testing.run(funds, "close", grants=[("docs.Fund", "read")], api=api, pk=2)
     assert result.denied
     assert api.get(Fund, 2)["status"] == "investing"
+
+
+@pytest.mark.parametrize("slug", SLUGS)
+def test_the_code_a_reader_sees_is_the_code_that_runs(slug):
+    """A setup fence that defines a class is followed by a plain copy of it, with the reader's import."""
+    fences = re.findall(r"```python( exec)?\n(.*?)```", content.load(slug).source, flags=re.S)
+    for index, (is_exec, code) in enumerate(fences):
+        if is_exec and "class " in code:
+            assert index + 1 < len(fences) and not fences[index + 1][0], f"{slug}: setup with no shown copy"
+            shown = fences[index + 1][1]
+            assert shown == code.replace("docs_site.sandbox.models", "myproject.models"), \
+                f"{slug}: the shown copy differs from the setup that runs"
+
+
+def test_every_reads_past_the_first_page():
+    import sys
+
+    from docs_site.sandbox.api import SandboxApi
+    from docs_site.sandbox.models import Fund
+    from docs_site.sandbox.store import Store
+
+    render_page(content.load("pages/tables"))
+    every = sys.modules["docs_site.pages.pages_tables"].every
+    api = SandboxApi(Store().tab("x"))
+    for n in range(250):
+        api.create(Fund, {"name": f"Fund {n}", "status": "investing"})
+    assert api.list(Fund).count == 256 and len(api.list(Fund)) == 25
+    assert len(every(api, Fund)) == 256
+    assert len(every(api, Fund, filters={"status": "investing"})) == 253

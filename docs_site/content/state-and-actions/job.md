@@ -36,6 +36,30 @@ class Tally(ui.State):
         return ui.toast("All commitments checked.", tone="success")
 ```
 
+```python
+import time
+
+from lex import ui
+from myproject.models import Commitment
+
+
+class Tally(ui.State):
+    checked: int = 0
+    largest: int = 0
+
+    @ui.job
+    def walk(self):
+        self.checked = 0
+        self.largest = 0
+        rows = self.api.list(Commitment, ordering="signed_on")[:10]
+        for done, row in enumerate(rows, start=1):
+            time.sleep(0.3)
+            self.checked = done
+            self.largest = max(self.largest, row["amount"])
+            yield ui.progress(done / len(rows), f"{done} of {len(rows)} commitments")
+        return ui.toast("All commitments checked.", tone="success")
+```
+
 ```python demo
 ui.section(
     "Commitments",
