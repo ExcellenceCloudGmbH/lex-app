@@ -1499,26 +1499,26 @@ does not remove user launch configurations.
 
 **Scenario range:** 1.827. **Test file:** `lex/test_project/tests/init/test_1dc_ui_mixin_handlers.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dc](batches.md).
 
-### 1dd. lex.ui tables: a date-range filter and a "contains" filter ✅
+### 1dd. lex.ui tables: a date column is filtered by a range of days ✅
 
-**What it tests:** `ui.filter(field, kind="dates")` and `ui.filter(field, kind="text")` filter a `@ui.rows` table on the server over every row, only on the fields the table offers, beside its dropdowns.
+**What it tests:** `filters=` names columns; a `date` or `datetime` column of a `@ui.rows` table is filtered by a range of days, any other by a dropdown of its values - on the server, over every row, only on the fields the table offers.
 
-**Why a regression matters:** a history that cannot be narrowed to a month, a date filter that drops the last day, or a filter on a field the table does not offer.
+**Why a regression matters:** a list that cannot be narrowed to a month, a range that drops its last day, or a filter on a field the table does not offer.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.828 | A history is filtered by dates and by words | the toolbar has a date-range picker and a text box beside the dropdown; a month keeps its first to last day (a datetime on the last evening included, an undated row never); an open start or end; every word must match in any case; both together; clearing empties them; a field the table does not offer and a date that is not a day change nothing; a model table and an unknown kind are refused |
+| 1.828 | A date column is filtered by a range of days | the kind column has a dropdown and the date column a date-range picker; a month keeps its first to last day (a datetime on the last evening included, an undated row never); an open start or end; the range and the dropdown together; clearing empties the picker; a range for a field that is no date filter and a date that is not a day change nothing |
 
 **Scenario range:** 1.828. **Test file:** `lex/test_project/tests/init/test_1dd_ui_table_filters.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dd](batches.md).
 
-### 1de. lex.ui handlers may send a Reflex event as it is ✅
+### 1de. lex.ui handlers may hand on to another state's handler ✅
 
-**What it tests:** A handler body returns or yields another state's handler, or an event spec such as `rx.call_script(...)`, among its lex.ui results; the browser gets it as it is, in order.
+**What it tests:** A handler body returns or yields another state's handler among its lex.ui results; the browser runs it in order. Reflex's own raw events stay in the custom region.
 
-**Why a regression matters:** a converted handler that cannot chain to the handler it used to start, or a result order the browser does not keep.
+**Why a regression matters:** a handler that cannot chain to another state, a result order the browser does not keep, or a browser script slipping out of an ordinary handler.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.829 | A handler sends a reflex event after its results | the Reflex events are results like the others, in the order written; they reach the browser as they are, after the toast before them; a plain object is still refused with the handler's name and what a handler may return |
+| 1.829 | A handler hands on to another states handler | the other state's handlers are results like the toast, in the order written, and reach the browser as they are; a browser script, a redirect and a plain object are refused with the handler's name and where raw events go |
 
 **Scenario range:** 1.829. **Test file:** `lex/test_project/tests/init/test_1de_ui_reflex_events.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1de](batches.md).

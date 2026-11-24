@@ -107,24 +107,28 @@ def split(value: Any, *, handler: str) -> tuple[list, Progress | None]:
             continue
         if isinstance(item, Progress):
             report = item
-        elif isinstance(item, (Goto, Toast, Download, Refresh)) or _is_reflex_event(item):
+        elif isinstance(item, (Goto, Toast, Download, Refresh)) or _is_state_handler(item):
             out.append(item)
         else:
             raise TypeError(
                 f"{handler} returned {item!r}. A lex.ui handler returns ui.goto(), ui.toast(), ui.download(), "
-                "ui.refresh() or a Reflex event (another handler, rx.call_script(...)), and a job may yield "
-                "ui.progress()."
+                "ui.refresh() or another state's handler (`Other.reload`, `Other.open(key)`), and a job may "
+                "yield ui.progress(). Use @ui.custom for raw Reflex events such as rx.call_script()."
             )
     return out, report
 
 
-def _is_reflex_event(item: Any) -> bool:
-    """A Reflex event a handler may send as it is: another handler (``Other.load``) or an event
-    spec (``rx.call_script(...)``, ``Other.load(key)``). The browser runs it after the results
-    before it, in order."""
+def _is_state_handler(item: Any) -> bool:
+    """Another state's handler, as a handler may hand it on: ``Other.reload`` or ``Other.open(key)``.
+
+    Only a handler of a state: Reflex's own events (``rx.call_script``, ``rx.redirect``,
+    ``rx.download``...) stay in the custom region (``@ui.custom``) - a toast, a goto and a download
+    have lex.ui results of their own.
+    """
     from reflex.event import EventHandler, EventSpec
 
-    return isinstance(item, (EventHandler, EventSpec))
+    target = item.handler if isinstance(item, EventSpec) else item
+    return isinstance(target, EventHandler) and bool(target.state_full_name)
 
 
 def _external(path: str) -> bool:
@@ -156,7 +160,7 @@ def to_events(items: list) -> list:
 
             extra = {"description": item.description} if item.description else {}
             events.append(getattr(rfds.toast, item.tone)(item.message, **extra))
-        elif _is_reflex_event(item):
+        elif _is_state_handler(item):
             events.append(item)
         else:
             events.append(rx.download(url=item.url, filename=item.filename, data=item.data))

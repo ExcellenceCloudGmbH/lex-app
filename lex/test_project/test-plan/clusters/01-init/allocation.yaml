@@ -2413,7 +2413,7 @@ letters:
       A lex.ui handler that a state takes from a mixin is decorated again under the state's own name. These tests fail
       on a button that stays busy, or a press ignored as a repeat, because another state runs the same handler.
   dd:
-    title: 'lex.ui tables: a date-range filter and a "contains" filter'
+    title: 'lex.ui tables: a date column is filtered by a range of days'
     scenarios: '1.828'
     status: complete
     tests:
@@ -2421,11 +2421,11 @@ letters:
       skip: 0
       xfail: 0
     note: >-
-      `ui.filter(field, kind="dates" | "text")` filters a `@ui.rows` table on the server, only on the fields it offers.
-      These tests fail on a history that cannot be narrowed to a month, a filter that drops the last day, or a filter
-      on a field the table does not offer.
+      A date or datetime column named in `filters=` is filtered by a range of days, on the server, only on the fields
+      the table offers. These tests fail on a list that cannot be narrowed to a month, a range that drops its last
+      day, or a filter on a field the table does not offer.
   de:
-    title: 'lex.ui handlers may send a Reflex event as it is'
+    title: 'lex.ui handlers may hand on to another state''s handler'
     scenarios: '1.829'
     status: complete
     tests:
@@ -2433,5 +2433,6 @@ letters:
       skip: 0
       xfail: 0
     note: >-
-      A handler body may return or yield another state's handler or an event spec among its results. These tests fail
-      on a converted handler that cannot chain to the handler it used to start, or a result order the browser loses.
+      A handler body may return or yield another state's handler among its results; raw Reflex events stay in the
+      custom region. These tests fail on a handler that cannot chain to another state, or a browser script slipping
+      out of an ordinary handler.

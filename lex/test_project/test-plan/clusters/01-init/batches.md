@@ -3128,31 +3128,31 @@ showed every section busy while one exported, and ignored a second section's exp
 | --- | --- | --- |
 | 1.827 | A handler from a mixin is each states own | each state keeps the handler under its own name, so a view of one state's running export does not show the other's; the second export runs too instead of being ignored as a repeat; a handler written on the state itself keeps its name |
 
-### Batch 1dd — lex.ui tables: a date-range filter and a "contains" filter ✅
+### Batch 1dd — lex.ui tables: a date column is filtered by a range of days ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.828 |
+| Scenario range | 1.828 | A date column is filtered by a range of days | the kind column has a dropdown and the date column a date-range picker; a month keeps its first to last day (a datetime on the last evening included, an undated row never); an open start or end; the range and the dropdown together; clearing empties the picker; a range for a field that is no date filter and a date that is not a day change nothing |
 | Type | U |
-| Files covered | `lex/lex_app/reflex/ui/pages/tables.py` (`filter`, the toolbar), `lex/lex_app/reflex/ui/pages/rows_table.py` (`set_dates`, `set_text`, matching), `lex/ui.py` |
+| Files covered | `lex/lex_app/reflex/ui/pages/tables.py` (the toolbar, filters by column kind), `lex/lex_app/reflex/ui/pages/rows_table.py` (`set_dates`, matching) |
 | Test file | `lex/test_project/tests/init/test_1dd_ui_table_filters.py` |
 | Test classes | `TestCluster01dd_TableFilters` (1.828) |
-| Fixtures | a history rows handler with dates of every shape; `ui.testing.Harness` |
+| Fixtures | a rows handler with dates of every shape; `ui.testing.Harness` |
 | Tests landed | **1 pass / 0 fail** |
 | Status | ✅ Complete |
 
-Found while moving the reviewed customer project's history tables to lex.ui: each filters by when a run started and by
-words in a name. 1.783's namespace gains `filter`.
+First built as `ui.filter(kind="dates" | "text")`; after an independent review the filter's control follows the
+column's kind (no new name), and the "contains" filter was dropped: `search=True` already does it.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.828 | A history is filtered by dates and by words | the toolbar has a date-range picker and a text box beside the dropdown; a month keeps its first to last day (a datetime on the last evening included, an undated row never); an open start or end; every word must match in any case; both together; clearing empties them; a field the table does not offer and a date that is not a day change nothing; a model table and an unknown kind are refused |
+| 1.828 | A date column is filtered by a range of days | the kind column has a dropdown and the date column a date-range picker; a month keeps its first to last day (a datetime on the last evening included, an undated row never); an open start or end; the range and the dropdown together; clearing empties the picker; a range for a field that is no date filter and a date that is not a day change nothing |
 
-### Batch 1de — lex.ui handlers may send a Reflex event as it is ✅
+### Batch 1de — lex.ui handlers may hand on to another state's handler ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.829 |
+| Scenario range | 1.829 | A handler hands on to another states handler | the other state's handlers are results like the toast, in the order written, and reach the browser as they are; a browser script, a redirect and a plain object are refused with the handler's name and where raw events go |
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/results.py` (`split`, `to_events`) |
 | Test file | `lex/test_project/tests/init/test_1de_ui_reflex_events.py` |
@@ -3161,9 +3161,9 @@ words in a name. 1.783's namespace gains `filter`.
 | Tests landed | **1 pass / 0 fail** |
 | Status | ✅ Complete |
 
-Found while converting the reviewed customer project's handlers: many started another state's handler or announced
-something, and stayed raw async handlers for that alone. 1.747's docstring now says a Reflex event is allowed.
+First built to accept any Reflex event; after an independent review only another state's handler is accepted, so raw
+events stay in the custom region. 1.747's docstring follows.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.829 | A handler sends a reflex event after its results | the Reflex events are results like the others, in the order written; they reach the browser as they are, after the toast before them; a plain object is still refused with the handler's name and what a handler may return |
+| 1.829 | A handler hands on to another states handler | the other state's handlers are results like the toast, in the order written, and reach the browser as they are; a browser script, a redirect and a plain object are refused with the handler's name and where raw events go |

@@ -51,8 +51,7 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
     row_open: ClassVar[str] = ""                      # the row's own open= field, if any
     tags_fields: ClassVar[tuple[str, ...]] = ()
     choice_fields: ClassVar[tuple[str, ...]] = ()
-    date_fields: ClassVar[tuple[str, ...]] = ()       # filtered by a date range (ui.filter(kind="dates"))
-    text_fields: ClassVar[tuple[str, ...]] = ()       # filtered by "contains" (ui.filter(kind="text"))
+    date_fields: ClassVar[tuple[str, ...]] = ()       # date columns among the filters: a range of days
     search_fields: ClassVar[tuple[str, ...]] = ()     # the text columns a search looks in
     totals_spec: ClassVar[tuple[Mapping[str, Any], ...]] = ()
     totals_currency: ClassVar[str] = ""               # the money field whose currency splits the totals
@@ -67,7 +66,6 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
     choices: dict[str, list[dict[str, str]]] = {}
     chosen: dict[str, str] = {}
     dates: dict[str, dict[str, str]] = {}             # a date filter's range, as its picker shows it
-    texts: dict[str, str] = {}                        # a text filter's words, as its box shows them
     _row_to: dict[str, str] = {}
 
     # -- events ----------------------------------------------------------------------------------
@@ -150,22 +148,6 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
         async for _ in self.load():
             yield
 
-    @rx.event
-    async def set_text(self, field: str, value: str):
-        """A text filter's words: a row matches when the field contains them; ``""`` removes it."""
-        if field not in type(self).text_fields:
-            return
-        text = " ".join(str(value or "").split())[:200]
-        filters, texts = dict(self.filters), dict(self.texts)
-        if text:
-            filters[field], texts[field] = {"op": "contains", "value": text}, text
-        else:
-            filters.pop(field, None)
-            texts.pop(field, None)
-        self.filters, self.texts, self.page = filters, texts, 0
-        async for _ in self.load():
-            yield
-
     def _store_filter(self, key: str, value: Mapping[str, Any]) -> bool:
         # Only the table's own filters: a filter on any other field would let the browser learn,
         # from the count of matching rows, a value the table does not show.
@@ -175,8 +157,8 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
 
     @rx.event
     async def clear_filters(self):
-        """"Clear filters": every filter, and the dropdowns, ranges and boxes that show them."""
-        self.chosen, self.dates, self.texts = {}, {}, {}
+        """"Clear filters": every filter, and the dropdowns and ranges that show them."""
+        self.chosen, self.dates = {}, {}
         if self.filters:
             self.filters = {}
             await self._after_filter_change()
@@ -185,7 +167,6 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
     async def remove_filter(self, key: str):
         self.chosen = {k: v for k, v in self.chosen.items() if k != key}
         self.dates = {k: v for k, v in self.dates.items() if k != key}
-        self.texts = {k: v for k, v in self.texts.items() if k != key}
         if key in self.filters:
             self.filters = {k: v for k, v in self.filters.items() if k != key}
             await self._after_filter_change()
@@ -266,15 +247,12 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
 
     @classmethod
     def _matching(cls, rows: list[dict], *, sort: list, filters: dict, query: str) -> list[dict]:
-        own = (*cls.tags_fields, *cls.date_fields, *cls.text_fields)
+        own = (*cls.tags_fields, *cls.date_fields)
         plain = {k: v for k, v in (filters or {}).items() if k not in own}
         for name, spec in (filters or {}).items():
             if name in cls.date_fields:
                 start, end = (list(spec.get("value") or []) + ["", ""])[:2]
                 rows = [r for r in rows if _within(r.get(name), start, end)]
-            elif name in cls.text_fields:
-                words = str(spec.get("value", "")).casefold().split()
-                rows = [r for r in rows if all(word in str(r.get(name) or "").casefold() for word in words)]
         for name, spec in (filters or {}).items():
             if name in cls.tags_fields:
                 wanted = str(spec.get("value", ""))

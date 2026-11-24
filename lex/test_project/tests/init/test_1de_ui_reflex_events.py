@@ -1,10 +1,12 @@
-"""lex.ui handlers may send a Reflex event as it is.
+"""lex.ui handlers may hand on to another state's handler.
 
-Intent: a project moving to lex.ui keeps raw Reflex states for a while, and a converted handler
-still has to start another state's handler (a table's refresh, a load after a choice) or run a
-small browser script (an announcement for screen readers). Without that, each such handler
-stayed a raw async handler, with everything lex.ui removes. A regression is a converted handler
-that cannot chain to the handler it used to start, or a result order the browser does not keep.
+Intent: when a handler has done its work, another state often has to act: read again, open
+what was just made. A handler returns that state's handler among its results and the browser
+runs it in order. Reflex's own raw events (a browser script, a redirect, a download) are not
+accepted: they stay in the custom region, where a review sees them, and toasts, gotos and
+downloads have lex.ui results of their own. A regression is a handler that cannot chain to
+another state, a result order the browser does not keep, or a browser script slipping out of
+an ordinary handler.
 
 Cluster 1de -- scenario 1.829. Type: U.
 Covers: lex/lex_app/reflex/ui/results.py (split, to_events).
@@ -41,33 +43,31 @@ class RawTable(rx.State):
 
 
 class TestCluster01de_ReflexEvents(SimpleTestCase):
-    """1.829: a Reflex event among a handler's results."""
+    """1.829: another state's handler among a handler's results."""
 
     # -- 1.829 ---------------------------------------------------------
-    def test_1_829_a_handler_sends_a_reflex_event_after_its_results(self) -> None:
+    def test_1_829_a_handler_hands_on_to_another_states_handler(self) -> None:
         """
-        Scenario 1.829: a Reflex event as a result.
-        Given: a handler's return value with a toast, another state's handler, that handler with
-               an argument, and a browser script.
-        When:  it is split as a handler's result and turned into browser events.
-        Then:  the Reflex events are results like the others, in the order written; they reach
-               the browser as they are, after the toast before them; a plain object is still
-               refused with the handler's name and with what a handler may return.
+        Scenario 1.829: another state's handler as a result.
+        Given: a handler's return value with a toast, another state's handler, and that handler
+               with an argument; and a browser script, a redirect and a plain object.
+        When:  they are split as a handler's result and turned into browser events.
+        Then:  the other state's handlers are results like the toast, in the order written, and
+               reach the browser as they are; the browser script, the redirect and the plain
+               object are refused with the handler's name and with where raw events go.
         """
-        script = rx.call_script("document.title = 'Saved'")
-        out, report = results.split([ui.toast("Saved"), RawTable.reload, RawTable.open("7"), script],
-                                    handler="Desk.save")
+        out, report = results.split([ui.toast("Saved"), RawTable.reload, RawTable.open("7")], handler="Orders.save")
         self.assertIsNone(report)
         self.assertEqual(out[0], results.Toast("Saved"), "the toast first, as written")
         self.assertIsInstance(out[1], EventHandler, "another state's handler")
         self.assertIsInstance(out[2], EventSpec, "the same with an argument")
-        self.assertIs(out[3], script, "a browser script")
         with patch.object(results, "RECORDER", None):
             events = results.to_events(out)
-        self.assertEqual(len(events), 4, "one browser event per result")
+        self.assertEqual(len(events), 3, "one browser event per result")
         self.assertIn("Saved", str(events[0]), "the toast is RFDS's toast")
-        self.assertEqual(events[1:], out[1:], "the Reflex events reach the browser as they are, in order")
-        with self.assertRaises(TypeError) as wrong:
-            results.split(object(), handler="Desk.save")
-        self.assertIn("Desk.save", str(wrong.exception))
-        self.assertIn("a Reflex event", str(wrong.exception), "the message says what a handler may return")
+        self.assertEqual(events[1:], out[1:], "the handlers reach the browser as they are, in order")
+        for raw in (rx.call_script("document.title = 'Saved'"), rx.redirect("/orders"), object()):
+            with self.assertRaises(TypeError) as wrong:
+                results.split(raw, handler="Orders.save")
+            self.assertIn("Orders.save", str(wrong.exception))
+            self.assertIn("@ui.custom", str(wrong.exception), "the message says where raw events go")
