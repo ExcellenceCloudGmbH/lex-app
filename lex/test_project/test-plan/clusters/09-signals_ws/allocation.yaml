@@ -1,7 +1,7 @@
 cluster: 9
 slug: signals_ws
 title: Signals & WebSocket
-max_scenario: 73
+max_scenario: 81
 letters:
   a:
     title: ''
@@ -94,3 +94,20 @@ letters:
       sign-in that ends while the socket joins its group is closed at once (9.69); re-validation also closes on a
       Django session that is gone, a deactivated user and an expired refresh token (9.70-9.72), and reaches the
       synchronous consumers through the channel layer (9.73).
+  k:
+    title: The calculation sockets carry a run only to who may read its record (LEX_SEC_INTERNAL)
+    scenarios: 9.74-9.81
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      Follows 10ah (the same rule on api/init-calculation-logs and api/active-calculations). The live-log socket
+      (named after the record, so any record could be followed by its number), the status socket (snapshot on
+      connect, every state change with its error message and traceback) and ws/calculations (each run's id) sent
+      every run to every connected socket, and under the default LEX_WS_AUTH=log to sockets without a sign-in. Now
+      a socket hears about records its user may read (lex/api/consumers/record_access.py, judged with the sign-in's
+      Keycloak roles and UMA permissions, never refreshing a token), a superuser about all, an unsigned socket about
+      none; LEX_SEC_INTERNAL=false restores. On the consumers before the fix 9.74 and 9.76-9.81 fail and 9.75
+      passes. 9f and 9j now run with LEX_SEC_INTERNAL=false: they check wiring and sign-in with made-up records.

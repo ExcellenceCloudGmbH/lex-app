@@ -1,12 +1,19 @@
 import json
 
+from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 
 from lex.api.consumers.auth import LexSocketAuthMixin
+from lex.api.consumers.record_access import SocketReader
 
 
 class CalculationLogConsumer(LexSocketAuthMixin, AsyncWebsocketConsumer):
-    """``ws/calculation_logs/<id>``: a calculation's live log lines, for signed-in users (see ``auth``)."""
+    """``ws/calculation_logs/<record>-<run>``: the live log lines of a record's calculations.
+
+    For signed-in users (see ``auth``) who may read the record (see ``record_access``). The
+    lines are broadcast to the record's group (``<model>_<pk>``); a socket for a record its user
+    may not read never joins it, stays open and hears nothing, like a quiet run.
+    """
 
     active_consumers = set()
 
@@ -17,7 +24,9 @@ class CalculationLogConsumer(LexSocketAuthMixin, AsyncWebsocketConsumer):
         if not await self.lex_socket_connect():
             return
 
-        await self.channel_layer.group_add(f'{self.calculation_record}', self.channel_name)
+        reader = SocketReader(self.scope)
+        if await database_sync_to_async(reader.may_read)(self.calculation_record):
+            await self.channel_layer.group_add(f'{self.calculation_record}', self.channel_name)
         await self.accept()
         self.active_consumers.add(self)
 

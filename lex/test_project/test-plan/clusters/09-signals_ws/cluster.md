@@ -53,3 +53,24 @@
 **Scenario range:** 9.53 – 9.73 (letters h and i, 9.44 – 9.52, are held by the in-flight branch `integration/lex-3-extensions`; 9.68 – 9.73 from the security review of 2026-11-06). **Test file:** `lex/test_project/tests/signals_ws/test_9j_socket_sign_in.py`. **Type:** I. **Status:** ✅ Complete (2026-11-06; review fixes the same day). Batch: [9j](batches.md).
 
 ---
+
+### 9k. The calculation sockets carry a run only to who may read its record (`LEX_SEC_INTERNAL`) ✅
+
+**What it tests:** `ws/calculation_logs/<record>-<run>`, `ws/calculation_status_update` and `ws/calculations` through `lex.lex_app.asgi.application`, with every message sent by its production emitter (`WebSocketHandler`, `update_calculation_status`, `WebSocketNotifier`). A socket hears about the runs of records its user may read (`permission_read`, judged like an API call of the same user: the sign-in's Keycloak client roles and UMA permissions); a superuser about every run; a socket without a sign-in about none, even under `LEX_WS_AUTH=log`; `LEX_SEC_INTERNAL=false` restores the open channels. A refused socket stays open and hears nothing. Socket code never refreshes a token: permissions are read with the access token while it is valid, and a socket whose token ran out keeps its last ones. The same rule as the REST endpoints of 10ah.
+
+**Why a regression matters:** a record's log lines (business data), its errors and tracebacks, and its running calculations reach users its permission refuses, or sockets with no sign-in.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 9.74 | live log, reader only | the open row's line reaches its socket; the secret row's socket stays open and hears nothing |
+| 9.75 | superuser, switch off | a superuser hears a secret row's line; with `LEX_SEC_INTERNAL=false` the plain user does too |
+| 9.76 | status snapshot | the user's snapshot lists the open run only, the secret run's record id, run id and display name nowhere; a superuser's lists both |
+| 9.77 | state changes | the secret run's failure (message, traceback) reaches the superuser, not the user; the open run's success reaches both; a worker's in-progress report on a secret row still lands in the process store |
+| 9.78 | run-started notice | `ws/calculations`: the open run's id reaches the user, the secret run's does not; a notice naming no record reaches every signed-in socket |
+| 9.79 | no sign-in, `log` | the three sockets are served; the snapshot is empty; no log line, notice or state change arrives |
+| 9.80 | Keycloak roles and UMA | a user with the `read` scope and the `calc-auditor` role sees both runs, one with neither sees none, exactly what `GET /api/active-calculations` answers each |
+| 9.81 | never refreshes | after the access token expires the socket keeps its last permissions; a socket that never had a valid token hears nothing; no token refreshed, no expired token sent to Keycloak |
+
+**Scenario range:** 9.74 – 9.81. **Test file:** `lex/test_project/tests/signals_ws/test_9k_calculation_sockets_read.py`. **Type:** I. **Status:** ✅ Complete (2026-11-25). Batch: [9k](batches.md). 9f and 9j run with `LEX_SEC_INTERNAL=false` since: they test wiring and the sign-in with made-up records, which this rule refuses (9.62's "served as before" holds with the switch off).
+
+---
