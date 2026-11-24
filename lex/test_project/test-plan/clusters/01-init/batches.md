@@ -3107,3 +3107,23 @@ Found while moving the reviewed customer project to lex.ui: it has its own frame
 | --- | --- | --- |
 | 1.825 | A page in the projects own frame after its gate | the page is in the project's frame, not lex-app's chrome; its load events are the grants, then the project's gate for that route, then the opener; the error page is in the frame too; without ui.chrome lex-app's chrome; a non-function is refused |
 | 1.826 | Install puts lex ui into a projects own app | the declared page is registered; the error page is added with the grants and the project's gate as its loads; the jobs' clock is registered once; the routes are checked after the project's pages |
+
+### Batch 1dc — lex.ui handlers declared on a state mixin are each state's own ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.827 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/ui/handlers.py` (`own_handlers`), `lex/lex_app/reflex/ui/state.py`, `lex/lex_app/reflex/ui/rows.py` |
+| Test file | `lex/test_project/tests/init/test_1dc_ui_mixin_handlers.py` |
+| Test classes | `TestCluster01dc_MixinHandlers` (1.827) |
+| Fixtures | a mixin with a job and an action, two states using it; `ui.testing.Harness` |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+
+Found while moving the reviewed customer project's handlers to lex.ui: an export shared by every section of a page
+showed every section busy while one exported, and ignored a second section's export as a repeat.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.827 | A handler from a mixin is each states own | each state keeps the handler under its own name, so a view of one state's running export does not show the other's; the second export runs too instead of being ignored as a repeat; a handler written on the state itself keeps its name |

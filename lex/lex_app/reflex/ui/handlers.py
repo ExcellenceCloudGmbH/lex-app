@@ -11,6 +11,7 @@ import logging
 import os
 import threading
 import time
+import types
 import uuid
 from typing import Any, AsyncIterator, Callable
 
@@ -288,6 +289,29 @@ def _mark(wrapper: Callable[..., Any], fn: Callable[..., Any], kind: str, **opti
     wrapper.__ui_options__ = options
 
 
+def own_handlers(cls: Any) -> None:
+    """Give ``cls`` its own copy of each lex.ui handler it took from a state mixin.
+
+    Reflex copies a mixin's handlers into every state that uses it, closure and all, so each copy
+    would keep the mixin's key: the states would share one running status, one repeat guard and one
+    page-load entry. Each such handler is decorated again here, from its body, under the state's
+    own name (``Concrete.export``), as if it had been written on the state.
+    """
+    for name, handler in list(getattr(cls, "event_handlers", {}).items()):
+        fn = getattr(handler, "fn", None)
+        again = getattr(fn, "__ui_again__", None)
+        if again is None or fn.__ui_key__ == fn.__qualname__:
+            continue
+        body = fn.__ui_fn__
+        copy = types.FunctionType(body.__code__, body.__globals__, body.__name__, body.__defaults__, body.__closure__)
+        copy.__kwdefaults__ = body.__kwdefaults__
+        copy.__annotations__ = body.__annotations__
+        copy.__doc__ = body.__doc__
+        copy.__module__ = body.__module__
+        copy.__qualname__ = fn.__qualname__                 # Reflex already named the copy after the state
+        cls._add_event_handler(name, again(copy))
+
+
 def _sibling_call(key: str, name: str) -> RuntimeError:
     caller = context.active()
     return RuntimeError(
@@ -373,6 +397,7 @@ def action(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any
             return run(self, *args, **kwargs)
 
         _mark(wrapper, fn, "action", requires=requirements)
+        wrapper.__ui_again__ = functools.partial(action, requires=requires)
         return rx.event(wrapper)
 
     return decorate(fn) if fn is not None else decorate
@@ -478,6 +503,7 @@ def job(fn: Callable[..., Any] | None = None, *, requires: Any = None, stop_on_l
                 await _shielded(wind_up())
 
         _mark(wrapper, fn, "job", requires=requirements, stop_on_leave=stop_on_leave)
+        wrapper.__ui_again__ = functools.partial(job, requires=requires, stop_on_leave=stop_on_leave)
         return rx.event(wrapper, background=True)
 
     return decorate(fn) if fn is not None else decorate
@@ -729,6 +755,7 @@ def load(fn: Callable[..., Any] | None = None, *, requires: Any = None, optional
                     yield item
 
         _mark(wrapper, fn, "load", requires=requirements, optional=optional, keep=kept)
+        wrapper.__ui_again__ = functools.partial(load, requires=requires, optional=optional, keep=keep)
         return rx.event(wrapper, background=True)
 
     return decorate(fn) if fn is not None else decorate

@@ -69,6 +69,9 @@ class State(rx.State):
                 f"Rename it, e.g. {name}_value or _{name}."
             )
         super().__init_subclass__(**kwargs)
+        from lex.lex_app.reflex.ui import handlers
+
+        handlers.own_handlers(cls)          # a handler from a mixin keeps its status under this state's name
 
     #: Handler key -> the first argument of each run in flight ('' without arguments).
     ui_running: dict[str, list[str]] = {}

@@ -70,6 +70,7 @@ def rows(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any:
                                "it is not an event to send.")
 
         handlers._mark(wrapper, fn, "rows", requires=requirements, search=bool(names))
+        wrapper.__ui_again__ = functools.partial(rows, requires=requires)
         return rx.event(wrapper)
 
     return decorate(fn) if fn is not None else decorate

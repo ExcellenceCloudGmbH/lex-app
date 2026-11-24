@@ -1486,3 +1486,15 @@ does not remove user launch configurations.
 | 1.826 | Install puts lex ui into a projects own app | the declared page is registered; the error page is added with the grants and the project's gate as its loads; the jobs' clock is registered once; the routes are checked after the project's pages |
 
 **Scenario range:** 1.825 – 1.826. **Test file:** `lex/test_project/tests/init/test_1db_ui_project_chrome.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1db](batches.md).
+
+### 1dc. lex.ui handlers declared on a state mixin are each state's own ✅
+
+**What it tests:** A handler shared through a Reflex state mixin keeps its running status and its repeat guard per state that uses the mixin.
+
+**Why a regression matters:** a button that stays busy, or a press that silently does nothing, because another state is running "the same" handler.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.827 | A handler from a mixin is each states own | each state keeps the handler under its own name, so a view of one state's running export does not show the other's; the second export runs too instead of being ignored as a repeat; a handler written on the state itself keeps its name |
+
+**Scenario range:** 1.827. **Test file:** `lex/test_project/tests/init/test_1dc_ui_mixin_handlers.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dc](batches.md).

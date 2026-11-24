@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 826
+max_scenario: 827
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2401,3 +2401,14 @@ letters:
       `ui.chrome(frame, first=)` puts every `@ui.page` and the failed-load page in the project's frame, after the
       project's gate; `ui.install(app)` puts lex.ui into a project's own Reflex app. These tests fail on a converted
       page that looks unlike its neighbours, or a page load that runs before the gate it relies on.
+  dc:
+    title: 'lex.ui handlers declared on a state mixin are each state''s own'
+    scenarios: '1.827'
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      A lex.ui handler that a state takes from a mixin is decorated again under the state's own name. These tests fail
+      on a button that stays busy, or a press ignored as a repeat, because another state runs the same handler.
