@@ -17,6 +17,7 @@ class Frame:
     """What ``ui.frame(...)`` configured; every part optional."""
 
     nav: tuple[str, ...] = ()
+    sign_out: str = ""                  # '' = lex-app's own /logout
     module: str = ""
 
 
@@ -29,7 +30,7 @@ def current() -> Frame:
     return _FRAME or Frame()
 
 
-def frame(*, nav: Any = ()) -> None:
+def frame(*, nav: Any = (), sign_out: Any = None) -> None:
     """Configure lex-app's frame for this project: call it once, in the dashboard module.
 
     ``nav`` is the navigation's areas in the order they are listed: the same words a page names
@@ -37,6 +38,11 @@ def frame(*, nav: Any = ()) -> None:
     start. Without it, areas come in the order their first page is declared::
 
         ui.frame(nav=["Orders", "Reports", "Tools"])
+
+    ``sign_out`` is where the user menu's "Sign out" leads: a page (``@ui.page`` or
+    ``ui.reflex_page``) or an ``https://`` address. By default it is lex-app's ``/logout``, which
+    ends the dashboard's sign-in and lex-app's; a project's address should end there too, or the
+    dashboard's sign-in lasts until it expires.
 
     The product name in the header is ``LEX_DASHBOARD_TITLE`` and its badge ``LEX_ENVIRONMENT``: a
     deployment's values. The look is lex-app's. Called again from the same module (a reload), the
@@ -47,7 +53,8 @@ def frame(*, nav: Any = ()) -> None:
     if _FRAME is not None and _FRAME.module != module:
         raise ValueError(f"ui.frame() is already configured, in module {_FRAME.module!r}. A project configures "
                          f"lex-app's frame once, in its dashboard module; move this call ({module!r}) there.")
-    _FRAME = Frame(nav=_areas(nav), module=module)
+    _FRAME = Frame(nav=_areas(nav), sign_out="" if sign_out is None else target(sign_out, argument="sign_out"),
+                   module=module)
 
 
 def _areas(nav: Any) -> tuple[str, ...]:

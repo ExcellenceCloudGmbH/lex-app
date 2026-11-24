@@ -28,8 +28,16 @@ import os
 import re
 from typing import Any, Callable
 
-#: Where the user signs out: the page ``create_app`` adds, which hands over to the backend's ``/auth/logout``.
+#: Where the user signs out by default (``ui.frame(sign_out=)`` changes it): the page ``create_app``
+#: adds, which hands over to the backend's ``/auth/logout``.
 SIGN_OUT_HREF = "/logout"
+
+def sign_out_href() -> str:
+    """Where the user signs out: ``ui.frame(sign_out=)``, else :data:`SIGN_OUT_HREF`."""
+    from lex.lex_app.reflex.ui.pages import frame
+
+    return frame.current().sign_out or SIGN_OUT_HREF
+
 
 #: ``LEX_ENVIRONMENT`` values RFDS's header can badge.
 ENVIRONMENTS = ("prod", "uat", "dev", "none")
@@ -182,7 +190,7 @@ def lex_chrome(body, *, embedded=None):
         # `?is_logout_enabled=false` leaves the user's name without the way out.
         user_menu=rx.cond(
             LexDashboardState.logout_enabled,
-            rfds.user_menu(name=LexUser.display_name, email=LexUser.email, sign_out_href=SIGN_OUT_HREF),
+            rfds.user_menu(name=LexUser.display_name, email=LexUser.email, sign_out_href=sign_out_href()),
             rx.text(LexUser.display_name, size="2"),
         ),
     )

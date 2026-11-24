@@ -202,3 +202,40 @@ class TestCluster01eb_FrameNav(FrameCase):
         css = (JS_DIR / "lex_rfds.css").read_text()
         self.assertIn('.rfds-side-nav-section:has(.rfds-side-nav-link[aria-current="page"]) .rfds-side-nav-heading',
                       css, "the current entry's area is marked by lex-app's stylesheet")
+
+    # -- 1.964 ---------------------------------------------------------
+    def test_1_964_the_user_menu_signs_out_where_the_project_says(self) -> None:
+        """
+        Scenario 1.964: the way out.
+        Given: lex-app's frame with no configuration, then ui.frame(sign_out=) an outside address,
+               then a page of the dashboards.
+        When:  the frame is built and compiled.
+        Then:  by default the user menu signs out at lex-app's /logout; configured, it leads to the
+               project's address, or the page's route; a route written as text, a plain-http address
+               and a page that needs values are refused with what to write; the product name is still
+               LEX_DASHBOARD_TITLE.
+        """
+        self.assertEqual(shell.sign_out_href(), shell.SIGN_OUT_HREF, "lex-app's own sign-out by default")
+        self.assertIn('"/logout"', compile_page("/plain", shell.lex_chrome(rx.text("body")))[1])
+        ui.frame(sign_out="https://portal.example.com/sign-out")
+        self.assertEqual(shell.sign_out_href(), "https://portal.example.com/sign-out")
+        with patch.dict("os.environ", {"LEX_DASHBOARD_TITLE": "Order desk"}):
+            _, module = compile_page("/plain", shell.lex_chrome(rx.text("body")))
+        self.assertIn("https://portal.example.com/sign-out", module, "the user menu leads there")
+        self.assertIn("Order desk", module, "the product name is the deployment's")
+
+        @ui.page("/goodbye")
+        def goodbye():
+            return _record("Signed out")
+
+        @ui.page("/orders/[key]")
+        def order():
+            return _record("Order")
+
+        ui.frame(sign_out=goodbye)
+        self.assertEqual(shell.sign_out_href(), "/goodbye", "a page of the dashboards, by its route")
+        for wrong, says in (("/logout", "not written as text"), ("http://portal.example.com", "https://"),
+                            (order, "needs key")):
+            with self.assertRaises(ValueError, msg=f"sign_out={wrong!r}") as caught:
+                ui.frame(sign_out=wrong)
+            self.assertIn(says, str(caught.exception))

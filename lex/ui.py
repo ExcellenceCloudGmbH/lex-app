@@ -59,7 +59,8 @@ progress_of/cancel``        event of a Cancel button
 ``@ui.page``                where a page lives: its route, its area of the navigation (``nav=``),
                             who may see it
 ``ui.frame``                lex-app's frame for this project, set once in the dashboard module:
-                            ``nav=[...]`` the areas' order
+                            ``nav=[...]`` the areas' order; ``sign_out=`` where the user menu
+                            signs out (a page or an https:// address; lex-app's /logout by default)
 ``@ui.dashboard``           a page that is not a route (the project's ``main()``)
 ``ui.record/list/form``     the page kinds: named slots, placed by lex-app (``ui.list`` is
                             left out of ``import *``, which would hide Python's ``list``)
