@@ -163,7 +163,8 @@ class TestCluster01cm_Namespace(TestCase):
                  "button", "link", "each", "switch", "custom_block", "loaded", "PageError",   # batch 1cu covers these
                  "rows", "address", "refresh", "embed", "reflex_page",                      # and batches 1cv, 1cy, 1da these
                  "form", "field", "step",                                                    # and batch 1dj these
-                 "private"}                                                                  # and batch 1dv this
+                 "private",                                                                  # and batch 1dv this
+                 "calculation"}                                                              # and batch 1ef this
         self.assertEqual(sorted(set(ui.__all__) - pages), sorted(expected),
                          "nothing else is public beside the page names")
 

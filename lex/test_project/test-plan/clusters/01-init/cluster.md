@@ -1795,3 +1795,19 @@ does not remove user launch configurations.
 | 1.935 | A kept form with tabs and a searched choice | keep=True with tabs=True compiles with its search; back within the idle time the tab's table reads the kept private value; a customer offered before the visit is still accepted; past the idle time the form and the tab's table say it is gone |
 
 **Scenario range:** 1.930 – 1.935. **Test file:** `lex/test_project/tests/init/test_1dx_ui_form_keep.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dx](batches.md).
+
+### 1ef. lex.ui calculation pages: the page kind, its form, a run started as the user -- ui.calculation ✅
+
+**What it tests:** `ui.calculation(Model, ...)`: the kind and its build-time checks; the form's values created as a record and its run started through lex-app's API as the user, with Celery off and on; `self.api.calculate` and `self.api.log`.
+
+**Why a regression matters:** a record created past the model's permissions, a run nobody can trace to its user, a page that blocks while the run goes, or a run whose log the grid cannot find.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.980 | The page is declared with form words and checked against the model | compiles to RFDS's form with a Calculate button; one state per page; lex-app's load; a model that is no calculation, an unknown field, a needed field left out, the status as an input, no fields: refused with what to write |
+| 1.981 | The form creates the record as the user and starts its run in-process | the record's values; create view then Calculate request; the browser at ?run=<key>; SUCCESS with what calculate() computed; the log under the grid's run id |
+| 1.982 | A user the model does not let create is refused above the button | no record; the refusal in ui_refused of the form's handler; the browser stays |
+| 1.983 | With Celery on the run goes to a worker and the page does not wait | dispatched once, never in-process; the record IN_PROGRESS; the browser already at the run |
+| 1.984 | self.api.calculate and self.api.log are the grid's Calculate and log | [] before a run; IN_PROGRESS at once; the run's Markdown log after; its newest line |
+
+**Scenario range:** 1.980 – 1.984. **Test file:** `lex/test_project/tests/init/test_1ef_ui_calculation_start.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1ef](batches.md).

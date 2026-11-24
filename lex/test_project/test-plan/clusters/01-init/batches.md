@@ -3586,3 +3586,26 @@ form's `result=`. What building settled is section 6.17 of `docs/superpowers/spe
 | 1.933 | A kept form with a load keeps what the load keeps | after a revisit and the load: the kept private result and the field in the load's keep= survive; what the load does not keep is reset |
 | 1.934 | A kept form keeps its refusal above its submit button | a ui.Refuse with a title stays above the button across a visit for a kept form and leaves for a form not kept; the line under a kept form does not repeat it; sending again clears both |
 | 1.935 | A kept form with tabs and a searched choice | keep=True with tabs=True compiles with its search; back within the idle time the tab's table reads the kept private value; a customer offered before the visit is still accepted; past the idle time the form and the tab's table say it is gone |
+
+### Batch 1ef — lex.ui calculation pages: the page kind, its form, a run started as the user -- ui.calculation ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.980 – 1.984 |
+| Type | E |
+| Files covered | `lex/lex_app/reflex/ui/pages/calculation.py` (`calculation`, its checks, the form view), `lex/lex_app/reflex/ui/calculations.py` (the page's state, `calculate`), `lex/lex_app/reflex/data.py` (`LexApi.calculate`, `LexApi.log`), `lex/lex_app/reflex/ui/context.py` (`self.api.calculate`, `self.api.log`) |
+| Test file | `lex/test_project/tests/init/test_1ef_ui_calculation_start.py` |
+| Test classes | `TestCluster01ef_CalculationStart` (1.980–1.984) |
+| Fixtures | `UiRegionReport` (a calculation model with a gate and permission switches) and `UiRegionReportLine` in the cluster's models; `_ui_calc_aids.Session`: the harness with `self.api` = lex.ui's own API client answered by lex-app's real views through the signed-in `APIClient` |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+
+The calculation page kind of section 6.19 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`, first piece: the kind, its checks against the model, its form and the start of a run. The handlers run in `ui.testing.Harness` against lex-app's real views.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.980 | The page is declared with form words and checked against the model | compiles to RFDS's form with a Calculate button; one state per page; lex-app's load; a model that is no calculation, an unknown field, a needed field left out, the status as an input, no fields: refused with what to write |
+| 1.981 | The form creates the record as the user and starts its run in-process | the record's values; create view then Calculate request; the browser at ?run=<key>; SUCCESS with what calculate() computed; the log under the grid's run id |
+| 1.982 | A user the model does not let create is refused above the button | no record; the refusal in ui_refused of the form's handler; the browser stays |
+| 1.983 | With Celery on the run goes to a worker and the page does not wait | dispatched once, never in-process; the record IN_PROGRESS; the browser already at the run |
+| 1.984 | self.api.calculate and self.api.log are the grid's Calculate and log | [] before a run; IN_PROGRESS at once; the run's Markdown log after; its newest line |

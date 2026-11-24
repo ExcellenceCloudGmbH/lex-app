@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 952
+max_scenario: 984
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2618,3 +2618,13 @@ letters:
       xfail: 0
     note: >-
       `ui.form(..., keep=True)`: the result flag survives a new visit; back while the job runs its progress, back after it the result; a kept private result that is gone is said under the form; a kept form shows its last failure in place and keeps its refusal above its submit button, not twice; with tabs=True a tab's table reads the kept private value; a searched choice's earlier offer is still accepted; what was typed returns through value=. These tests fail on a kept form that comes back empty, a result shown over data that is gone, or a failure while away that is never shown.
+  ef:
+    title: 'lex.ui calculation pages: the page kind, its form, a run started as the user -- ui.calculation'
+    scenarios: 1.980-1.984
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      `ui.calculation(Model, title=, fields=/steps=)`: the form's values become a record created through lex-app's create view as the user and its run is started by lex-app's Calculate request (`self.api.calculate`, the grid's run id), in-process with Celery off and handed to a worker with Celery on; the browser goes to `?run=<key>`; a refusal of the model's permission_create is the form's; `self.api.log` reads the newest run's log. These tests fail on a record created past the model's permissions, a page that waits for the run, or a run whose log the grid cannot find.

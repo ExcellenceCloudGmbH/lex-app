@@ -175,6 +175,36 @@ class LexApi:
         """Delete a record as the user."""
         await self._request("DELETE", f"model_entries/{model_id(model)}/{operation_id(model, 'delete')}/one/{pk}")
 
+    async def calculate(self, model: Any, pk: Any) -> dict:
+        """Start a calculation record's run as the user, as lex-app's Calculate button does.
+
+        The run's id has the shape the button gives it (``<model>_<pk>_update_<uuid>``): the grid's
+        log button and :meth:`log` find a run's log by it. Answers the record, ``IN_PROGRESS``; a
+        run already going is left alone, and the record comes back as it is.
+        """
+        name = model_id(model)
+        run = f"{name}_{pk}_update_{uuid.uuid4()}"
+        return await self._request("PATCH", f"model_entries/{name}/{run}/one/{pk}", json={"calculate": "true"})
+
+    async def log(self, model: Any, pk: Any) -> "list[str]":
+        """The log of a calculation record's newest run, as the user may read it: one Markdown text per entry.
+
+        The run is the one the grid's log button opens (its list request names each row's newest
+        run); ``[]`` when the record has no stored log yet -- an atomic run stores its log when it
+        commits.
+        """
+        name = model_id(model)
+        found = await self._request("POST", f"model_entries/{name}/list", params=[("id", str(pk))],
+                                    json={"startRow": 0, "endRow": 1})
+        rows = list((found or {}).get("rowData") or [])
+        run = rows[0].get("lex_reserved_calculation_id") if rows else None
+        if not run:
+            return []
+        data = await self._request("GET", "model_entries/calculationlog/list",
+                                   params=[("calculationId", str(run)), ("ordering", "id")])
+        entries = data if isinstance(data, list) else list((data or {}).get("results", []))
+        return [str(entry.get("calculation_log") or "") for entry in entries if entry.get("calculation_log")]
+
 
 async def lex_api(state: rx.State) -> LexApi:
     """The lex-app API as the user signed in to ``state``'s session.
