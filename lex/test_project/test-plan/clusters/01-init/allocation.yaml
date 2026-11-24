@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1037
+max_scenario: 1040
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2878,3 +2878,13 @@ letters:
       xfail: 0
     note: >-
       The Clear carries data-lex-clear=<key>. These tests fail on a several-choice field without its Clear, a Clear always shown, or a Clear that does not empty the browser's value.
+  fb:
+    title: 'ui.testing: drive a searched field, seed a private value as gone, test against lex-app''s API in-process'
+    scenarios: 1.1038-1.1040
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      The calculation tests' ViewsClient is now ui.testing.LexViews. These tests fail on a searched field a test cannot drive, a logged warning when seeding GONE, or self.api not answered by lex-app's views.

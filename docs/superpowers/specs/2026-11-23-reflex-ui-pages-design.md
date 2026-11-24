@@ -1322,6 +1322,21 @@ lex-app project. (The table gaps of the same round are section 5.15 of the table
   something is chosen. The same for the checkbox group of a short list (one rule for "several").
   A single choice has none (it is changed by choosing another). No argument.
 
+- **`ui.testing`: a searched field, a gone private value, lex-app's API in-process (batch 1fb).**
+  `ui.testing.search(OrdersState.create, "customer", "acm")` returns the matches a searched choice
+  offers when the user types (`{"value", "label"}`, as the browser gets them), its rows handler run as
+  the user; `Harness.search(handler, key, text)` is the same step inside a longer test (as `run` is
+  `Harness.send`). The form's page must be built, as when lex-app starts; a key that is no searched
+  field is refused saying what one is. `fields={"_report": ui.testing.GONE}` now seeds a
+  `ui.private` field through its own store (`private.put`), never Reflex's typed setter, so nothing
+  is logged. **`ui.testing.lex_api(client)`** is `self.api` answered in this process by lex-app's own
+  views through Django's test client (signed in as the user the API acts for): permissions,
+  validation, hooks, audit and calculations are lex-app's, with no server and no HTTP; `.calls` lists
+  the requests. It is the aid the calculation page's own tests used (`ViewsClient`), now public, so
+  the two cannot drift. *Names:* `search` as the field's own word (`options=` "searched on the
+  server"); `lex_api` as `data.lex_api` -- lex-app's API as the user. A plain stand-in object
+  (`api=Stub()`) still works for a test that needs no database.
+
 ## 7. Order of building
 
 One spec, four steps. Each ends by porting real pages of the reviewed project, in the scratchpad

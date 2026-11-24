@@ -1,13 +1,15 @@
 
 
-### 1ez. lex.ui forms: a field of several choices can be emptied at once -- its Clear ✅
+### 1fb. ui.testing: drive a searched field, seed a private value as gone, test against lex-app's API in-process ✅
 
-**What it tests:** each several-choice field (multi-select past twelve options, checkbox group below) has a Clear under a condition on something being chosen, which sets the field's browser value to the empty list; a single choice has none.
+**What it tests:** `ui.testing.search` returns the matches a searched field offers, as the browser gets them, and refuses a field that is not searched; seeding `ui.testing.GONE` logs nothing and the handler is refused in plain words, a seeded value is read; `ui.testing.lex_api(client)` answers `self.api` with lex-app's real list view in-process.
 
-**Why a regression matters:** A long choice that can only be undone one option at a time, or a Clear that leaves values behind.
+**Why a regression matters:** Project tests that reach into lex.ui's private modules, noisy logs, or a stand-in API that tests what lex-app does not do.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.1036 | Several choices can be emptied at once | Clear for regions (multi-select) and kinds (checkbox group) under a cond, none for main; the multi-select compiled; onClick sets the client state to []; .length > 0 |
+| 1.1038 | A test drives a searched field | matches Customer 001..009 with value and label only; an unsearched key refused |
+| 1.1039 | A private value is seeded as gone without a logged error | no WARNING log while seeding GONE; refused with the gone sentence; a seeded value read |
+| 1.1040 | self.api is answered by lex-app's views in-process | Acme Ltd, Gamma Ltd from a real list with search; calls == GET /api/model_entries/uicustomer/list |
 
-**Scenario range:** 1.1036. **Test file:** `lex/test_project/tests/init/test_1ez_ui_choices_clear.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ez](batches.md).
+**Scenario range:** 1.1038 – 1.1040. **Test file:** `lex/test_project/tests/init/test_1fb_ui_testing_search_gone_api.py`. **Type:** U (1.1038-1.1039), E (1.1040). **Status:** ✅ Complete (2026-11-24). Batch: [1fb](batches.md).

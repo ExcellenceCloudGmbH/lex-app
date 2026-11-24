@@ -69,7 +69,9 @@
 ``ui.running/failed/        a handler's status, for views; ``ui.cancel`` is the
 progress_of/cancel``        event of a Cancel button
 ``ui.loaded``               whether a load has finished since the page opened
-``ui.testing``              run a handler in a unit test
+``ui.testing``              run a handler in a unit test: ``run``, ``rows`` (a table's rows),
+                            ``search`` (what a searched field offers), ``GONE`` (a private value
+                            gone), ``lex_api(client)`` (``self.api`` answered by lex-app's views)
 ``@ui.page``                where a page lives: its route, its area of the navigation (``nav=``),
                             who may see it. lex-app's frame heads it with its breadcrumbs: the
                             area, the listed page that opens it, the page. The navigation lists
