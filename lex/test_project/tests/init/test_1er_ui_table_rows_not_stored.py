@@ -10,10 +10,10 @@ choices out of what Reflex stores; the browser gets them in the event's update, 
 stored state lost them reads them again when the page opens or reconnects (`restore`). A regression
 is a person's name in a state pickle, or a table that shows nothing after its state was stored.
 
-Cluster 1er -- scenarios 1.1024-1.1025. Type: U.
+Cluster 1er -- scenarios 1.1024-1.1025, 1.1103. Type: U.
 Covers: lex/lex_app/reflex/data.py (RowsNotStored, LexTableState), lex/lex_app/reflex/ui/pages/rows_table.py
 (LexRowsTableState, go, restore_events), lex/lex_app/reflex/ui/pages/tables.py (shown_on),
-lex/lex_app/reflex/ui/state.py (ui_open sends restore).
+lex/lex_app/reflex/ui/state.py (ui_open sends restore; ui_matches never stored).
 Run: python -m lex pytest lex/test_project/tests/init/test_1er_ui_table_rows_not_stored.py -v
 """
 
@@ -182,3 +182,62 @@ class TestCluster01er_TableRowsNotStored(SimpleTestCase):
         dropped, updates = asyncio.run(scenario())
         self.assertEqual(dropped, {}, "the row's address is not stored")
         self.assertIn("/salaries/7", updates, "the click still opens the row's address")
+
+
+class StaffState(ui.State):
+    """A form whose person is chosen by a search over a private list of persons."""
+
+    _staff: list = ui.private()
+
+    @ui.action
+    def find(self):
+        self._staff = [{"id": 11, "label": PERSON}, {"id": 12, "label": "Alan Turing"}]
+
+    @ui.rows
+    def people(self, search):
+        return [one for one in (self._staff or []) if search.lower() in one["label"].lower()]
+
+    @ui.action
+    def assign(self, values):
+        return None
+
+
+class TestCluster01er_MatchesNotStored(SimpleTestCase):
+    """1.1103: what a searched field offers reaches the browser, never the store."""
+
+    def setUp(self) -> None:
+        private.clear()
+        self.addCleanup(private.clear)
+
+    # -- 1.1103 --------------------------------------------------------
+    def test_1_1103_a_searched_fields_matches_reach_no_stored_state(self) -> None:
+        """
+        Scenario 1.1103: a searched choice over a ui.private value has offered its matches.
+        Given: a form whose person field is searched by a @ui.rows handler reading a private list of
+               persons; the user typed part of a name.
+        When:  every state of the tab is serialised as Reflex stores it (Redis, disk) and pickled.
+        Then:  the browser's update carries the person's name; no stored state holds it; what the form
+               accepts is still known (the offered ids are stored), so a value chosen is accepted.
+        """
+        form = ui.form(title="Assign", submit=StaffState.assign, fields=[ui.field("person", options=StaffState.people)])
+        form.build(Build(page="assign", route="/assign"))
+
+        async def scenario():
+            async with testing.Harness(user="ada") as h:
+                await h.open_tab("/assign")
+                await (await h.send(StaffState, "find"))
+                offered = await h.search(StaffState.assign, "person", "grace")
+                root = (await h._state(State))._get_root_state()
+                blobs = _stored(root)
+                kept = pickle.loads(pickle.dumps(await h._state(State)))
+                await (await h.send(StaffState, "assign", values={"person": "11"}))
+                invalid = dict((await h._state(State)).ui_invalid)
+                return offered, blobs, kept, str(h.updates), invalid
+
+        offered, blobs, kept, updates, invalid = asyncio.run(scenario())
+        self.assertEqual(offered, [{"value": "11", "label": PERSON}])
+        self.assertIn(PERSON, updates, "the browser is offered the person")
+        for blob in blobs:
+            self.assertNotIn(PERSON.encode(), blob, "no stored state holds a match")
+        self.assertEqual(kept.ui_matches, {}, "the matches are left out when the state is stored")
+        self.assertEqual(invalid, {}, "the value chosen is still accepted: the offered ids are kept")

@@ -201,6 +201,8 @@ class State(rx.State):
     ui_asking: str = ""
     ui_asking_args: list = []
     #: Searched field id -> the matches the user may choose from now: ``{"value", "label"}``, a page of them.
+    #: Data (a label may come from a ``ui.private`` value): it reaches the browser and is never stored with
+    #: the state (:meth:`__getstate__`); ``_ui_offered``, the ids only, is what a form is checked against.
     ui_matches: dict[str, list[dict[str, str]]] = {}
     #: Page route -> what its rules (``@ui.rule``) answered at its last opening: ``{"granted": "yes"|"no",
     #: "message": the refusal's sentence}``. A page with rules shows its content only on "yes".
@@ -250,6 +252,13 @@ class State(rx.State):
     #: "State.field" -> the stamp of the value a ``ui.private`` field holds in the server's memory.
     #: Only the stamp is part of the state: the value itself is never stored with it.
     _ui_private: dict[str, str] = {}
+
+    def __getstate__(self):
+        """The state as Reflex stores it (Redis, disk): without the matches a searched field shows."""
+        stored = super().__getstate__()
+        if stored.get("ui_matches"):
+            stored["ui_matches"] = {}
+        return stored
 
     user = property(lambda self: context.current().session.user)
     api = property(lambda self: context.api_of(context.current()))

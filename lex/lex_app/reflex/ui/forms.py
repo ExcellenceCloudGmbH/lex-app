@@ -8,8 +8,9 @@ kept for the field (``ui_invalid``) and the handler ends there.
 A choice searched on the server (``options=`` a ``@ui.rows`` handler) is the one field that talks to
 the server before the form is sent: :func:`ask` records what the user typed, in order, and
 :func:`search` runs the rows handler for it without holding the tab,
-keeps a page of matches for the browser (``ui_matches``) and remembers, on the server only, every
-value it offered to the tab (``_ui_offered``). The form's value is checked against those.
+keeps a page of matches for the browser (``ui_matches``, never stored with the state: a label is data)
+and remembers, on the server only, every value it offered to the tab (``_ui_offered``, the ids). The
+form's value is checked against those.
 """
 
 from __future__ import annotations

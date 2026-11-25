@@ -1349,6 +1349,15 @@ lex-app project. (The table gaps of the same round are section 5.15 of the table
   server"); `lex_api` as `data.lex_api` -- lex-app's API as the user. A plain stand-in object
   (`api=Stub()`) still works for a test that needs no database.
 
+**Review 2 (2026-11-25).** An independent review of 6.19-6.22 and 5.15; what it changed, each with its
+scenario (batch in brackets):
+
+- *A searched field's matches are never stored (I-7, 1.1103 [1er]).* `ui_matches` holds labels a rows
+  handler made, possibly from a `ui.private` value; Reflex stored them with `ui.State` after every event.
+  `ui.State.__getstate__` now leaves them out, as `RowsNotStored` leaves a table's rows out; what a form
+  accepts is checked against `_ui_offered`, the ids only, which stays. After a reconnect a searched field
+  shows no matches until it is opened or typed into again, which searches anew.
+
 ## 7. Order of building
 
 One spec, four steps. Each ends by porting real pages of the reviewed project, in the scratchpad

@@ -3985,6 +3985,7 @@ Section 5.15 of `docs/superpowers/specs/2026-11-23-reflex-ui-tables-design.md`.
 | --- | --- | --- |
 | 1.1024 | A table's rows reach the browser and no stored state | the browser's updates carry name, pay, team; no BaseStateToken.serialize or pickle of any state of the tab holds them or the total; stored: no rows, count kept, _rows_dropped; restore reads nothing when not dropped, reads again when dropped |
 | 1.1025 | Every ui.table is not stored; a row link survives the store | a ui.table model table is rows_not_stored and told to restore by its page; lex_table's state is not; a row's own address left out of the pickle, the click still redirects to it |
+| 1.1103 | A searched field's matches reach no stored state | a match read from a private value reaches the browser, no Redis/disk serialisation or pickle; the offered ids still accept the value |
 
 ### Batch 1es — lex.ui: a foreign key shows the related record's name, in a model table, a run's history and its facts ✅
 

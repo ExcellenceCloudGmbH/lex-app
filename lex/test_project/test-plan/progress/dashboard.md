@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 152 | 1102 | 984 | 3 | 0 |
+| 1. Init — Project Bootstrap | 152 | 1103 | 985 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -166,7 +166,7 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1eo | lex.ui frame: a page the user may not open looks like a missing one -- refused_as_missing | 1.1016-1.1019 | complete | 5 | 0 | 0 | The switch is the frame's (the application's policy), not a rule's: it holds for permissions too. The page's code stays in the app's bundle; it is hidden from the screen. These tests fail on a refused page that reveals itself, a permitted user refused, or lex-app's not-found page looking different. |
 | 1ep | lex.ui frame: the project's mark in the header, leading home | 1.1020-1.1021 | complete | 2 | 0 | 0 | The look stays lex-app's: RFDS's header has a logo slot for a tenant's mark. These tests fail on a lost mark, a brand that does not lead home, a decorative mark read out, or an unchecked address. |
 | 1eq | lex.ui: a search through self.api matches the model's own text, never created_by | 1.1023 | complete | 1 | 0 | 0 | Fails on a search sent to created_by__icontains (the bug: it was the first text field of every LexModel). |
-| 1er | lex.ui tables: the rows a table shows reach the browser and are never stored with the state | 1.1024-1.1025 | complete | 2 | 0 | 0 | Pins the data-protection rule "no person in any state's pickle" for tables. Fails on a row value, a total or a filter choice in a stored state, or on a table that cannot read its rows again after the store left them out. |
+| 1er | lex.ui tables: the rows a table shows reach the browser and are never stored with the state | 1.1024-1.1025, 1.1103 | complete | 3 | 0 | 0 | Pins the data-protection rule "no person in any state's pickle" for tables. Fails on a row value, a total or a filter choice in a stored state, or on a table that cannot read its rows again after the store left them out. |
 | 1es | lex.ui: a foreign key shows the related record's name, in a model table, a run's history and its facts | 1.1026-1.1027 | complete | 2 | 0 | 0 | The name is lex-app's own `<fk>__short_description` (str of the related record). These tests fail on an id shown in a foreign key's column or fact, a sort sent by the name key, or the id lost from the row. |
 | 1et | lex.ui: every record through self.api.all, and a model table filtered by a range of days | 1.1028-1.1029 | complete | 2 | 0 | 0 | 1cx's 1.809 and 1eh's 1.998 now expect the export/totals refusal's new words (it names self.api.all). These tests fail on a row read twice or missed, an unbounded read, or a model date filter not sent. |
 | 1eu | lex.ui frame: areas nav= does not list follow the listed ones; a typo is still refused | 1.103 | complete | 1 | 0 | 0 | 1.960 still holds (its typo is a lex.ui page's). These tests fail on an unlisted raw area refused, areas out of order, or a lex.ui typo accepted. |
