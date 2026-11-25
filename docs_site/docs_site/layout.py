@@ -11,7 +11,7 @@ import re
 import reflex as rx
 import rfds
 
-from docs_site import llms, nav
+from docs_site import llms, nav, reference
 from docs_site.content import load
 from docs_site.render import render_page, toc
 from docs_site.theme import VARS, var
@@ -24,11 +24,11 @@ MONO = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
 #: Inter is lex-app's own font (lex_head_components); the code font is the docs' addition
 MONO_STYLESHEET = "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
 
-#: a section's icon in the sidebar and on the landing cards (presentation only: nav.py holds the order)
+#: a chapter's icon in the sidebar and on the landing cards (presentation only: nav.py holds the order)
 SECTION_ICONS = {
-    "get-started": "arrow_right", "pages": "file_text", "state-and-actions": "zap",
-    "data-and-permissions": "database", "look-and-chrome": "palette", "ship-it": "rocket",
-    "reference": "braces",
+    "start-here": "flag", "show-your-data": "table", "let-people-act": "mouse_pointer_click",
+    "long-running-work": "hourglass", "who-can-do-what": "shield_check", "make-it-your-app": "panels_top_left",
+    "test-and-ship": "rocket", "reference": "braces",
 }
 
 
@@ -40,12 +40,29 @@ def _title(slug: str) -> str:
     return load(slug).title
 
 
-def _first(section: nav.Section) -> str:
-    return section.groups[0].pages[0]
-
-
 def _section(slug: str) -> str:
     return "" if slug == "index" else nav.section_of(slug).slug
+
+
+def chapter_label(section: nav.Section) -> str:
+    """"Chapter 2 · Show your data"; the API reference is not a chapter, and says its own name."""
+    n = nav.number(section)
+    return section.title if n is None else f"Chapter {n} · {section.title}"
+
+
+def api_href(name: str) -> str | None:
+    """The API reference's entry for a name in a page's ``api:`` (``@ui.page`` is the ``ui.page``
+    entry), or None when the reference has none (``self.api``, ``lex reflex check``)."""
+    bare = name.removeprefix("@")
+    if not bare.startswith("ui."):
+        return None
+    for group, names in reference.GROUPS.items():
+        if bare.removeprefix("ui.") in names:
+            slug = f"reference/{group}"
+            for _, text, anchor_id in load(slug).headings:
+                if text == bare:
+                    return f"{route_of(slug)}#{anchor_id}"
+    return None
 
 
 # -- header -------------------------------------------------------------------------------------
@@ -54,19 +71,16 @@ def _mark() -> rx.Component:
                   custom_attrs={"aria-hidden": "true"})
 
 
-#: the header's tabs: (label, the section it opens, the sections it stands for). "Components" is the
-#: Pages section - lex.ui's page kinds and parts; "Guide" is every other guide section and the landing.
-_REFERENCE_SLUG = "reference"
-_COMPONENTS_SLUG = "pages"
+#: the header's tabs: "Guide" is the landing and the seven chapters, "API reference" the reference
+_REFERENCE_SLUG = nav.REFERENCE
 
 
 def _tabs(current: str) -> rx.Component:
     here = _section(current)
-    by_slug = {s.slug: s for s in nav.NAV}
+    reference_section = next(s for s in nav.NAV if s.slug == _REFERENCE_SLUG)
     tabs = (
-        ("Guide", "/", here not in (_COMPONENTS_SLUG, _REFERENCE_SLUG)),
-        ("Components", route_of(_first(by_slug[_COMPONENTS_SLUG])), here == _COMPONENTS_SLUG),
-        ("API reference", route_of(_first(by_slug[_REFERENCE_SLUG])), here == _REFERENCE_SLUG),
+        ("Guide", "/", here != _REFERENCE_SLUG),
+        ("API reference", route_of(nav.first(reference_section)), here == _REFERENCE_SLUG),
     )
     return rx.el.nav(
         *[rx.link(label, href=href, underline="none", class_name="docs-tab",
@@ -97,7 +111,7 @@ def mode_toggle() -> rx.Component:
 
 
 # -- sidebar ------------------------------------------------------------------------------------
-_GUIDE = tuple(s for s in nav.NAV if s.slug != _REFERENCE_SLUG)
+_GUIDE = nav.CHAPTERS
 _REFERENCE = tuple(s for s in nav.NAV if s.slug == _REFERENCE_SLUG)
 
 
@@ -108,24 +122,21 @@ def _nav_link(slug: str, current: str) -> rx.Component:
 
 
 def _nav_section(section: nav.Section, current: str) -> rx.Component:
-    """One section as a group that opens and closes (a native details: client-side, and the
-    browser says it is expanded); the current page's section starts open."""
-    holds_current = any(current in g.pages for g in section.groups)
-    count = sum(len(g.pages) for g in section.groups)
-    body = []
-    for group in section.groups:
-        if len(section.groups) > 1:
-            body.append(rx.el.li(group.title, class_name="docs-nav-group", custom_attrs={"role": "presentation"}))
-        body += [_nav_link(slug, current) for slug in group.pages]
+    """One chapter as a list that opens and closes (a native details: client-side, and the
+    browser says it is expanded); the current page's chapter starts open. A chapter is one list
+    of pages, in the story's order: no group labels inside it."""
+    pages = nav.pages_of(section)
+    n = nav.number(section)
+    title = [rx.el.span(str(n), class_name="docs-nav-num"), section.title] if n is not None else [section.title]
     return rx.el.details(
         rx.el.summary(rx.el.span(rfds.icon(SECTION_ICONS.get(section.slug, "file_text"), size="sm"),
                                  class_name="docs-nav-icon"),
-                      rx.el.span(section.title, class_name="docs-nav-title"),
-                      rx.el.span(str(count), class_name="docs-nav-count", custom_attrs={"aria-hidden": "true"}),
+                      rx.el.span(*title, class_name="docs-nav-title"),
+                      rx.el.span(str(len(pages)), class_name="docs-nav-count", custom_attrs={"aria-hidden": "true"}),
                       rfds.icon("chevron_right", size="sm", class_name="docs-nav-chevron"),
                       class_name="docs-nav-summary"),
-        rx.el.ul(*body, class_name="docs-nav-list"),
-        open=holds_current, class_name="docs-nav-section",
+        rx.el.ul(*[_nav_link(slug, current) for slug in pages], class_name="docs-nav-list"),
+        open=current in pages, class_name="docs-nav-section",
     )
 
 
@@ -164,6 +175,48 @@ def _meta(slug: str) -> rx.Component:
     return rx.el.div(*items, class_name="docs-meta")
 
 
+def _api_tags(slug: str) -> rx.Component:
+    """"In the API": the names the page teaches, each a link to its API reference entry when the
+    reference has one; the title says what the page does, these say what it is called in code."""
+    names = load(slug).api
+    if not names:
+        return rx.fragment()
+
+    def tag(name: str) -> rx.Component:
+        code = rx.el.code(name, class_name="docs-api-name")
+        href = api_href(name)
+        if href is None:
+            return rx.el.li(code, class_name="docs-api-tag")
+        return rx.el.li(rx.link(code, href=href, underline="none", class_name="docs-api-link",
+                                custom_attrs={"aria-label": f"{name} in the API reference"}),
+                        class_name="docs-api-tag")
+
+    return rx.el.div(
+        rx.el.span("In the API", class_name="docs-api-label", id=f"docs-api-{slug.replace('/', '-')}"),
+        rx.el.ul(*[tag(n) for n in names], class_name="docs-api-list",
+                 custom_attrs={"aria-labelledby": f"docs-api-{slug.replace('/', '-')}"}),
+        class_name="docs-api",
+    )
+
+
+def _chapter_intro(slug: str) -> rx.Component:
+    """On a chapter's first page: the chapter's part of the story, before the page begins."""
+    section = nav.section_of(slug)
+    n = nav.number(section)
+    if n is None or nav.first(section) != slug:
+        return rx.fragment()
+    return rx.el.aside(
+        rx.el.span(rfds.icon(SECTION_ICONS.get(section.slug, "file_text"), size="md"),
+                   class_name="docs-intro-icon", custom_attrs={"aria-hidden": "true"}),
+        rx.el.div(
+            rx.el.p(f"Chapter {n} of {len(nav.CHAPTERS)} · {section.title}", class_name="docs-intro-label"),
+            rx.el.p(section.story, class_name="docs-intro-story"),
+            class_name="docs-intro-body",
+        ),
+        class_name="docs-intro", custom_attrs={"aria-label": "This chapter"},
+    )
+
+
 def _prev_next(slug: str) -> rx.Component:
     before, after = nav.neighbours(slug)
 
@@ -186,7 +239,7 @@ _TEXT = {"font_family": "Inter, system-ui, sans-serif"}
 
 _STYLE = {
     **VARS,
-    "--docs-sidebar-w": "280px",
+    "--docs-sidebar-w": "304px",       # the chapters' page titles fit on one line
     "--docs-toc-w": "232px",
     "--docs-mono": MONO,
     "--rfds-size-shell-header": "60px",
@@ -272,8 +325,8 @@ _STYLE = {
     "& .docs-nav-list": {"list_style": "none", "margin": "2px 0 8px 22px", "padding": "0 0 0 10px",
                          "border_left": f"1px solid {var('border')}", "display": "flex", "flex_direction": "column",
                          "gap": "1px"},
-    "& .docs-nav-group": {"padding": "8px 2px 2px", "font_size": "11px", "font_weight": "600",
-                          "letter_spacing": "0.04em", "text_transform": "uppercase", "color": var("muted")},
+    "& .docs-nav-num": {"display": "inline-block", "min_width": "16px", "margin_right": "6px",
+                        "font_variant_numeric": "tabular-nums", "font_weight": "600", "color": var("muted")},
     "& .docs-nav-link": {"display": "flex", "align_items": "center", "justify_content": "space-between", "gap": "8px",
                          "margin_left": "-11px", "padding": "6px 10px 6px 12px",
                          "border_left": "2px solid transparent", "border_radius": "0 8px 8px 0",
@@ -318,6 +371,30 @@ _STYLE = {
     "& .docs-meta": {"display": "flex", "flex_wrap": "wrap", "gap": "16px", "margin": "18px 0 32px",
                      "font_size": "13px", "color": var("muted")},
     "& .docs-meta > span": {"display": "flex", "align_items": "center", "gap": "6px"},
+    # "In the API": the page's API names as small code tags, under the lead
+    "& .docs-api": {"display": "flex", "flex_wrap": "wrap", "align_items": "center", "gap": "8px 10px",
+                    "margin": "16px 0 0"},
+    "& .docs-api + .docs-meta": {"margin_top": "14px"},
+    "& .docs-api-label": {"font_size": "13px", "font_weight": "500", "color": var("muted")},
+    "& .docs-api-list": {"display": "flex", "flex_wrap": "wrap", "gap": "6px", "margin": "0", "padding": "0",
+                         "list_style": "none"},
+    "& .docs-api-name": {"display": "inline-block", "font_family": "var(--docs-mono)", "font_size": "12.5px",
+                         "line_height": "20px", "padding": "1px 8px", "border_radius": "6px",
+                         "background": var("pill-bg"), "color": var("pill-ink"),
+                         "border": f"1px solid {var('pill-bg')}", "font_variant_ligatures": "none"},
+    "& .docs-api-link": {"text_decoration": "none"},
+    "& .docs-api-link:hover .docs-api-name": {"border_color": var("accent")},
+    # a chapter's first page: the chapter's part of the story, before the page begins
+    "& .docs-intro": {"display": "flex", "gap": "14px", "align_items": "flex-start", "margin": "0 0 32px",
+                      "padding": "16px 18px", "border_radius": "12px", "background": var("sunk"),
+                      "border": f"1px solid {var('border')}", "border_left": f"3px solid {var('accent')}"},
+    "& .docs-intro-icon": {"display": "none", "align_items": "center", "justify_content": "center",
+                           "flex": "none", "width": "32px", "height": "32px", "border_radius": "8px",
+                           "background": var("pill-bg"), "color": var("pill-ink")},
+    "& .docs-intro-body": {"display": "flex", "flex_direction": "column", "gap": "2px", "min_width": "0"},
+    "& .docs-intro-label": {"margin": "0", "font_size": "12px", "font_weight": "600", "letter_spacing": "0.04em",
+                            "text_transform": "uppercase", "color": var("link")},
+    "& .docs-intro-story": {"margin": "0", "font_size": "16px", "line_height": "1.55", "color": var("ink")},
     # article body
     "& .docs-prose": {"font_size": "15px", "line_height": "1.65", "color": var("ink")},
     "& .docs-prose p.rt-Text, & .docs-prose li": {"font_size": "15px", "line_height": "1.65"},
@@ -434,16 +511,25 @@ _STYLE = {
     "& .docs-section-card:hover": {"border_color": var("accent"), "background": var("sunk")},
     "& .docs-section-card-title": {"display": "flex", "align_items": "center", "gap": "10px",
                                    "font_size": "16px", "font_weight": "600", "color": var("ink")},
-    "& .docs-section-card-icon": {"display": "inline-flex", "align_items": "center", "justify_content": "center",
-                                  "width": "28px", "height": "28px", "border_radius": "8px",
-                                  "background": var("pill-bg"), "color": var("pill-ink"), "flex": "none"},
-    "& .docs-section-card-blurb": {"font_size": "14px", "line_height": "1.55", "color": var("muted")},
-    "& .docs-section-card-count": {"margin_top": "auto", "padding_top": "8px", "font_size": "12px",
-                                   "color": var("muted")},
+    "& .docs-section-card-icon, & .docs-section-card-num": {
+        "display": "inline-flex", "align_items": "center", "justify_content": "center", "width": "28px",
+        "height": "28px", "border_radius": "8px", "background": var("pill-bg"), "color": var("pill-ink"),
+        "flex": "none"},
+    "& .docs-section-card-num": {"border_radius": "999px", "font_size": "14px", "font_weight": "700",
+                                 "font_variant_numeric": "tabular-nums"},
+    "& .docs-section-card-story": {"font_size": "14px", "line_height": "1.55", "color": var("muted")},
+    "& .docs-section-card-count": {"display": "flex", "align_items": "center", "gap": "6px", "margin_top": "auto",
+                                   "padding_top": "8px", "font_size": "12px", "color": var("muted")},
+    "& .docs-section-card-ref": {"background": var("sunk")},
+    "& .docs-journey": {"margin_top": "8px", "padding_top": "8px"},
+    "& .docs-journey-title.rt-Heading": {"margin": "16px 0 0", "font_size": "24px", "line_height": "1.3",
+                                         "font_weight": "650", "letter_spacing": "-0.015em", "color": var("ink")},
+    "& .docs-journey-lede": {"margin": "6px 0 0", "font_size": "15px", "line_height": "1.6", "color": var("muted")},
     "@media (min-width: 640px)": {
         "& .docs-product-sub": {"display": "inline"},
         "& .docs-kbd": {"display": "inline"},
         "& .docs-demo-as": {"display": "inline"},
+        "& .docs-intro-icon": {"display": "inline-flex"},
         "& .docs-pager": {"grid_template_columns": "1fr 1fr"},
         "& .docs-main": {"padding": "32px 32px 72px"},
         "& .docs-title.rt-Heading": {"font_size": "40px"},
@@ -504,13 +590,17 @@ def _content_page(slug: str):
         section = nav.section_of(slug)
         body = rx.box(
             rx.el.div(
-                rfds.breadcrumbs({"label": section.title, "href": route_of(_first(section))}, {"label": doc.title}),
+                # the first crumb is the chapter: "Chapter 2 · Show your data", to its first page
+                rfds.breadcrumbs({"label": chapter_label(section), "href": route_of(nav.first(section))},
+                                 {"label": doc.title}, truncate_chars=48),
                 _page_actions(slug),
                 class_name="docs-article-head",
             ),
             rx.heading(doc.title, size="8", as_="h1", class_name="docs-title"),
             rx.text(doc.description, as_="p", class_name="docs-lede") if doc.description else rx.fragment(),
+            _api_tags(slug),
             _meta(slug),
+            _chapter_intro(slug),
             render_page(doc),
             _prev_next(slug),
         )
@@ -520,14 +610,22 @@ def _content_page(slug: str):
 
 
 def _section_card(section: nav.Section) -> rx.Component:
-    count = sum(len(g.pages) for g in section.groups)
+    """A chapter on the landing journey: its number, title, part of the story and page count, to
+    its first page. The API reference's card has its icon where a chapter has its number."""
+    count = len(nav.pages_of(section))
+    n = nav.number(section)
+    mark = (rx.el.span(str(n), class_name="docs-section-card-num") if n is not None else
+            rx.el.span(rfds.icon(SECTION_ICONS.get(section.slug, "file_text"), size="sm"),
+                       class_name="docs-section-card-icon"))
     return rx.link(
-        rx.el.span(rx.el.span(rfds.icon(SECTION_ICONS.get(section.slug, "file_text"), size="sm"),
-                              class_name="docs-section-card-icon", custom_attrs={"aria-hidden": "true"}),
-                   section.title, class_name="docs-section-card-title"),
-        rx.el.span(section.blurb, class_name="docs-section-card-blurb"),
-        rx.el.span(f"{count} page{'s' if count != 1 else ''}", class_name="docs-section-card-count"),
-        href=route_of(_first(section)), underline="none", class_name="docs-section-card",
+        rx.el.span(rx.el.span(mark, custom_attrs={"aria-hidden": "true"}), section.title,
+                   class_name="docs-section-card-title"),
+        rx.el.span(section.story, class_name="docs-section-card-story"),
+        rx.el.span(f"{count} page{'s' if count != 1 else ''}", rfds.icon("arrow_right", size="sm"),
+                   class_name="docs-section-card-count"),
+        href=route_of(nav.first(section)), underline="none",
+        class_name="docs-section-card" + ("" if n is not None else " docs-section-card-ref"),
+        custom_attrs={"aria-label": f"{chapter_label(section).replace(' · ', ': ')}. {section.story}"},
     )
 
 
@@ -540,9 +638,16 @@ def _landing() -> rx.Component:
         render_page(doc),
         class_name="docs-hero",
     )
-    cards = rx.grid(*[_section_card(s) for s in nav.NAV],
-                    columns=rx.breakpoints(initial="1", sm="2", xl="3"), spacing="4", margin_top="24px")
-    return shell("index", rx.box(hero, cards), wide=True)
+    journey = rx.el.section(
+        rx.heading("The guide, chapter by chapter", as_="h2", size="6", class_name="docs-journey-title",
+                   id="the-guide"),
+        rx.el.p("Each chapter adds to one dashboard for a fund team, from its first page to production.",
+                class_name="docs-journey-lede"),
+        rx.grid(*[_section_card(s) for s in nav.NAV], columns=rx.breakpoints(initial="1", sm="2"),
+                spacing="4", margin_top="20px"),
+        class_name="docs-journey", custom_attrs={"aria-labelledby": "the-guide"},
+    )
+    return shell("index", rx.box(hero, journey), wide=True)
 
 
 def add_pages(app: rx.App) -> None:

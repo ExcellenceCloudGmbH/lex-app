@@ -13,7 +13,7 @@ HELP = ("Puts this tab's sample data back as it started. Tables on the page read
 
 
 def page_module(path: str) -> str:
-    """The module a page's code runs in, from the page's route (``/pages/tables``)."""
+    """The module a page's code runs in, from the page's route (``/show-your-data/tables``)."""
     slug = path.strip("/") or "index"
     return "docs_site.pages." + slug.replace("/", "_").replace("-", "_")
 

@@ -17,6 +17,8 @@ class Entry:
     heading: str
     anchor: str
     text: str
+    #: the page's API names: a page is found by what it is called in code as well as by its title
+    api: str = ""
 
 
 @cache
@@ -25,14 +27,15 @@ def build_index() -> list[Entry]:
     for slug in all_slugs():
         page = load(slug)
         anchors = iter(a for _, _, a in page.headings)     # the same headings, in order, de-duplicated
+        api = " ".join(page.api)
         heading, anchor_id, words = "", "", []
         for block in page.document.blocks:
             if isinstance(block, HeadingBlock) and block.level in (2, 3):
-                out.append(Entry(slug, page.title, heading, anchor_id, " ".join(words)))
+                out.append(Entry(slug, page.title, heading, anchor_id, " ".join(words), api))
                 heading, anchor_id, words = plain(block.children), next(anchors), []
             elif isinstance(block, TextBlock):
                 words.append(plain(block.children))
-        out.append(Entry(slug, page.title, heading, anchor_id, " ".join(words)))
+        out.append(Entry(slug, page.title, heading, anchor_id, " ".join(words), api))
     return out
 
 
@@ -42,10 +45,11 @@ def find(index: list[Entry], query: str, limit: int = 8) -> list[Entry]:
         return []
 
     def rank(e: Entry) -> int | None:
-        hay = f"{e.title} {e.heading} {e.text}".lower()
+        named = f"{e.title} {e.api}".lower()           # what the page is called, in words or in code
+        hay = f"{named} {e.heading} {e.text}".lower()
         if not all(t in hay for t in terms):
             return None
-        if all(t in e.title.lower() for t in terms):
+        if all(t in named for t in terms):
             return 0 if not e.heading else 1
         return 2 if all(t in e.heading.lower() for t in terms) else 3
 

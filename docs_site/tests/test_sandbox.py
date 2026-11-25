@@ -99,7 +99,7 @@ from docs_site.sandbox.store import STORE
 
 def _fake_state(tab: str, role: str | None = None):
     """A state as the resolver sees it; with ``role``, its tab's RoleState holds that role."""
-    router = SimpleNamespace(session=SimpleNamespace(client_token=tab), url="/pages/record", page=SimpleNamespace(params={}))
+    router = SimpleNamespace(session=SimpleNamespace(client_token=tab), url="/show-your-data/one-record", page=SimpleNamespace(params={}))
     state = SimpleNamespace(router=router)
     if role is not None:
         from docs_site.sandbox.role import RoleState

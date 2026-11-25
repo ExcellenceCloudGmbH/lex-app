@@ -27,6 +27,10 @@ def test_internal_links_resolve(slug):
         assert path in ROUTES, f"{slug}: link to {target}"
         if frag:
             assert frag in ANCHORS[path], f"{slug}: no #{frag} on {path}"
+    # a link to a heading of the same page: the heading must be on this page (a split page moves them)
+    own = {a for _, _, a in content.load(slug).headings}
+    for frag in re.findall(r"\]\(#([^)\s]+)\)", content.load(slug).source):
+        assert frag in own, f"{slug}: no #{frag} on this page"
 
 
 def test_the_first_dashboard_closes_a_fund():
@@ -37,8 +41,8 @@ def test_the_first_dashboard_closes_a_fund():
     from docs_site.sandbox.store import Store
     from lex.lex_app.reflex.ui import testing
 
-    render_page(content.load("get-started/first-dashboard"))
-    funds = sys.modules["docs_site.pages.get_started_first_dashboard"].Funds
+    render_page(content.load("start-here/first-dashboard"))
+    funds = sys.modules["docs_site.pages.start_here_first_dashboard"].Funds
     api = SandboxApi(Store().tab("x"))
     testing.run(funds, "close", grants=[("docs.Fund", "edit")], api=api, pk=2)
     assert api.get(Fund, 2)["status"] == "closed"
@@ -52,8 +56,8 @@ def test_a_viewer_cannot_close_a_fund():
     from docs_site.sandbox.store import Store
     from lex.lex_app.reflex.ui import testing
 
-    render_page(content.load("get-started/first-dashboard"))
-    funds = sys.modules["docs_site.pages.get_started_first_dashboard"].Funds
+    render_page(content.load("start-here/first-dashboard"))
+    funds = sys.modules["docs_site.pages.start_here_first_dashboard"].Funds
     api = SandboxApi(Store().tab("x"))
     result = testing.run(funds, "close", grants=[("docs.Fund", "read")], api=api, pk=2)
     assert result.denied

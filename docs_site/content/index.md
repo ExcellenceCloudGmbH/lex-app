@@ -69,10 +69,3 @@ click again: a viewer may read funds but not create them, so the handler does no
 Every example on this site runs like this one. It works on sample data that belongs to your
 browser tab: a reload keeps your changes, a new tab starts fresh, and **Reset sample data** puts
 the data back as it started.
-
-## Where to start
-
-- [Your first dashboard](/get-started/first-dashboard): a page that lists funds and closes one.
-- [`@ui.page`](/pages/ui-page): give a page an address and a place in the navigation.
-- [`ui.State`](/state-and-actions/state) and [`@ui.action`](/state-and-actions/action): the
-  handlers behind the buttons.

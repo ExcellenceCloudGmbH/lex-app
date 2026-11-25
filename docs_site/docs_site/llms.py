@@ -1,6 +1,6 @@
 """The site as Markdown, for readers working with an AI tool.
 
-``/md/<page>.md`` is one page; ``/llms.txt`` lists every page by section; ``/llms-full.txt`` is
+``/md/<page>.md`` is one page; ``/llms.txt`` lists every page by chapter, in the story's order; ``/llms-full.txt`` is
 every page in one file. Served by the backend, from the same files the pages are drawn from.
 """
 
@@ -25,6 +25,8 @@ def _body(source: str) -> str:
 def page_markdown(slug: str) -> str:
     page = load(slug)
     head = f"# {page.title}\n\n" + (f"{page.description}\n\n" if page.description else "")
+    if page.api:
+        head += "In the API: " + ", ".join(f"`{name}`" for name in page.api) + "\n\n"
     return head + _body(page.source)
 
 
@@ -32,8 +34,9 @@ def llms_txt() -> str:
     index = load("index")
     lines = [f"# {index.title}", "", f"> {index.description}", ""]
     for section in nav.NAV:
-        lines += [f"## {section.title}", ""]
-        for slug in (s for g in section.groups for s in g.pages):
+        n = nav.number(section)
+        lines += [f"## {section.title}" if n is None else f"## {n}. {section.title}", "", section.story, ""]
+        for slug in nav.pages_of(section):
             page = load(slug)
             lines.append(f"- [{page.title}](/md/{slug}.md)" + (f": {page.description}" if page.description else ""))
         lines.append("")

@@ -59,17 +59,19 @@ def test_the_frame_has_its_landmarks_and_the_drawer_wiring(compiled):
 def test_the_current_page_is_highlighted_and_only_its_section_open(compiled):
     import re
 
-    slug = "pages/record"
+    slug = "show-your-data/one-record"
     out = _page(slug)
     current = re.findall(r'"aria-current":"page",asChild:true,className:"docs-nav-link".{0,400}?to:"([^"]+)"', out)
-    assert current == ["/pages/record"], current
-    opened = re.findall(r'open:true\},jsx\("summary",\{className:"docs-nav-summary"\}.{0,400}?'
-                        r'className:"docs-nav-title"\},"([^"]+)"', out)
-    assert opened == ["Pages"], opened
+    assert current == ["/show-your-data/one-record"], current
+    opened = re.findall(r'open:true\},jsx\("summary",\{className:"docs-nav-summary"\}.{0,600}?'
+                        r'className:"docs-nav-title"\},(?:jsx\("span",\{className:"docs-nav-num"\},"\d"\),)?"([^"]+)"',
+                        out)
+    assert opened == ["Show your data"], opened
     assert out.count("open:false") == len(nav.NAV) - 1
-    # each section's button carries its icon and its page count; the chevron turns when open
+    # each chapter's button carries its icon, its number and its page count; the chevron turns when open
     assert out.count('className:"docs-nav-icon"') == len(nav.NAV)
-    assert 'className:"docs-nav-count"},"7"' in out
+    assert out.count('className:"docs-nav-num"') == len(nav.CHAPTERS)
+    assert 'className:"docs-nav-count"},"6"' in out
     from docs_site.layout import _STYLE
 
     assert _STYLE["& .docs-nav-section[open] > .docs-nav-summary .docs-nav-chevron"]["transform"] == "rotate(90deg)"
@@ -78,10 +80,10 @@ def test_the_current_page_is_highlighted_and_only_its_section_open(compiled):
 
 
 def test_a_page_has_breadcrumbs_actions_and_previous_next_cards(compiled):
-    out = _page("pages/record")
+    out = _page("show-your-data/one-record")
     assert 'rfdsI18n.t("breadcrumbs.label", "Breadcrumb"' in out
-    assert 'className:"rfds-breadcrumbs-current"},"ui.record"' in out
-    assert "Copy page" in out and '"Markdown"' in out and "/md/pages/record.md" in out
+    assert 'className:"rfds-breadcrumbs-current"},"Show one record"' in out
+    assert "Copy page" in out and '"Markdown"' in out and "/md/show-your-data/one-record.md" in out
     # the two page actions are one joined group, as the design draws them
     assert '"aria-label":"Page actions"' in out and 'role:"group"' in out
     assert '"aria-label":"View this page as Markdown"' in out
@@ -101,6 +103,25 @@ def test_the_landing_page_has_a_hero_and_a_card_per_section(compiled):
     assert "docs-hero" in out and "docs-article-wide" in out
 
 
+def test_the_landing_page_is_a_numbered_journey_then_the_reference(compiled):
+    """The seven chapters in order, each its number, title, story and page count, to its first
+    page; the API reference's card comes after them."""
+    import re
+
+    from docs_site import layout
+
+    out = str(layout._landing())
+    numbers = re.findall(r'className:"docs-section-card-num"\},"(\d)"', out)
+    assert numbers == [str(n) for n in range(1, len(nav.CHAPTERS) + 1)] and len(numbers) == 7
+    places = [out.index(section.story) for section in nav.NAV]
+    assert places == sorted(places)            # 1 to 7, then the reference
+    for section in nav.CHAPTERS:
+        count = len(nav.pages_of(section))
+        assert f'"{count} page{"s" if count != 1 else ""}"' in out
+        assert f'to:"/{nav.first(section)}"' in out
+    assert "docs-section-card-ref" in out and '"The guide, chapter by chapter"' in out
+
+
 def test_the_header_has_a_colour_mode_toggle(compiled):
     """A sun/moon button switches Reflex's colour mode; its label says where it goes."""
     from docs_site import layout
@@ -111,8 +132,8 @@ def test_the_header_has_a_colour_mode_toggle(compiled):
 
 
 def test_the_header_has_the_section_tabs_and_the_current_one_marked(compiled):
-    """Guide / Components / API reference: Components is the Pages section (lex.ui's page kinds and
-    parts), API reference the reference section, Guide the landing; the tab of the page's section is marked."""
+    """Guide / API reference: Guide is the landing and the seven chapters, API reference the
+    reference section; the tab of the page's section is marked. There is no "Components" tab."""
     import re
 
     from docs_site import layout
@@ -124,16 +145,74 @@ def test_the_header_has_the_section_tabs_and_the_current_one_marked(compiled):
             out)]
 
     reference = next(sec for sec in nav.NAV if sec.slug == "reference").groups[0].pages[0]
-    assert tabs("pages/record") == [("Guide", "/", False), ("Components", "/pages/ui-page", True),
-                                    ("API reference", "/" + reference, False)]
-    assert [cur for _, _, cur in tabs("get-started/first-dashboard")] == [True, False, False]
-    assert [cur for _, _, cur in tabs(nav.ordered()[-1])] == [False, False, True]
-    assert [cur for _, _, cur in tabs("index")] == [True, False, False]
+    assert tabs("show-your-data/one-record") == [("Guide", "/", True), ("API reference", "/" + reference, False)]
+    assert [cur for _, _, cur in tabs("start-here/first-dashboard")] == [True, False]
+    assert [cur for _, _, cur in tabs(nav.ordered()[-1])] == [False, True]
+    assert [cur for _, _, cur in tabs("index")] == [True, False]
+    assert "Components" not in str(layout._header("show-your-data/one-record"))
     out = str(layout._header("index"))
     assert '"aria-label":"Sections"' in out and '"dashboards"' in out and "docs-mark" in out
     # the search box keeps its name and shows its shortcut; the shortcut is registered on every page
     assert '"aria-label":"Search"' in out and '"Ctrl K"' in out and 'id:"docs-search-input"' in out
-    assert "palette.open" in _page("pages/record") or "mod+K" in _page("pages/record")
+    assert "palette.open" in _page("show-your-data/one-record") or "mod+K" in _page("show-your-data/one-record")
+
+
+def test_a_page_says_its_chapter_first_in_the_breadcrumbs(compiled):
+    """"Chapter N · Chapter title" is the first crumb, to the chapter's first page; a reference
+    page's first crumb is "API reference"."""
+    out = _page("make-it-your-app/blocked-pages")
+    assert r'"Chapter 6 \u00b7 Make it your app"' in out          # the middle dot, escaped in the page's JS
+    assert 'to:"/make-it-your-app/look"' in out
+    ref = _page(nav.ordered()[-1])
+    assert "Chapter " not in re_crumbs(ref) and "API reference" in re_crumbs(ref)
+
+
+def re_crumbs(out: str) -> str:
+    start = out.index('"data-slot":"rfds-breadcrumbs-item"')
+    return out[start:start + 1500]
+
+
+def test_the_api_names_are_tags_under_the_title_linking_to_the_reference(compiled):
+    """A page's api: names show under its lead, "In the API", each a link to its reference entry
+    when the reference has one, else plain text; a page without api: shows none."""
+    from docs_site import layout
+
+    out = _page("show-your-data/tables")
+    assert '"In the API"' in out and out.count('className:"docs-api-tag"') == 3
+    for name, href in (("ui.table", "/reference/parts#ui-table"), ("ui.column", "/reference/parts#ui-column"),
+                       ("@ui.rows", "/reference/state#ui-rows")):
+        assert layout.api_href(name) == href
+        assert f'to:"{href}"' in out and f'"{name}"' in out
+    plain = _page("show-your-data/records")
+    assert layout.api_href("self.api") is None and '"self.api"' in plain
+    assert "docs-api-link" not in re_api(plain)
+    assert '"In the API"' not in _page("start-here/first-dashboard")
+
+
+def re_api(out: str) -> str:
+    start = out.index('className:"docs-api"')
+    return out[start:start + 800]
+
+
+def test_every_api_name_that_names_a_lex_ui_export_links_to_it():
+    """An api: name that is lex.ui's (ui.x or @ui.x) has an entry in the reference, so a typo shows."""
+    from docs_site import content, layout
+
+    for slug in nav.ordered():
+        for name in content.load(slug).api:
+            if name.removeprefix("@").startswith("ui."):
+                assert layout.api_href(name), f"{slug}: {name} is not in the API reference"
+
+
+def test_the_first_page_of_each_chapter_tells_its_part_of_the_story(compiled):
+    """A chapter's first page opens with the chapter's story sentence; its other pages do not."""
+    for section in nav.CHAPTERS:
+        first = _page(nav.first(section))
+        assert 'className:"docs-intro"' in first and section.story in first, section.slug
+        assert f"Chapter {nav.number(section)} of {len(nav.CHAPTERS)} \\u00b7 {section.title}" in first
+        for slug in nav.pages_of(section)[1:]:
+            assert 'className:"docs-intro"' not in _page(slug), slug
+    assert 'className:"docs-intro"' not in _page(nav.ordered()[-1])
 
 
 def test_the_header_is_page_coloured_through_the_sites_tokens():

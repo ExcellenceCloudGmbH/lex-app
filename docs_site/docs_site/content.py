@@ -70,6 +70,8 @@ class Page:
     source: str
     document: Document
     headings: list[tuple[int, str, str]]
+    #: the API names the page teaches (front matter ``api:``), shown as tags under its title
+    api: tuple[str, ...] = ()
 
 
 def all_slugs() -> list[str]:
@@ -101,5 +103,8 @@ def load(slug: str) -> Page:
     meta = document.metadata or {}
     title = str(meta.get("title") or slug.rsplit("/", 1)[-1].replace("-", " ").capitalize())
     headings = headings_of(document, live=not slug.startswith("reference/"))
+    api = meta.get("api") or ()
+    if isinstance(api, str) or not all(isinstance(name, str) for name in api):
+        raise ValueError(f"content/{slug}.md: api: is a list of names, such as [\"ui.record\"]")
     return Page(slug=slug, title=title, description=str(meta.get("description") or ""),
-                source=source, document=document, headings=headings)
+                source=source, document=document, headings=headings, api=tuple(api))

@@ -12,10 +12,10 @@ def _page(source: str) -> Page:
 
 
 def test_headings_text_code_and_links():
-    built = str(render_page(_page("## Setup steps\n\nRun **this** and see [the record](/pages/record).\n\n"
+    built = str(render_page(_page("## Setup steps\n\nRun **this** and see [the record](/show-your-data/one-record).\n\n"
                                   "```python\nprint(1)\n```\n")))
     assert 'id="setup-steps"' in built or '"setup-steps"' in built
-    assert "Setup steps" in built and "this" in built and "/pages/record" in built
+    assert "Setup steps" in built and "this" in built and "/show-your-data/one-record" in built
     assert "print(1)" in built
 
 

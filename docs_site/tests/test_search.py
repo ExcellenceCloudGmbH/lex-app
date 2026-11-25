@@ -6,7 +6,10 @@ from docs_site.search import build_index, find
 def test_every_word_must_match_and_titles_come_first():
     index = build_index()
     hits = find(index, "ui.record")
-    assert hits and hits[0].slug == "pages/record"
+    assert hits and hits[0].slug == "show-your-data/one-record"
+    # a page is found by its title too, not only by the API name it teaches
+    assert find(index, "show one record")[0].slug == "show-your-data/one-record"
+    assert find(index, "@ui.job")[0].slug == "long-running-work/jobs"
     assert find(index, "zzzz-nothing") == []
 
 
