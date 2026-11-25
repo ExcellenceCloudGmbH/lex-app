@@ -2397,3 +2397,24 @@ string before this point — the fix is correct defensive practice regardless of
 Test fix: 1.693's `;`-carrying host case also carried a `*`, so the existing wildcard pre-check was
 rejecting it before the grammar check ever ran; changed to a host with only the semicolon. One new
 test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenario IDs.
+
+### Batch 1fc — `lex_api()`: a dashboard calls the Lex API with the token current when the request is sent ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.1123 – 1.1132 |
+| Type | U |
+| Files covered | `lex/lex_app/streamlit/auth.py` (`lex_api`, `LexApiSession`, `current_access_token`, `default_api_url`, `renew_access_token`'s `min_ttl`/`force`, `_store_tokens`, `_adopt_header_token`, `_refresh_stored_api_headers`), `lex/lex_app/streamlit/__init__.py` (exports), `lex/streamlit_app.py` (re-exports the moved lifecycle) |
+| Test file | `lex/test_project/tests/init/test_1fc_streamlit_lex_api.py` |
+| Test classes | `TestCluster01fc_LexApiSendsTheCurrentToken` (1.1123–1.1129), `TestCluster01fc_StoredHeadersStayCurrent` (1.1130–1.1131), `TestCluster01fc_OneHomeForTheTokenLifecycle` (1.1132) |
+| Fixtures | none — a `requests` transport adapter stands in for the network and a patched `_pull_from_proxy` for the proxy |
+| Tests landed | **10 pass / 0 fail** (12 subtests) |
+| Status | ✅ Complete |
+
+The token lifecycle moved from `lex/streamlit_app.py` to `lex/lex_app/streamlit/auth.py`, so the existing
+1ac (1.238, 1.239, 1.242), 1ad (1.301, 1.302) and 1be (1.523) tests now patch `_live_headers`,
+`_session_is_live`, `get_script_run_ctx`, `add_script_run_ctx`, `RENEW_POLL_SECONDS` and `st` on that
+module instead; their assertions are unchanged. Tests import the module with
+`importlib.import_module`, not as a package attribute: model discovery also imports every file under
+`lex/lex_app` as `lex_app.…`, a second module object the attribute can point at (the same reason
+`reflex` is excluded from discovery).

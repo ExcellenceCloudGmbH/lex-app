@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 694
+max_scenario: 1132
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1815,3 +1815,22 @@ letters:
       lex-app-v2's 1.409 and this branch's own 1br (1.681-1.689); 1.410 stays unused.
       Renumbered on merging lex-app-v2 (2026-11-12): 1az and its scenarios were taken there, so it is 1bs,
       the first letter free on lex-app-v2 and every remote branch, with a range above the highest max_scenario.
+  fc:
+    title: 'lex_api() -- a dashboard calls the Lex API with the token current when the request is sent'
+    scenarios: 1.1123-1.1132
+    status: complete
+    tests:
+      pass: 10
+      skip: 0
+      xfail: 0
+    note: >-
+      Production incident (AGI provision tool, lex-app 2.4.2): a new-provision form in an st.dialog
+      attached its document through a REST PATCH carrying a header dict the app built once per page
+      run (st.session_state.headers). Dialog reruns do not rebuild it, so after a few minutes the
+      PATCH carried an expired token and the API answered 401 while the session itself held a
+      renewed one. Adds lex.lex_app.streamlit.lex_api() / current_access_token(), keeps a stored
+      headers dict on the current token in place, and moves the token lifecycle out of
+      lex/streamlit_app.py (re-executed as __main__ every script run) into
+      lex/lex_app/streamlit/auth.py. 1ac/1ad/1be patch targets re-pointed at the new module.
+      Allocation: 1fc/1.1123 is the first letter free on lex-app-v2 and every remote branch,
+      above the highest max_scenario (1122, feat/reflex-docs-site and feat/reflex-ui-forms).
