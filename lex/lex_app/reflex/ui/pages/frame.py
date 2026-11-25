@@ -640,6 +640,7 @@ def deciding() -> bool:
 class Answers:
     """What the server decided for one user when a page opened; only this reaches the browser."""
 
+    user: str = ""                      # the id of the user it was decided for (never sent)
     shown: list[str] = dataclasses.field(default_factory=list)
     counts: dict[str, int] = dataclasses.field(default_factory=dict)
     links: dict[str, list[dict[str, str]]] = dataclasses.field(default_factory=dict)
@@ -717,7 +718,7 @@ async def decide(state: Any) -> Answers:
     counts = results[len(guarded):len(guarded) + len(counted)]
     words = results[len(guarded) + len(counted):len(guarded) + len(counted) + len(worded)]
     given = results[len(guarded) + len(counted) + len(worded):]
-    answers = Answers(shown=[entry.key for entry, yes in zip(guarded, granted) if yes])
+    answers = Answers(user=session.user.id, shown=[entry.key for entry, yes in zip(guarded, granted) if yes])
     for entry, count in zip(counted, counts):
         if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
             answers.counts[entry.key] = count

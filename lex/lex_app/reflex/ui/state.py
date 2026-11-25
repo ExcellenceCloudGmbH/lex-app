@@ -132,6 +132,21 @@ async def _page_refusal(state: Any, rules: tuple) -> str | None:
 
 
 
+def _answers_for(state: Any) -> str:
+    """The id of the user signed in on ``state``'s tab; what the tab holds for another user is dropped first.
+
+    Reflex keys a tab's states by its client token, which outlives a sign-in: what was decided for the
+    last user of the tab -- the frame's entries, counts, links and words, the pages' rules' answers, a
+    kept form's result and refusal, the last failures -- is not this user's. Call holding the tab's lock.
+    """
+    user = context.user_id_of(state)
+    if state._ui_for and str(state._ui_for) != user:     # '' until a page first opened: nobody's answers yet
+        state.ui_frame_shown, state.ui_frame_counts, state.ui_frame_links, state.ui_frame_values = [], {}, {}, {}
+        state.ui_access, state.ui_done, state.ui_refused, state.ui_failed = {}, {}, {}, {}
+    state._ui_for = user
+    return user
+
+
 class State(rx.State):
     """The base class of a page state: handler status for views, and the body's helpers.
 
@@ -221,6 +236,10 @@ class State(rx.State):
     _ui_started: list[str] = []
     #: Load id -> the token of its latest run in this tab; an older run on mount is stale.
     _ui_load_runs: dict[str, str] = {}
+    #: The signed-in user the tab's answers are for -- the frame's, the pages' rules', a kept form's
+    #: result and refusal: Reflex keeps a tab's states as long as the tab, so another user signing in
+    #: on it starts without them (:func:`_answers_for`).
+    _ui_for: str = ""
     #: Searched field id -> every value offered to this tab (as text) -> the row's id: what a form accepts.
     _ui_offered: dict[str, dict] = {}
     #: The signed-in user the offers and the matches were for: another user of the tab starts without them.
@@ -258,6 +277,7 @@ class State(rx.State):
         """
         from lex.lex_app.reflex.ui import forms, handlers, private, runs
 
+        _answers_for(self)                          # another user on this tab: nothing decided for the last one
         await runs.sweep(self)                      # runs of a process that is gone: also after a reconnect
         location = handlers._location(self)
         connection = str(self.router.session.session_id or "")
@@ -334,7 +354,8 @@ class State(rx.State):
         """A page in lex-app's frame opened: decide on the server what the frame shows this user.
 
         Sent by the shell's mount, in the background: the page does not wait, and only the answers
-        reach the browser. A failure is logged; the frame keeps what it showed.
+        reach the browser. A failure is logged; the frame keeps what it showed. The answers are written
+        only while the user they were decided for is still the one signed in on the tab.
         """
         from lex.lex_app.reflex.ui.pages import frame
 
@@ -344,6 +365,8 @@ class State(rx.State):
             frame.logger.exception("lex.ui: the frame could not be decided for this page")
             return
         async with self:
+            if _answers_for(self) != answers.user:
+                return                              # decided for a user who has left the tab
             self.ui_frame_shown = answers.shown
             self.ui_frame_counts = answers.counts
             self.ui_frame_links = answers.links

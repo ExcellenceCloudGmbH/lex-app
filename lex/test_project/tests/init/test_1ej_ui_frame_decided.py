@@ -6,7 +6,7 @@ Keycloak's grants (not from what the browser was told), so it is right on the fi
 A regression is an entry the user may not open drawn anyway, an entry a rule refuses still listed, a
 browser that decides by itself what is listed, or a failing rule that shows its entry.
 
-Cluster 1ej -- scenarios 1.1000-1.1003. Type: U.
+Cluster 1ej -- scenarios 1.1000-1.1003, 1.1022, 1.1100. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/frame.py (guards, decide), lex/lex_app/reflex/shell.py (nav_sections,
 lex_chrome), lex/lex_app/reflex/ui/state.py (ui_frame_open, ui_frame_shown),
 lex/lex_app/reflex/ui/pages/links.py (reflex_page requires=), lex/lex_app/reflex/ui/pages/declare.py (install).
@@ -276,3 +276,93 @@ class TestCluster01ej_WholeFrame(FrameCase):
         self.assertEqual(sorted(counts.values()), [2, 2])
         self.assertEqual(values, {"banner": "Some configuration could not be loaded."})
         self.assertEqual([one["href"] for one in links["Favourites#"]], ["/reports/7"])
+
+
+def signed_in_as(user: str, grants=()) -> None:
+    """From now on ``user`` is the one signed in on the harness's tab (the tab's token stays)."""
+    from lex.lex_app.reflex.ui import context, testing
+
+    held = testing._grants(grants)
+
+    async def resolve(state):
+        async def token():
+            return "test-token"
+
+        async def permissions():
+            return list(held)
+
+        return context.Session(user=context.User(id=user, name=user, username=user), params=context.Params({}),
+                               token=token, permissions=permissions, api=testing._NoApi(), tab="tab1")
+
+    context.set_resolver(resolve)
+    context.set_user_id_of(lambda state: user)
+
+
+class TestCluster01ej_AnotherUserOfTheTab(FrameCase):
+    """1.1100: what was decided for one user is never shown to the next user of the same browser tab."""
+
+    # -- 1.1100 --------------------------------------------------------
+    def test_1_1100_the_next_user_of_a_tab_starts_without_the_last_ones_answers(self) -> None:
+        """
+        Scenario 1.1100: another user signs in on a tab (Reflex keeps a tab's states under its client
+        token, which outlives a sign-in).
+        Given: anna, a reviewer holding Report:read, opened the rule-guarded review desk and the frame
+               was decided for her (Reports, Reviews, the desk and Audit listed, the desk granted by the
+               opener).
+        When:  carl, who may open none of them, signs in on the same tab and a page opens; then, for a
+               decision that was still being made for anna when carl signed in, the answer arrives.
+        Then:  carl's tab holds none of anna's answers -- no listed entry, no granted page -- as soon as
+               his page opens; anna's late answer is not written for carl.
+        """
+        from lex.lex_app.reflex.ui import testing
+        from lex.lex_app.reflex.ui.pages import frame
+        from lex.lex_app.reflex.ui.state import State
+
+        declare_pages()
+
+        @ui.page("/desk", nav="Reports", requires=reviewers)
+        def desk():
+            return _about("Review desk")
+
+        declare.finalize()
+        late: dict = {}
+
+        async def scenario():
+            async with testing.Harness(user="anna", grants=["lex_app.Report:read"]) as harness:
+                await harness.open_tab("/desk")
+                await (await harness.send(State, "ui_open", page="/desk"))
+                await (await harness.send(State, "ui_frame_open"))
+                deadline = time.monotonic() + 5
+                while len((await harness._state(State)).ui_frame_shown) < 4 and time.monotonic() < deadline:
+                    await asyncio.sleep(0.01)
+                state = await harness._state(State)
+                anna = (sorted(state.ui_frame_shown), dict(state.ui_access))
+
+                signed_in_as("carl")
+                await (await harness.send(State, "ui_open", page="/orders"))
+                state = await harness._state(State)
+                carl = (list(state.ui_frame_shown), dict(state.ui_access))
+
+                # A decision made for anna, arriving after carl signed in on the tab.
+                signed_in_as("anna", ["lex_app.Report:read"])
+                decided = frame.decide
+
+                async def decide_then_carl(state):
+                    answers = await decided(state)
+                    signed_in_as("carl")
+                    late["decided"] = list(answers.shown)
+                    return answers
+
+                with patch.object(frame, "decide", decide_then_carl):
+                    await (await harness.send(State, "ui_frame_open"))
+                    deadline = time.monotonic() + 5
+                    while "decided" not in late and time.monotonic() < deadline:
+                        await asyncio.sleep(0.01)
+                    await asyncio.sleep(0.2)
+                return anna, carl, list((await harness._state(State)).ui_frame_shown)
+
+        anna, carl, after = asyncio.run(scenario())
+        self.assertEqual(anna, (["/audit", "/desk", "/reports", "/reviews"], {"/desk": {"granted": "yes", "message": ""}}))
+        self.assertEqual(carl, ([], {}), "carl's page opens without anna's entries or her granted page")
+        self.assertEqual(sorted(late["decided"]), ["/audit", "/desk", "/reports", "/reviews"], "the late answer was anna's")
+        self.assertEqual(after, [], "and it was not written for carl")

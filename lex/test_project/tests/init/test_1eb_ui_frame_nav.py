@@ -9,7 +9,7 @@ when it says so. A regression is a navigation whose areas come in import order, 
 typo, a raw page that cannot be listed, a second frame configured from another module, or a sign-out
 that leads to an address lex-app did not check.
 
-Cluster 1eb -- scenarios 1.960-1.964. Type: U.
+Cluster 1eb -- scenarios 1.960-1.964, 1.1102. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/frame.py (frame), lex/lex_app/reflex/shell.py (nav_sections,
 check_nav, list_in_nav, sign_out_href, lex_chrome), lex/lex_app/reflex/ui/pages/declare.py (page,
 finalize, install), lex/lex_app/reflex/ui/pages/links.py (reflex_page), lex/lex_app/reflex/_js/lex_rfds.css,
@@ -242,3 +242,32 @@ class TestCluster01eb_FrameNav(FrameCase):
             with self.assertRaises(ValueError, msg=f"sign_out={wrong!r}") as caught:
                 ui.frame(sign_out=wrong)
             self.assertIn(says, str(caught.exception))
+
+    # -- 1.1102 --------------------------------------------------------
+    def test_1_1102_signing_out_gives_the_tab_a_new_client_token(self) -> None:
+        """
+        Scenario 1.1102: lex-app's sign-out (the /logout page's LexUser.sign_out).
+        Given: Reflex keeps a browser tab's states on the server under the tab's client token, which it
+               keeps in sessionStorage under the key "token" (its state.js) and which survives a sign-in.
+        When:  the user signs out.
+        Then:  the tab forgets that token before the browser leaves for lex-app's sign-out, so whoever signs
+               in next on the tab starts with states of their own; the key is the one Reflex reads.
+        """
+        from types import SimpleNamespace
+
+        import reflex_base
+
+        from lex.lex_app.reflex import session
+        from lex.lex_app.reflex.auth import LexUser
+
+        with patch.object(session, "sign_out_url", lambda state: "https://lex.example.com/auth/logout"):
+            event = LexUser.sign_out.fn(SimpleNamespace())
+        script = str(event.args[0][1]._var_value)
+        forget = 'window.sessionStorage.removeItem("token")'
+        self.assertIn(forget, script, "the tab's client token is forgotten")
+        self.assertLess(script.index(forget), script.index("window.location.assign"), "before the browser leaves")
+        import pathlib
+
+        state_js = pathlib.Path(reflex_base.__file__).parent / ".templates" / "web" / "utils" / "state.js"
+        self.assertIn(f'const TOKEN_KEY = "{session.TAB_TOKEN_KEY}";', state_js.read_text(),
+                      "the key Reflex keeps the tab's token under")

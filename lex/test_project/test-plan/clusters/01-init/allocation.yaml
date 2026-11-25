@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1091
+max_scenario: 1102
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2610,20 +2610,20 @@ letters:
       `@ui.job(limit=2)`: at most two runs at once in the server process, for all users; a further press refused at once with a fixed sentence (toast and ui.failed, also for a form's job), before a form's values are judged; the place given back however a run ends, also one reporting through self.progress. These tests fail on a third run starting beside two, a refused press that changes the page, or a place never given back.
   dx:
     title: 'lex.ui forms: a result kept across visits -- ui.form(keep=True)'
-    scenarios: 1.930-1.935, 1.936, 1.937, 1.939
+    scenarios: '1.930-1.935, 1.936, 1.937, 1.939, 1.1101'
     status: complete
     tests:
-      pass: 9
+      pass: 10
       skip: 0
       xfail: 0
     note: >-
       `ui.form(..., keep=True)`: the result flag survives a new visit; back while the job runs its progress, back after it the result; a kept private result that is gone is said under the form; a kept form shows its last failure in place and keeps its refusal above its submit button, not twice; with tabs=True a tab's table reads the kept private value; a searched choice's earlier offer is still accepted; what was typed returns through value=. These tests fail on a kept form that comes back empty, a result shown over data that is gone, or a failure while away that is never shown.
   eb:
     title: 'lex.ui frame: the navigation in areas, in the project''s order, and the way to sign out'
-    scenarios: 1.960-1.964
+    scenarios: '1.960-1.964, 1.1102'
     status: complete
     tests:
-      pass: 5
+      pass: 6
       skip: 0
       xfail: 0
     note: >-
@@ -2700,10 +2700,10 @@ letters:
       A FileField of the run alone in `result=` is a button that downloads the run's file through lex-app's download view as the user (`self.api.file`), shown only when the run has one; a forged field refused. Stop (to users who may edit, asking "Stop this run?") is lex-app's cancel: a run on a worker is revoked and CANCELLED and the page stops following; a run in lex-app's own process cannot be stopped and the page says so; after the end, "The run has already ended." The whole page declared with @ui.page compiles. These tests fail on a file downloaded past lex-app's checks, a Stop that pretends, or a page left running after a stop.
   ej:
     title: 'lex.ui frame: what a user may see in the navigation, decided on the server'
-    scenarios: 1.1000-1.1003, 1.1022
+    scenarios: '1.1000-1.1003, 1.1022, 1.1100'
     status: complete
     tests:
-      pass: 5
+      pass: 6
       skip: 0
       xfail: 0
     note: >-

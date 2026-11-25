@@ -1171,6 +1171,18 @@ permission checker over the browser's permissions (6.19; rules cannot be asked t
 decides); asking in the opener (`ui_open`): a page in raw Reflex in lex-app's frame (`lex_chrome`) has
 no opener, and the opener holds the tab while it asks.
 
+**The next user of a tab (review 2, I-1).** Reflex keys a tab's states by the client token it keeps in
+the tab's `sessionStorage`, which outlives a sign-in. What was decided for one user -- the frame's
+entries, counts, links and words, the pages' rules' answers (`ui_access`), a kept form's result and
+refusal, the last failures -- is that user's: `ui.State` records whom the tab's answers are for
+(`_ui_for`), the opener drops them when another user is signed in on the tab, and the frame's
+background decision writes its answers only while the user it decided for is still the one signed in.
+lex-app's sign-out (`/logout`, `LexUser.sign_out`) also makes the tab forget its client token before
+the browser leaves, so whoever signs in next starts with states of their own -- a project's own fields
+(a record a load filled) included, which lex-app cannot know to drop. *Limit:* a project that signs
+out through its own page (`ui.frame(sign_out=)`) keeps the token; the opener's check still covers
+lex-app's answers there.
+
 - **`nav=` takes sections too.** An item of `nav=` is an area's name, as before, or
   `ui.section("Title", ...)` -- the lex.ui word for a titled part. A section named like an area holds
   the area's declared pages and then its links; any other title makes a section of links. Its content is

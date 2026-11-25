@@ -1770,6 +1770,7 @@ does not remove user launch configurations.
 | 1.962 | A raw Reflex page joins an area with the same words | nav=, title=, icon=, requires= make its entry; still a link target; nav= without title=, title=/icon=/requires= without nav= refused |
 | 1.963 | The current entry and its area are marked in a compiled page | Reflex's page compiler; aria-current per entry; lex-app's stylesheet marks the area heading |
 | 1.964 | The user menu signs out where the project says | /logout by default; an https:// address or a page's route; a route as text, http:// and a page needing values refused; the title is still LEX_DASHBOARD_TITLE |
+| 1.1102 | Signing out gives the tab a new client token | LexUser.sign_out forgets sessionStorage's token before leaving; the key is the one Reflex's state.js reads |
 
 **Scenario range:** 1.960 – 1.964. **Test file:** `lex/test_project/tests/init/test_1eb_ui_frame_nav.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1eb](batches.md).
 
@@ -1876,6 +1877,7 @@ does not remove user launch configurations.
 | 1.936 | A reconnect is not a new visit | hydrate and on_load again on a new connection for the same address keep the visit count, a private value not kept and both forms' results, and run the loads without resetting; a link to the same page on the same connection, and a reconnect on another address, are new visits |
 | 1.937 | One keep=True keeps what the result shows | with no keep on the state, a private result and a field shown come back after a visit and the page's load of the same state; a result showing another state's field the page's load resets is refused at page build with @ui.load(keep=(...)) to write |
 | 1.939 | The docstrings a reader learns from say what the code does | ui.State names self.tab_id and self.progress as the only helper safe from another thread; ui.form says one keep=True is enough and a computed var never reads a private field; the field summary names currency= and lines=; no docstring line past 110 characters |
+| 1.1101 | A kept result is not shown to the next user of the tab | the same user finds the kept result; another user's form starts over: no result, refusal or failure |
 
 **Scenario range:** 1.930 – 1.935, 1.936, 1.937, 1.939. **Test file:** `lex/test_project/tests/init/test_1dx_ui_form_keep.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1dx](batches.md).
 
@@ -1957,6 +1959,7 @@ does not remove user launch configurations.
 | 1.1002 | What the browser was told does not decide | the resolver behind the browser's permissions claims grants: nothing listed; a fresh tab's first page answered at once |
 | 1.1003 | lex-app's start-up draws the decided navigation | declare.install then compile: the answer's var and the mount's event; a raw page's requires= takes a list; a plain function refused naming @ui.rule |
 | 1.1022 | The whole frame through lex-app's start-up | every part configured at once in a dashboard module; declare.install; the compiled page holds each part and asks on mount; the server fills anna's counts, banner words and per-user links; a rule's page refused as missing |
+| 1.1100 | The next user of a tab starts without the last one's answers | another user signing in on the tab finds no listed entry, no granted page of the last; a decision for the last user arriving late is not written |
 
 **Scenario range:** 1.1000 – 1.1003, 1.1022. **Test file:** `lex/test_project/tests/init/test_1ej_ui_frame_decided.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ej](batches.md).
 
