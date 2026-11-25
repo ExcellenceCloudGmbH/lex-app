@@ -96,8 +96,8 @@ to users who may create the model.
 ## The run's view
 
 A run's view starts with the page's title, the run's name under it (the record's `__str__`) and a
-badge with its status. The inputs follow, as facts labelled as their fields. What comes next
-depends on the status:
+badge with its status. The inputs follow, as facts labelled as their fields; a foreign key shows
+the related record's name, never its bare id. What comes next depends on the status:
 
 | Status | Badge | What is shown |
 | --- | --- | --- |
@@ -157,7 +157,8 @@ runs". lex-app completes the table:
 
 - the run's status is added as the last column, in the badge's words;
 - each row opens its run on the same page (`?run=<key>`);
-- the newest run comes first until the user sorts.
+- the newest run comes first until the user sorts;
+- a foreign-key column shows the related record's name, as in any model table.
 
 Everything else a [model table](/pages/tables#rows-from-a-model) takes works: `search=`,
 `filters=`, `page_size=`, `choose_columns=`. Who sees which runs is the model's `permission_list`

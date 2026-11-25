@@ -42,6 +42,10 @@ would land there and outlive the page. A `ui.private()` field is kept in the mem
 of the server process instead, for this browser tab and the signed-in user who wrote it. The state
 holds only a random mark that something was kept.
 
+A table that shows a private value's rows keeps them out of the store too: no lex.ui table stores
+the rows it shows ([What reaches the browser, and what is
+kept](/pages/tables#what-reaches-the-browser-and-what-is-kept)).
+
 ## How to declare one
 
 ```python

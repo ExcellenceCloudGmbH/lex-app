@@ -14,23 +14,10 @@ from lex import ui
 from docs_site.sandbox.models import Fund
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
-
 class Sizes(ui.State):
     @ui.rows
     def rows(self):
-        return every(self.api, Fund, ordering="name")
+        return self.api.all(Fund, ordering="name")
 
     @ui.action(requires=ui.edit(Fund))
     def grow(self, pk: int):
@@ -46,23 +33,10 @@ from lex import ui
 from myproject.models import Fund
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
-
 class Sizes(ui.State):
     @ui.rows
     def rows(self):
-        return every(self.api, Fund, ordering="name")
+        return self.api.all(Fund, ordering="name")
 
     @ui.action(requires=ui.edit(Fund))
     def grow(self, pk: int):
@@ -142,6 +116,7 @@ An action returns nothing, or one or a list of these:
 | `ui.goto("/funds/7")` | the browser goes to that page; `replace=True` replaces the current entry in its history |
 | `ui.download(data=..., filename="x.csv")` | the user gets a file, or `ui.download(url=...)` for one at an address; the file's name tells the browser what it is (`report.pdf` is a PDF) |
 | `ui.refresh(Other.rows)` | the tables over another state's `@ui.rows` handler read again ([Refreshing other tables](/state-and-actions/refresh)) |
+| `ui.scroll_to("Errors found")`, `ui.scroll_to(State.rows)` | the section with that title, or the table over that `@ui.rows` handler, comes into view ([Bringing a part into view](/pages/forms#bringing-a-part-into-view)) |
 | `Other.reload`, `Other.open(key)` | another state's handler, which the browser runs next |
 
 Results in a list happen in the order written. Anything else - including Reflex's own events

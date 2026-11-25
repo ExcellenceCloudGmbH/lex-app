@@ -14,19 +14,6 @@ from lex import ui
 from docs_site.sandbox.models import Fund
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
-
 class Desk(ui.State):
     who: str = ""
 
@@ -47,7 +34,7 @@ class Desk(ui.State):
     @ui.rows
     def funds(self):
         may_edit = self.can(Fund, "edit")
-        rows = every(self.api, Fund, ordering="name")
+        rows = self.api.all(Fund, ordering="name")
         for row in rows:
             if not may_edit:
                 row["why_not"] = "Only an editor may close a fund."
@@ -68,19 +55,6 @@ from lex import ui
 from myproject.models import Fund
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
-
 class Desk(ui.State):
     who: str = ""
 
@@ -101,7 +75,7 @@ class Desk(ui.State):
     @ui.rows
     def funds(self):
         may_edit = self.can(Fund, "edit")
-        rows = every(self.api, Fund, ordering="name")
+        rows = self.api.all(Fund, ordering="name")
         for row in rows:
             if not may_edit:
                 row["why_not"] = "Only an editor may close a fund."
@@ -237,8 +211,9 @@ class FundView(ui.State):
   sentence, refuses. On a handler that is an unexpected failure: it is logged and the user gets a
   reference. On a page the user reads lex-app's no-access sentence, and the failure is logged.
 - **On a page** the rule is asked when the page opens. Refused, the page shows the no-access
-  notice with the rule's sentence and starts no load. A rule does not hide the page's entry in the
-  navigation; a permission in the same `requires=` still does.
+  notice with the rule's sentence and starts no load. The page's entry in the navigation is drawn
+  only for users the rule grants, decided on the server
+  ([Only what the user may open](/look-and-chrome/frame#only-what-the-user-may-open)).
 - **On a handler** it is checked with the permissions, before the body runs. As with any
   `requires=`, a handler that names a rule may query the database directly.
 - **It stays a plain function.** `visible=` cannot take a rule, since `visible=` is decided in the
@@ -248,7 +223,16 @@ class FundView(ui.State):
   function given to `requires=` without `@ui.rule` is refused, with a sentence saying to mark it.
 
 The page's values are `self.params` as a handler sees it: the route's arguments and the query.
-`user` is the signed-in user, with `.id`, `.name`, `.username` and `.email`.
+`user` is the signed-in user, with `.id`, `.name`, `.username`, `.email`, and `.permissions`, the
+grants Keycloak lists for them, for a rule that decides by a grant:
+
+```python
+@ui.rule
+def report_reader(user, params):
+    if any(grant["rsname"] == "myproject.Report" and "read" in grant["scopes"] for grant in user.permissions):
+        return True
+    return "Only report readers."
+```
 
 ```md alert info
 There is no live demo of a rule: a rule sees the user and the page's values, and on this site the

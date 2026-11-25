@@ -105,11 +105,31 @@ a `ui.State` may be reported when it should not be. It is never missed.
 ## What it reads, and the rest of the run
 
 `lex reflex check` reads `_reflex_structure.py` and the `_dashboards/` folder at the project's root,
-whichever exist. After lex.ui's check it runs two checks of RFDS, the design system lex-app's
-dashboards are drawn with:
+whichever exist, and every module of your project they import, and the modules those import, and
+so on. A state or a page you moved into a module of its own is checked where it lives:
 
-1. `rfds lint --strict` over the same files: RFDS's rules for components and styling. With
-   `--strict`, its warnings fail too.
+```text
+myproject/
+  _dashboards/home.py        imports orders.pages    checked
+  orders/pages/__init__.py   from . import tickets   checked
+  orders/pages/tickets.py                            checked
+  helpers.py                 imported by nobody      not checked
+```
+
+- An import like `import orders.pages` or `from orders.pages import tickets` is looked up from the
+  project's root, where `lex start` runs it; `from . import tickets`, from the importing file's
+  package.
+- Only files of your project are read: lex-app, Reflex, the standard library and other installed
+  packages are left alone.
+- The files are read as text, never imported, as always.
+- A module loaded by name while the app runs, such as `importlib.import_module("orders.extra")`,
+  is not followed.
+
+After lex.ui's check it runs two checks of RFDS, the design system lex-app's dashboards are drawn
+with:
+
+1. `rfds lint --strict` over the same files, those it followed included: RFDS's rules for
+   components and styling. With `--strict`, its warnings fail too.
 2. `rfds doctor` over the project: the versions and pins of what is installed, and the checks of
    `rxconfig.py`, including the order of its plugins.
 

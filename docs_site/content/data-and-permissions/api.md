@@ -14,19 +14,6 @@ from lex import ui
 from docs_site.sandbox.models import Fund
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
-
 class Portfolio(ui.State):
     investing: int = 0
     largest: str = ""
@@ -39,8 +26,8 @@ class Portfolio(ui.State):
 
     @ui.rows
     def recent(self):
-        return every(self.api, Fund, filters={"vintage__gte": 2020, "status__in": ["investing", "fundraising"]},
-                     ordering="-size")
+        return self.api.all(Fund, filters={"vintage__gte": 2020, "status__in": ["investing", "fundraising"]},
+                            ordering="-size")
 ```
 
 ```python
@@ -48,19 +35,6 @@ from lex import ui
 from myproject.models import Fund
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
-
 class Portfolio(ui.State):
     investing: int = 0
     largest: str = ""
@@ -73,8 +47,8 @@ class Portfolio(ui.State):
 
     @ui.rows
     def recent(self):
-        return every(self.api, Fund, filters={"vintage__gte": 2020, "status__in": ["investing", "fundraising"]},
-                     ordering="-size")
+        return self.api.all(Fund, filters={"vintage__gte": 2020, "status__in": ["investing", "fundraising"]},
+                            ordering="-size")
 ```
 
 ```python demo
@@ -88,15 +62,16 @@ ui.section(
 )
 ```
 
-The count needs no loop: `.count` is the number of matching records across all pages. The table
-needs every matching record, so it reads page after page with `every`, the helper explained on
-[`ui.State`](/state-and-actions/state).
+`list` returns one page of records, and its `.count` is the number of matching records across all
+pages, so the count needs nothing more. The table needs every matching record, so its handler
+returns `self.api.all(...)`, which reads them all; see [Every record](#every-record).
 
 ## The methods
 
 | Call | Returns |
 | --- | --- |
 | `self.api.list(Model, filters=, search=, ordering=, page=1, per_page=25, fields=)` | one page of records, a list of dicts with `.count`, the number of matches across all pages |
+| `self.api.all(Model, filters=, search=, ordering=, fields=)` | every matching record, a list of dicts, for a `@ui.rows` table; at most 10,000 |
 | `self.api.get(Model, pk)` | one record, a dict |
 | `self.api.create(Model, {...})` | the new record, as lex-app saved it |
 | `self.api.update(Model, pk, {...})` | the record after the change; only the fields you pass change |
@@ -132,12 +107,58 @@ nothing, and you get every record. Filtering or ordering by a field the user may
 refused, and the user sees lex-app's reason.
 ```
 
-- `search="growth"` matches the model's first plain text field, ignoring case. A model with no
-  such field raises an error that says to filter with `"<field>__icontains"` instead.
+- `search="growth"` matches, ignoring case, the first plain text field (one without choices) that
+  your model declares itself. The fields lex-app adds to every model, such as `created_by` (who
+  created the record), are never searched. A model without a text field of its own raises an
+  error that says to filter with `"<field>__icontains"` instead.
 - `ordering="-size"` sorts by a field, `-` first for descending; `"status,-size"` sorts by more
   than one. Two records that tie can come back in any order, so end with a field that is
-  different on every record, such as `id`, when you read page after page.
+  different on every record, such as `id`, when you read page after page yourself.
 - `fields=["id", "name"]` keeps only those fields in each record.
+
+## Related records
+
+In the records `list` and `all` return, a foreign key comes as the related record's id, and
+beside it, under `<field>__short_description`, the related record's name: the text your model's
+`__str__` gives, which lex-app's grid shows too (`None` when the key is empty). A
+commitment's row holds `"fund": 2` and `"fund__short_description": "Northbridge Growth II"`.
+`fields=["fund"]` keeps both.
+
+```python
+@ui.rows
+def commitments(self):
+    return [{"id": row["id"], "fund": row["fund__short_description"], "amount": row["amount"]}
+            for row in self.api.all(Commitment, filters={"investor": self.params.key})]
+```
+
+A [model table](/pages/tables#rows-from-a-model) shows the name in a foreign-key column by itself.
+
+```md alert info
+The sample data on this site is not lex-app's API, and its rows carry no
+`__short_description`: the demos look the names up themselves.
+```
+
+## Every record
+
+`self.api.all(Model, ...)` returns every record the user may read that matches, as one list: what
+a [`@ui.rows` handler](/pages/tables#rows-from-a-handler) returns for a table. It takes the same
+`filters=`, `search=`, `ordering=` and `fields=` as `list`.
+
+```python
+@ui.rows
+def orders(self):
+    return self.api.all(Order, filters={"region": self.params.key}, ordering="-placed_on")
+```
+
+- **It reads page after page**, 1,000 records at a time, sorted by `ordering=` and then by the
+  record's key, so no record is read twice or missed when two of them tie. Its `.count` is the
+  number of records read.
+- **At most 10,000.** When more match, it reads no further than the first page and refuses: the
+  table shows "There are 12,345 orders here, more than can be shown at once (10,000). Narrow them
+  down first." The words for the records are your model's plural name. A `@ui.rows` handler holds
+  every row in the server's memory, so read fewer with `filters=`: the user's region, this year.
+- **A table over it does the rest**: it searches, filters (by date too), sorts, totals and exports
+  every row, which a model table cannot.
 
 ## Writing
 
@@ -146,23 +167,10 @@ from lex import ui
 from docs_site.sandbox.models import Investor
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
-
 class Investors(ui.State):
     @ui.rows
     def rows(self):
-        return every(self.api, Investor, ordering="name")
+        return self.api.all(Investor, ordering="name")
 
     @ui.action(requires=ui.create(Investor))
     def add(self):
@@ -186,23 +194,10 @@ from lex import ui
 from myproject.models import Investor
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
-
 class Investors(ui.State):
     @ui.rows
     def rows(self):
-        return every(self.api, Investor, ordering="name")
+        return self.api.all(Investor, ordering="name")
 
     @ui.action(requires=ui.create(Investor))
     def add(self):

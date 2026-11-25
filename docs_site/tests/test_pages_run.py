@@ -72,49 +72,8 @@ def test_the_code_a_reader_sees_is_the_code_that_runs(slug):
                 f"{slug}: the shown copy differs from the setup that runs"
 
 
-def test_every_reads_past_the_first_page():
-    import sys
-
-    from docs_site.sandbox.api import SandboxApi
-    from docs_site.sandbox.models import Fund
-    from docs_site.sandbox.store import Store
-
-    render_page(content.load("pages/tables"))
-    every = sys.modules["docs_site.pages.pages_tables"].every
-    api = SandboxApi(Store().tab("x"))
-    for n in range(250):
-        api.create(Fund, {"name": f"Fund {n}", "status": "investing"})
-    assert api.list(Fund).count == 256 and len(api.list(Fund)) == 25
-    assert len(every(api, Fund)) == 256
-    assert len(every(api, Fund, filters={"status": "investing"})) == 253
-
-
-EVERY = '''def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-'''
-
-
-def test_every_copy_of_the_every_helper_is_the_same():
-    copies = []
-    for path in sorted(content.CONTENT.rglob("*.md")):
-        for match in re.finditer(r"^def every\(.*?(?=^\S|^```)", path.read_text(encoding="utf-8"),
-                                 re.M | re.S):
-            copies.append((path.name, match.group(0).rstrip("\n") + "\n"))
-    assert len(copies) >= 11
-    for name, text in copies:
-        assert text == EVERY, f"{name}: its every() differs from the canonical one"
-
-
-def test_every_breaks_ties_on_the_id():
+def test_all_reads_past_the_first_page():
+    """The sandbox's self.api.all is lex.ui's own: page after page, ties broken on the id."""
     from docs_site.sandbox.api import SandboxApi
     from docs_site.sandbox.models import Fund
     from docs_site.sandbox.store import Store
@@ -123,12 +82,35 @@ def test_every_breaks_ties_on_the_id():
 
     class Spy(SandboxApi):
         def list(self, model, **kwargs):
-            calls.append(kwargs.get("ordering"))
+            calls.append((kwargs.get("ordering"), kwargs.get("per_page")))
             return super().list(model, **kwargs)
 
-    namespace: dict = {}
-    exec(EVERY, namespace)
-    api = Spy(Store().tab("every"))
-    assert [r["id"] for r in namespace["every"](api, Fund)] == [1, 2, 3, 4, 5, 6]
-    namespace["every"](api, Fund, ordering="-vintage")
-    assert calls == ["id", "-vintage,id"]
+    api = Spy(Store().tab("all"))
+    assert [r["id"] for r in api.all(Fund)] == [1, 2, 3, 4, 5, 6]
+    api.all(Fund, ordering="-vintage")
+    assert calls == [("id", 1000), ("-vintage,id", 1000)]
+    for n in range(1100):
+        api.create(Fund, {"name": f"Fund {n}", "status": "investing"})
+    assert len(api.all(Fund)) == 1106
+    assert len(api.all(Fund, filters={"status": "investing"})) == 1103
+
+
+def test_all_refuses_more_than_it_holds(monkeypatch):
+    import pytest
+
+    from docs_site.sandbox.api import SandboxApi
+    from docs_site.sandbox.models import Fund
+    from docs_site.sandbox.store import Store
+    from lex import ui
+    from lex.lex_app.reflex.ui import context
+
+    monkeypatch.setattr(context, "ALL_LIMIT", 5)
+    with pytest.raises(ui.Refuse, match="There are 6 funds here, more than can be shown at once"):
+        SandboxApi(Store().tab("all")).all(Fund)
+
+
+def test_no_page_copies_a_paging_helper():
+    """Every record is self.api.all; a page that pages by hand shows the reader the old way."""
+    for path in sorted(content.CONTENT.rglob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        assert "def every(" not in text and "every(self.api" not in text, path.name

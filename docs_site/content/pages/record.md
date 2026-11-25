@@ -18,18 +18,6 @@ from lex import ui
 from docs_site.sandbox.models import Commitment, Fund, Investor
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
 FUND = 2
 
 
@@ -59,11 +47,11 @@ class FundPage(ui.State):
         return ui.download(data="\n".join(lines), filename="commitments.csv")
 
     def _commitments(self):
-        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
+        investors = {row["id"]: row["name"] for row in self.api.all(Investor)}
         return [
             {"id": row["id"], "investor": investors[row["investor"]], "amount": row["amount"],
              "currency": self.currency}
-            for row in every(self.api, Commitment, filters={"fund": FUND}, ordering="signed_on")
+            for row in self.api.all(Commitment, filters={"fund": FUND}, ordering="signed_on")
         ]
 
 
@@ -72,7 +60,7 @@ class FundInvestors(ui.State):
 
     @ui.load
     def open(self):
-        self.count = len({row["investor"] for row in every(self.api, Commitment, filters={"fund": FUND})})
+        self.count = len({row["investor"] for row in self.api.all(Commitment, filters={"fund": FUND})})
 ```
 
 ```python
@@ -80,18 +68,6 @@ from lex import ui
 from myproject.models import Commitment, Fund, Investor
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
 FUND = 2
 
 
@@ -121,11 +97,11 @@ class FundPage(ui.State):
         return ui.download(data="\n".join(lines), filename="commitments.csv")
 
     def _commitments(self):
-        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
+        investors = {row["id"]: row["name"] for row in self.api.all(Investor)}
         return [
             {"id": row["id"], "investor": investors[row["investor"]], "amount": row["amount"],
              "currency": self.currency}
-            for row in every(self.api, Commitment, filters={"fund": FUND}, ordering="signed_on")
+            for row in self.api.all(Commitment, filters={"fund": FUND}, ordering="signed_on")
         ]
 
 
@@ -134,7 +110,7 @@ class FundInvestors(ui.State):
 
     @ui.load
     def open(self):
-        self.count = len({row["investor"] for row in every(self.api, Commitment, filters={"fund": FUND})})
+        self.count = len({row["investor"] for row in self.api.all(Commitment, filters={"fund": FUND})})
 ```
 
 ```python demo
@@ -174,7 +150,8 @@ declared as `@ui.page("/funds/[key]")`, the load reads `self.params.key`.
   locale: `"text"` (the default), `"number"`, `"money"` (with `currency=`, a code such as `"EUR"`
   or a state value), `"percent"` (a ratio: 0.6 shows 60%) or `"datetime"`.
 - **`sections=`** is a list of `ui.section(title, ...)`. A record page needs at least one, and
-  each section needs its own title. Sections do not nest.
+  each section needs its own title, in fixed words: the page lists them under "On this page".
+  Sections do not nest.
 - **`actions=`** are buttons in the page's header. The first is the primary one, unless it is
   dangerous (`tone="danger"`) or a link; one more is shown as a button, and two or more further
   actions go into a "More actions" menu.
@@ -207,8 +184,55 @@ A record page's sections are always open: `collapsed=True`, which closes a secti
 [form's result](/pages/forms#laying-out-a-result), stops a record page with an error. To show one
 section at a time, give the record `tabs=True`.
 
+A record page names its sections itself, so two things a [form's
+result](/pages/forms#laying-out-a-result) allows stop the page here, with what to write instead:
+a title from the state (put the value inside the section, as a `ui.fact` or a `ui.text`), and a
+section's `actions=` (put the buttons inside the section, or in the page's `actions=`). A handler
+can still bring a section into view by its title, with
+[`ui.scroll_to("Commitments")`](/pages/forms#bringing-a-part-into-view).
+
 On a record page, a section's `visible=` takes a permission, such as `visible=ui.read(Investor)`:
 a user without it still sees the section's heading, with a note that they may not see it. To show
-different content depending on the record, put a `ui.switch(...)` inside the section.
+different content depending on the record, put a `ui.switch(...)` inside the section. With
+`tabs=True`, `visible=` may also be a state value: the tab shows while it is true. The page opens
+on its first tab, so that one cannot depend on the state.
+
+```python
+ui.record(title=FundPage.name, load=FundPage.open, tabs=True, sections=[
+    ui.section("Commitments", ui.table(FundPage.commitments, columns=["investor", "amount"])),
+    ui.section("Distributions", ui.table(FundPage.distributions, columns=["paid_on", "amount"]),
+               visible=FundPage.has_distributions),
+])
+```
+
+## At most four tables
+
+A record page shows at most four tables, counted over all its sections, with `tabs=True` too.
+This is a rule of RFDS, the design system lex-app draws with, for one page. A fifth stops the
+page with a sentence that names how many tables there are and in which sections.
+
+The way out is a page of their own for the further tables, led to from a section of the record:
+
+```python
+class OrderInvoices(ui.State):
+    order: str = ""
+
+    @ui.load
+    def open(self):
+        self.order = str(self.params.key)
+
+
+@ui.page("/orders/[key]/invoices", nav="Orders", requires=ui.read(Invoice))
+def order_invoices():
+    return ui.list(title="Invoices", load=OrderInvoices.open,
+                   table=ui.table(Invoice, columns=["number", "amount"], where={"order": OrderInvoices.order}))
+
+
+# a section of the order's record page
+ui.section("Invoices", ui.link("All invoices", to=order_invoices, key=OrderState.key))
+```
+
+The record page keeps its four most important tables; the invoices page lists the order's
+invoices, its table's `where=` naming the order.
 
 Next: [`ui.list`](/pages/list), the page for finding things.

@@ -17,23 +17,10 @@ from lex import ui
 from docs_site.sandbox.models import Fund
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
-
 class Funds(ui.State):
     @ui.rows
     def open_funds(self):
-        return every(self.api, Fund, filters={"status": "investing"}, ordering="name")
+        return self.api.all(Fund, filters={"status": "investing"}, ordering="name")
 
     @ui.action(requires=ui.edit(Fund))
     def close(self, pk: int):
@@ -46,23 +33,10 @@ from lex import ui
 from myproject.models import Fund
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
-
 class Funds(ui.State):
     @ui.rows
     def open_funds(self):
-        return every(self.api, Fund, filters={"status": "investing"}, ordering="name")
+        return self.api.all(Fund, filters={"status": "investing"}, ordering="name")
 
     @ui.action(requires=ui.edit(Fund))
     def close(self, pk: int):
@@ -70,10 +44,10 @@ class Funds(ui.State):
         return ui.toast("Fund closed.")
 ```
 
-`@ui.rows` returns a table's rows as a list of dicts - all of them, so `every` keeps asking
-`self.api.list` for the next page until it has them all: `list` returns one page at a time
-(see [Reading every record](/state-and-actions/state#reading-every-record)). `@ui.action` runs when the user clicks, and
-`requires=ui.edit(Fund)` means it runs only for users who may edit funds.
+`@ui.rows` returns a table's rows as a list of dicts - all of them, so it calls `self.api.all`,
+which reads every matching record, page after page (see
+[Reading every record](/state-and-actions/state#reading-every-record)). `@ui.action` runs when the
+user clicks, and `requires=ui.edit(Fund)` means it runs only for users who may edit funds.
 
 ## The page
 

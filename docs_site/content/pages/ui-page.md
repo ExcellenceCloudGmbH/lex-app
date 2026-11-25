@@ -39,7 +39,7 @@ What each argument does:
   Only plain arguments are supported, not optional or catch-all ones. An argument may not be
   named like a state helper (`user`, `api`, `params`, `can`, `state`, `tab_id`, `progress`), and
   no argument or parameter may be named `to`, `record`, `href`, `visible`, `label`, `handler`,
-  `tone` or `icon`, the words a link or button uses itself; the error says what to rename. Nor
+  `tone`, `icon`, `badge` or `requires`, the words a link or button uses itself; the error says what to rename. Nor
   may it share its name with a field of any state: see
   [A route argument and a state field](/pages/ui-page#a-route-argument-and-a-state-field).
 - **`nav=`** names the page's area in the navigation: the page is listed under that heading, with
@@ -52,8 +52,10 @@ What each argument does:
 - **`requires=`** takes what a handler's `requires=` takes: a permission such as
   `ui.read(Model)`, `ui.signed_in`, a rule of your own marked [`@ui.rule`](/data-and-permissions/can#a-rule-of-your-own),
   or a list of them. A user who does not meet it sees an access-denied notice instead of the page,
-  and the page's loads do not start. A permission also leaves the page out of that user's
-  navigation. Leave it out for a page any signed-in user may see.
+  and the page's loads do not start. The page is also left out of that user's navigation, decided
+  on the server for permissions and rules alike. Leave it out for a page any signed-in user may see.
+- **`badge=`** is a count beside the page's entry in the navigation: a function of the user or a
+  whole-number state value ([Counts](/look-and-chrome/frame#counts)). It needs `nav=`.
 - **`params=`** lists the query parameters the page accepts besides its route's arguments, so
   that a link to it may pass them: `params=["tab"]`. How to link to a page is on
   [Buttons and links](/pages/buttons-and-links).

@@ -32,7 +32,7 @@ Inside a handler, `self` has helpers for the request it is running for:
 | Helper | What it is |
 | --- | --- |
 | `self.user` | the signed-in user: `.id`, `.name`, `.username`, `.email`, and `.permissions` (their grants as Keycloak lists them) |
-| `self.api` | lex-app's API as that user: `list`, `get`, `create`, `update`, `delete`; `list` returns one page of records |
+| `self.api` | lex-app's API as that user: `list`, `all`, `get`, `create`, `update`, `delete`; `list` returns one page of records, `all` every one |
 | `self.can(Model, scope)` | whether the user is granted `scope` - `"read"`, `"create"`, `"edit"` or `"delete"` - on the model |
 | `self.params` | the page's route and query values: `self.params.key`, `self.params["key"]`, or `self.params.get("w")` for an optional one |
 | `self.state(Other)` | another state of the same user, to read or change |
@@ -104,32 +104,19 @@ with `_`: one handler cannot call another, and a method with a leading `_` is no
 
 `self.api.list(Model, ...)` returns **one page** of the matching records: 25 unless you pass
 `per_page=`, and the page you ask for with `page=` (the first by default). The rows it returns
-carry `.count`, the number of matching records across all pages. A handler that needs every
-record - a `@ui.rows` table, a total - asks for the pages in turn until it has `.count` of them.
-The examples on this site use this helper:
+carry `.count`, the number of matching records across all pages, so a count needs nothing more.
+
+A handler that needs every record - a `@ui.rows` table, a total - calls `self.api.all` instead:
 
 ```python
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
+@ui.rows
+def rows(self):
+    return self.api.all(Fund, filters={"status": "investing"}, ordering="name")
 ```
 
-`every(self.api, Fund, filters={"status": "investing"}, ordering="name")` takes the same
-`filters=`, `search=` and `ordering=` as `list`. For a count alone, `self.api.list(Model).count`
-needs no loop.
-
-The helper always sorts, and ends the sort with the record's `id`. lex-app adds no order of its
-own, and two records that tie on `ordering=` can come back in any order, so without the `id` a
-record could turn up on two pages and another on none. If your model's key has another name, use
-that instead of `id`.
+It takes the same `filters=`, `search=`, `ordering=` and `fields=` as `list`, reads page after page
+in a stable order, and refuses, in words the user reads, when more than 10,000 records match. See
+[Every record](/data-and-permissions/api#every-record).
 
 ## Another state
 

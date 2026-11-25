@@ -17,39 +17,26 @@ from lex import ui
 from docs_site.sandbox.models import Commitment, Fund, Investor
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
-
 class FundTotals(ui.State):
     @ui.rows
     def rows(self):
-        commitments = every(self.api, Commitment)
+        commitments = self.api.all(Commitment)
         return [
             {"id": fund["id"], "name": fund["name"], "currency": fund["currency"],
              "committed": sum(row["amount"] for row in commitments if row["fund"] == fund["id"])}
-            for fund in every(self.api, Fund, ordering="name")
+            for fund in self.api.all(Fund, ordering="name")
         ]
 
 
 class CommitmentDesk(ui.State):
     @ui.rows
     def rows(self):
-        funds = {row["id"]: row for row in every(self.api, Fund)}
-        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
+        funds = {row["id"]: row for row in self.api.all(Fund)}
+        investors = {row["id"]: row["name"] for row in self.api.all(Investor)}
         return [
             {"id": row["id"], "investor": investors[row["investor"]], "fund": funds[row["fund"]]["name"],
              "amount": row["amount"], "currency": funds[row["fund"]]["currency"]}
-            for row in every(self.api, Commitment)
+            for row in self.api.all(Commitment)
         ]
 
     @ui.action(requires=ui.edit(Commitment))
@@ -64,39 +51,26 @@ from lex import ui
 from myproject.models import Commitment, Fund, Investor
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
-
 class FundTotals(ui.State):
     @ui.rows
     def rows(self):
-        commitments = every(self.api, Commitment)
+        commitments = self.api.all(Commitment)
         return [
             {"id": fund["id"], "name": fund["name"], "currency": fund["currency"],
              "committed": sum(row["amount"] for row in commitments if row["fund"] == fund["id"])}
-            for fund in every(self.api, Fund, ordering="name")
+            for fund in self.api.all(Fund, ordering="name")
         ]
 
 
 class CommitmentDesk(ui.State):
     @ui.rows
     def rows(self):
-        funds = {row["id"]: row for row in every(self.api, Fund)}
-        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
+        funds = {row["id"]: row for row in self.api.all(Fund)}
+        investors = {row["id"]: row["name"] for row in self.api.all(Investor)}
         return [
             {"id": row["id"], "investor": investors[row["investor"]], "fund": funds[row["fund"]]["name"],
              "amount": row["amount"], "currency": funds[row["fund"]]["currency"]}
-            for row in every(self.api, Commitment)
+            for row in self.api.all(Commitment)
         ]
 
     @ui.action(requires=ui.edit(Commitment))

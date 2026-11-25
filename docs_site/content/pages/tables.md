@@ -17,37 +17,24 @@ it then searches, filters, sorts and pages the rows itself. The handler only rea
 field of the state there fails.
 
 Return every row, not one page: `self.api.list` returns one page of records at a time (25 by
-default), so a handler that returns it directly shows, searches and totals only that page. The
-`every` helper below asks for the pages in turn; [Reading every
-record](/state-and-actions/state#reading-every-record) explains it.
+default), so a handler that returns it directly shows, searches and totals only that page.
+`self.api.all` reads every matching record, up to 10,000; see
+[Every record](/data-and-permissions/api#every-record).
 
 ```python exec
 from lex import ui
 from docs_site.sandbox.models import Commitment, Fund, Investor
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
-
 class Commitments(ui.State):
     @ui.rows
     def rows(self):
-        funds = {row["id"]: row for row in every(self.api, Fund)}
-        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
+        funds = {row["id"]: row for row in self.api.all(Fund)}
+        investors = {row["id"]: row["name"] for row in self.api.all(Investor)}
         return [
             {"id": row["id"], "investor": investors[row["investor"]], "fund": funds[row["fund"]]["name"],
              "amount": row["amount"], "currency": funds[row["fund"]]["currency"]}
-            for row in every(self.api, Commitment, ordering="-amount")
+            for row in self.api.all(Commitment, ordering="-amount")
         ]
 ```
 
@@ -56,28 +43,15 @@ from lex import ui
 from myproject.models import Commitment, Fund, Investor
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
-
 class Commitments(ui.State):
     @ui.rows
     def rows(self):
-        funds = {row["id"]: row for row in every(self.api, Fund)}
-        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
+        funds = {row["id"]: row for row in self.api.all(Fund)}
+        investors = {row["id"]: row["name"] for row in self.api.all(Investor)}
         return [
             {"id": row["id"], "investor": investors[row["investor"]], "fund": funds[row["fund"]]["name"],
              "amount": row["amount"], "currency": funds[row["fund"]]["currency"]}
-            for row in every(self.api, Commitment, ordering="-amount")
+            for row in self.api.all(Commitment, ordering="-amount")
         ]
 ```
 
@@ -87,12 +61,14 @@ ui.table(
     columns=["investor", "fund", ui.column("amount", kind="money", currency="currency")],
     search=True,
     totals={"amount": "sum"},
+    export=True,
 )
 ```
 
 `search=True` adds a search box over the table's text columns. `totals={"amount": "sum"}` adds a
 totals row over every matching row, not only the visible page - one per currency, since these
-commitments are in euros and dollars. Search for "Rhine" and the totals follow.
+commitments are in euros and dollars. Search for "Rhine" and the totals follow. `export=True`
+adds an export menu: the file holds every matching row, as the search left them.
 
 A handler that takes a `search` argument receives the search text and does the search itself, for
 a ranked search or a search in another system:
@@ -102,6 +78,24 @@ a ranked search or a search in another system:
 def rows(self, search):
     return my_search(self.user, search)
 ```
+
+## What reaches the browser, and what is kept
+
+The rows a table shows reach the browser, as everything a page shows does. They are never stored
+with the state: Reflex keeps each user's state in Redis (on disk while you develop), and every
+`ui.table` - over a `@ui.rows` handler or a model - leaves out of it the page of rows it shows, its
+totals, its filters' choices and its rows' addresses. So a table over a
+[`ui.private`](/state-and-actions/private) value keeps the persons in it out of the store too.
+
+What is kept is how the user left the table: the page, the sort, the search, the filters and the
+row count. When the browser loses its connection and gets it back, a `@ui.page` tells its tables
+to read their rows again, from where the user left them.
+
+- **The cost**: after a reconnect, or when another of the server's workers answers the user, the
+  table reads its rows again: the handler runs, or lex-app's API is asked, once more.
+- What the user typed in the search box and chose in a filter is stored, as the table's state.
+- A table drawn with `lex_table` on a [raw page](/look-and-chrome/raw-reflex) still stores its
+  rows, since no lex.ui page tells it to read them again.
 
 ## Columns
 
@@ -135,13 +129,13 @@ write: it names the row, so the reader never loses track of which row they are r
 class Register(ui.State):
     @ui.rows
     def rows(self):
-        funds = {row["id"]: row for row in every(self.api, Fund)}
-        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
+        funds = {row["id"]: row for row in self.api.all(Fund)}
+        investors = {row["id"]: row["name"] for row in self.api.all(Investor)}
         return [
             {"id": row["id"], "investor": investors[row["investor"]], "reference": f"C-{row['id']:04d}",
              "fund": funds[row["fund"]]["name"], "signed_on": row["signed_on"], "amount": row["amount"],
              "currency": funds[row["fund"]]["currency"]}
-            for row in every(self.api, Commitment, ordering="signed_on")
+            for row in self.api.all(Commitment, ordering="signed_on")
         ]
 ```
 
@@ -149,13 +143,13 @@ class Register(ui.State):
 class Register(ui.State):
     @ui.rows
     def rows(self):
-        funds = {row["id"]: row for row in every(self.api, Fund)}
-        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
+        funds = {row["id"]: row for row in self.api.all(Fund)}
+        investors = {row["id"]: row["name"] for row in self.api.all(Investor)}
         return [
             {"id": row["id"], "investor": investors[row["investor"]], "reference": f"C-{row['id']:04d}",
              "fund": funds[row["fund"]]["name"], "signed_on": row["signed_on"], "amount": row["amount"],
              "currency": funds[row["fund"]]["currency"]}
-            for row in every(self.api, Commitment, ordering="signed_on")
+            for row in self.api.all(Commitment, ordering="signed_on")
         ]
 ```
 
@@ -201,14 +195,14 @@ a dropdown of the values in the column, or, for a `date` or `datetime` column, a
 class AllFunds(ui.State):
     @ui.rows
     def rows(self):
-        return every(self.api, Fund, ordering="name")
+        return self.api.all(Fund, ordering="name")
 ```
 
 ```python
 class AllFunds(ui.State):
     @ui.rows
     def rows(self):
-        return every(self.api, Fund, ordering="name")
+        return self.api.all(Fund, ordering="name")
 ```
 
 ```python demo
@@ -233,13 +227,13 @@ days, the last day included.
 class Signings(ui.State):
     @ui.rows
     def rows(self):
-        funds = {row["id"]: row for row in every(self.api, Fund)}
-        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
+        funds = {row["id"]: row for row in self.api.all(Fund)}
+        investors = {row["id"]: row["name"] for row in self.api.all(Investor)}
         return [
             {"id": row["id"], "investor": investors[row["investor"]], "fund": funds[row["fund"]]["name"],
              "signed_on": row["signed_on"], "amount": row["amount"],
              "currency": funds[row["fund"]]["currency"]}
-            for row in every(self.api, Commitment, ordering="signed_on")
+            for row in self.api.all(Commitment, ordering="signed_on")
         ]
 ```
 
@@ -247,13 +241,13 @@ class Signings(ui.State):
 class Signings(ui.State):
     @ui.rows
     def rows(self):
-        funds = {row["id"]: row for row in every(self.api, Fund)}
-        investors = {row["id"]: row["name"] for row in every(self.api, Investor)}
+        funds = {row["id"]: row for row in self.api.all(Fund)}
+        investors = {row["id"]: row["name"] for row in self.api.all(Investor)}
         return [
             {"id": row["id"], "investor": investors[row["investor"]], "fund": funds[row["fund"]]["name"],
              "signed_on": row["signed_on"], "amount": row["amount"],
              "currency": funds[row["fund"]]["currency"]}
-            for row in every(self.api, Commitment, ordering="signed_on")
+            for row in self.api.all(Commitment, ordering="signed_on")
         ]
 ```
 
@@ -300,11 +294,13 @@ ui.table(
 
 ## Rows from a model
 
-`ui.table(Model, ...)` reads a model through lex-app's API, as the user. `where=` chooses which
-rows to show; who may see them is decided by the model's own permissions, never by `where=`.
+`ui.table(Model, ...)` reads a model through lex-app's API, as the user, one page at a time.
+`where=` chooses which rows to show; who may see them is decided by the model's own permissions,
+never by `where=`.
 
 ```python
-ui.table(Commitment, columns=["investor", "amount"], where={"fund": FundState.id})
+ui.table(Commitment, columns=["investor", "amount", "signed_on"], where={"fund": FundState.id},
+         search=True, filters=["signed_on"])
 ```
 
 ```md alert info
@@ -312,9 +308,36 @@ A model table reads lex-app's API directly, with the signed-in user's token, so 
 on this site. The demos here use `@ui.rows` tables over sample data.
 ```
 
-A model table is shown only to users who may read the model. Its `filters=` work on fields with
-choices or yes/no fields, so a date range is not offered there, and it cannot export or total
-yet; for those, read the rows in a `@ui.rows` handler. Its first column stays in place too, and
-`page_size=` and `choose_columns=True` work on it as on any table.
+- **It is shown only to users who may read the model.**
+- **A foreign key shows the related record's name.** `"investor"` above is a foreign key: its
+  column shows each investor's name, as lex-app's grid does, from the investor model's `__str__`.
+  Sorting the column sorts by the key, as lex-app's grid sorts it. A row action still gets the id,
+  and `where=` and filters still work on the key.
+- **`search=True`** searches the first text column it shows that your model declares itself; a
+  field lex-app adds to every model, such as `created_by`, only when it shows no other.
+- **`filters=`** takes fields with choices, yes/no fields, and date or date-and-time fields, which
+  get the same range of days as a [rows table](#filtering-by-date). Other fields are refused when
+  the page is built: search them instead.
+- **It cannot export or total**, because it reads one page at a time. `export=`, `totals=` or
+  `totals_of_all=` on it stop the page with a sentence that says what to write instead: read the
+  rows with `self.api.all` in a `@ui.rows` handler, and table that.
+
+```python
+class FundCommitments(ui.State):
+    @ui.rows
+    def commitments(self):
+        return self.api.all(Commitment, filters={"fund": self.params.key}, ordering="signed_on")
+
+
+ui.table(FundCommitments.commitments,
+         columns=[ui.column("investor__short_description", label="Investor"),
+                  ui.column("amount", kind="number")],
+         totals={"amount": "sum"}, export=True)
+```
+
+A row from `self.api` carries the related record's name beside each foreign key, under
+`<field>__short_description` ([Related records](/data-and-permissions/api#related-records)), so a
+rows table names that column itself. Its first column stays in place too, and `page_size=` and
+`choose_columns=True` work on a model table as on any table.
 
 Next: [Buttons and links](/pages/buttons-and-links), what a user clicks.

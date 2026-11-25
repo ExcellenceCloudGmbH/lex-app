@@ -108,7 +108,8 @@ ui.field("customer", options=Orders.customers)       # a @ui.rows handler: searc
   value is checked on the server, and the handler receives the option itself, of its own type:
   `options=[2024, 2025]` gives an `int`, as does `{1: "Q1", 2: "Q2"}`.
 - **`kind="choices"`** lets the user choose several: boxes to tick for up to 12 fixed options, a
-  list to pick from above that. `required=True` then means at least one.
+  list to pick from above that. `required=True` then means at least one. A **Clear** button beside
+  the field empties it at once, in the browser; it shows while something is chosen.
 - **`lines=`** makes a text field that many lines high, 2 or more: see
   [Several lines of text](/pages/forms#several-lines-of-text).
 - **`options=` a `@ui.rows` handler** searches the options on the server as the user types: see
@@ -140,7 +141,7 @@ class LookUp(ui.State):
     @ui.action
     def look_up(self, values):
         self._found, self._missing = [], []
-        funds = {row["name"].casefold(): row for row in self.api.list(Fund, per_page=100)}
+        funds = {row["name"].casefold(): row for row in self.api.all(Fund)}
         for number, line in enumerate(values["names"].splitlines(), start=1):
             name = line.strip()
             fund = funds.get(name.casefold())
@@ -173,7 +174,7 @@ class LookUp(ui.State):
     @ui.action
     def look_up(self, values):
         self._found, self._missing = [], []
-        funds = {row["name"].casefold(): row for row in self.api.list(Fund, per_page=100)}
+        funds = {row["name"].casefold(): row for row in self.api.all(Fund)}
         for number, line in enumerate(values["names"].splitlines(), start=1):
             name = line.strip()
             fund = funds.get(name.casefold())
@@ -261,9 +262,8 @@ class ByInvestor(ui.State):
 
     @ui.action
     def list_commitments(self, values):
-        funds = {row["id"]: row for row in self.api.list(Fund, per_page=100)}
-        found = self.api.list(Commitment, filters={"investor": values["investor"]}, ordering="signed_on",
-                              per_page=100)
+        funds = {row["id"]: row for row in self.api.all(Fund)}
+        found = self.api.all(Commitment, filters={"investor": values["investor"]}, ordering="signed_on")
         self._rows = [{"id": row["id"], "fund": funds[row["fund"]]["name"], "signed_on": row["signed_on"],
                        "amount": row["amount"], "currency": funds[row["fund"]]["currency"]} for row in found]
 
@@ -286,9 +286,8 @@ class ByInvestor(ui.State):
 
     @ui.action
     def list_commitments(self, values):
-        funds = {row["id"]: row for row in self.api.list(Fund, per_page=100)}
-        found = self.api.list(Commitment, filters={"investor": values["investor"]}, ordering="signed_on",
-                              per_page=100)
+        funds = {row["id"]: row for row in self.api.all(Fund)}
+        found = self.api.all(Commitment, filters={"investor": values["investor"]}, ordering="signed_on")
         self._rows = [{"id": row["id"], "fund": funds[row["fund"]]["name"], "signed_on": row["signed_on"],
                        "amount": row["amount"], "currency": funds[row["fund"]]["currency"]} for row in found]
 
@@ -343,8 +342,8 @@ class Signed(ui.State):
     @ui.job
     def build_list(self, values):
         self._rows = []                     # before the first yield: an old result never shows
-        funds = {row["id"]: row for row in self.api.list(Fund, per_page=100)}
-        found = self.api.list(Commitment, per_page=100, ordering="signed_on")
+        funds = {row["id"]: row for row in self.api.all(Fund)}
+        found = self.api.all(Commitment, ordering="signed_on")
         rows = []
         for i, row in enumerate(found, start=1):
             yield ui.progress(i / len(found), "Reading commitments")
@@ -371,8 +370,8 @@ class Signed(ui.State):
     @ui.job
     def build_list(self, values):
         self._rows = []                     # before the first yield: an old result never shows
-        funds = {row["id"]: row for row in self.api.list(Fund, per_page=100)}
-        found = self.api.list(Commitment, per_page=100, ordering="signed_on")
+        funds = {row["id"]: row for row in self.api.all(Fund)}
+        found = self.api.all(Commitment, ordering="signed_on")
         rows = []
         for i, row in enumerate(found, start=1):
             yield ui.progress(i / len(found), "Reading commitments")
@@ -420,39 +419,187 @@ appears with its totals. Send the form again and the old table goes until the ne
 
 ## Laying out a result
 
-A result can hold what a section holds, or `ui.section`s. Two arguments arrange the sections.
+A result can hold what a section holds, or `ui.section`s. A section in a result has a heading of
+its own, so it can be closed, take its title from the state, and carry buttons.
 
-**`ui.section(..., collapsed=True)`** keeps a section closed until the user opens it, for a detail
-most users skip - the lines that matched nothing, in the demo above. It opens and closes in the
-browser, without asking the server. When it holds one table, its title says how many rows the
-table has, "Not found (1)", once the table has read them; the table reads them while the section
-is still closed. A closed section without a table shows its title alone. It works in a form's
-`result=` and in a section shown on its own with [`ui.embed`](/look-and-chrome/raw-reflex); a
-record page's sections are always open, and `collapsed=True` there stops the page with an error
-that points to `tabs=True`.
+```python exec
+class Vintages(ui.State):
+    summary: str = "Summary"
+    count: int = 0
+    largest: str = ""
+    _funds: list[dict] = []
 
-**`ui.form(..., tabs=True)`** shows the result's sections one at a time, as tabs, the way
-`tabs=True` does on a [record page](/pages/record). Each section's title is its tab:
+    @ui.action
+    def look(self, values):
+        self._funds = self.api.all(Fund, filters={"vintage__gte": values["since"]}, ordering="vintage")
+        self.count = len(self._funds)
+        self.largest = max(self._funds, key=lambda row: row["size"])["name"] if self._funds else ""
+        self.summary = f"Summary: {self.count} funds since {values['since']}"
+
+    @ui.rows
+    def funds(self):
+        return self._funds
+
+    @ui.action
+    def show_list(self):
+        return ui.scroll_to(Vintages.funds)
+```
 
 ```python
+class Vintages(ui.State):
+    summary: str = "Summary"
+    count: int = 0
+    largest: str = ""
+    _funds: list[dict] = []
+
+    @ui.action
+    def look(self, values):
+        self._funds = self.api.all(Fund, filters={"vintage__gte": values["since"]}, ordering="vintage")
+        self.count = len(self._funds)
+        self.largest = max(self._funds, key=lambda row: row["size"])["name"] if self._funds else ""
+        self.summary = f"Summary: {self.count} funds since {values['since']}"
+
+    @ui.rows
+    def funds(self):
+        return self._funds
+
+    @ui.action
+    def show_list(self):
+        return ui.scroll_to(Vintages.funds)
+```
+
+```python demo
 ui.form(
-    title="Region report",
-    fields=[ui.field("year", kind="year", required=True)],
-    submit=RegionReport.build_report,
-    tabs=True,
+    title="Funds by vintage",
+    fields=[ui.field("since", options=[2018, 2020, 2022], required=True)],
+    submit=Vintages.look,
     result=[
-        ui.text(RegionReport.note),                                  # above the tabs, shared by all
-        ui.section("North", ui.table(RegionReport.north, columns=["name"])),
-        ui.section("South", ui.table(RegionReport.south, columns=["name"])),
+        ui.section(Vintages.summary,
+                   ui.fact("Funds", Vintages.count, kind="number"),
+                   ui.fact("Largest", Vintages.largest),
+                   collapsed=True,
+                   actions=[ui.button("Show the list", Vintages.show_list)]),
+        ui.section("Funds", ui.table(Vintages.funds, columns=["name", "vintage", ui.column("status", kind="status")])),
     ],
 )
 ```
 
+Choose 2020 and press **Look**: the closed section is titled "Summary: 4 funds since 2020". Open
+it: its facts appear, and its **Show the list** button brings the table into view.
+
+**`collapsed=True`** keeps a section closed until the user opens it, for a detail most users
+skip - the lines that matched nothing in [Several lines of text](#several-lines-of-text). It opens
+and closes in the browser, without asking the server.
+
+- What it holds appears when the user first opens it, and stays, so a chart in it fits the space
+  it is shown in.
+- A table is the exception: it reads its rows at once, so that the closed section's title can say
+  how many there are, "Not found (1)". A closed section without a table shows its title alone.
+- It works in a form's `result=` and in a section shown on its own with
+  [`ui.embed`](/look-and-chrome/raw-reflex). A record page's sections are always open, and
+  `collapsed=True` there stops the page with an error that points to `tabs=True`.
+
+**A title from the state**, `ui.section(Vintages.summary, ...)`, is a field your handler fills: a
+title with a count, "Lines (12)". It works wherever the section has a heading of its own - a
+form's result, `ui.embed`. A record page lists its sections under "On this page" and a tab names
+its section, both with fixed words, so a state title there stops the page with an error.
+
+**`actions=[ui.button(...)]`** puts buttons, or links, in the section's heading. In a closed
+section they appear when it is opened, never on the closed heading itself, which is the one place
+a user clicks to open it. A record page's section and a tab have no heading of their own: there
+`actions=` stops the page, saying to put the buttons inside the section or in the page's
+`actions=`.
+
+### Bringing a part into view
+
+A handler returns **`ui.scroll_to(...)`** to bring a part of the page into view, as the demo's
+**Show the list** does:
+
+```python
+return ui.scroll_to("Errors found")          # the section with that title
+return ui.scroll_to(Vintages.funds)          # the table over that @ui.rows handler
+```
+
+- A section is named by its title, as the page names it; two sections of one title: the first.
+- A table is named by its `@ui.rows` handler. A model table cannot be named: name the section
+  that holds it.
+- A section whose title is a state value is reached through a table it holds.
+- A part that is not on the page is not scrolled to, and nothing fails.
+- It happens in order with the handler's other results: a toast, then the scroll.
+
+### Tabs
+
+**`ui.form(..., tabs=True)`** shows the result's sections one at a time, as tabs, the way
+`tabs=True` does on a [record page](/pages/record). Each section's title is its tab:
+
+```python exec
+class ByStatus(ui.State):
+    has_closed: bool = False
+    _open: list[dict] = []
+    _closed: list[dict] = []
+
+    @ui.action
+    def sort_funds(self, values):
+        funds = self.api.all(Fund, filters={"vintage__gte": values["since"]}, ordering="name")
+        self._open = [row for row in funds if row["status"] != "closed"]
+        self._closed = [row for row in funds if row["status"] == "closed"]
+        self.has_closed = bool(self._closed)
+
+    @ui.rows
+    def open_funds(self):
+        return self._open
+
+    @ui.rows
+    def closed_funds(self):
+        return self._closed
+```
+
+```python
+class ByStatus(ui.State):
+    has_closed: bool = False
+    _open: list[dict] = []
+    _closed: list[dict] = []
+
+    @ui.action
+    def sort_funds(self, values):
+        funds = self.api.all(Fund, filters={"vintage__gte": values["since"]}, ordering="name")
+        self._open = [row for row in funds if row["status"] != "closed"]
+        self._closed = [row for row in funds if row["status"] == "closed"]
+        self.has_closed = bool(self._closed)
+
+    @ui.rows
+    def open_funds(self):
+        return self._open
+
+    @ui.rows
+    def closed_funds(self):
+        return self._closed
+```
+
+```python demo
+ui.form(
+    title="Funds by status",
+    fields=[ui.field("since", options=[2018, 2020, 2022], required=True)],
+    submit=ByStatus.sort_funds,
+    tabs=True,
+    result=[
+        ui.section("Not closed", ui.table(ByStatus.open_funds, columns=["name", "vintage", "status"])),
+        ui.section("Closed", ui.table(ByStatus.closed_funds, columns=["name", "vintage"]),
+                   visible=ByStatus.has_closed),
+    ],
+)
+```
+
+Choose 2018 and press **Sort funds**: two tabs, and **Closed** lists the one closed fund. Choose
+2020 and send it again: no fund since 2020 is closed, and the **Closed** tab is gone.
+
 - What comes before the first section is shown above the tabs; anything after a section is
   refused.
-- It needs two or more sections, each with its own title, and none of them `collapsed=True`.
+- It needs two or more sections, each with its own fixed title, and none of them `collapsed=True`.
 - `visible=` on a section takes a permission, such as `visible=ui.read(Investor)`: a user without
-  it does not get that tab.
+  it does not get that tab. Or a state value, as **Closed** above: the tab shows while it is true.
+  The page opens on its first tab, so a state value there is refused: put a tab that is always
+  there first.
 - A table in a tab reads its rows when its tab is opened.
 
 ## A form in steps

@@ -14,25 +14,12 @@ from lex import ui
 from docs_site.sandbox.models import Fund
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
-
 class Closing(ui.State):
     @ui.rows
     def rows(self):
         return [
             {**fund, "why_not": "This fund is already closed." if fund["status"] == "closed" else ""}
-            for fund in every(self.api, Fund, ordering="name")
+            for fund in self.api.all(Fund, ordering="name")
         ]
 
     @ui.action(requires=ui.edit(Fund))
@@ -49,25 +36,12 @@ from lex import ui
 from myproject.models import Fund
 
 
-def every(api, model, **options):
-    """Every matching record: self.api.list returns one page of them at a time."""
-    ordering = options.pop("ordering", None)
-    ordering = f"{ordering},id" if ordering else "id"  # a stable order: no row skipped or repeated
-    rows, page = [], 1
-    while True:
-        found = api.list(model, page=page, per_page=100, ordering=ordering, **options)
-        rows.extend(found)
-        if not found or len(rows) >= found.count:
-            return rows
-        page += 1
-
-
 class Closing(ui.State):
     @ui.rows
     def rows(self):
         return [
             {**fund, "why_not": "This fund is already closed." if fund["status"] == "closed" else ""}
-            for fund in every(self.api, Fund, ordering="name")
+            for fund in self.api.all(Fund, ordering="name")
         ]
 
     @ui.action(requires=ui.edit(Fund))
@@ -166,6 +140,10 @@ links to it; in your project `to=` is usually a page function.
 
 `to=` names a page, never a route string: when the route changes, every link follows. A link in a
 page's `actions=` is drawn as a button. Mail and phone links are not supported yet.
+
+`icon=`, `badge=` and `requires=` on a link are words of [the frame](/look-and-chrome/frame), for
+its navigation, header and user menu. In a page they stop the page, saying what to write instead:
+`visible=` to decide who sees the link, a `ui.button(..., icon=)` for an icon.
 
 ## Linking to a page
 

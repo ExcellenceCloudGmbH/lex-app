@@ -2,6 +2,7 @@
 
 Filters take the forms a handler writes (``field``, ``field__icontains``, ``__gte``, ``__lte``,
 ``__in``); ``ordering`` is a field, ``-`` first for descending, comma-separated for more.
+``all`` is lex.ui's own, reading page after page through this ``list``.
 """
 
 from collections.abc import Mapping, Sequence
@@ -10,7 +11,7 @@ from typing import Any
 from docs_site.sandbox.models import MODELS
 from docs_site.sandbox.store import TabData
 from lex.lex_app.reflex.data import LexApiError
-from lex.lex_app.reflex.ui.context import Rows
+from lex.lex_app.reflex.ui.context import Api, Rows
 
 
 def _matches(row: Mapping[str, Any], key: str, wanted: Any) -> bool:
@@ -63,6 +64,9 @@ class SandboxApi:
                    for r in found[start:start + per_page])
         out.count = len(found)
         return out
+
+    #: lex.ui's own ``self.api.all``: page after page through ``list`` above, at most 10,000 rows.
+    all = Api.all
 
     def get(self, model: Any, pk: Any) -> dict:
         return dict(self._find(model, pk))

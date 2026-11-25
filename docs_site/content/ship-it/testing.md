@@ -26,7 +26,7 @@ class Funds(ui.State):
 
     @ui.rows
     def open_funds(self):
-        return self.api.list(Fund, filters={"status": "investing"})
+        return self.api.all(Fund, filters={"status": "investing"})
 
     @ui.load
     def open(self):
@@ -59,7 +59,7 @@ class FakeApi:
         self.funds = {fund["id"]: dict(fund) for fund in funds}
         self.updates = []
 
-    def list(self, model, *, filters=None, **options):
+    def all(self, model, *, filters=None, **options):
         wanted = (filters or {}).items()
         return [f for f in self.funds.values() if all(f.get(k) == v for k, v in wanted)]
 
@@ -182,6 +182,88 @@ def test_the_search_box_finds_a_fund():
 With `table=`, it may only name the table's filters that offer a list of choices; any other name
 - a date filter too - raises an error that lists the ones it takes.
 
+## What a searched field offers
+
+A [searched choice](/pages/forms#a-choice-searched-on-the-server) asks its `@ui.rows` handler as
+the user types. `ui.testing.search` types for you and returns what the browser would be offered.
+Take the form of that section, on a page of its own:
+
+```python
+@ui.page("/commitments/by-investor")
+def commitments_of_an_investor():
+    return ui.form(title="Commitments of an investor",
+                   fields=[ui.field("investor", options=ByInvestor.investors, required=True)],
+                   submit=ByInvestor.list_commitments,
+                   result=[ui.table(ByInvestor.commitments, columns=["fund", "amount"])])
+
+
+def test_the_investor_field_searches_by_name():
+    ui.dashboard(commitments_of_an_investor)()   # builds the page, as lex-app does when it starts
+    offered = ui.testing.search(ByInvestor.list_commitments, "investor", "fund", api=investors)
+    assert [one["label"] for one in offered] == ["Fjord Sovereign Fund", "Rhine Pension Fund"]
+```
+
+Here `investors` is a stand-in whose `list` answers the investors, as `FakeApi` answers funds.
+
+- Name the form by its `submit=` handler and the field by its key. It takes the same `user=`,
+  `grants=`, `params=` and `api=` as `run`.
+- Each match is `{"value": ..., "label": ...}`, exactly as the browser gets it.
+- The form's page must be built first, as lex-app builds it when it starts: `ui.dashboard(page)()`
+  builds it in a test. A key that is not a searched field of that form raises an error that says
+  what one is.
+
+## A private value that is gone
+
+A [`ui.private`](/state-and-actions/private) value is kept only for a while. To test what a
+handler does once it is gone, seed it with `ui.testing.GONE`:
+
+```python
+def test_a_gone_report_asks_to_start_again():
+    result = ui.testing.run(Report, "export", fields={"_report": ui.testing.GONE})
+    assert result.refused.startswith("This is no longer available")
+```
+
+The field is seeded through its own store, as lex-app keeps it, and a value you seed instead is
+read as written.
+
+## Against lex-app's own API
+
+A stand-in such as `FakeApi` answers what you tell it to. To check what lex-app itself does with
+the handler's calls - the model's permissions, validation, lifecycle hooks, audit entries and
+calculations - give the handler `ui.testing.lex_api(client)`:
+
+```python
+from django.test import TransactionTestCase
+
+
+class Investors(ui.State):
+    names: list[str] = []
+
+    @ui.action
+    def find_pension_funds(self):
+        self.names = [row["name"] for row in self.api.list(Investor, filters={"kind": "pension"})]
+
+
+class InvestorsTest(TransactionTestCase):
+    def test_lists_the_pension_funds(self):
+        Investor.objects.create(name="Rhine Pension Fund", kind="pension")
+        # self.client is signed in as the user, the way your project's API tests sign in
+        api = ui.testing.lex_api(self.client)
+        result = ui.testing.run(Investors, "find_pension_funds", api=api)
+        assert result.fields["names"] == ["Rhine Pension Fund"]
+        assert api.calls == [("GET", "/api/model_entries/investor/list")]
+```
+
+The views answer on a thread of their own, with their own database connection, so put such tests
+in a `TransactionTestCase`, as for [handlers that query the
+database](#handlers-that-query-the-database).
+
+- Every call of `self.api` is answered in the test's own process by lex-app's views, through
+  Django's test client: no server, no HTTP.
+- `client` is Django's or Django REST framework's test client, signed in as the user the API acts
+  for, the way your project's API tests sign in. `user=` on `run` only names `self.user`.
+- `.calls` lists the requests made, as `(method, path)`.
+
 ## Handlers that query the database
 
 A handler with `requires=` may query the database directly. Its body runs on a worker thread with
@@ -242,14 +324,14 @@ def test_open_then_close():
 returns something to `await` until it has run; `fields` reads a state; `h.updates` and `h.results`
 hold what the browser was sent and what the handlers returned.
 
-Some events start others that run in the background: a [searched
-choice](/pages/forms#a-choice-searched-on-the-server)'s search, the `ui_search` event, runs its rows
-handler that way. Awaiting what `send` returns waits for the event itself only; await its
-`.wait_all()` to wait for those too: `await (await h.send(...)).wait_all()`. To test which
-matches a searched choice offers, call its rows handler directly:
-`ui.testing.rows(Orders.customers, search="acme")`.
+`await h.search(Orders.create, "customer", "acme")` is `ui.testing.search` inside a longer test,
+as `send` is `run`.
 
-`ui.testing.run` and `ui.testing.rows` start their own event loop, so call them from ordinary
+Some events start others that run in the background. Awaiting what `send` returns waits for the
+event itself only; await its `.wait_all()` to wait for those too:
+`await (await h.send(...)).wait_all()`.
+
+`ui.testing.run`, `ui.testing.rows` and `ui.testing.search` start their own event loop, so call them from ordinary
 test functions, not from `async def` tests.
 
 Next: [`lex reflex check`](/ship-it/check), which finds mistakes without running anything.

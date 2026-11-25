@@ -10,7 +10,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "parts": ("section", "table", "column", "fact", "text", "each", "status", "custom", "custom_block",
               "button", "link", "switch", "address", "message", "progress", "progress_of"),
     "state": ("State", "private", "action", "job", "load", "rows", "running", "failed", "loaded", "cancel", "refresh"),
-    "results": ("toast", "goto", "download", "Refuse", "ApiError", "PageError"),
+    "results": ("toast", "goto", "download", "scroll_to", "Refuse", "ApiError", "PageError"),
     "permissions": ("read", "create", "edit", "delete", "signed_in", "permission", "rule"),
     "testing": ("testing",),
 }
