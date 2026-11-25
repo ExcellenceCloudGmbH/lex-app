@@ -1064,7 +1064,10 @@ write of the page is the user's.
   (Calculate, the run's load, Stop, the download, the following): each is refused with the rule's
   sentence before lex-app's API is called. Before the merge, a rule on the page hid the page and left
   its handlers open. The state is one per page and requirements: the same title and fields under
-  another `requires=` is another state.
+  another `requires=` is another state. The requirements are bound when the page is *built*
+  (`Build.requires`, set by `declare.finalize`), not when `ui.calculation(...)` is called (review 2,
+  I-4): a kind made outside the page function used to get none. Built where no page's `requires=` is
+  known (a `@ui.dashboard`), it is refused with what to write -- never handlers that guard nothing.
 - *A run's view sits under its page in the breadcrumbs* (1.979). `?run=` is the same route, so the
   frame's trail would not change; while a run is open, the page becomes a link back to its form and the
   run's name (its key until lex-app names it) is the last crumb. A page kind with a view inside it
@@ -1365,6 +1368,9 @@ scenario (batch in brackets):
   thread with the page's values -- before every read, as a handler asks its own; refused, nothing is read
   and the table shows the refusal's sentence. It costs a rule's answer per read (once per event, as for a
   handler). A table in `ui.embed` or on a dashboard has no page `requires=` and reads as before.
+- *A calculation's handlers take the page's `requires=` when the page is built (I-4, 1.1105 [1ef]).* See 6.20.
+  `declare.finalize` and `@ui.dashboard` now build a kind before reading its loads, so what a kind binds
+  when built is there; the context variable that carried the page's `requires=` to the constructor is gone.
 
 ## 7. Order of building
 

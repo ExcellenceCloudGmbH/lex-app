@@ -36,7 +36,7 @@ from lex.test_project.tests.init.models import UI_FK_MODELS, UiCustomer, UiCusto
 pytestmark = pytest.mark.init
 
 ROUTE = "/reports/customers"
-CTX = Build(page="customer_reports", route=ROUTE)
+CTX = Build(page="customer_reports", route=ROUTE, requires=())      # a @ui.page without requires=
 
 
 class TestCluster01es_ForeignKeyNames(E2ETestCase):

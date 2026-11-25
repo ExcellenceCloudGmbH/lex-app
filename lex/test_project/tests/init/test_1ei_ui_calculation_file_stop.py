@@ -35,7 +35,7 @@ from lex.test_project.tests.init.models import UI_CALC_MODELS, UiRegionReport
 pytestmark = pytest.mark.init
 
 ROUTE = "/reports/regions"
-CTX = Build(page="region_reports", route=ROUTE)
+CTX = Build(page="region_reports", route=ROUTE, requires=())      # a @ui.page without requires=
 
 
 def region_reports():
@@ -205,11 +205,13 @@ class TestCluster01ei_CalculationFileAndStop(E2ETestCase):
         def region_reports_whole():
             return region_reports()
 
+        # As lex-app registers it (declare.finalize): built with the page's requires=, then its loads read.
         kind = declare._kind_of(region_reports_whole)
+        built = kind.build(Build(page="region_reports_whole", route="/reports/regions-whole",
+                                 requires=declare._DECLARED["/reports/regions-whole"].requires))
         required, optional = declare._loads("region_reports_whole", kind)
         self.assertEqual([load.fn.__name__ for load in required], ["open"])
-        _, module = compile_page("/reports/regions-whole", kind.build(Build(page="region_reports_whole",
-                                                                              route="/reports/regions-whole")))
+        _, module = compile_page("/reports/regions-whole", built)
         for sign in ("rfds-form", '"Past runs"', "rfds-progress-bar", '"Stop this run?"'):
             self.assertIn(sign, module, sign)
         self.assertIn(permission(UiRegionReport, "edit"), module, "Stop is shown to users who may edit")

@@ -9,7 +9,7 @@ to the run's address on the same page. A regression is a run nobody may trace to
 created past the model's permissions, a page that blocks while the run goes, or a run whose log the
 grid cannot find.
 
-Cluster 1ef -- scenarios 1.980-1.984, 1.978. Type: E (the handlers run against lex-app's real views).
+Cluster 1ef -- scenarios 1.980-1.984, 1.978, 1.1105. Type: E (the handlers run against lex-app's real views; 1.1105 U).
 Covers: lex/lex_app/reflex/ui/pages/calculation.py (ui.calculation, its checks, the form view),
 lex/lex_app/reflex/ui/calculations.py (the state, calculate), lex/lex_app/reflex/data.py and
 lex/lex_app/reflex/ui/context.py (self.api.calculate, self.api.log).
@@ -34,11 +34,12 @@ from lex.lex_app.reflex.ui.pages.parts import Build, PageError
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 from lex.test_project.tests.init._ui_calc_aids import Session, settled
 from lex.test_project.tests.init.models import UI_CALC_MODELS, UiRegionReport
+from lex.test_project.tests.init.test_1eb_ui_frame_nav import FrameCase
 
 pytestmark = pytest.mark.init
 
 ROUTE = "/reports/regions"
-CTX = Build(page="region_reports", route=ROUTE)
+CTX = Build(page="region_reports", route=ROUTE, requires=())      # a @ui.page without requires=
 
 
 def region_reports(**changes):
@@ -99,7 +100,9 @@ class TestCluster01ef_CalculationStart(E2ETestCase):
         _, module = compile_page(ROUTE, page.build(CTX))
         self.assertIn("rfds-form", module, "the form is RFDS's")
         self.assertIn('"Calculate"', module, "the button reads Calculate, lex-app's word for starting a run")
-        self.assertIs(region_reports().state, page.state, "one state per page, whatever the number of builds")
+        again = region_reports()
+        again.build(CTX)
+        self.assertIs(again.state, page.state, "one state per page, whatever the number of builds")
         self.assertEqual([load.fn.__name__ for load in page.loads()[0]], ["open"], "the page's load is lex-app's")
         with self.assertRaises(PageError) as other:
             ui.page("/groups/run")(lambda: ui.calculation(Group, title="Groups", fields=[ui.field("name")]))
@@ -235,8 +238,8 @@ class TestCluster01ef_CalculationStart(E2ETestCase):
                events by name: its load on a run's address, Stop, the download and the following.
         Then:  anna's page is granted and her run starts as before; bob's page is refused with the rule's
                sentence and every one of his events is refused with it, before lex-app's API is called:
-               no record is created, no run read, stopped or downloaded. The page built outside a page
-               (no requires=) keeps its own state.
+               no record is created, no run read, stopped or downloaded. The same page on a @ui.page without
+               requires= keeps its own state.
         """
         from unittest.mock import patch as patching
 
@@ -267,7 +270,9 @@ class TestCluster01ef_CalculationStart(E2ETestCase):
 
         declare.finalize()
         state = declare._DECLARED[ROUTE].kind.state
-        self.assertIsNot(state, region_reports().state, "the guarded page's handlers are its own")
+        unguarded = region_reports()
+        unguarded.build(CTX)
+        self.assertIsNot(state, unguarded.state, "the guarded page's handlers are its own")
         existing = UiRegionReport.objects.create(region="north", year=2024)
 
         async def scenario(user: str):
@@ -304,3 +309,57 @@ class TestCluster01ef_CalculationStart(E2ETestCase):
                          "bob is told so, and his browser goes nowhere and downloads nothing")
         self.assertIn("anna", asked)
         self.assertIn("bob", asked)
+
+
+@ui.rule
+def north_only(user, params):
+    return True if user.id == "anna" else "Only the north team runs region reports."
+
+
+#: Built once, outside any page function, and returned by one: its handlers must still be the page's.
+SHARED_REPORT = ui.calculation(UiRegionReport, title="Shared region report",
+                               fields=[ui.field("region", required=True), ui.field("year", kind="year", required=True)])
+
+
+class TestCluster01ef_RequiresBoundWhenBuilt(FrameCase):
+    """1.1105: a calculation's handlers require what the page that builds it does, wherever it was made."""
+
+    # -- 1.1105 --------------------------------------------------------
+    def test_1_1105_the_handlers_require_the_page_that_builds_the_calculation(self) -> None:
+        """
+        Scenario 1.1105: the page kind made outside the page function (a module-level value), and one on
+        a dashboard.
+        Given: ui.calculation made once at module level, returned by a @ui.page guarded by a rule that
+               refuses bob; the same kind returned by a @ui.dashboard.
+        When:  lex-app registers the page and bob sends its Calculate by name; the dashboard is built.
+        Then:  bob is refused with the rule's sentence before lex-app's API is called -- the handlers
+               took the page's requires= when the page was built, never an empty one; the dashboard,
+               where no page's requires= is known, is refused with what to write.
+        """
+        from lex.lex_app.reflex.ui import testing
+        from lex.lex_app.reflex.ui.pages import declare
+
+        @ui.page("/reports/shared", requires=north_only)
+        def shared_reports():
+            return SHARED_REPORT
+
+        declare.finalize()
+        state = declare._DECLARED["/reports/shared"].kind.state
+
+        async def scenario():
+            async with testing.Harness(user="bob") as harness:
+                await harness.open_tab("/reports/shared")
+                await (await harness.send(state, "calculate", values={"region": "north", "year": "2026"}))
+                return [(o.kind, o.message) for o in harness.outcomes]
+
+        self.assertEqual(asyncio.run(scenario()), [("denied", "Only the north team runs region reports.")],
+                         "refused by the page's rule, before the API is asked")
+
+        @ui.dashboard
+        def main():
+            return SHARED_REPORT
+
+        with self.assertRaises(PageError) as refused:
+            main()
+        self.assertIn("outside a `@ui.page`", str(refused.exception))
+        self.assertIn("@ui.page(", str(refused.exception), "it says what to write")

@@ -3728,6 +3728,7 @@ The calculation page kind of section 6.20 of `docs/superpowers/specs/2026-11-23-
 | 1.983 | With Celery on the run goes to a worker and the page does not wait | dispatched once, never in-process; the record IN_PROGRESS; the browser already at the run |
 | 1.984 | self.api.calculate and self.api.log are the grid's Calculate and log | [] before a run; IN_PROGRESS at once; the run's Markdown log after; its newest line |
 | 1.978 | A rule on the page guards the calculation's own handlers | @ui.page(requires=a @ui.rule) on ui.calculation: the granted user's run starts as before; the refused user's page says the rule's sentence and calculate, the load, Stop, the download and the following sent by name are each refused with it before lex-app's API is called; the guarded page has its own state |
+| 1.1105 | The handlers require the page that builds the calculation | a kind made at module level and returned by a rule-guarded @ui.page refuses bob's Calculate with the rule's sentence before the API; on a @ui.dashboard refused with what to write |
 
 ### Batch 1eg — lex.ui calculation pages: one run, followed until it ends -- its result, its error, its log ✅
 

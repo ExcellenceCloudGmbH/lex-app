@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
-import contextvars
 import dataclasses
 import os
 from typing import Any, Callable
@@ -30,25 +28,6 @@ class Declared:
 
 #: Route -> the page declared for it, until :func:`finalize` hands it to lex-app.
 _DECLARED: dict[str, Declared] = {}
-
-#: The requires= of the page whose function lex-app is calling. A page kind whose handlers are
-#: lex-app's own (``ui.calculation``) gives them the page's requires=: the project cannot write it there.
-_PAGE_REQUIRES: contextvars.ContextVar[tuple] = contextvars.ContextVar("lex_ui_page_requires", default=())
-
-
-def page_requires() -> tuple:
-    """The requires= of the page being declared or built (``()`` outside one, or for a page without)."""
-    return _PAGE_REQUIRES.get()
-
-
-@contextlib.contextmanager
-def _declaring(requires: tuple):
-    token = _PAGE_REQUIRES.set(tuple(requires))
-    try:
-        yield
-    finally:
-        _PAGE_REQUIRES.reset(token)
-
 
 _PAGES_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -217,20 +196,20 @@ def finalize() -> None:
         if declared.done:
             continue
         name = declared.fn.__name__
-        with _declaring(declared.requires):
-            kind = declared.kind = _kind_of(declared.fn)
+        kind = declared.kind = _kind_of(declared.fn)
         title = kind.title
         listed = declared.nav if not declared.info.arguments else None
         if listed and not isinstance(title, str):
             raise PageError(f"Page `{name}`: a page listed in the navigation needs a fixed title.\n"
                             "Give the kind `title=\"...\"`, or leave `nav=` out.")
+        # Built first: every slot checked now (a wrong page stops the start), and what is bound to the page
+        # when it is built -- its requires= on lex-app's own handlers -- is there before its loads are read.
+        kind.build(Build(page=name, route=route, requires=declared.requires))
         required, optional = _loads(name, kind)
-        kind.build(Build(page=name, route=route, requires=declared.requires))   # a wrong page stops the start
 
         def body(fn: Callable[[], Any] = declared.fn, route: str = route,
                  requires: tuple = declared.requires) -> rx.Component:
-            with _declaring(requires):
-                return _kind_of(fn).build(Build(page=fn.__name__, route=route, requires=requires))
+            return _kind_of(fn).build(Build(page=fn.__name__, route=route, requires=requires))
 
         body.__name__ = name
         body.__qualname__ = declared.fn.__qualname__
@@ -355,6 +334,7 @@ def dashboard(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     def built(*args: Any) -> Any:
         kind = _kind_of(fn, *args)
+        component = kind.build(Build(page=fn.__name__, mounts=True))
         page_loads, part_loads = _loads(fn.__name__, kind)
         owners: dict[str, str] = {}
         for load in (*page_loads, *part_loads):
@@ -366,7 +346,7 @@ def dashboard(fn: Callable[..., Any]) -> Callable[..., Any]:
                                 "page appears, so one would clear what the other read. Give each load a state of "
                                 "its own, or read everything in one load.")
             owners[state] = handler
-        return kind.build(Build(page=fn.__name__, mounts=True))
+        return component
 
     built.__name__ = fn.__name__
     built.__qualname__ = fn.__qualname__
