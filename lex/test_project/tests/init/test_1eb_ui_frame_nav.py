@@ -2,14 +2,14 @@
 
 Intent: a project with several areas of work ("Orders", "Reports", "Tools", each with several
 pages) keeps its navigation when its pages become lex.ui pages. lex-app's frame is configured, not
-replaced: `ui.frame(nav=[...])`, once, in the dashboard module, gives the areas' order -- the same
+replaced: `ui.frame(nav={...})`, once, in the dashboard module, gives the areas' order -- the same
 word as a page's `nav=`, which names its area -- and a raw Reflex page joins an area with the same
 words. The current entry and its area are marked. The way out of the user menu is the project's
 when it says so. A regression is a navigation whose areas come in import order, an area made by a
 typo, a raw page that cannot be listed, a second frame configured from another module, or a sign-out
 that leads to an address lex-app did not check.
 
-Cluster 1eb -- scenarios 1.960-1.964, 1.1102. Type: U.
+Cluster 1eb -- scenarios 1.960-1.964, 1.1102, 1.1112. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/frame.py (frame), lex/lex_app/reflex/shell.py (nav_sections,
 check_nav, list_in_nav, sign_out_href, lex_chrome), lex/lex_app/reflex/ui/pages/declare.py (page,
 finalize, install), lex/lex_app/reflex/ui/pages/links.py (reflex_page), lex/lex_app/reflex/_js/lex_rfds.css,
@@ -64,7 +64,7 @@ class TestCluster01eb_FrameNav(FrameCase):
     def test_1_960_areas_come_in_the_projects_order_and_pages_in_theirs(self) -> None:
         """
         Scenario 1.960: the navigation in areas.
-        Given: ui.frame(nav=["Reports", "Orders"]) and, in this order, a page in Orders, a raw page in
+        Given: ui.frame(nav={"Reports": [], "Orders": []}) and, in this order, a page in Orders, a raw page in
                Orders, a page in Reports and a second page in Orders; then a page whose area is a typo.
         When:  lex-app registers the pages and builds the navigation.
         Then:  the overview comes first, then Reports, then Orders -- the project's order, not the
@@ -74,7 +74,7 @@ class TestCluster01eb_FrameNav(FrameCase):
                in the order of their first page; a page in an area ui.frame does not list stops the
                start, naming the page and the areas to choose from.
         """
-        ui.frame(nav=["Reports", "Orders"])
+        ui.frame(nav={"Reports": [], "Orders": []})
 
         @ui.page("/orders", nav="Orders", icon="list")
         def orders():
@@ -124,24 +124,28 @@ class TestCluster01eb_FrameNav(FrameCase):
         """
         Scenario 1.961: one frame.
         Given: ui.frame called in one module, then again in it (a reload), then from another module;
-               and ui.frame given a single area as text, an area twice, and an empty name.
+               and ui.frame given a single area as text, the areas as a list (review 2: nav= is a dict),
+               an empty name, a name that is not words, and an area given neither [] nor links.
         When:  each call is made.
         Then:  a reload replaces the configuration; another module's call is refused, naming the module
                that configured it; each wrong argument is refused with what to write.
         """
         namespace = {"ui": ui, "__name__": "orders_app.dashboards"}
-        exec("ui.frame(nav=['Orders'])", namespace)          # noqa: S102 - a module's top level, as written
-        exec("ui.frame(nav=['Orders', 'Reports'])", namespace)  # noqa: S102 - the same module, reloaded
+        exec("ui.frame(nav={'Orders': []})", namespace)          # noqa: S102 - a module's top level, as written
+        exec("ui.frame(nav={'Orders': [], 'Reports': []})", namespace)  # noqa: S102 - the same module, reloaded
         self.assertEqual(frame.current().nav, ("Orders", "Reports"), "a reload replaces it")
         with self.assertRaises(ValueError) as caught:
-            exec("ui.frame(nav=['Tools'])", {"ui": ui, "__name__": "other_app.pages"})  # noqa: S102
+            exec("ui.frame(nav={'Tools': []})", {"ui": ui, "__name__": "other_app.pages"})  # noqa: S102
         self.assertIn("orders_app.dashboards", str(caught.exception), "it names where the frame is configured")
         self.assertIn("once", str(caught.exception))
         with patch.object(frame, "_FRAME", None):
             with self.assertRaises(TypeError) as caught:
                 ui.frame(nav="Orders")
-            self.assertIn("nav=[\"Orders\"]", str(caught.exception), "a single area is written as a list")
-            for wrong in (["Orders", "Orders"], ["Orders", ""], ["Orders", 3]):
+            self.assertIn("nav={\"Orders\": []}", str(caught.exception), "it says what to write")
+            with self.assertRaises(TypeError) as caught:
+                ui.frame(nav=["Orders", "Reports"])
+            self.assertIn("nav={\"Orders\": [], \"Reports\": []}", str(caught.exception), "the list, rewritten")
+            for wrong in ({"Orders": [], "": []}, {"Orders": [], 3: []}, {"Orders": "Reports"}):
                 with self.assertRaises((TypeError, ValueError)):
                     ui.frame(nav=wrong)
             self.assertEqual(frame.current().nav, (), "a refused call configures nothing")
@@ -150,18 +154,20 @@ class TestCluster01eb_FrameNav(FrameCase):
     def test_1_962_a_raw_reflex_page_joins_an_area_with_the_same_words(self) -> None:
         """
         Scenario 1.962: a raw page in the navigation.
-        Given: raw Reflex pages declared with ui.reflex_page, with nav=, title=, icon= and requires=.
+        Given: raw Reflex pages declared with ui.reflex_page, with nav=, title=, icon= and visible=
+               (review 2: requires= on a raw page, which lex-app cannot guard, is now visible=).
         When:  the navigation is built.
         Then:  the page is listed in its area by its title, with its icon and the permission that
                hides its entry; it is still somewhere a link may lead; nav= without a title, and a title
                or a permission without nav=, are refused with what to write; declared again (a reload)
-               it keeps its place. (A project rule as its requires= now hides the entry too: 1.1001.)
+               it keeps its place; requires= is refused, saying to write visible=. (A project rule as its
+               visible= hides the entry too: 1.1001.)
         """
         legacy = ui.reflex_page("/legacy", nav="Tools", title="Legacy export", icon="download",
-                                requires=ui.permission("lex_app.Order", "read"))
+                                visible=ui.permission("lex_app.Order", "read"))
         ui.reflex_page("/other", nav="Tools", title="Other tool")
         ui.reflex_page("/legacy", nav="Tools", title="Legacy export", icon="download",
-                       requires=ui.permission("lex_app.Order", "read"))
+                       visible=ui.permission("lex_app.Order", "read"))
         [tools] = shell.nav_sections()[1:]
         self.assertEqual(tools.label_default, "Tools")
         # A guarded entry carries its key (its route) for the server's answer (1.1000), not the permission.
@@ -173,10 +179,13 @@ class TestCluster01eb_FrameNav(FrameCase):
         with self.assertRaises(ValueError) as caught:
             ui.reflex_page("/untitled", nav="Tools")
         self.assertIn("title=", str(caught.exception))
-        for kwargs in ({"title": "Lonely"}, {"requires": ui.read("lex_app.Order")}, {"icon": "list"}):
+        for kwargs in ({"title": "Lonely"}, {"visible": ui.read("lex_app.Order")}, {"icon": "list"}):
             with self.assertRaises(ValueError, msg=f"{kwargs} without nav= has no entry to apply to") as caught:
                 ui.reflex_page("/lonely", **kwargs)
             self.assertIn("nav=", str(caught.exception))
+        with self.assertRaises(TypeError) as caught:
+            ui.reflex_page("/guarded", nav="Tools", title="Guarded", requires=ui.read("lex_app.Order"))
+        self.assertIn("visible=", str(caught.exception), "requires= on a raw page says what to write")
 
     # -- 1.963 ---------------------------------------------------------
     def test_1_963_the_current_entry_and_its_area_are_marked_in_a_compiled_page(self) -> None:
@@ -188,7 +197,7 @@ class TestCluster01eb_FrameNav(FrameCase):
                current by the browser's route (a record's route below its list's marks the list); and
                lex-app's stylesheet marks the heading of the area that holds the current entry.
         """
-        ui.frame(nav=["Orders", "Reports"])
+        ui.frame(nav={"Orders": [], "Reports": []})
 
         @ui.page("/orders", nav="Orders")
         def orders():
@@ -271,3 +280,36 @@ class TestCluster01eb_FrameNav(FrameCase):
         state_js = pathlib.Path(reflex_base.__file__).parent / ".templates" / "web" / "utils" / "state.js"
         self.assertIn(f'const TOKEN_KEY = "{session.TAB_TOKEN_KEY}";', state_js.read_text(),
                       "the key Reflex keeps the tab's token under")
+
+    # -- 1.1112 --------------------------------------------------------
+    def test_1_1112_the_frames_words_read_as_one_table_and_one_rule(self) -> None:
+        """
+        Scenario 1.1112: what a reader learns ui.frame from (review 2, readability).
+        Given: ui.frame's docstring, and lex.ui's module summary.
+        When:  they are read.
+        Then:  the docstring sorts every argument into four groups -- navigation, header, denied pages,
+               other -- each argument once, under one rule ("fixed, or a function of the user"); actions=
+               are "the parts at the top right"; nav= is shown as a dict; ui.section is not a word of the
+               navigation; lex.ui's first example reads a table's rows in a @ui.rows handler, not into a
+               state field; no docstring line runs past 110 characters.
+        """
+        import inspect
+
+        import lex.ui
+
+        doc = frame.frame.__doc__
+        groups = ["**Navigation**", "**Header**", "**Denied pages**", "**Other**"]
+        self.assertEqual([doc.index(one) for one in groups], sorted(doc.index(one) for one in groups))
+        arguments = [name for name in inspect.signature(frame.frame).parameters if name != "refused_as_missing"]
+        table = doc[doc.index("**Navigation**"):doc.index("**Other**") + 400]
+        for name in arguments:
+            self.assertEqual(table.count(f"``{name}``"), 1, f"{name} is in the table once")
+        self.assertIn("fixed, or a function of the user", doc)
+        self.assertIn("the parts at the top right", doc)
+        self.assertIn('nav={"Orders": [ui.link(', doc)
+        self.assertNotIn("ui.section", doc)
+        summary = lex.ui.__doc__
+        self.assertLess(summary.index("@ui.rows"), summary.index("@ui.action"), "the first example reads rows")
+        self.assertNotIn("rows: list[dict] = []", summary)
+        for text in (doc, summary):
+            self.assertEqual([line for line in text.splitlines() if len(line) > 110], [])

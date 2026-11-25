@@ -9,7 +9,7 @@ browser that decides by itself what is listed, or a failing rule that shows its 
 Cluster 1ej -- scenarios 1.1000-1.1003, 1.1022, 1.1100, 1.1108. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/frame.py (guards, decide), lex/lex_app/reflex/shell.py (nav_sections,
 lex_chrome), lex/lex_app/reflex/ui/state.py (ui_frame_open, ui_frame_shown),
-lex/lex_app/reflex/ui/pages/links.py (reflex_page requires=), lex/lex_app/reflex/ui/pages/declare.py (install).
+lex/lex_app/reflex/ui/pages/links.py (reflex_page visible=), lex/lex_app/reflex/ui/pages/declare.py (install).
 Run: python -m lex pytest lex/test_project/tests/init/test_1ej_ui_frame_decided.py -v
 """
 
@@ -61,8 +61,8 @@ def declare_pages():
     def reviews():
         return _about("Reviews")
 
-    ui.reflex_page("/legacy", nav="Tools", title="Legacy export", requires=ui.permission("lex_app.Order", "export"))
-    ui.reflex_page("/audit", nav="Tools", title="Audit", requires=reviewers)
+    ui.reflex_page("/legacy", nav="Tools", title="Legacy export", visible=ui.permission("lex_app.Order", "export"))
+    ui.reflex_page("/audit", nav="Tools", title="Audit", visible=reviewers)
     declare.finalize()
     return orders
 
@@ -179,10 +179,10 @@ class TestCluster01ej_FrameDecidedOnTheServer(FrameCase):
         """
         Scenario 1.1003: through lex-app's start-up.
         Given: the pages of 1.1000, handed to an app by lex-app's start-up step (declare.install, as
-               create_app runs it); a raw page given a list of permissions and a wrong requires=.
+               create_app runs it); a raw page given a list of permissions and a wrong visible=.
         When:  the installed page is compiled.
         Then:  it draws the guarded entries on the server's answer and asks when it mounts; a raw page's
-               requires= takes what a page's does, and a wrong one is refused with what to write.
+               visible= takes what a page's requires= does, and a wrong one is refused with what to write.
         """
         declare_pages()
         install(self)
@@ -190,12 +190,12 @@ class TestCluster01ej_FrameDecidedOnTheServer(FrameCase):
         for expected in ("ui_frame_shown", "ui_frame_open", '"/reviews"'):
             self.assertIn(expected, module, f"installed: {expected}")
         ui.reflex_page("/both", nav="Tools", title="Both",
-                       requires=[ui.permission("lex_app.Order", "read"), ui.permission("lex_app.Order", "export")])
+                       visible=[ui.permission("lex_app.Order", "read"), ui.permission("lex_app.Order", "export")])
         from lex.lex_app.reflex.ui.pages import frame
 
         self.assertEqual(frame.guards()["/both"].permissions, ("lex_app.Order:read", "lex_app.Order:export"))
         with self.assertRaises(ValueError) as caught:
-            ui.reflex_page("/wrong", nav="Tools", title="Wrong", requires=lambda user, params: True)
+            ui.reflex_page("/wrong", nav="Tools", title="Wrong", visible=lambda user, params: True)
         self.assertIn("@ui.rule", str(caught.exception))
 
 
@@ -208,7 +208,7 @@ class TestCluster01ej_WholeFrame(FrameCase):
         Scenario 1.1022: everything at once.
         Given: a dashboard module that configures every part of the frame -- areas and sections, a count,
                a per-user section, a foot, the search page, header actions, user menu entries, a banner,
-               the mark and refused_as_missing -- beside its pages.
+               the mark and denied_as_missing -- beside its pages.
         When:  lex-app's start-up step hands the pages to an app (declare.install, as create_app runs it),
                a page is compiled, and the frame is decided for a user.
         Then:  the compiled page holds every part, the shell asks the server when it mounts, and the
@@ -243,12 +243,12 @@ class TestCluster01ej_WholeFrame(FrameCase):
         def admin():
             return _about("Administration")
 
-        ui.frame(nav=[ui.section("Orders", ui.link("Search orders", to=search, icon="search")), "Admin",
-                      ui.section("Favourites", favourites)],
+        ui.frame(nav={"Orders": [ui.link("Search orders", to=search, icon="search")], "Admin": [],
+                      "Favourites": favourites},
                  nav_footer=ui.text("Version 2.4.1"), search=search,
                  actions=[ui.link("Notifications", to=account, icon="notification", badge=waiting)],
                  user_menu=[ui.link("Account", to=account)],
-                 banner=ui.message(problem, tone="warning"), logo="/acme.svg", refused_as_missing=True)
+                 banner=ui.message(problem, tone="warning"), logo="/acme.svg", denied_as_missing=True)
         install(self)
         _, module = compile_page("/orders", self.page_named("/orders")())
         for expected in ("Search orders", "rfds-side-nav-badge", "ui_frame_links", "Version 2.4.1",

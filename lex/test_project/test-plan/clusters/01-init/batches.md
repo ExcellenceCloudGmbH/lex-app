@@ -3630,6 +3630,7 @@ What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-refl
 | 1.963 | The current entry and its area are marked in a compiled page | Reflex's page compiler; aria-current per entry; lex-app's stylesheet marks the area heading |
 | 1.964 | The user menu signs out where the project says | /logout by default; an https:// address or a page's route; a route as text, http:// and a page needing values refused; the title is still LEX_DASHBOARD_TITLE |
 | 1.1102 | Signing out gives the tab a new client token | LexUser.sign_out forgets sessionStorage's token before leaving; the key is the one Reflex's state.js reads |
+| 1.1112 | The frame's words read as one table and one rule | ui.frame's docstring: four groups, each argument once, one rule, actions the parts at the top right, nav= a dict, no ui.section; lex.ui's first example a @ui.rows handler; no line past 110 |
 
 ### Batch 1ec — lex.ui frame: breadcrumbs from the area and the page, written by no page ✅
 
@@ -3848,6 +3849,7 @@ Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | 1.1006 | A per-user section lists what its function returns | compiled under the heading from ui_frame_links; anna's page address with its value and an outside address, words as they are; a link with requires= left out and logged; carl: none |
 | 1.1007 | A link the user may not open is not drawn | a link's requires=, the page it leads to, a rule asked with the link's values: all three for anna, none for carl |
 | 1.1008 | A link at the foot, and the frame's words in a page | RFDS's navigation footer with a link or a text; a button refused; badge=, requires=, icon= on a link in a page refused with what to write |
+| 1.1110 | A per-user section named like an area with pages is refused | nav={"Orders": favourites} beside a page in Orders -- declared before the frame, after it, or a raw page -- refused naming page, area and function; a section of its own name drawn after the area |
 
 ### Batch 1el — lex.ui frame: the header band -- a search box, a status hint, a bell with a count ✅
 
@@ -3931,6 +3933,7 @@ Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | 1.1017 | The opener decides a permission page on the server | carl refused: no, no load; anna granted: yes, her load ran; a rule's page refused for carl |
 | 1.1018 | lex-app's not-found page looks the same | the 404 page in lex-app's frame with the same body; /ui-error's refusal says not found, other failures keep Try again; create_app adds it unless the project has a 404 page |
 | 1.1019 | refused_as_missing written wrongly | a non-bool refused; beside denied= or request_access= refused, saying the notice is never shown |
+| 1.1111 | The switch is named like the other denied words | denied_as_missing=True is the switch; refused_as_missing= refused with denied_as_missing=True written out |
 
 ### Batch 1ep — lex.ui frame: the project's mark in the header, leading home ✅
 
@@ -4187,3 +4190,4 @@ Section 6.22 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | 1.1038 | A test drives a searched field | matches Customer 001..009 with value and label only; an unsearched key refused |
 | 1.1039 | A private value is seeded as gone without a logged error | no WARNING log while seeding GONE; refused with the gone sentence; a seeded value read |
 | 1.1040 | self.api is answered by lex-app's views in-process | Acme Ltd, Gamma Ltd from a real list with search; calls == GET /api/model_entries/uicustomer/list |
+| 1.1113 | The handler's user is the user the API acts as | lex_api(client) with user= another than the client's: the first call refused with user='e2e_user' to write; the same user answered |

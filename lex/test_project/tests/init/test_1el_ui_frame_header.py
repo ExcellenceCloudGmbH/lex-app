@@ -49,6 +49,7 @@ class HeaderState(ui.State):
     """A project's own state, for a button in the header."""
 
     refreshed: int = 0
+    mode: str = ""
 
     @ui.action
     def refresh(self):
@@ -96,17 +97,19 @@ class TestCluster01el_FrameHeader(FrameCase):
         """
         Scenario 1.1009: actions in the header band.
         Given: ui.frame(actions=[a status from a function of the user, a bell link to a guarded inbox with
-               icon= and badge=, a fixed text, a button of the project's state, a custom block]).
+               icon= and badge=, a fixed status, a button of the project's state, a custom block]) (review
+               2: the parts at the top right take no ui.text; a fixed word is a status).
         When:  a page is compiled, and the frame is decided for anna (who may read messages) and ben.
         Then:  the header's actions slot holds them, before the user menu, with the status and the count
                from the server's answers and the bell drawn on its answer; anna's status is "Sync
                delayed", her count 4, and the bell is hers; ben's failing status is logged and left out,
-               no bell; a part the header does not take is refused with what to write.
+               no bell; a part the header does not take -- a text among them -- and a status from a state
+               value are refused with what to write.
         """
         orders, inbox, search = self.declare_pages()
         ui.frame(actions=[ui.status(sync_state, tone="warning"),
                           ui.link("Notifications", to=inbox, icon="notification", badge=unread),
-                          ui.text("Read-only"), ui.button("Refresh", HeaderState.refresh),
+                          ui.status("Read-only"), ui.button("Refresh", HeaderState.refresh),
                           ui.custom_block(rx.el.span("custom-mark"), reason="A mark the vocabulary has no word for.")])
         declare.finalize()
         _, module = compile_page("/orders", self.page_named("/orders")())
@@ -122,11 +125,14 @@ class TestCluster01el_FrameHeader(FrameCase):
             ben = asyncio.run(decided(user="ben"))
         self.assertEqual((ben["values"], ben["shown"]), ({}, []))
         self.assertIn("sync_state", "\n".join(logged.output))
-        for wrong in (ui.fact("Region", "north"), ui.section("More", ui.text("x"))):
+        for wrong in (ui.fact("Region", "north"), ui.section("More", ui.text("x")), ui.text("Read-only")):
             with self.assertRaises(TypeError) as caught:
                 ui.frame(actions=[wrong])
             self.assertIn("actions=", str(caught.exception))
             self.assertIn("ui.custom_block", str(caught.exception))
+        with self.assertRaises(TypeError) as caught:
+            ui.frame(actions=[ui.status(HeaderState.mode)])
+        self.assertIn("function of the user", str(caught.exception), "a frame value is fixed or a function of the user")
 
     # -- 1.1010 --------------------------------------------------------
     def test_1_1010_the_search_box_opens_the_projects_search_page(self) -> None:

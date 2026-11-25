@@ -9,7 +9,7 @@ lex-app's views through Django's test client, so permissions, validation and hoo
 ones). A regression is a project test that has to reach into lex.ui's private modules, a noisy log,
 or a stand-in API that tests something lex-app does not do.
 
-Cluster 1fb -- scenarios 1.1038-1.1040. Types: U (1.1038, 1.1039), E (1.1040).
+Cluster 1fb -- scenarios 1.1038-1.1040, 1.1113. Types: U (1.1038, 1.1039), E (1.1040).
 Covers: lex/lex_app/reflex/ui/testing.py (search, Harness.search, Harness.set_fields, lex_api,
 LexViews).
 Run: python -m lex pytest lex/test_project/tests/init/test_1fb_ui_testing_search_gone_api.py -v
@@ -118,7 +118,31 @@ class TestCluster01fb_LexApiInProcess(E2ETestCase):
         for name in ("Acme Ltd", "Beta plc", "Gamma Ltd"):
             UiCustomer.objects.create(name=name)
         api = ui.testing.lex_api(self.client)
-        ran = ui.testing.run(ShipState, "list_customers", api=api)
+        ran = ui.testing.run(ShipState, "list_customers", user="e2e_user", api=api)   # the client's user
         self.assertEqual(ran.error, "")
         self.assertEqual(ran.fields["names"], ["Acme Ltd", "Gamma Ltd"])
         self.assertEqual(api.calls, [("GET", "/api/model_entries/uicustomer/list")])
+
+
+    # -- 1.1113 --------------------------------------------------------
+    def test_1_1113_the_handlers_user_is_the_user_the_api_acts_as(self) -> None:
+        """
+        Scenario 1.1113: ui.testing.lex_api(client) with a handler run as another user (review 2).
+        Given: the test's client, signed in as e2e_user; a handler run as "tester".
+        When:  the handler calls self.api.
+        Then:  the call is refused before lex-app's views answer, saying the API acts as the client's user
+               and what to write (user="e2e_user"); run as e2e_user it is answered.
+        """
+        UiCustomer.objects.create(name="Acme Ltd")
+        api = ui.testing.lex_api(self.client)
+        ran = ui.testing.run(ShipState, "list_customers", user="tester", api=api)
+        self.assertEqual(api.calls, [("GET", "/api/model_entries/uicustomer/list")])
+        self.assertEqual(ran.fields["names"], [], "nothing was answered for the wrong user")
+        self.assertTrue(ran.error, "the handler failed")
+        with self.assertLogs("lex.lex_app.reflex.ui.handlers", level="ERROR") as logged:
+            ui.testing.run(ShipState, "list_customers", user="tester", api=ui.testing.lex_api(self.client))
+        said = "\n".join(logged.output)
+        self.assertIn("acts as the client's user 'e2e_user'", said)
+        self.assertIn("user='e2e_user'", said, "it says what to write")
+        self.assertEqual(ui.testing.run(ShipState, "list_customers", user="e2e_user", api=api).fields["names"],
+                         ["Acme Ltd"])

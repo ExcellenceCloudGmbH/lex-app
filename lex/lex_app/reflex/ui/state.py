@@ -358,9 +358,9 @@ class State(rx.State):
         refused = entry is None or not _page_permitted(self, entry.requires)
         from lex.lex_app.reflex.ui.pages import frame
 
-        # A page shown as missing when refused (ui.frame(refused_as_missing=True)) is decided here for its
+        # A page shown as missing when refused (ui.frame(denied_as_missing=True)) is decided here for its
         # permissions too: the browser is told only yes or no.
-        concealed = entry is not None and frame.current().refused_as_missing and bool(
+        concealed = entry is not None and frame.current().denied_as_missing and bool(
             entry.rules or frame._strings(entry.requires))
         if concealed or (not refused and entry.rules):  # the project's rules, asked on the server
             refusal = "" if refused else (await _page_refusal(self, entry.rules) if entry.rules else None)
@@ -500,7 +500,7 @@ def error_page() -> rx.Component:
         rx.cond(
             State.ui_error.get("kind", "error") == "denied",
             # the refusal's sentence and the project's way out; or, refused as missing, what a missing page says
-            not_found_notice() if frame.current().refused_as_missing else denied_notice(message=message.to(str)),
+            not_found_notice() if frame.current().denied_as_missing else denied_notice(message=message.to(str)),
             rfds.empty_state(kind="error", title=title, description=message, primary_action=retry),
         ),
     ))

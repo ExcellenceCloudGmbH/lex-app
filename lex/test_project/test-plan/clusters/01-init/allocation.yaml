@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1109
+max_scenario: 1113
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2620,10 +2620,10 @@ letters:
       `ui.form(..., keep=True)`: the result flag survives a new visit; back while the job runs its progress, back after it the result; a kept private result that is gone is said under the form; a kept form shows its last failure in place and keeps its refusal above its submit button, not twice; with tabs=True a tab's table reads the kept private value; a searched choice's earlier offer is still accepted; what was typed returns through value=. These tests fail on a kept form that comes back empty, a result shown over data that is gone, or a failure while away that is never shown.
   eb:
     title: 'lex.ui frame: the navigation in areas, in the project''s order, and the way to sign out'
-    scenarios: '1.960-1.964, 1.1102'
+    scenarios: '1.960-1.964, 1.1102, 1.1112'
     status: complete
     tests:
-      pass: 6
+      pass: 7
       skip: 0
       xfail: 0
     note: >-
@@ -2710,10 +2710,10 @@ letters:
       Guarded entries carry their route as the key of `ui_frame_shown`, the server's answer; the shell's mount sends `ui_frame_open` (background). A raw page's `requires=` now takes rules too. These tests fail on an entry the user may not open, a rule that cannot hide its entry, an answer taken from the browser's permissions, or a failing rule that fails open.
   ek:
     title: 'lex.ui frame: navigation beyond the declared pages -- sections of links, counts, per-user entries, a foot'
-    scenarios: 1.1004-1.1008
+    scenarios: '1.1004-1.1008, 1.1110'
     status: complete
     tests:
-      pass: 5
+      pass: 6
       skip: 0
       xfail: 0
     note: >-
@@ -2750,10 +2750,10 @@ letters:
       The banner's words from a function of the user are `ui_frame_values["banner"]`. These tests fail on a banner lost, an empty banner shown, a banner for the wrong user, a failing function shown as an error, or a banner given as anything but one message.
   eo:
     title: 'lex.ui frame: a page the user may not open looks like a missing one -- refused_as_missing'
-    scenarios: 1.1016-1.1019
+    scenarios: '1.1016-1.1019, 1.1111'
     status: complete
     tests:
-      pass: 5
+      pass: 6
       skip: 0
       xfail: 0
     note: >-
@@ -2880,10 +2880,10 @@ letters:
       The Clear carries data-lex-clear=<key>. These tests fail on a several-choice field without its Clear, a Clear always shown, or a Clear that does not empty the browser's value.
   fb:
     title: 'ui.testing: drive a searched field, seed a private value as gone, test against lex-app''s API in-process'
-    scenarios: 1.1038-1.1040
+    scenarios: '1.1038-1.1040, 1.1113'
     status: complete
     tests:
-      pass: 3
+      pass: 4
       skip: 0
       xfail: 0
     note: >-

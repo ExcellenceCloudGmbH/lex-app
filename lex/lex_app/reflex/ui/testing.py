@@ -31,6 +31,9 @@ class LexViews:
     def __init__(self, client: Any):
         self.client = client
         self.calls: list[tuple[str, str]] = []
+        #: The harness's ``user=`` (``self.user``), which the client's user must be; ``None``: not checked.
+        self.acting_for: str | None = None
+        self._checked = False
 
     async def request(self, method: str, url: str, *, params: Any = None, json: Any = None,  # noqa: A002
                       headers: Any = None) -> Any:
@@ -49,6 +52,7 @@ class LexViews:
             from django.db import close_old_connections
 
             try:
+                self._check_user()
                 return self.client.generic(method, path, data=body, content_type="application/json")
             finally:
                 close_old_connections()
@@ -57,6 +61,39 @@ class LexViews:
         if getattr(response, "streaming", False):          # a file: read whole, as httpx gives it
             return _Read(response.status_code, dict(response.headers), b"".join(response.streaming_content))
         return response
+
+
+    def _check_user(self) -> None:
+        """Refuse a test whose ``self.user`` is not the user the API acts as: what it asserts would be wrong."""
+        if self.acting_for is None or self._checked:
+            return
+        signed_in = _client_user(self.client)
+        if signed_in is None:
+            raise ValueError("ui.testing.lex_api(client): the client is signed in as nobody, so lex-app's API refuses "
+                             "every call. Sign it in first (the test case's own sign-in, or client.force_login(user)).")
+        names = {str(signed_in.pk), str(getattr(signed_in, "username", "")), str(getattr(signed_in, "email", ""))}
+        if self.acting_for not in names:
+            who = getattr(signed_in, "username", "") or signed_in.pk
+            raise ValueError(f"ui.testing.lex_api(client): lex-app's API acts as the client's user {who!r}, and the "
+                             f"handler's self.user is {self.acting_for!r}. Give the handler the same user: "
+                             f"user={who!r} (or sign the client in as {self.acting_for!r}).")
+        self._checked = True
+
+
+def _client_user(client: Any) -> Any:
+    """The user a Django (or Django REST framework) test client is signed in as, or ``None``."""
+    forced = getattr(getattr(client, "handler", None), "_force_user", None)
+    if forced is not None:
+        return forced
+    try:
+        pk = client.session.get("_auth_user_id")
+    except Exception:  # noqa: BLE001 - no session: nobody
+        return None
+    if pk is None:
+        return None
+    from django.contrib.auth import get_user_model
+
+    return get_user_model().objects.filter(pk=pk).first()
 
 
 class _Read:
@@ -75,11 +112,15 @@ class _Read:
 def lex_api(client: Any) -> LexViews:
     """``self.api`` as lex-app's real API, answered in this process by its views: no server, no HTTP.
 
-    ``client`` is Django's (or Django REST framework's) test client, signed in as the user the
-    handler acts for: ``ui.testing.run(OrdersState, "approve", api=ui.testing.lex_api(self.client),
-    key=7)``. Every call goes through lex-app's own views -- the model's permissions, validation,
-    lifecycle hooks, audit entries and calculations -- so a test checks what the page will really do.
-    The handler's ``user=`` names the user in ``self.user``; who the API acts as is the client's user.
+    ``client`` is Django's (or Django REST framework's) test client, signed in: lex-app's API acts as
+    *the client's user*, as it acts as the signed-in user in the browser. Every call goes through
+    lex-app's own views -- the model's permissions, validation, lifecycle hooks, audit entries and
+    calculations -- so a test checks what the page will really do. The handler's ``self.user`` is the
+    harness's ``user=``, and it must be the same user (its username, id or e-mail): the first call
+    refuses a test where they differ, saying what to write::
+
+        ui.testing.run(OrdersState, "approve", user="e2e_user", api=ui.testing.lex_api(self.client), key=7)
+
     ``.calls`` lists the requests made (method, path).
     """
     return LexViews(client)
@@ -202,6 +243,9 @@ class Harness:
         state._FRAME_DECIDING.clear()
         forms._SEARCHED.clear()
         forms._SEARCHING.clear()
+
+        if isinstance(api, LexViews):
+            api.acting_for = user               # the API acts as the client's user: the same one, or refused
 
         async def resolve(state: Any) -> context.Session:
             async def token() -> str:

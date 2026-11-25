@@ -3,11 +3,9 @@
     from lex import ui
 
     class Tickets(ui.State):
-        rows: list[dict] = []
-
-        @ui.load
-        def open(self):
-            self.rows = self.api.list(Ticket)
+        @ui.rows
+        def open_tickets(self):
+            return self.api.all(Ticket, filters={"status": "open"})
 
         @ui.action
         def approve(self, ticket_id: int):
@@ -18,6 +16,11 @@
             for done, part in enumerate(parts(self.user), start=1):
                 build(part)
                 yield ui.progress(done / 10, "Building")
+
+    @ui.page("/tickets", nav="Support", requires=ui.read(Ticket))
+    def tickets():
+        return ui.list(title="Open tickets",
+                       table=ui.table(Tickets.open_tickets, columns=["title", "customer"], search=True))
 
     @ui.page("/funds/[key]", requires=ui.read(Fund))
     def fund():
@@ -77,27 +80,17 @@ progress_of/cancel``        event of a Cancel button
                             who may see it. lex-app's frame heads it with its breadcrumbs: the
                             area, the listed page that opens it, the page. The navigation lists
                             only what the user may open, decided on the server when a page opens
-``ui.frame``                lex-app's frame for this project, set once in the dashboard module:
-                            ``nav=[...]`` the areas' order, and sections of links
-                            (``ui.section("Help", ui.link(...))``, or ``ui.section("Favourites",
-                            favourites)`` filled by a function of the user); ``nav_footer=`` a
-                            link or text at the navigation's foot; ``search=`` a page taking one
-                            query parameter, opened by RFDS's search box in the header;
-                            ``actions=[...]`` links, buttons, statuses, texts, custom blocks in
-                            the header band; ``user_menu=[ui.link(...)]`` entries above "Sign
-                            out"; ``banner=`` one ``ui.message`` above every page while its
-                            sentence is not empty; ``logo=`` the project's mark beside the
-                            product's name, leading home; ``denied=`` the sentence a refused user
-                            reads, ``request_access=`` their way out (a page, https:// or
-                            mailto:), or ``refused_as_missing=True`` a refused page looks like
-                            lex-app's not-found page; ``opened=`` a function lex-app calls, not
-                            awaited, when a page has opened: ``opened(user, page)``;
-                            ``sign_out=`` where the user menu signs out (a page or https://;
-                            lex-app's /logout by default). A function of the user,
-                            ``def waiting(user)``, stands for any value the frame shows (a count,
-                            words, a section's links): lex-app calls it on the server when a page
-                            opens. What the user may open is decided there too; nothing else is
-                            drawn
+``ui.frame``                lex-app's frame for this project, set once in the dashboard module.
+                            Navigation: ``nav={"Orders": [], "Help": [ui.link(...)],
+                            "Favourites": favourites}`` the areas in order -- ``[]`` its pages,
+                            links after them, or a function of the user for the user's own links
+                            -- and ``nav_footer=``. Header: ``logo=``, ``logo_label=``,
+                            ``search=`` (a page taking one query parameter), ``actions=`` (the
+                            parts at the top right: links, buttons, statuses, custom blocks),
+                            ``user_menu=``, ``sign_out=``. Denied pages: ``denied=``,
+                            ``request_access=``, ``denied_as_missing=True``. Other: ``banner=``,
+                            ``opened=``. A value it shows is fixed or a function of the user,
+                            ``def waiting(user)``, called on the server when a page opens
 ``@ui.dashboard``           a page that is not a route (the project's ``main()``)
 ``ui.record/list/form``     the page kinds: named slots, placed by lex-app (``ui.list`` is
                             left out of ``import *``, which would hide Python's ``list``)
@@ -130,8 +123,9 @@ button/link``               ``requires=`` (drawn only for users who meet it, dec
                             browser and are never stored with the state (Redis, disk)
 ``ui.address``              a page's address, for a row that leads to a page of its own
 ``ui.reflex_page``          a page written in raw Reflex, as somewhere a link may lead;
-                            ``nav=``, ``title=`` list it in an area of the navigation, ``requires=``
-                            (a permission or a rule) hides that entry
+                            ``nav=``, ``title=`` list it in an area of the navigation, ``visible=``
+                            (a permission or a rule) shows that entry only to users who meet it --
+                            lex-app does not guard a raw page
 ``ui.custom_block``         a raw component, marked for review with its reason
 ``ui.embed``                the other way round: one lex.ui part inside a raw Reflex page,
                             for moving a project a table at a time

@@ -166,7 +166,7 @@ class TestCluster01ec_Breadcrumbs(FrameCase):
     def test_1_979_a_calculation_page_in_an_area_and_its_runs_view_under_it(self) -> None:
         """
         Scenario 1.979: ui.calculation in the frame (merge of the frame with the calculation page).
-        Given: ui.frame(nav=["Reports", "Sales"]) and a calculation page declared with nav="Reports".
+        Given: ui.frame(nav={"Reports": [], "Sales": []}) and a calculation page declared with nav="Reports".
         When:  lex-app registers it, and the page is built in lex-app's frame and compiled.
         Then:  the page is listed in Reports by its title; its trail is the area and the page; while a
                run is open (``?run=``, the same route) the trail goes on: the page becomes a link back to
@@ -176,7 +176,7 @@ class TestCluster01ec_Breadcrumbs(FrameCase):
         from lex.lex_app.reflex.ui.pages import declare
         from lex.test_project.tests.init.models import UiRegionReport
 
-        ui.frame(nav=["Reports", "Sales"])
+        ui.frame(nav={"Reports": [], "Sales": []})
 
         @ui.page("/reports/regions", nav="Reports")
         def region_reports():

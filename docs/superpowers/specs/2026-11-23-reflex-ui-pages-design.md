@@ -824,7 +824,7 @@ takes a few generic parts, each a need of any project with several areas; nothin
 **One place: `ui.frame(...)`, once, in the dashboard module, beside the `@ui.page`s.**
 
 ```python
-ui.frame(nav=["Orders", "Reports", "Tools"],
+ui.frame(nav={"Orders": [], "Reports": [], "Tools": []},
          denied="Ask your administrator for access.", request_access=access_request,
          opened=remember_page, sign_out="https://portal.example.com/sign-out")
 ```
@@ -841,7 +841,7 @@ since the look is lex-app's (section 8).
 - **Areas are `nav=`.** A page's `nav="Orders"` already listed it under a heading; that heading is
   its area. A page with route arguments (`/orders/[key]`) cannot be opened from the navigation, so its
   `nav=` places it in the area -- its breadcrumbs, as section 1's example writes it -- without listing it.
-  `ui.frame(nav=[...])` -- the same word -- gives the areas' order; a page whose `nav=` is
+  `ui.frame(nav={...})` -- the same word -- gives the areas' order; a page whose `nav=` is
   not in that list stops the start with the list to choose from (a typo would make a new area).
   Without it, areas come in the order their first page is declared. Pages in an area keep their
   declaration order, `@ui.page`s and raw pages alike (a `@ui.page` takes its place when declared).
@@ -849,7 +849,7 @@ since the look is lex-app's (section 8).
   so a record page under its list's route marks its list); the area holding the current entry has its
   heading marked too (lex-app's stylesheet, `:has()`, no state). A raw page joins with the same words:
   `ui.reflex_page("/legacy", nav="Tools", title="Legacy export", icon="download")` -- `title=` is its
-  label, as on `@lex_page`; its `requires=` only hides its entry, since lex-app does not guard a raw page.
+  label, as on `@lex_page`; its `visible=` (review 2; `requires=` before) only hides its entry, since lex-app does not guard a raw page.
 - **Breadcrumbs come from the area and the page.** The frame shows RFDS's breadcrumbs above the page:
   the area (text, an area is not a page), then the page. A page that is not listed in the navigation
   has a parent: the first listed page whose table opens it (`open=`), else whose button or link leads
@@ -1128,11 +1128,11 @@ def favourites(user):
     return [ui.link(f.title, to=report, key=f.report_id) for f in Favourite.objects.filter(user=user.id)]
 
 ui.frame(
-    nav=[ui.section("Orders", ui.link("Search orders", to=search, icon="search")),
-         "Reports",
-         ui.section("Requests", ui.link("Waiting for you", to=approvals, badge=waiting)),
-         ui.section("Favourites", favourites),
-         ui.section("Help", ui.link("All workflows", href="https://wiki.example.com/workflows"))],
+    nav={"Orders": [ui.link("Search orders", to=search, icon="search")],
+         "Reports": [],
+         "Requests": [ui.link("Waiting for you", to=approvals, badge=waiting)],
+         "Favourites": favourites,
+         "Help": [ui.link("All workflows", href="https://wiki.example.com/workflows")]},
     nav_footer=ui.link("Version 2.4.1", href="https://example.com/changes"),
     search=search,
     actions=[ui.status(sync_state, tone="info"),
@@ -1141,13 +1141,14 @@ ui.frame(
                ui.link("Settings", to=settings, requires=ui.edit(Setting))],
     banner=ui.message(config_problem, tone="warning"),
     logo="/acme.svg",
-    refused_as_missing=True,
+    denied_as_missing=True,
 )
 ```
 
 **One rule for values: a function of the user.** Where a part of the frame shows a value -- a badge's
-count, a status's word, the banner's sentence, a section's entries -- it takes what a page's part takes
-(a fixed value or a state value) or *a function of the user*, `fn(user)`. lex-app calls the frame's
+count, a status's word, the banner's sentence, a section's entries -- it is fixed or *a function of the
+user*, `fn(user)` (review 2 withdrew the state value: no page loads a state for the frame, so it showed what
+the last page left there). lex-app calls the frame's
 functions on the server each time a page opens (the frame's mount, a background event: the page never
 waits for them), on worker threads -- they may query the database, as `opened=` and `@ui.rule` may --
 and the browser receives only the answers. A function that fails is logged and its part shows nothing
@@ -1186,14 +1187,17 @@ the browser leaves, so whoever signs in next starts with states of their own -- 
 out through its own page (`ui.frame(sign_out=)`) keeps the token; the opener's check still covers
 lex-app's answers there.
 
-- **`nav=` takes sections too.** An item of `nav=` is an area's name, as before, or
-  `ui.section("Title", ...)` -- the lex.ui word for a titled part. A section named like an area holds
-  the area's declared pages and then its links; any other title makes a section of links. Its content is
-  `ui.link`s (to a page, a raw page, a record or an `https://` address, with fixed values), or *one*
-  function of the user that returns `ui.link`s -- a per-user section ("Favourites", "Topics you may
-  see"), hidden while it has none. A per-user section's links are shown as they are: their words are the
+- **`nav=` is a dict, in the order written (review 2).** Each area's name -> `[]` (its pages), a list of
+  `ui.link`s (to a page, a raw page, a record or an `https://` address, with fixed values) shown after its
+  pages, or a function of the user that returns `ui.link`s -- a per-user section ("Favourites", "Topics
+  you may see"), hidden while it has none. A per-user section may not share its name with an area that
+  has pages (I-2: its pages silently left the navigation): refused with a sentence wherever the second of
+  the two is declared -- the frame, a `@ui.page`, a raw page. *Before:* a list of names and
+  `ui.section("Title", ...)`; `ui.section` now means one thing, a titled part of a page, and a list is
+  refused with the dict it should be. *Considered:* keeping the list with sections (two meanings of one
+  word), a separate `sections=` argument (the order of areas and sections would be split in two). A per-user section's links are shown as they are: their words are the
   data's, not translated, and they take no `icon=`, `badge=` or `requires=` (the function decides).
-- **`badge=`** -- a count beside an entry -- is a function of the user, or a whole-number state value, on
+- **`badge=`** -- a count beside an entry -- is a function of the user, on
   `ui.link`, `@ui.page(nav=...)` and `ui.reflex_page(nav=...)`: RFDS's navigation badge, read out as
   "3 new items". It is the same word in the header. *Considered:* `count=` (RFDS's word is badge).
 - **`icon=`** on a `ui.link` is the entry's icon, as `icon=` is on `@ui.page` and `ui.button`.
@@ -1206,22 +1210,22 @@ lex-app's answers there.
   from the browser. *Considered:* a `ui.custom_block` (every project would write the same box);
   `search=(page, "q")` (the page already says which parameter it reads).
 - **`actions=`** are a few parts in the header band before the user menu, as RFDS's header has them:
-  `ui.link` (with `icon=`, `badge=`, `requires=`), `ui.button`, `ui.status`, `ui.text` and
-  `ui.custom_block` -- e.g. a bell `ui.link("Notifications", to=inbox, icon="notification",
+  `ui.link` (with `icon=`, `badge=`, `requires=`), `ui.button`, `ui.status` and `ui.custom_block` --
+  "the parts at the top right"; free text is not one of them (review 2; a status says a state in a word) e.g. a bell `ui.link("Notifications", to=inbox, icon="notification",
   badge=unread)`, or RFDS's full notification centre as a `ui.custom_block`. The word is the page kinds'
   `actions=`.
 - **`user_menu=`** are `ui.link`s in the user menu, above "Sign out", each hidden by its `requires=`
   (and by its page's) as a navigation entry is. RFDS's `user_menu(items=)`.
 - **`banner=`** is one `ui.message`, RFDS's banner above the header on every page of the dashboards,
   inside lex-app's frame too (its message is about the dashboards, wherever they are shown): its tone is
-  the message's; its sentence a fixed sentence, a state value or a function of the user; it shows while
+  the message's; its sentence a fixed sentence or a function of the user; it shows while
   the sentence is not empty. *Considered:* a `ui.message` returned by the function (the tone would come
   from the browser's data; the tone belongs to the configuration); several banners (RFDS: at most one).
 - **`requires=` on a `ui.link`** belongs to the frame, where it is decided on the server. In a page a
   link's `requires=` and `badge=` are refused with what to write (`visible=`, a state value): the page
   is the browser's to draw, and its handlers are what is guarded. `icon=` is a frame word too: in a page
   a link is words, and a button has the icon.
-- **`refused_as_missing=True`**: a page the user may not open looks like a page that does not exist --
+- **`denied_as_missing=True`**: a page the user may not open looks like a page that does not exist --
   lex-app's not-found page, with the browser tab's title, the breadcrumbs and the navigation entry gone
   too -- instead of the no-access notice. *Why the frame, not the rule* (`@ui.rule(hidden=True)`): not
   revealing that pages exist is a policy of the application, and it has to hold for lex-app's
@@ -1387,6 +1391,18 @@ scenario (batch in brackets):
   one ends, the newest text asked meanwhile is searched (those in between never are), since dropping it
   would leave the field showing matches for text the user has since changed. 1.912 now expects the newer
   text to be searched after the slow one ends, not beside it. Both limits are per server process.
+- *Readability of the frame (Bar 3, 1.1110-1.1113).* `nav=` is a dict (above, 6.21); `actions=` are "the
+  parts at the top right" without `ui.text`; on `ui.reflex_page`, which lex-app cannot guard, `requires=` is
+  now `visible=` (it only hides the entry) and `requires=` there is refused saying so, so `requires=` always
+  means access control; `refused_as_missing=` is `denied_as_missing=`, one stem with `denied=` (the old
+  name is refused with the new argument written out); `ui.frame`'s docstring is one table in four groups
+  (navigation, header, denied pages, other) under one rule, "a value is fixed or a function of the user";
+  `lex/ui.py`'s first example reads a table's rows in a `@ui.rows` handler. `ui.testing.lex_api(client)`
+  says that lex-app's API acts as the client's user, and its first call refuses a test whose `user=` is
+  another user, with the `user=` to write (1.1040 now runs as the client's `e2e_user`).
+- *A frame value is fixed or a function of the user (Bar 2).* The state-value forms of `banner=`, a status's
+  word in `actions=` and `badge=` (frame links, `@ui.page`, `ui.reflex_page`) are refused, saying to write a
+  function of the user (1.1009, 1.1014 updated).
 
 ## 7. Order of building
 

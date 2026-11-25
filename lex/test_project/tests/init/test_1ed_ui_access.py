@@ -292,10 +292,11 @@ class TestCluster01ed_Rules(FrameCase):
         """
         Scenario 1.973: mistakes.
         Given: a rule taking the wrong arguments, a plain function given as requires=, a rule given as
-               visible=, and a raw page given a plain function as requires=.
+               visible=, and a raw page given a plain function as visible= (review 2: a raw page's
+               requires= is now visible=).
         When:  each is declared or built.
         Then:  each is refused with what to write; a rule stays a function the project can call itself.
-               (A raw page's requires= takes a rule since the navigation is decided on the server: 1.1001.)
+               (A raw page's visible= takes a rule since the navigation is decided on the server: 1.1001.)
         """
         with self.assertRaises(TypeError) as caught:
             @ui.rule
@@ -318,7 +319,7 @@ class TestCluster01ed_Rules(FrameCase):
             ui.text("Only for the team.", visible=region_team).build(Build(page="p", route="/p"))
         self.assertIn("self.params", str(caught.exception), "it says how to show something by a rule")
         with self.assertRaises(ValueError):
-            ui.reflex_page("/legacy", nav="Tools", title="Legacy", requires=plain)
+            ui.reflex_page("/legacy", nav="Tools", title="Legacy", visible=plain)
         from lex.lex_app.reflex.ui.context import Params, User
 
         self.assertIs(region_team(User(id="anna"), Params({"region": "north"})), True, "still callable")

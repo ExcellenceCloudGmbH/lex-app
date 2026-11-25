@@ -1,6 +1,6 @@
 """lex.ui's frame: areas ui.frame(nav=) does not list follow the listed ones; a typo is still refused.
 
-Intent: `ui.frame(nav=[...])` orders the navigation's areas. A project moving its pages one at a time
+Intent: `ui.frame(nav={...})` orders the navigation's areas. A project moving its pages one at a time
 still has raw Reflex pages in areas of their own ("Admin", "Tools"); requiring every such area in
 the list stopped the app when the author ordered only the areas they cared about. Now an area the
 list does not name follows the listed ones, in the order its first page was declared. The check
@@ -33,7 +33,7 @@ class TestCluster01eu_FrameUnlistedAreas(FrameCase):
     # -- 1.1030 --------------------------------------------------------
     def test_1_1030_unlisted_areas_follow_and_a_typo_is_still_refused(self) -> None:
         """
-        Scenario 1.1030: ui.frame(nav=["Orders"]) with raw pages in other areas.
+        Scenario 1.1030: ui.frame(nav={"Orders": []}) with raw pages in other areas.
         Given: a raw page in "Admin", then a raw page in "Tools", a @ui.page in "Orders" and a @ui.page
                that joins the raw area "Admin"; then a @ui.page in "Ordres" (a typo), and a record page
                with route arguments in "Reprots".
@@ -42,7 +42,7 @@ class TestCluster01eu_FrameUnlistedAreas(FrameCase):
                page was declared; the lex.ui page sits in the raw area it joined; each typo stops the
                start, naming the page, the listed areas and the raw pages' areas to choose from.
         """
-        ui.frame(nav=["Orders"])
+        ui.frame(nav={"Orders": []})
         ui.reflex_page("/admin/users", nav="Admin", title="Users")
         ui.reflex_page("/tools/import", nav="Tools", title="Import")
 
@@ -68,7 +68,7 @@ class TestCluster01eu_FrameUnlistedAreas(FrameCase):
         with self.assertRaises(PageError) as typo:
             declare.finalize()
         message = str(typo.exception)
-        for expected in ("returns", "'Ordres'", "'Orders'", "'Admin'", "'Tools'", "add 'Ordres' to ui.frame(nav=)"):
+        for expected in ("returns", "'Ordres'", "'Orders'", "'Admin'", "'Tools'", "add 'Ordres': [] to ui.frame(nav=)"):
             self.assertIn(expected, message, f"the refusal names {expected!r}")
         declare._DECLARED.pop("/returns")
 

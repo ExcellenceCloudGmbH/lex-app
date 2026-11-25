@@ -113,7 +113,7 @@ def page(route: str, *, nav: str | None = None, icon: str | None = None, require
     """Declare a page: its address, its place in the navigation, who may see it.
 
     ``nav`` names the page's area in the navigation (``nav="Orders"``); the page is listed there, by
-    its title, after the pages declared before it. ``ui.frame(nav=[...])`` gives the areas' order.
+    its title, after the pages declared before it. ``ui.frame(nav={...})`` gives the areas' order.
     A page with route arguments (``/orders/[key]``) is in its area -- its breadcrumbs say so -- but
     not listed: it opens from the page that leads to it. Without ``nav`` a page is reached by links
     only.
@@ -129,8 +129,7 @@ def page(route: str, *, nav: str | None = None, icon: str | None = None, require
     the navigation is drawn only for users who may open it, decided on the server (permissions and rules).
 
     ``badge=`` is a count beside the page's entry in the navigation ("Approvals  3"): a function of the
-    user, ``def waiting(user): ...``, which lex-app calls on the server when a page opens, or a
-    whole-number state value.
+    user, ``def waiting(user): ...``, which lex-app calls on the server when a page opens.
 
     ``visible=`` decides what is shown, never what is allowed: a value a page shows reaches the
     browser. What a user may read or change is enforced by each handler's own ``requires=`` and by
@@ -176,10 +175,10 @@ def _badge(where: str, nav: Any, badge: Any) -> None:
     if not nav:
         raise ValueError(f"{where}: badge= is a count beside the page's entry in the navigation, and it has none. "
                          "Give its area too: nav=\"Requests\".")
-    if not isinstance(badge, rx.Var):
-        from lex.lex_app.reflex.ui.pages.frame import of_user
+    from lex.lex_app.reflex.ui.pages.frame import fixed_or_of_user, of_user
 
-        of_user(badge, f"{where}, badge=,")
+    fixed_or_of_user(badge, f"{where}, badge=,")
+    of_user(badge, f"{where}, badge=,")
 
 
 def finalize() -> None:

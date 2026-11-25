@@ -1,18 +1,18 @@
 """lex.ui's frame: a page the user may not open can look like a page that does not exist.
 
 Intent: some applications must not reveal that a page exists to a user who may not open it. With
-`ui.frame(refused_as_missing=True)` every refused page -- by a permission or a project's rule -- shows
+`ui.frame(denied_as_missing=True)` every refused page -- by a permission or a project's rule -- shows
 lex-app's not-found page instead of the no-access notice: its body, the browser tab's title, the
 breadcrumbs and the navigation entry give nothing away, and lex-app's own not-found page looks the same.
 It is decided on the server by the page's opener. A regression is a refused page that still says "no
 access" or shows its title or breadcrumbs, a permitted user who sees "not found", or a missing page that
 looks different from a refused one.
 
-Cluster 1eo -- scenarios 1.1016-1.1019. Type: U.
-Covers: lex/lex_app/reflex/ui/pages/frame.py (frame refused_as_missing=), lex/lex_app/reflex/shell.py
+Cluster 1eo -- scenarios 1.1016-1.1019, 1.1111. Type: U.
+Covers: lex/lex_app/reflex/ui/pages/frame.py (frame denied_as_missing=), lex/lex_app/reflex/shell.py
 (lex_page, lex_chrome, not_found_body, not_found_page), lex/lex_app/reflex/ui/state.py (_ui_start,
 error_page), lex/lex_app/reflex/app.py (create_app adds lex-app's not-found page).
-Run: python -m lex pytest lex/test_project/tests/init/test_1eo_ui_frame_refused_as_missing.py -v
+Run: python -m lex pytest lex/test_project/tests/init/test_1eo_ui_frame_denied_as_missing.py -v
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from reflex.compiler.compiler import compile_page
 from lex import ui
 from lex.lex_app.reflex import app as lex_app_module
 from lex.lex_app.reflex import shell
-from lex.lex_app.reflex.ui.pages import declare
+from lex.lex_app.reflex.ui.pages import declare, frame
 from lex.test_project.tests.init.test_1eb_ui_frame_nav import FrameCase
 
 pytestmark = pytest.mark.init
@@ -76,7 +76,7 @@ class TestCluster01eo_RefusedAsMissing(FrameCase):
     def test_1_1016_a_refused_page_is_drawn_as_a_missing_one(self) -> None:
         """
         Scenario 1.1016: what the browser is given.
-        Given: ui.frame(refused_as_missing=True); a page behind a permission and one behind a rule.
+        Given: ui.frame(denied_as_missing=True); a page behind a permission and one behind a rule.
         When:  lex-app registers and compiles them.
         Then:  neither carries RFDS's access-denied notice; each shows lex-app's not-found body when the
                opener refuses, and its content, breadcrumbs included, only once it grants; the tab's title
@@ -84,7 +84,7 @@ class TestCluster01eo_RefusedAsMissing(FrameCase):
                drawn only while one of them is; without the switch the permission page still shows the
                no-access notice and its own title.
         """
-        ui.frame(refused_as_missing=True)
+        ui.frame(denied_as_missing=True)
         self.declare_pages()
         for route in ("/secret", "/admin"):
             _, module = compile_page(route, self.page_named(route)())
@@ -102,7 +102,7 @@ class TestCluster01eo_RefusedAsMissing(FrameCase):
         self.assertEqual(titles["/orders"], "Orders", "an open page keeps its title")
 
     def test_1_1016b_without_the_switch_a_refused_page_says_no_access(self) -> None:
-        """Scenario 1.1016 (continued): without refused_as_missing the notice and the title stay."""
+        """Scenario 1.1016 (continued): without denied_as_missing the notice and the title stay."""
         self.declare_pages()
         _, module = compile_page("/secret", self.page_named("/secret")())
         self.assertIn("rfds-access-denied", module)
@@ -113,12 +113,12 @@ class TestCluster01eo_RefusedAsMissing(FrameCase):
     def test_1_1017_the_opener_decides_a_permission_page_on_the_server(self) -> None:
         """
         Scenario 1.1017: decided by the opener.
-        Given: ui.frame(refused_as_missing=True) and the pages of 1.1016.
+        Given: ui.frame(denied_as_missing=True) and the pages of 1.1016.
         When:  carl (no grants) and anna (Secret:read) open /secret, and carl opens /admin.
         Then:  carl is refused on the server -- "no", no load started -- and anna granted with her load
                run; the rule's page is refused for carl too.
         """
-        ui.frame(refused_as_missing=True)
+        ui.frame(denied_as_missing=True)
         self.declare_pages()
         from lex.lex_app.reflex.ui import testing
         from lex.lex_app.reflex.ui.state import State
@@ -144,14 +144,14 @@ class TestCluster01eo_RefusedAsMissing(FrameCase):
     def test_1_1018_lex_apps_not_found_page_looks_the_same(self) -> None:
         """
         Scenario 1.1018: a missing page and a refused one.
-        Given: ui.frame(refused_as_missing=True).
+        Given: ui.frame(denied_as_missing=True).
         When:  lex-app's not-found page and the page a refused load goes to are compiled, and create_app's
                source is read.
         Then:  the not-found page is in lex-app's frame with the same body a refused page shows; a refused
                load's page shows that body instead of the no-access notice, any other failure keeps "Try
                again"; create_app adds the not-found page at Reflex's 404 route, unless the project has one.
         """
-        ui.frame(refused_as_missing=True)
+        ui.frame(denied_as_missing=True)
         from lex.lex_app.reflex.ui.state import error_page
 
         _, page = compile_page("404", shell.not_found_page())
@@ -166,17 +166,34 @@ class TestCluster01eo_RefusedAsMissing(FrameCase):
         self.assertIn("404", source)
 
     # -- 1.1019 --------------------------------------------------------
-    def test_1_1019_refused_as_missing_written_wrongly(self) -> None:
+    def test_1_1019_denied_as_missing_written_wrongly(self) -> None:
         """
         Scenario 1.1019: mistakes.
-        Given: refused_as_missing="yes"; refused_as_missing=True beside denied= and request_access=.
+        Given: denied_as_missing="yes"; denied_as_missing=True beside denied= and request_access=.
         When:  each is configured.
         Then:  each is refused with what to write.
         """
         with self.assertRaises(TypeError) as caught:
-            ui.frame(refused_as_missing="yes")
+            ui.frame(denied_as_missing="yes")
         self.assertIn("True", str(caught.exception))
         for kwargs in ({"denied": "Ask your administrator."}, {"request_access": "mailto:it@example.com"}):
             with self.assertRaises(ValueError, msg=f"{kwargs}") as caught:
-                ui.frame(refused_as_missing=True, **kwargs)
+                ui.frame(denied_as_missing=True, **kwargs)
             self.assertIn("never shows", str(caught.exception))
+
+
+    # -- 1.1111 --------------------------------------------------------
+    def test_1_1111_the_switch_is_named_like_the_other_denied_words(self) -> None:
+        """
+        Scenario 1.1111: one stem for what a refused user sees (review 2): denied=, request_access=,
+        denied_as_missing=.
+        Given: the switch under its new name, then under its old one.
+        When:  ui.frame is configured with each.
+        Then:  denied_as_missing=True is the switch; refused_as_missing= is refused, saying the new name and
+               the exact argument to write.
+        """
+        ui.frame(denied_as_missing=True)
+        self.assertTrue(frame.current().denied_as_missing)
+        with self.assertRaises(TypeError) as caught:
+            ui.frame(refused_as_missing=True)
+        self.assertIn("write denied_as_missing=True", str(caught.exception))
