@@ -8,7 +8,7 @@ result and on a record page with `tabs=True`. The page opens on its first tab, s
 not be hidden by state. A regression is a tab shown with nothing to say, or a hidden tab the user can
 still open.
 
-Cluster 1ey -- scenario 1.1035. Type: U.
+Cluster 1ey -- scenarios 1.1035, 1.1121. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/kinds.py (hide_tabs, tab_visible, Record's tabs),
 lex/lex_app/reflex/ui/pages/forms.py (a form's result tabs).
 Run: python -m lex pytest lex/test_project/tests/init/test_1ey_ui_tab_shown_by_state.py -v
@@ -82,3 +82,29 @@ class TestCluster01ey_TabShownByState(SimpleTestCase):
         with self.assertRaises(PageError) as anchors:
             ui.record(title="Report", sections=list(sections)).build(Build(page="report", route="/report"))
         self.assertIn("give the record `tabs=True`, where a state value hides a tab", str(anchors.exception))
+
+
+    # -- 1.1121 --------------------------------------------------------
+    def test_1_1121_the_open_tab_falls_back_and_a_changed_rfds_is_said(self) -> None:
+        """
+        Scenario 1.1121: review 2, minor -- what hide_tabs reads of RFDS, and an open tab that goes away.
+        Given: a result whose second tab shows while the state has figures; RFDS's tabs as built today; a
+               component that holds no tabs as RFDS builds them (as if RFDS changed how it builds them).
+        When:  the page is built and compiled; hide_tabs is given the other component.
+        Then:  the tabs' open value falls back to the first tab while the open tab's state is false (its
+               panel would be gone, and nothing shown); the other component is refused loudly, saying lex.ui
+               must be updated for this RFDS -- never a tab silently shown.
+        """
+        import reflex as rx
+
+        from lex.lex_app.reflex.ui.pages import kinds
+
+        form = ui.form(title="Report", submit=ResultState.build, fields=[ui.field("name")], tabs=True, result=[
+            ui.section("Summary", ui.text("Summary.")),
+            ui.section("Figures", ui.text("Figures."), visible=ResultState.has_figures)])
+        _, module = compile_page("/report", form.build(CTX))
+        self.assertRegex(module, r'=== "figures"\?\.valueOf\?\.\(\)\), \(\) => \(!\([^)]*has_figures_rx_state_\)\)\) \? "summary"',
+                         "the figures tab, open while its state is false: the first tab instead")
+        with self.assertRaises(RuntimeError) as caught:
+            kinds.hide_tabs(rx.box(rx.text("no tabs")), {"figures": ResultState.has_figures})
+        self.assertIn("must be updated for this version of RFDS", str(caught.exception))

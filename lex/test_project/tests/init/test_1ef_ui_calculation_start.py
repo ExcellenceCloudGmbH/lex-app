@@ -9,7 +9,7 @@ to the run's address on the same page. A regression is a run nobody may trace to
 created past the model's permissions, a page that blocks while the run goes, or a run whose log the
 grid cannot find.
 
-Cluster 1ef -- scenarios 1.980-1.984, 1.978. Type: E (the handlers run against lex-app's real views).
+Cluster 1ef -- scenarios 1.980-1.984, 1.978, 1.1105, 1.1107, 1.1115. Type: E (the handlers run against lex-app's real views; 1.1105 U).
 Covers: lex/lex_app/reflex/ui/pages/calculation.py (ui.calculation, its checks, the form view),
 lex/lex_app/reflex/ui/calculations.py (the state, calculate), lex/lex_app/reflex/data.py and
 lex/lex_app/reflex/ui/context.py (self.api.calculate, self.api.log).
@@ -34,11 +34,12 @@ from lex.lex_app.reflex.ui.pages.parts import Build, PageError
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 from lex.test_project.tests.init._ui_calc_aids import Session, settled
 from lex.test_project.tests.init.models import UI_CALC_MODELS, UiRegionReport
+from lex.test_project.tests.init.test_1eb_ui_frame_nav import FrameCase
 
 pytestmark = pytest.mark.init
 
 ROUTE = "/reports/regions"
-CTX = Build(page="region_reports", route=ROUTE)
+CTX = Build(page="region_reports", route=ROUTE, requires=())      # a @ui.page without requires=
 
 
 def region_reports(**changes):
@@ -99,7 +100,9 @@ class TestCluster01ef_CalculationStart(E2ETestCase):
         _, module = compile_page(ROUTE, page.build(CTX))
         self.assertIn("rfds-form", module, "the form is RFDS's")
         self.assertIn('"Calculate"', module, "the button reads Calculate, lex-app's word for starting a run")
-        self.assertIs(region_reports().state, page.state, "one state per page, whatever the number of builds")
+        again = region_reports()
+        again.build(CTX)
+        self.assertIs(again.state, page.state, "one state per page, whatever the number of builds")
         self.assertEqual([load.fn.__name__ for load in page.loads()[0]], ["open"], "the page's load is lex-app's")
         with self.assertRaises(PageError) as other:
             ui.page("/groups/run")(lambda: ui.calculation(Group, title="Groups", fields=[ui.field("name")]))
@@ -149,6 +152,88 @@ class TestCluster01ef_CalculationStart(E2ETestCase):
         self.assertEqual(record.orders, 3, "what the run computed is on the record")
         self.assertTrue(CalculationLog.objects.filter(calculationId__startswith=f"uiregionreport_{record.pk}_update_")
                         .exists(), "the run's log is filed under the id the grid's log button looks for")
+
+    # -- 1.1107 --------------------------------------------------------
+    def test_1_1107_a_model_that_calculates_on_create_is_started_once(self) -> None:
+        """
+        Scenario 1.1107: a calculate_on_create model whose run is fast.
+        Given: the model calculates on create, and its run ends before lex-app's create view answers
+               (a run on a synchronous pool: the answer is already SUCCESS, not IN_PROGRESS).
+        When:  the form is sent.
+        Then:  lex-app's create started the run, and the page does not start it again: no Calculate
+               request follows the create, the run computed once, and the browser goes to that run.
+        """
+        from concurrent.futures import Future
+
+        from lex.api.views.model_entries import One
+
+        class AtOnce:
+            """A pool that runs what it is given before it answers: the fastest run there is."""
+
+            def submit(self, fn, *args, **kwargs):
+                done = Future()
+                done.set_result(fn(*args, **kwargs))
+                return done
+
+        UiRegionReport.calculate_on_create = True
+        self.addCleanup(setattr, UiRegionReport, "calculate_on_create", False)
+        with patch.object(One, "_calculation_executor", AtOnce()):
+            went, outcomes, _, calls = _start(self, {"region": "north", "year": "2026"})
+        record = UiRegionReport.objects.get()
+        self.assertEqual([o for o in outcomes if o.kind != "ok"], [], "the form was not refused")
+        self.assertEqual([method for method, _ in calls], ["POST"], "created, and started by the create alone")
+        self.assertEqual(settled(record), CalculationModel.SUCCESS)
+        self.assertEqual(record.lines.count(), 2, "the run computed once")
+        self.assertEqual([g.path for g in went if hasattr(g, "path")], [f"{ROUTE}?run={record.pk}"])
+
+    # -- 1.1115 --------------------------------------------------------
+    def test_1_1115_the_run_is_found_by_the_page_and_the_record_it_names(self) -> None:
+        """
+        Scenario 1.1115: where a run is, and whose log it is (review 2, minor).
+        Given: the page; a browser whose address was changed to another path before Calculate; a list
+               answer that ignores the filter and gives another record first; two pages' states.
+        When:  the form is sent; the log of a record is read; the states are named.
+        Then:  the browser goes to the run on the page's own route, not the path it was on; the log is
+               asked by the model's key and is [] when the answer is another record; a state's name comes
+               from what the page is -- the same page, the same name, whatever was built before it.
+        """
+        page = region_reports()
+        page.build(CTX)
+        state = page.state
+
+        async def scenario():
+            async with Session(self.client, grants=((UiRegionReport, "create"),)) as session:
+                await session.visit(ROUTE)
+                await session.harness.navigate("/somewhere/else")
+                await (await session.harness.send(state, "calculate", values={"region": "north", "year": "2026"}))
+                await asyncio.sleep(0.05)
+                return list(session.harness.results)
+
+        went = asyncio.run(scenario())
+        record = UiRegionReport.objects.get()
+        self.assertEqual([g.path for g in went if hasattr(g, "path")], [f"{ROUTE}?run={record.pk}"])
+
+        from lex.lex_app.reflex.data import LexApi
+
+        asked: list = []
+
+        async def answer(self_, method, path, params=None, json=None):
+            asked.append((method, path, list(params or [])))
+            if path.endswith("/list") and method == "POST":
+                return {"rowData": [{"id": 99, "lex_reserved_calculation_id": "other-run"}]}
+            return [{"calculation_log": "not this record's"}]
+
+        with patch.object(LexApi, "_request", answer):
+            log = asyncio.run(LexApi("token").log(UiRegionReport, 7))
+        self.assertEqual(asked[0][2], [("id", "7")], "asked by the model's key")
+        self.assertEqual(log, [], "another record's answer lends no log")
+
+        plan = calculations.Plan(UiRegionReport, ("region", "year"), (), ROUTE)
+        first = calculations.state_name(plan, ("Region report",))
+        calculations.state_name(calculations.Plan(UiRegionReport, ("year",), (), "/other"), ("Other",))
+        self.assertEqual(calculations.state_name(plan, ("Region report",)), first, "the same page, the same name")
+        self.assertNotEqual(calculations.state_name(plan, ("Another report",)), first)
+        self.assertTrue(state.__name__.startswith("Calculation_uiregionreport_"))
 
     # -- 1.982 ---------------------------------------------------------
     def test_1_982_a_user_the_model_does_not_let_create_is_refused_above_the_button(self) -> None:
@@ -235,8 +320,8 @@ class TestCluster01ef_CalculationStart(E2ETestCase):
                events by name: its load on a run's address, Stop, the download and the following.
         Then:  anna's page is granted and her run starts as before; bob's page is refused with the rule's
                sentence and every one of his events is refused with it, before lex-app's API is called:
-               no record is created, no run read, stopped or downloaded. The page built outside a page
-               (no requires=) keeps its own state.
+               no record is created, no run read, stopped or downloaded. The same page on a @ui.page without
+               requires= keeps its own state.
         """
         from unittest.mock import patch as patching
 
@@ -267,7 +352,9 @@ class TestCluster01ef_CalculationStart(E2ETestCase):
 
         declare.finalize()
         state = declare._DECLARED[ROUTE].kind.state
-        self.assertIsNot(state, region_reports().state, "the guarded page's handlers are its own")
+        unguarded = region_reports()
+        unguarded.build(CTX)
+        self.assertIsNot(state, unguarded.state, "the guarded page's handlers are its own")
         existing = UiRegionReport.objects.create(region="north", year=2024)
 
         async def scenario(user: str):
@@ -304,3 +391,57 @@ class TestCluster01ef_CalculationStart(E2ETestCase):
                          "bob is told so, and his browser goes nowhere and downloads nothing")
         self.assertIn("anna", asked)
         self.assertIn("bob", asked)
+
+
+@ui.rule
+def north_only(user, params):
+    return True if user.id == "anna" else "Only the north team runs region reports."
+
+
+#: Built once, outside any page function, and returned by one: its handlers must still be the page's.
+SHARED_REPORT = ui.calculation(UiRegionReport, title="Shared region report",
+                               fields=[ui.field("region", required=True), ui.field("year", kind="year", required=True)])
+
+
+class TestCluster01ef_RequiresBoundWhenBuilt(FrameCase):
+    """1.1105: a calculation's handlers require what the page that builds it does, wherever it was made."""
+
+    # -- 1.1105 --------------------------------------------------------
+    def test_1_1105_the_handlers_require_the_page_that_builds_the_calculation(self) -> None:
+        """
+        Scenario 1.1105: the page kind made outside the page function (a module-level value), and one on
+        a dashboard.
+        Given: ui.calculation made once at module level, returned by a @ui.page guarded by a rule that
+               refuses bob; the same kind returned by a @ui.dashboard.
+        When:  lex-app registers the page and bob sends its Calculate by name; the dashboard is built.
+        Then:  bob is refused with the rule's sentence before lex-app's API is called -- the handlers
+               took the page's requires= when the page was built, never an empty one; the dashboard,
+               where no page's requires= is known, is refused with what to write.
+        """
+        from lex.lex_app.reflex.ui import testing
+        from lex.lex_app.reflex.ui.pages import declare
+
+        @ui.page("/reports/shared", requires=north_only)
+        def shared_reports():
+            return SHARED_REPORT
+
+        declare.finalize()
+        state = declare._DECLARED["/reports/shared"].kind.state
+
+        async def scenario():
+            async with testing.Harness(user="bob") as harness:
+                await harness.open_tab("/reports/shared")
+                await (await harness.send(state, "calculate", values={"region": "north", "year": "2026"}))
+                return [(o.kind, o.message) for o in harness.outcomes]
+
+        self.assertEqual(asyncio.run(scenario()), [("denied", "Only the north team runs region reports.")],
+                         "refused by the page's rule, before the API is asked")
+
+        @ui.dashboard
+        def main():
+            return SHARED_REPORT
+
+        with self.assertRaises(PageError) as refused:
+            main()
+        self.assertIn("outside a `@ui.page`", str(refused.exception))
+        self.assertIn("@ui.page(", str(refused.exception), "it says what to write")

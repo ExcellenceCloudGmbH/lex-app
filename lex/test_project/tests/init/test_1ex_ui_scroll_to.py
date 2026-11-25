@@ -8,7 +8,7 @@ event. Before, only `rx.scroll_to("<dom id>")` in a `@ui.custom` handler could, 
 author had to guess. A regression is a scroll that goes nowhere because the id the result names is
 not the id the part was built with.
 
-Cluster 1ex -- scenario 1.1034. Type: U.
+Cluster 1ex -- scenarios 1.1034, 1.1120. Type: U.
 Covers: lex/lex_app/reflex/ui/results.py (scroll_to, ScrollTo, split, to_events),
 lex/lex_app/reflex/ui/pages/kinds.py (section_anchor, table_anchor, a titled section's id),
 lex/lex_app/reflex/ui/pages/tables.py (a rows table's id), lex/ui.py.
@@ -86,3 +86,21 @@ class TestCluster01ex_ScrollTo(SimpleTestCase):
             with self.subTest(wrong=wrong), self.assertRaises(TypeError) as refused:
                 ui.scroll_to(wrong)
             self.assertIn("ui.scroll_to(\"Errors\")", str(refused.exception))
+
+
+    # -- 1.1120 --------------------------------------------------------
+    def test_1_1120_two_sections_of_one_title_have_two_ids(self) -> None:
+        """
+        Scenario 1.1120: two sections called alike on one page (review 2, minor: one DOM id twice).
+        Given: a form's result with two sections titled "Errors found" and one titled "Lines".
+        When:  the page is built and compiled.
+        Then:  each section has an id of its own -- the second "errors-found-2" -- and ui.scroll_to("Errors
+               found") reaches the first, as documented.
+        """
+        form = ui.form(title="Check", submit=CheckState.check, fields=[ui.field("name")], result=[
+            ui.section("Errors found", ui.text("First.")), ui.section("Errors found", ui.text("Second.")),
+            ui.section("Lines", ui.text("Lines."))])
+        _, module = compile_page("/check", form.build(Build(page="check", route="/check")))
+        for ident in ('"errors-found"', '"errors-found-2"', '"lines"'):
+            self.assertEqual(module.count(f"id:{ident}"), 1, f"{ident} once")
+        self.assertEqual(results.scroll_to("Errors found").target, "errors-found")

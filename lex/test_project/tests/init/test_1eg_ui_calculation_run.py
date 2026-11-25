@@ -8,7 +8,7 @@ model's own fields (``RegionReport.orders``), or the calculation's error in its 
 run's log. A regression is a page that says "running" for ever, a result shown before the run ended,
 a traceback shown to a user, or a run shown to someone the model does not let read it.
 
-Cluster 1eg -- scenarios 1.985-1.990, 1.999. Type: E (the handlers run against lex-app's real views).
+Cluster 1eg -- scenarios 1.985-1.990, 1.999, 1.1116. Type: E (the handlers run against lex-app's real views; 1.1116 U).
 Covers: lex/lex_app/reflex/ui/pages/calculation.py (the run's view, the result with the model's
 fields), lex/lex_app/reflex/ui/calculations.py (open, follow, error_words, newest_line).
 Run: python -m lex pytest lex/test_project/tests/init/test_1eg_ui_calculation_run.py -v
@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from django.contrib.auth.models import Group
+from django.test import SimpleTestCase
 from reflex.compiler.compiler import compile_page
 
 from lex import ui
@@ -35,7 +36,7 @@ from lex.test_project.tests.init.models import UI_CALC_MODELS, UiRegionReport, U
 pytestmark = pytest.mark.init
 
 ROUTE = "/reports/regions"
-CTX = Build(page="region_reports", route=ROUTE)
+CTX = Build(page="region_reports", route=ROUTE, requires=())      # a @ui.page without requires=
 
 
 def region_reports(**changes):
@@ -373,3 +374,46 @@ def _waited(condition, seconds: float = 10) -> bool:
             return True
         time.sleep(0.02)
     return False
+
+
+
+class SlowRunApi:
+    """lex-app's API as a page following a run sees it: running for ten readings, then done."""
+
+    def __init__(self):
+        self.reads, self.logs = 0, 0
+
+    def get(self, model, key):
+        self.reads += 1
+        status = "IN_PROGRESS" if self.reads <= 10 else "SUCCESS"
+        return {"id": int(key), "is_calculated": status, "short_description": "north 2026"}
+
+    def log(self, model, key):
+        self.logs += 1
+        return [f"## Step {self.reads}"]
+
+
+class TestCluster01eg_FollowReadsTheLog(SimpleTestCase):
+    """1.1116: following a run reads its record each time and its log every few times."""
+
+    # -- 1.1116 --------------------------------------------------------
+    def test_1_1116_following_a_run_reads_its_log_every_few_readings(self) -> None:
+        """
+        Scenario 1.1116: a run followed for ten readings (review 2, minor: the log is the heavier read).
+        Given: the page's state; a run that is IN_PROGRESS for ten readings of its record, then SUCCESS.
+        When:  the page follows it.
+        Then:  the record is read each time; the log, for the line the progress shows, every
+               calculations.LOG_EVERY readings, and once more when the run has ended; the progress still
+               shows the newest line read.
+        """
+        page = region_reports()
+        page.build(CTX)
+        api = SlowRunApi()
+        with patch.object(calculations, "POLL_SECONDS", 0):
+            ran = ui.testing.run(page.state, "follow", api=api, fields={"run_id": "7"})
+        self.assertEqual(ran.error, "")
+        self.assertEqual(api.reads, 11, "the record, each reading")
+        every = calculations.LOG_EVERY
+        self.assertGreater(every, 1)
+        self.assertEqual(api.logs, -(-10 // every) + 1, "the log every few readings, and at the end")
+        self.assertEqual(ran.fields["run_log"], ["## Step 11"])

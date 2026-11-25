@@ -6,10 +6,10 @@ Keycloak's grants (not from what the browser was told), so it is right on the fi
 A regression is an entry the user may not open drawn anyway, an entry a rule refuses still listed, a
 browser that decides by itself what is listed, or a failing rule that shows its entry.
 
-Cluster 1ej -- scenarios 1.1000-1.1003. Type: U.
+Cluster 1ej -- scenarios 1.1000-1.1003, 1.1022, 1.1100, 1.1108. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/frame.py (guards, decide), lex/lex_app/reflex/shell.py (nav_sections,
 lex_chrome), lex/lex_app/reflex/ui/state.py (ui_frame_open, ui_frame_shown),
-lex/lex_app/reflex/ui/pages/links.py (reflex_page requires=), lex/lex_app/reflex/ui/pages/declare.py (install).
+lex/lex_app/reflex/ui/pages/links.py (reflex_page visible=), lex/lex_app/reflex/ui/pages/declare.py (install).
 Run: python -m lex pytest lex/test_project/tests/init/test_1ej_ui_frame_decided.py -v
 """
 
@@ -61,8 +61,8 @@ def declare_pages():
     def reviews():
         return _about("Reviews")
 
-    ui.reflex_page("/legacy", nav="Tools", title="Legacy export", requires=ui.permission("lex_app.Order", "export"))
-    ui.reflex_page("/audit", nav="Tools", title="Audit", requires=reviewers)
+    ui.reflex_page("/legacy", nav="Tools", title="Legacy export", visible=ui.permission("lex_app.Order", "export"))
+    ui.reflex_page("/audit", nav="Tools", title="Audit", visible=reviewers)
     declare.finalize()
     return orders
 
@@ -179,10 +179,10 @@ class TestCluster01ej_FrameDecidedOnTheServer(FrameCase):
         """
         Scenario 1.1003: through lex-app's start-up.
         Given: the pages of 1.1000, handed to an app by lex-app's start-up step (declare.install, as
-               create_app runs it); a raw page given a list of permissions and a wrong requires=.
+               create_app runs it); a raw page given a list of permissions and a wrong visible=.
         When:  the installed page is compiled.
         Then:  it draws the guarded entries on the server's answer and asks when it mounts; a raw page's
-               requires= takes what a page's does, and a wrong one is refused with what to write.
+               visible= takes what a page's requires= does, and a wrong one is refused with what to write.
         """
         declare_pages()
         install(self)
@@ -190,12 +190,12 @@ class TestCluster01ej_FrameDecidedOnTheServer(FrameCase):
         for expected in ("ui_frame_shown", "ui_frame_open", '"/reviews"'):
             self.assertIn(expected, module, f"installed: {expected}")
         ui.reflex_page("/both", nav="Tools", title="Both",
-                       requires=[ui.permission("lex_app.Order", "read"), ui.permission("lex_app.Order", "export")])
+                       visible=[ui.permission("lex_app.Order", "read"), ui.permission("lex_app.Order", "export")])
         from lex.lex_app.reflex.ui.pages import frame
 
         self.assertEqual(frame.guards()["/both"].permissions, ("lex_app.Order:read", "lex_app.Order:export"))
         with self.assertRaises(ValueError) as caught:
-            ui.reflex_page("/wrong", nav="Tools", title="Wrong", requires=lambda user, params: True)
+            ui.reflex_page("/wrong", nav="Tools", title="Wrong", visible=lambda user, params: True)
         self.assertIn("@ui.rule", str(caught.exception))
 
 
@@ -208,7 +208,7 @@ class TestCluster01ej_WholeFrame(FrameCase):
         Scenario 1.1022: everything at once.
         Given: a dashboard module that configures every part of the frame -- areas and sections, a count,
                a per-user section, a foot, the search page, header actions, user menu entries, a banner,
-               the mark and refused_as_missing -- beside its pages.
+               the mark and denied_as_missing -- beside its pages.
         When:  lex-app's start-up step hands the pages to an app (declare.install, as create_app runs it),
                a page is compiled, and the frame is decided for a user.
         Then:  the compiled page holds every part, the shell asks the server when it mounts, and the
@@ -243,12 +243,12 @@ class TestCluster01ej_WholeFrame(FrameCase):
         def admin():
             return _about("Administration")
 
-        ui.frame(nav=[ui.section("Orders", ui.link("Search orders", to=search, icon="search")), "Admin",
-                      ui.section("Favourites", favourites)],
+        ui.frame(nav={"Orders": [ui.link("Search orders", to=search, icon="search")], "Admin": [],
+                      "Favourites": favourites},
                  nav_footer=ui.text("Version 2.4.1"), search=search,
                  actions=[ui.link("Notifications", to=account, icon="notification", badge=waiting)],
                  user_menu=[ui.link("Account", to=account)],
-                 banner=ui.message(problem, tone="warning"), logo="/acme.svg", refused_as_missing=True)
+                 banner=ui.message(problem, tone="warning"), logo="/acme.svg", denied_as_missing=True)
         install(self)
         _, module = compile_page("/orders", self.page_named("/orders")())
         for expected in ("Search orders", "rfds-side-nav-badge", "ui_frame_links", "Version 2.4.1",
@@ -276,3 +276,152 @@ class TestCluster01ej_WholeFrame(FrameCase):
         self.assertEqual(sorted(counts.values()), [2, 2])
         self.assertEqual(values, {"banner": "Some configuration could not be loaded."})
         self.assertEqual([one["href"] for one in links["Favourites#"]], ["/reports/7"])
+
+
+def signed_in_as(user: str, grants=()) -> None:
+    """From now on ``user`` is the one signed in on the harness's tab (the tab's token stays)."""
+    from lex.lex_app.reflex.ui import context, testing
+
+    held = testing._grants(grants)
+
+    async def resolve(state):
+        async def token():
+            return "test-token"
+
+        async def permissions():
+            return list(held)
+
+        return context.Session(user=context.User(id=user, name=user, username=user), params=context.Params({}),
+                               token=token, permissions=permissions, api=testing._NoApi(), tab="tab1")
+
+    context.set_resolver(resolve)
+    context.set_user_id_of(lambda state: user)
+
+
+class TestCluster01ej_AnotherUserOfTheTab(FrameCase):
+    """1.1100: what was decided for one user is never shown to the next user of the same browser tab."""
+
+    # -- 1.1100 --------------------------------------------------------
+    def test_1_1100_the_next_user_of_a_tab_starts_without_the_last_ones_answers(self) -> None:
+        """
+        Scenario 1.1100: another user signs in on a tab (Reflex keeps a tab's states under its client
+        token, which outlives a sign-in).
+        Given: anna, a reviewer holding Report:read, opened the rule-guarded review desk and the frame
+               was decided for her (Reports, Reviews, the desk and Audit listed, the desk granted by the
+               opener).
+        When:  carl, who may open none of them, signs in on the same tab and a page opens; then, for a
+               decision that was still being made for anna when carl signed in, the answer arrives.
+        Then:  carl's tab holds none of anna's answers -- no listed entry, no granted page -- as soon as
+               his page opens; anna's late answer is not written for carl.
+        """
+        from lex.lex_app.reflex.ui import testing
+        from lex.lex_app.reflex.ui.pages import frame
+        from lex.lex_app.reflex.ui.state import State
+
+        declare_pages()
+
+        @ui.page("/desk", nav="Reports", requires=reviewers)
+        def desk():
+            return _about("Review desk")
+
+        declare.finalize()
+        late: dict = {}
+
+        async def scenario():
+            async with testing.Harness(user="anna", grants=["lex_app.Report:read"]) as harness:
+                await harness.open_tab("/desk")
+                await (await harness.send(State, "ui_open", page="/desk"))
+                await (await harness.send(State, "ui_frame_open"))
+                deadline = time.monotonic() + 5
+                while len((await harness._state(State)).ui_frame_shown) < 4 and time.monotonic() < deadline:
+                    await asyncio.sleep(0.01)
+                state = await harness._state(State)
+                anna = (sorted(state.ui_frame_shown), dict(state.ui_access))
+
+                signed_in_as("carl")
+                await (await harness.send(State, "ui_open", page="/orders"))
+                state = await harness._state(State)
+                carl = (list(state.ui_frame_shown), dict(state.ui_access))
+
+                # A decision made for anna, arriving after carl signed in on the tab.
+                signed_in_as("anna", ["lex_app.Report:read"])
+                decided = frame.decide
+
+                async def decide_then_carl(state):
+                    answers = await decided(state)
+                    signed_in_as("carl")
+                    late["decided"] = list(answers.shown)
+                    return answers
+
+                from lex.lex_app.reflex.ui import state as ui_state
+
+                with patch.object(frame, "decide", decide_then_carl), patch.object(ui_state, "FRAME_INTERVAL", 0):
+                    ui_state._FRAME_DECIDED.clear()
+                    await (await harness.send(State, "ui_frame_open"))
+                    deadline = time.monotonic() + 5
+                    while "decided" not in late and time.monotonic() < deadline:
+                        await asyncio.sleep(0.01)
+                    await asyncio.sleep(0.2)
+                return anna, carl, list((await harness._state(State)).ui_frame_shown)
+
+        anna, carl, after = asyncio.run(scenario())
+        self.assertEqual(anna, (["/audit", "/desk", "/reports", "/reviews"], {"/desk": {"granted": "yes", "message": ""}}))
+        self.assertEqual(carl, ([], {}), "carl's page opens without anna's entries or her granted page")
+        self.assertEqual(sorted(late["decided"]), ["/audit", "/desk", "/reports", "/reviews"], "the late answer was anna's")
+        self.assertEqual(after, [], "and it was not written for carl")
+
+
+
+class TestCluster01ej_DecidedInALoop(FrameCase):
+    """1.1108: the frame's decision sent in a loop runs once at a time, and not again at once."""
+
+    # -- 1.1108 --------------------------------------------------------
+    def test_1_1108_one_decision_runs_at_a_time_and_not_again_at_once(self) -> None:
+        """
+        Scenario 1.1108: the frame's event sent over and over (a script, a page that remounts).
+        Given: the pages of 1.1000; deciding the frame takes a while (a slow rule).
+        When:  anna's tab sends the frame's event twenty times at once; again just after it was decided;
+               again after the frame's minimum interval; and carl, signed in on the same tab, sends it.
+        Then:  one decision ran for the twenty; none just after; one after the interval; carl's ran for
+               him at once -- another user is never kept waiting by the last one's decision.
+        """
+        from lex.lex_app.reflex.ui import state as ui_state
+        from lex.lex_app.reflex.ui import testing
+        from lex.lex_app.reflex.ui.pages import frame
+        from lex.lex_app.reflex.ui.state import State
+
+        declare_pages()
+        ran: list = []
+        decided = frame.decide
+
+        async def slow_decide(state):
+            ran.append("decide")
+            await asyncio.sleep(0.2)
+            return await decided(state)
+
+        async def settle(harness):
+            await asyncio.sleep(0.4)
+
+        async def scenario():
+            async with testing.Harness(user="anna", grants=["lex_app.Report:read"]) as harness:
+                await harness.open_tab("/orders")
+                for _ in range(20):
+                    await harness.send(State, "ui_frame_open")
+                await settle(harness)
+                looped = len(ran)
+                await (await harness.send(State, "ui_frame_open"))
+                await settle(harness)
+                at_once = len(ran) - looped
+                ui_state._FRAME_DECIDED.clear()           # as when the minimum interval has passed
+                await (await harness.send(State, "ui_frame_open"))
+                await settle(harness)
+                later = len(ran) - looped - at_once
+                signed_in_as("carl")
+                await (await harness.send(State, "ui_frame_open"))
+                await settle(harness)
+                return looped, at_once, later, len(ran) - looped - at_once - later
+
+        with patch.object(frame, "decide", slow_decide):
+            looped, at_once, later, carl = asyncio.run(scenario())
+        self.assertEqual((looped, at_once, later, carl), (1, 0, 1, 1))
+        self.assertGreater(ui_state.FRAME_INTERVAL, 0)

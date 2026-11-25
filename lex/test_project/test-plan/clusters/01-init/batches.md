@@ -3408,6 +3408,7 @@ such a collision.
 | 1.912 | Two searched fields on one form never cancel each other | through Reflex's event processor: a field's matches arrive while another field's slow search runs, another button works meanwhile, and the slow, older search ending after a newer one does not replace the newer matches |
 | 1.917 | A choice reaches the handler as the option's own value | fixed ints, a dict with int keys, a state field of ints, several ints and a searched row whose id is a UUID each reach the handler as their own value, of their own type; a value that is no option is refused; 1.8xx int-option refusals now refuse floats |
 | 1.918 | What was offered to one user is not kept for the next | another user on the tab is refused a value offered to the previous one, and finds neither its matches nor its offers in the state; a new visit drops the matches; the same user's offers stay (1.935) |
+| 1.1109 | One search at a time per field, and the newest follows | while a slow search runs nothing else of the field runs; then only the newest of twenty texts, after the interval; its matches shown |
 
 ### Batch 1dt — lex.ui: a refusal shown above a form's submit button, with a title ✅
 
@@ -3604,6 +3605,7 @@ form's `result=`. What building settled is section 6.17 of `docs/superpowers/spe
 | 1.936 | A reconnect is not a new visit | hydrate and on_load again on a new connection for the same address keep the visit count, a private value not kept and both forms' results, and run the loads without resetting; a link to the same page on the same connection, and a reconnect on another address, are new visits |
 | 1.937 | One keep=True keeps what the result shows | with no keep on the state, a private result and a field shown come back after a visit and the page's load of the same state; a result showing another state's field the page's load resets is refused at page build with @ui.load(keep=(...)) to write |
 | 1.939 | The docstrings a reader learns from say what the code does | ui.State names self.tab_id and self.progress as the only helper safe from another thread; ui.form says one keep=True is enough and a computed var never reads a private field; the field summary names currency= and lines=; no docstring line past 110 characters |
+| 1.1101 | A kept result is not shown to the next user of the tab | the same user finds the kept result; another user's form starts over: no result, refusal or failure |
 
 ### Batch 1eb — lex.ui frame: the navigation in areas, in the project's order, and the way to sign out ✅
 
@@ -3627,6 +3629,8 @@ What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-refl
 | 1.962 | A raw Reflex page joins an area with the same words | nav=, title=, icon=, requires= make its entry; still a link target; nav= without title=, title=/icon=/requires= without nav= refused |
 | 1.963 | The current entry and its area are marked in a compiled page | Reflex's page compiler; aria-current per entry; lex-app's stylesheet marks the area heading |
 | 1.964 | The user menu signs out where the project says | /logout by default; an https:// address or a page's route; a route as text, http:// and a page needing values refused; the title is still LEX_DASHBOARD_TITLE |
+| 1.1102 | Signing out gives the tab a new client token | LexUser.sign_out forgets sessionStorage's token before leaving; the key is the one Reflex's state.js reads |
+| 1.1112 | The frame's words read as one table and one rule | ui.frame's docstring: four groups, each argument once, one rule, actions the parts at the top right, nav= a dict, no ui.section; lex.ui's first example a @ui.rows handler; no line past 110 |
 
 ### Batch 1ec — lex.ui frame: breadcrumbs from the area and the page, written by no page ✅
 
@@ -3673,6 +3677,7 @@ What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-refl
 | 1.971 | A rule is asked once per event and fails closed | named twice, asked once per press; raising or answering wrongly refuses with the standard error |
 | 1.972 | A page guarded by a rule is decided by the opener | compiled cond on ui_access with the notice; granted starts the load, refused none and keeps its sentence; a list with a permission hides the entry |
 | 1.973 | A rule written wrongly is refused with what to write | wrong arguments; a plain function in requires=; a rule in visible=; a raw page's requires=; still callable |
+| 1.1104 | A refused user reads no rows by sending a table's events | on a rule-guarded page a model table, a rows table without requires= and a calculation's past runs read nothing for a refused user (API and handler never called) and show the rule's sentence; the team's user reads |
 
 Added 2026-11-25: A rule, a frame function and `opened=` read `user.permissions` outside a handler body: lex-app gives the user its permissions first (1.1090).
 
@@ -3725,6 +3730,9 @@ The calculation page kind of section 6.20 of `docs/superpowers/specs/2026-11-23-
 | 1.983 | With Celery on the run goes to a worker and the page does not wait | dispatched once, never in-process; the record IN_PROGRESS; the browser already at the run |
 | 1.984 | self.api.calculate and self.api.log are the grid's Calculate and log | [] before a run; IN_PROGRESS at once; the run's Markdown log after; its newest line |
 | 1.978 | A rule on the page guards the calculation's own handlers | @ui.page(requires=a @ui.rule) on ui.calculation: the granted user's run starts as before; the refused user's page says the rule's sentence and calculate, the load, Stop, the download and the following sent by name are each refused with it before lex-app's API is called; the guarded page has its own state |
+| 1.1105 | The handlers require the page that builds the calculation | a kind made at module level and returned by a rule-guarded @ui.page refuses bob's Calculate with the rule's sentence before the API; on a @ui.dashboard refused with what to write |
+| 1.1107 | A model that calculates on create is started once | calculate_on_create with a run that ends before the create answers: only the create's POST, no Calculate PATCH; computed once; the browser goes to the run |
+| 1.1115 | The run is found by the page and the record it names | Calculate goes to the page's route though the browser reported another path; the log asked by the model's key, [] for another record's answer; a state's name from what the page is |
 
 ### Batch 1eg — lex.ui calculation pages: one run, followed until it ends -- its result, its error, its log ✅
 
@@ -3750,6 +3758,7 @@ Second piece of the calculation page (section 6.20 of `docs/superpowers/specs/20
 | 1.989 | A run the reader may not read is no run to them | nothing of the run in the state; the error page says There is no run N., as for a missing key |
 | 1.990 | Leaving stops the watching, never the run | the follow job ends on a new visit; the run still ends in SUCCESS |
 | 1.999 | A reconnect keeps following the run and does not open the page again | the socket reconnects on a followed run's address: same visit, the following goes on and the re-sent follow is a repeat; the load reads the run again; ui.frame(opened=) called once; the one following ends with SUCCESS |
+| 1.1116 | Following a run reads its log every few readings | ten IN_PROGRESS readings: the record each time, the log every LOG_EVERY and at the end; the newest line shown |
 
 ### Batch 1eh — lex.ui calculation pages: the past runs -- a model table, each row opening its run ✅
 
@@ -3817,6 +3826,8 @@ Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | 1.1002 | What the browser was told does not decide | the resolver behind the browser's permissions claims grants: nothing listed; a fresh tab's first page answered at once |
 | 1.1003 | lex-app's start-up draws the decided navigation | declare.install then compile: the answer's var and the mount's event; a raw page's requires= takes a list; a plain function refused naming @ui.rule |
 | 1.1022 | The whole frame through lex-app's start-up | every part configured at once in a dashboard module; declare.install; the compiled page holds each part and asks on mount; the server fills anna's counts, banner words and per-user links; a rule's page refused as missing |
+| 1.1100 | The next user of a tab starts without the last one's answers | another user signing in on the tab finds no listed entry, no granted page of the last; a decision for the last user arriving late is not written |
+| 1.1108 | One decision of the frame at a time, and not again at once | twenty events at once decide once; one just after decides nothing; after the interval once; another user on the tab at once |
 
 ### Batch 1ek — lex.ui frame: navigation beyond the declared pages -- sections of links, counts, per-user entries, a foot ✅
 
@@ -3840,6 +3851,8 @@ Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | 1.1006 | A per-user section lists what its function returns | compiled under the heading from ui_frame_links; anna's page address with its value and an outside address, words as they are; a link with requires= left out and logged; carl: none |
 | 1.1007 | A link the user may not open is not drawn | a link's requires=, the page it leads to, a rule asked with the link's values: all three for anna, none for carl |
 | 1.1008 | A link at the foot, and the frame's words in a page | RFDS's navigation footer with a link or a text; a button refused; badge=, requires=, icon= on a link in a page refused with what to write |
+| 1.1110 | A per-user section named like an area with pages is refused | nav={"Orders": favourites} beside a page in Orders -- declared before the frame, after it, or a raw page -- refused naming page, area and function; a section of its own name drawn after the area |
+| 1.1118 | User links are guarded and permissions are read when needed | a per-user link to a page the user may not open is left out, a rule-guarded one asked with its value; a fixed frame reads no permissions; badge= on a route-argument page refused |
 
 ### Batch 1el — lex.ui frame: the header band -- a search box, a status hint, a bell with a count ✅
 
@@ -3861,6 +3874,7 @@ Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | 1.1009 | The header's actions are lex.ui parts | compiled in rfds-header-actions before the user menu; anna's status Sync delayed, count 4, the bell hers; ben's failing status logged, no bell; ui.fact and ui.section refused naming ui.custom_block |
 | 1.1010 | The search box opens the project's search page | RFDS's search box in the header's search slot; Enter redirects to /search?q=north%20east%20%26%20co; an empty box to the page without it |
 | 1.1011 | A search page must take one value | no parameter, two, a route argument, a route as text refused with what to write; a raw page with params= accepted |
+| 1.1117 | The search box and a header button follow who may use them | search box and a requires= button drawn on ui_frame_shown; anna (reader) gets both, ben neither; the typed text is a client state sent with Enter, no per-key event |
 
 ### Batch 1em — lex.ui frame: the user menu's entries above Sign out ✅
 
@@ -3923,6 +3937,7 @@ Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | 1.1017 | The opener decides a permission page on the server | carl refused: no, no load; anna granted: yes, her load ran; a rule's page refused for carl |
 | 1.1018 | lex-app's not-found page looks the same | the 404 page in lex-app's frame with the same body; /ui-error's refusal says not found, other failures keep Try again; create_app adds it unless the project has a 404 page |
 | 1.1019 | refused_as_missing written wrongly | a non-bool refused; beside denied= or request_access= refused, saying the notice is never shown |
+| 1.1111 | The switch is named like the other denied words | denied_as_missing=True is the switch; refused_as_missing= refused with denied_as_missing=True written out |
 
 ### Batch 1ep — lex.ui frame: the project's mark in the header, leading home ✅
 
@@ -3982,6 +3997,8 @@ Section 5.15 of `docs/superpowers/specs/2026-11-23-reflex-ui-tables-design.md`.
 | --- | --- | --- |
 | 1.1024 | A table's rows reach the browser and no stored state | the browser's updates carry name, pay, team; no BaseStateToken.serialize or pickle of any state of the tab holds them or the total; stored: no rows, count kept, _rows_dropped; restore reads nothing when not dropped, reads again when dropped |
 | 1.1025 | Every ui.table is not stored; a row link survives the store | a ui.table model table is rows_not_stored and told to restore by its page; lex_table's state is not; a row's own address left out of the pickle, the click still redirects to it |
+| 1.1103 | A searched field's matches reach no stored state | a match read from a private value reaches the browser, no Redis/disk serialisation or pickle; the offered ids still accept the value |
+| 1.1106 | A table on a dashboard or in a raw page restores its rows | ui.embed in a raw page, a @ui.dashboard and an embedded model table each compile a hook that sends their restore whenever is_hydrated turns on; restore reads the rows again |
 
 ### Batch 1es — lex.ui: a foreign key shows the related record's name, in a model table, a run's history and its facts ✅
 
@@ -4022,6 +4039,7 @@ Section 5.15 of `docs/superpowers/specs/2026-11-23-reflex-ui-tables-design.md`.
 | --- | --- | --- |
 | 1.1028 | self.api.all reads every record in a stable order up to a ceiling | 2,345 rows once and in order; pages 1-3 of 1,000 with ordering amount,id; count; ALL_LIMIT refusal after the first page with the count; a rows table over it builds with export and totals; a model table's totals refusal names self.api.all |
 | 1.1029 | A model table filters a date field by a range of days | date_lookups event_at -> event_at__date; the picker in the toolbar; event_at__date__gte/lte sent; a field that is no date filter ignored; a malformed day dropped; clear_filters removes the range |
+| 1.1114 | Page turns, sorts, filters and searches read the kept rows | 60 rows: the handler asked on open, after a handler of its state, on a new visit and after the idle time, never per page/sort/filter/search among rows; a searching handler once per search; rows in no stored state |
 
 ### Batch 1eu — lex.ui frame: areas nav= does not list follow the listed ones; a typo is still refused ✅
 
@@ -4060,6 +4078,7 @@ Section 6.22 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.1031 | The check follows the project's imports | paths: _dashboards, _reflex_structure.py, helpers.py, orders/__init__.py, orders/pages/__init__.py, orders/pages/tickets.py (not unused.py, not os/reflex/lex); one error in tickets.py: TicketsState.approve has no lex.ui decorator |
+| 1.1122 | RFDS's lint reads only the modules that draw | lint --strict given the files importing reflex, rfds or lex.ui; a plain helper still read by lex.ui's checks |
 
 ### Batch 1ew — lex.ui pages: a closed section mounts what it holds when opened; a title from the state; actions ✅
 
@@ -4099,6 +4118,7 @@ Section 6.22 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.1034 | A handler brings a section or a table into view | errors-found on a form's section and a record page's; the table's box id; run() results Toast then ScrollTo; to_events are scroll events with those ids; empty string, a number, an action refused |
+| 1.1120 | Two sections of one title have two ids | errors-found and errors-found-2 once each; ui.scroll_to reaches the first |
 
 ### Batch 1ey — lex.ui pages: a tab shown only while the state says so -- visible= a state value on a tab ✅
 
@@ -4118,6 +4138,7 @@ Section 6.22 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.1035 | A tab is drawn only while its state value is true | form tabs: figures trigger and panel under cond on has_figures, summary not; compiles; record tabs the same; record without tabs refused pointing to tabs=True |
+| 1.1121 | The open tab falls back, and a changed RFDS is said | the tabs' value is the first tab while the open one's state is false; a component without RFDS's tabs refused loudly |
 
 ### Batch 1fa — lex.ui pages: more than four tables on a record page refused in lex.ui's words, with the way out ✅
 
@@ -4137,6 +4158,7 @@ Section 6.22 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.1037 | More than four tables is refused with the way out | four compile; five refused with and without tabs: slot sections, 5 tables in Lines (2), Invoices, Payments, Shipments, at most 4, with tabs=True too, a page of their own, ui.link to order_invoices; no 'use tab navigation' |
+| 1.1119 | Tables inside a switch or an each are counted | every switch case counts as RFDS counts it: 7 refused in lex.ui's words, 3 built; a table per item of ui.each refused as any number |
 
 ### Batch 1ez — lex.ui forms: a field of several choices can be emptied at once -- its Clear ✅
 
@@ -4177,3 +4199,4 @@ Section 6.22 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | 1.1038 | A test drives a searched field | matches Customer 001..009 with value and label only; an unsearched key refused |
 | 1.1039 | A private value is seeded as gone without a logged error | no WARNING log while seeding GONE; refused with the gone sentence; a seeded value read |
 | 1.1040 | self.api is answered by lex-app's views in-process | Acme Ltd, Gamma Ltd from a real list with search; calls == GET /api/model_entries/uicustomer/list |
+| 1.1113 | The handler's user is the user the API acts as | lex_api(client) with user= another than the client's: the first call refused with user='e2e_user' to write; the same user answered |

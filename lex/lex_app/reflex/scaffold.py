@@ -242,7 +242,11 @@ def check_paths(project_root: Path) -> list[str]:
 
 
 def run_check(project_root: Path) -> int:
-    """lex.ui's findings, RFDS's ``lint --strict`` over the dashboards, then ``doctor``; 0 = clean."""
+    """lex.ui's findings, RFDS's ``lint --strict`` over the dashboards, then ``doctor``; 0 = clean.
+
+    lex.ui's checks read every followed module; RFDS's lint the structure module and the dashboards, as
+    always, and of the modules they import only those that draw (import Reflex, RFDS or lex.ui): its rules
+    are for drawing code, and a helper module of plain logic would only be noise."""
     from rfds.cli import main as rfds_main
 
     from lex.lex_app.reflex.ui import checks
@@ -251,5 +255,9 @@ def run_check(project_root: Path) -> int:
     status = 0
     if paths:
         status = checks.report(checks.find(paths)) or status
-        status = rfds_main(["lint", "--strict", *paths]) or status
+        roots = [str(project_root / name) for name in ("_reflex_structure.py", DASHBOARDS_DIR)
+                 if (project_root / name).exists()]
+        drawn = [*roots, *checks.drawing([one for one in paths if one not in roots])]
+        if drawn:
+            status = rfds_main(["lint", "--strict", *drawn]) or status
     return rfds_main(["doctor", "--app-root", str(project_root)]) or status

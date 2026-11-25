@@ -8,12 +8,14 @@ kept for the field (``ui_invalid``) and the handler ends there.
 A choice searched on the server (``options=`` a ``@ui.rows`` handler) is the one field that talks to
 the server before the form is sent: :func:`ask` records what the user typed, in order, and
 :func:`search` runs the rows handler for it without holding the tab,
-keeps a page of matches for the browser (``ui_matches``) and remembers, on the server only, every
-value it offered to the tab (``_ui_offered``). The form's value is checked against those.
+keeps a page of matches for the browser (``ui_matches``, never stored with the state: a label is data)
+and remembers, on the server only, every value it offered to the tab (``_ui_offered``, the ids). The
+form's value is checked against those.
 """
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import datetime
 import inspect
@@ -32,6 +34,13 @@ VALUES = "values"
 MATCHES = 50
 #: Most values a searched choice remembers having offered to a tab; past it, only the latest search's count.
 OFFERED = 1000
+#: The shortest time between two runs of one field's search in a tab, in seconds. One run at a time:
+#: what is typed meanwhile is searched when it ends (the newest text only), so a search sent in a loop
+#: takes one of the shared pool's workers, never all of them.
+SEARCH_INTERVAL = 0.25
+#: (tab, field) -> when its last run ended; the (tab, field)s whose search is running now.
+_SEARCHED: dict[tuple[str, str], float] = {}
+_SEARCHING: set[tuple[str, str]] = set()
 
 _YES = (True, "on", "true", "True", "1", "yes")
 
@@ -175,6 +184,39 @@ def _latest(state: Any, field: str, number: int) -> str | None:
 
 
 async def search(state: Any, field: str, number: int) -> None:
+    """Run the newest search of the searched field ``field`` -- ``number`` or one asked since -- and offer
+    its matches; one run at a time per tab and field, at most one every :data:`SEARCH_INTERVAL`.
+
+    A search asked while one runs is not run beside it: the running one, when it ends, runs the newest
+    text asked meanwhile (the texts typed in between are never searched).
+    """
+    import time
+
+    key = (str(state.router.session.client_token or ""), str(field))
+    if key in _SEARCHING:
+        return                                      # the running search runs the newest when it ends
+    _SEARCHING.add(key)
+    try:
+        done = 0
+        while True:
+            async with state:
+                newest = int((dict(state._ui_searching).get(field) or [0])[0])
+            if newest <= done or newest < int(number):
+                return
+            wait = SEARCH_INTERVAL - (time.monotonic() - _SEARCHED.get(key, 0.0))
+            if wait > 0:
+                await asyncio.sleep(wait)
+            await _search_once(state, field, newest)
+            _SEARCHED[key] = time.monotonic()
+            done = newest
+    finally:
+        _SEARCHING.discard(key)
+        now = time.monotonic()
+        for old in [one for one, ended in _SEARCHED.items() if now - ended > SEARCH_INTERVAL]:
+            _SEARCHED.pop(old, None)
+
+
+async def _search_once(state: Any, field: str, number: int) -> None:
     """Run the search ``number`` of the searched field ``field`` and offer its matches.
 
     ``state`` is the tab's ``ui.State`` behind a background proxy: the rows handler runs as the user,

@@ -55,12 +55,12 @@ class NavEntry:
     label: str
     section: str
     icon: str | None = None
-    #: The permission (or permissions) a raw page's ``requires=`` gives; a declared page's guard is
-    #: what lex-app registered for it (:func:`~lex.lex_app.reflex.ui.pages.frame.page_guard`).
+    #: The permission (or permissions) a raw page's ``visible=`` gives (``lex_page(requires=)``'s too); a
+    #: declared page's guard is what lex-app registered for it (:func:`~lex.lex_app.reflex.ui.pages.frame.page_guard`).
     permission: Any = None
-    #: A raw page's rules (``@ui.rule``) in its ``requires=``.
+    #: A raw page's rules (``@ui.rule``) in its ``visible=``.
     rules: tuple = ()
-    #: A count beside the entry: a function of the user, or a whole-number state value.
+    #: A count beside the entry: a function of the user.
     badge: Any = None
 
 
@@ -141,6 +141,9 @@ def clear_nav() -> None:
 def list_in_nav(entry: NavEntry) -> None:
     """List ``entry`` in the navigation; a page listed again (a reload, or its title known later)
     keeps its place."""
+    from lex.lex_app.reflex.ui.pages import frame
+
+    frame.check_per_user(entry.section, entry.route)     # an area of pages is never a user's own section
     places = [i for i, known in enumerate(_NAV) if known.route == entry.route]
     if places:
         _NAV[places[0]] = entry
@@ -188,8 +191,8 @@ def check_area(route: str, area: str, name: str | None = None) -> None:
         listed = ", ".join(repr(one) for one in order)
         others = [one for one in raw if one not in order]
         also = f" or an area of a raw page ({', '.join(repr(one) for one in others)})" if others else ""
-        raise PageError(f"{page} is in nav={area!r}, which ui.frame(nav=[{listed}]) does not list, nor does any "
-                        f"raw page.\nWrite one of {listed}{also}, or add {area!r} to ui.frame(nav=).")
+        raise PageError(f"{page} is in nav={area!r}, which ui.frame(nav=) does not name ({listed}), nor does any "
+                        f"raw page.\nWrite one of {listed}{also}, or add {area!r}: [] to ui.frame(nav=).")
 
 
 def _slug(text: str) -> str:
@@ -223,15 +226,11 @@ class PerUserSection:
 
 
 def badge_of(key: str, badge: Any) -> Any:
-    """The count an entry shows: the server's answer for a function of the user, a state value as it is."""
-    import reflex as rx
-
+    """The count an entry shows: the server's answer for its function of the user."""
     from lex.lex_app.reflex.ui.state import State as UiState
 
     if badge is None:
         return None
-    if isinstance(badge, rx.Var):
-        return badge.to(int)
     return UiState.ui_frame_counts.get(key, 0).to(int)
 
 
@@ -393,14 +392,14 @@ def header_link(key: str, link: Any) -> Any:
 
 
 def header_actions() -> tuple:
-    """``ui.frame(actions=)`` as the header band's parts: a status's or a text's words from a function of
-    the user shown while it answers something; links on the server's answer; the rest as in a page."""
+    """``ui.frame(actions=)`` as the header band's parts: a status's word from a function of the user shown
+    while it answers something; links on the server's answer; the rest as in a page."""
     import reflex as rx
     import rfds
 
     from lex.lex_app.reflex.ui.pages import frame
     from lex.lex_app.reflex.ui.pages.parts import Build, with_overlays
-    from lex.lex_app.reflex.ui.pages.vocab import Link, Status, Text
+    from lex.lex_app.reflex.ui.pages.vocab import Button, Link, Status
 
     ctx = Build(page="ui.frame", slot="actions")
     drawn: list[Any] = []
@@ -409,13 +408,12 @@ def header_actions() -> tuple:
         if isinstance(part, Link):
             drawn.append(header_link(key, part))
             continue
-        words = part.word if isinstance(part, Status) else part.sentence if isinstance(part, Text) else None
-        if words is not None and frame._plain_function(words):
+        if isinstance(part, Status) and frame._plain_function(part.word):
             value = frame_value(key)
-            shown = (rfds.lozenge(value, tone=part.tone) if isinstance(part, Status) else rx.text(value, size="2"))
-            drawn.append(part._wrap(ctx, rx.cond(value != "", shown)))
+            drawn.append(part._wrap(ctx, rx.cond(value != "", rfds.lozenge(value, tone=part.tone))))
             continue
-        drawn.append(part.build(ctx))
+        built = part.build(ctx)
+        drawn.append(_shown_if_decided(key, built) if isinstance(part, Button) else built)   # by its handler's requires=
     return (with_overlays(ctx, rx.fragment(*drawn)),) if drawn else ()
 
 
@@ -474,11 +472,17 @@ def user_menu_items() -> tuple:
     return tuple(entries)
 
 
+#: The name the header's search box sends what was typed under, when the user presses Enter.
+SEARCH_FIELD = "lex_frame_query"
+
+
 def header_search() -> Any:
-    """RFDS's search box in the header, when ``ui.frame(search=)`` names the project's search page:
-    Enter opens it with what was typed (:meth:`State.ui_frame_search`)."""
+    """RFDS's search box in the header, when ``ui.frame(search=)`` names the project's search page, for users
+    who may open that page (decided on the server): Enter opens it with what was typed
+    (:meth:`State.ui_frame_search`). What is typed stays in the browser until then -- no event per key."""
     import reflex as rx
     import rfds
+    from rfds.components.inputs._shared import client_state
 
     from lex.lex_app.reflex.ui.pages import frame
     from lex.lex_app.reflex.ui.pages.parts import say
@@ -486,9 +490,12 @@ def header_search() -> Any:
 
     if frame.current().search is None:
         return None
-    box = rfds.search_input(value=UiState.ui_frame_query, on_change=UiState.ui_frame_type, label=say("Search"),
+    typed = client_state("lexFrameQuery", "")
+    box = rfds.search_input(value=typed.value, on_change=lambda text: typed.set_value(text), label=say("Search"),
                             id="lex-frame-search")
-    return rx.form(box, on_submit=UiState.ui_frame_search, reset_on_submit=False, class_name="lex-header-search")
+    form = rx.form(box, rx.el.input(type="hidden", name=SEARCH_FIELD, value=typed.value),
+                   on_submit=UiState.ui_frame_search, reset_on_submit=False, class_name="lex-header-search")
+    return _shown_if_decided("search", form)
 
 
 def _any_shown(section: Any, drawn: Any) -> Any:
@@ -587,7 +594,7 @@ def not_found_notice() -> Any:
 
 def not_found_body(path: Any) -> Any:
     """The body of lex-app's not-found page: the same for a missing page and a refused one
-    (``ui.frame(refused_as_missing=True)``)."""
+    (``ui.frame(denied_as_missing=True)``)."""
     import rfds
 
     from lex.lex_app.reflex.ui.pages.parts import say
@@ -629,10 +636,10 @@ def _decided(route: str, body: Any, *, missing: bool = False) -> Any:
 
 
 def _conceals(needed: tuple, rules: tuple) -> bool:
-    """Whether a page with these requirements is shown as missing when refused (``refused_as_missing``)."""
+    """Whether a page with these requirements is shown as missing when refused (``denied_as_missing``)."""
     from lex.lex_app.reflex.ui.pages import frame
 
-    return frame.current().refused_as_missing and bool(needed or rules)
+    return frame.current().denied_as_missing and bool(needed or rules)
 
 
 def lex_chrome(body, *, embedded=None, route=None, missing=False):

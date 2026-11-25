@@ -3,13 +3,13 @@
 Intent: an application's navigation holds more than its declared pages: a titled section of links (a
 search page, an outside wiki, a raw page), a count beside an entry ("Waiting for you  3"), a section
 whose entries depend on the user (favourites, topics the user may see), and a link at its foot (the
-version, help). A project says so in `ui.frame(nav=[...], nav_footer=)` with lex.ui's words
-(`ui.section`, `ui.link`); values that depend on the user are functions of the user, called on the
+version, help). A project says so in `ui.frame(nav={...}, nav_footer=)` with lex.ui's words
+(an area's list of `ui.link`s, or a function of the user); values that depend on the user are functions of the user, called on the
 server when a page opens. A regression is a lost section, a count computed in the browser or shown to
 the wrong user, a per-user entry another user sees, a link the user may not open, or a frame word that
 silently does nothing in a page.
 
-Cluster 1ek -- scenarios 1.1004-1.1008. Type: U.
+Cluster 1ek -- scenarios 1.1004-1.1008, 1.1110, 1.1118. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/frame.py (frame nav=/nav_footer=, entries, decide),
 lex/lex_app/reflex/shell.py (nav_layout, nav_sections, lex_chrome), lex/lex_app/reflex/ui/pages/vocab.py
 (link icon=/badge=/requires=), lex/lex_app/reflex/ui/pages/declare.py (page badge=),
@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from unittest.mock import patch
 
 import pytest
 from reflex.compiler.compiler import compile_page
@@ -111,20 +112,21 @@ class TestCluster01ek_FrameNavLinks(FrameCase):
     def test_1_1004_a_section_of_links_joins_the_navigation(self) -> None:
         """
         Scenario 1.1004: sections of links.
-        Given: ui.frame(nav=[a section named like the area Orders with a link to the search page, an
-               area, a section Help with an outside address, a raw page and a record page's address]).
+        Given: ui.frame(nav={the area Orders with a link to the search page after its pages, an area,
+               an area Help with an outside address, a raw page and a record page's address}) (review 2:
+               nav= is a dict; ui.section means a part of a page only).
         When:  lex-app registers the pages and builds the navigation, and a page is compiled.
         Then:  the sections come in nav='s order; the Orders section holds its declared page, then its
                link with its icon; Help holds the outside address, the raw page and the record page's
-               address with its value; the compiled page holds them; an area listed twice, an empty
-               section, a link with a state value, a section that is neither links nor one function and a
-               page section's own words (collapsed=) are refused with what to write.
+               address with its value; the compiled page holds them; the old list of sections, a link
+               with a state value, an area of anything but ui.links, a ui.section as an area's content,
+               and links and a function together are refused with what to write.
         """
         orders, search, order, approvals = self.declare_pages()
         legacy = ui.reflex_page("/legacy")
-        ui.frame(nav=[ui.section("Orders", ui.link("Search orders", to=search, icon="search")), "Requests",
-                      ui.section("Help", ui.link("All workflows", href="https://wiki.example.com/workflows"),
-                                 ui.link("Legacy export", to=legacy), ui.link("Order 7", to=order, key=7))])
+        ui.frame(nav={"Orders": [ui.link("Search orders", to=search, icon="search")], "Requests": [],
+                      "Help": [ui.link("All workflows", href="https://wiki.example.com/workflows"),
+                               ui.link("Legacy export", to=legacy), ui.link("Order 7", to=order, key=7)]})
         declare.finalize()
         sections = shell.nav_sections()
         self.assertEqual([s.label_default for s in sections], [None, "Orders", "Requests", "Help"])
@@ -138,12 +140,11 @@ class TestCluster01ek_FrameNavLinks(FrameCase):
 
         from lex.lex_app.reflex.ui.state import State
 
-        for nav, says in ((["Orders", ui.section("Orders", ui.link("Search", to=search))], "twice"),
-                          ([ui.section("Help")], "ui.link"),
-                          ([ui.section("Help", ui.link("Order", to=order, key=State.ui_visit))], "fixed"),
-                          ([ui.section("Help", ui.text("Ask us"))], "ui.link"),
-                          ([ui.section("Help", waiting, ui.link("Search", to=search))], "one function"),
-                          ([ui.section("Help", ui.link("Search", to=search), collapsed=True)], "collapsed=")):
+        for nav, says in (([ui.section("Orders", ui.link("Search", to=search))], "ui.section is a titled part"),
+                          ({"Help": [ui.link("Order", to=order, key=State.ui_visit)]}, "fixed"),
+                          ({"Help": [ui.text("Ask us")]}, "ui.link"),
+                          ({"Help": ui.section("Help", ui.link("Search", to=search))}, "write"),
+                          ({"Help": [waiting, ui.link("Search", to=search)]}, "ui.link")):
             with self.assertRaises((TypeError, ValueError), msg=f"{nav!r}") as caught:
                 ui.frame(nav=nav)
             self.assertIn(says, str(caught.exception))
@@ -163,7 +164,7 @@ class TestCluster01ek_FrameNavLinks(FrameCase):
         """
         orders, search, order, approvals = self.declare_pages()
         ui.reflex_page("/export", nav="Requests", title="Exports", badge=waiting)
-        ui.frame(nav=["Orders", ui.section("Requests", ui.link("Drafts", to=search, badge=drafts))])
+        ui.frame(nav={"Orders": [], "Requests": [ui.link("Drafts", to=search, badge=drafts)]})
         declare.finalize()
         _, module = compile_page("/orders", self.page_named("/orders")())
         for expected in ("ui_frame_counts", "rfds-side-nav-badge"):
@@ -184,14 +185,14 @@ class TestCluster01ek_FrameNavLinks(FrameCase):
             ui.page("/lonely", badge=waiting)
         self.assertIn("nav=", str(caught.exception))
         with self.assertRaises(TypeError) as caught:
-            ui.frame(nav=[ui.section("Requests", ui.link("Drafts", to=search, badge=lambda: 3))])
+            ui.frame(nav={"Requests": [ui.link("Drafts", to=search, badge=lambda: 3)]})
         self.assertIn("def ", str(caught.exception), "it says how to write a function of the user")
 
     # -- 1.1006 --------------------------------------------------------
     def test_1_1006_a_per_user_section_lists_what_its_function_returns(self) -> None:
         """
         Scenario 1.1006: a section whose entries come from a function of the user.
-        Given: ui.section("Favourites", favourites) where favourites(user) returns ui.links to a record
+        Given: nav={..., "Favourites": favourites} where favourites(user) returns ui.links to a record
                page, an outside address and a forged link with requires=.
         When:  a page is compiled, and the frame is decided for anna and carl.
         Then:  the compiled navigation repeats the server's links under the heading, hidden while there
@@ -207,7 +208,7 @@ class TestCluster01ek_FrameNavLinks(FrameCase):
             return [ui.link("Order 7 (Müller)", to=order, key=7), ui.link("Wiki", href="https://wiki.example.com"),
                     ui.link("Secret", to=search, requires=ui.read("lex_app.Order"))]
 
-        ui.frame(nav=["Orders", "Requests", ui.section("Favourites", favourites)])
+        ui.frame(nav={"Orders": [], "Requests": [], "Favourites": favourites})
         declare.finalize()
         _, module = compile_page("/orders", self.page_named("/orders")())
         for expected in ("ui_frame_links", "Favourites", "rfds-side-nav-link"):
@@ -240,8 +241,9 @@ class TestCluster01ek_FrameNavLinks(FrameCase):
         def team():
             return _about("Team")
 
-        ui.frame(nav=["Orders", "Requests", ui.section("More", ui.link("Search", to=search, requires=ui.read("lex_app.Report")),
-                                           ui.link("Reports", to=reports), ui.link("Team 7", to=team, key=7))])
+        ui.frame(nav={"Orders": [], "Requests": [],
+                      "More": [ui.link("Search", to=search, requires=ui.read("lex_app.Report")),
+                               ui.link("Reports", to=reports), ui.link("Team 7", to=team, key=7)]})
         declare.finalize()
         anna = asyncio.run(decided(user="anna", grants=["lex_app.Report:read"]))
         self.assertEqual(len(anna["shown"]), 3, f"all three for anna: {anna['shown']}")
@@ -274,3 +276,103 @@ class TestCluster01ek_FrameNavLinks(FrameCase):
             with self.assertRaises(PageError, msg=f"{kwargs}") as caught:
                 ui.link("Open", href="https://example.com", **kwargs).build(Build(page="p", route="/p"))
             self.assertIn(says, str(caught.exception))
+
+
+
+class TestCluster01ek_UserLinksAreNoArea(FrameCase):
+    """1.1110: the user's own links never take the place of an area's pages."""
+
+    # -- 1.1110 --------------------------------------------------------
+    def test_1_1110_a_per_user_section_named_like_an_area_with_pages_is_refused(self) -> None:
+        """
+        Scenario 1.1110: a function of the user under the name of an area that has pages (review 2, I-2:
+        the area's pages silently left the navigation).
+        Given: nav={"Orders": favourites} -- a function of the user -- and a page in Orders: declared
+               before the frame, after it, and a raw page in it.
+        When:  each is declared.
+        Then:  each is refused, naming the page, the area and the function, and saying to give one of the
+               two sections another name; a per-user section with a name of its own is drawn as before.
+        """
+        def favourites(user):
+            return [ui.link("Wiki", href="https://wiki.example.com")]
+
+        @ui.page("/orders", nav="Orders")
+        def orders():
+            return _about("Orders")
+
+        with self.assertRaises(ValueError) as before:
+            ui.frame(nav={"Orders": favourites})
+        message = str(before.exception)
+        for words in ("/orders", "'Orders'", "favourites", "another name"):
+            self.assertIn(words, message, f"the refusal says {words!r}")
+        with patch.object(shell, "_NAV", []):
+            ui.frame(nav={"Orders": favourites})
+            with self.assertRaises(ValueError) as after:
+                @ui.page("/orders/new", nav="Orders")
+                def new_order():
+                    return _about("New order")
+            self.assertIn("/orders/new", str(after.exception))
+            with self.assertRaises(ValueError) as raw:
+                ui.reflex_page("/orders/export", nav="Orders", title="Export")
+            self.assertIn("/orders/export", str(raw.exception))
+        ui.frame(nav={"Orders": [], "Orders (mine)": favourites})
+        declare.finalize()
+        layout = shell.nav_layout()
+        self.assertEqual([getattr(one, "label_default", None) or getattr(one, "title", None) for one in layout[1:]],
+                         ["Orders", "Orders (mine)"], "the area keeps its pages; the user's links follow")
+
+
+
+class TestCluster01ek_UserLinksFollowTheirPages(FrameCase):
+    """1.1118: a per-user link leads only to a page the user may open; a listed entry is a page's."""
+
+    # -- 1.1118 --------------------------------------------------------
+    def test_1_1118_user_links_are_guarded_and_permissions_are_read_when_needed(self) -> None:
+        """
+        Scenario 1.1118: review 2, minor.
+        Given: a per-user section whose function returns a link to a page anna may open (team 7, by a
+               rule asked with the link's value), one to a page behind a permission she lacks, and an outside
+               address; a frame with only fixed links.
+        When:  the frame is decided for anna; for the fixed frame; a page with route arguments is given badge=.
+        Then:  anna's section holds team 7 and the outside address, not the page she may not open; the
+               fixed frame reads no permissions (nothing needs them); badge= on a page with route arguments
+               is refused, saying it is never listed and where the count goes.
+        """
+        @ui.page("/orders", nav="Orders")
+        def orders():
+            return _about("Orders")
+
+        @ui.page("/reports", requires=ui.read("lex_app.Report"))
+        def reports():
+            return _about("Reports")
+
+        @ui.page("/teams/[key]", requires=team_of)
+        def team():
+            return _about("Team")
+
+        def mine(user):
+            return [ui.link("Team 7", to=team, key=7), ui.link("Reports", to=reports),
+                    ui.link("Wiki", href="https://wiki.example.com")]
+
+        ui.frame(nav={"Orders": [], "Mine": mine})
+        declare.finalize()
+        anna = asyncio.run(decided(user="anna"))
+        self.assertEqual([one["label"] for one in anna["links"]["Mine#"]], ["Team 7", "Wiki"])
+        self.assertIn(("team_of", "anna", {"key": "7"}), CALLED, "the page's rule, asked with the link's value")
+
+        from lex.lex_app.reflex.ui import context
+
+        ui.frame(nav={"Orders": [ui.link("Wiki", href="https://wiki.example.com")]})
+        read: list = []
+        with_permissions = context.with_permissions
+
+        async def counted(session):
+            read.append(session.user.id)
+            return await with_permissions(session)
+
+        with patch.object(context, "with_permissions", counted):
+            asyncio.run(decided(user="anna"))
+        self.assertEqual(read, [], "nothing needed the user's permissions")
+        with self.assertRaises(ValueError) as caught:
+            ui.page("/orders/[key]", nav="Orders", badge=waiting)
+        self.assertIn("never listed", str(caught.exception))

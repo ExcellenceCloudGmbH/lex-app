@@ -12,16 +12,17 @@ from __future__ import annotations
 import dataclasses
 import datetime
 import decimal
-import itertools
 import time
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote
 
 from lex.lex_app.reflex.ui import handlers, results
 from lex.lex_app.reflex.ui.state import State
 
 #: How long the page waits between two readings of a running calculation.
 POLL_SECONDS = 1.0
+#: The run's log is read every this many readings of the record, for the line the progress shows.
+LOG_EVERY = 3
 
 IN_PROGRESS, SUCCESS, ERROR = "IN_PROGRESS", "SUCCESS", "ERROR"
 CANCELLED, ABORTED, NOT_CALCULATED = "CANCELLED", "ABORTED", "NOT_CALCULATED"
@@ -38,6 +39,7 @@ class Plan:
     model: Any
     keys: tuple[str, ...]
     requires: tuple = ()
+    route: str = "/"                    # the page's route, as declared: where a run's address is built
 
 
 def payload(values: dict) -> dict:
@@ -71,9 +73,13 @@ def newest_line(log: list) -> str:
     return ""
 
 
-def _here(state: Any) -> str:
-    """The path of the page the browser is on, without its query."""
-    return urlsplit(handlers._location(state)).path or "/"
+def _here(state: Any, route: str) -> str:
+    """The page's own address: its route, with its route values from the page's parameters -- never the
+    browser's path, which the browser could have changed."""
+    import re
+
+    return re.sub(r"\[([A-Za-z_][A-Za-z0-9_]*)\]",
+                  lambda found: quote(str(state.params.get(found.group(1), "")), safe=""), route) or "/"
 
 
 def _fill(state: Any, plan: Plan, record: dict) -> None:
@@ -98,20 +104,34 @@ def _read(state: Any, plan: Plan, key: Any) -> dict:
         raise
 
 
-def make_state(plan: Plan, counter: Any) -> type:
+def state_name(plan: Plan, identity: tuple) -> str:
+    """The state's class name, from what the page is (its model, title, fields and requires=), never from
+    the order pages are built in: Reflex finds a stored state's class by its name in every process."""
+    import hashlib
+
+    from lex.lex_app.reflex.data import stable
+
+    digest = hashlib.sha256(repr(stable((plan.model._meta.label_lower, plan.keys, plan.route, identity)))
+                            .encode()).hexdigest()[:12]
+    return f"Calculation_{plan.model._meta.model_name}_{digest}"
+
+
+def make_state(plan: Plan, identity: tuple) -> type:
     """A ``ui.State`` for one calculation page, with its handlers: ``calculate``, ``open``, ``follow``,
     ``download`` (a file of the run) and ``stop``."""
     import reflex as rx  # noqa: F401 - Reflex builds the class's vars from its annotations
 
-    name = f"Calculation_{plan.model._meta.model_name}_{next(counter)}"
+    name = state_name(plan, identity)
     pk = plan.model._meta.pk.name
 
     def calculate(self, values):
         record = self.api.create(plan.model, payload(values))
         key = record.get(pk)
-        if record.get("is_calculated") != IN_PROGRESS:          # a calculate_on_create model started on its create
+        # A calculate_on_create model was started by its create: the answer is IN_PROGRESS, or -- a fast
+        # run -- already SUCCESS or ERROR. Only a record nothing started is started here.
+        if record.get("is_calculated") in (None, "", NOT_CALCULATED):
             self.api.calculate(plan.model, key)
-        return results.goto(f"{_here(self)}?{RUN}={quote(str(key), safe='')}")
+        return results.goto(f"{_here(self, plan.route)}?{RUN}={quote(str(key), safe='')}")
 
     def open(self):  # noqa: A001 - the page's load, named as every page's
         key = self.params.get(RUN)
@@ -124,12 +144,15 @@ def make_state(plan: Plan, counter: Any) -> type:
             self.run_log = list(self.api.log(plan.model, self.run_id))
 
     def follow(self):
+        note, polls = "", 0
         while True:
             record = _read(self, plan, self.run_id)
             _fill(self, plan, record)
             if self.run_status != IN_PROGRESS:
                 break
-            note = newest_line(self.api.log(plan.model, self.run_id))
+            if polls % LOG_EVERY == 0:                  # the log, for its newest line: every few readings
+                note = newest_line(self.api.log(plan.model, self.run_id)) or note
+            polls += 1
             yield results.progress(0, note or results.message("lex.ui.calculation.running", "Running"))
             time.sleep(POLL_SECONDS)
         self.run_log = list(self.api.log(plan.model, self.run_id))
@@ -193,13 +216,12 @@ def make_state(plan: Plan, counter: Any) -> type:
 
 
 _STATES: dict[tuple, type] = {}
-_COUNTER = itertools.count(1)
 
 
 def state_for(plan: Plan, identity: tuple) -> type:
     """The state of the calculation page ``identity`` names (its model, title and fields); one per page."""
-    key = (plan.model._meta.label_lower, plan.keys, identity)
+    key = (plan.model._meta.label_lower, plan.keys, plan.route, identity)
     found = _STATES.get(key)
     if found is None:
-        found = _STATES[key] = make_state(plan, _COUNTER)
+        found = _STATES[key] = make_state(plan, identity)
     return found

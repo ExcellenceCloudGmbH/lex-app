@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1091
+max_scenario: 1122
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2530,10 +2530,10 @@ letters:
       the start-up route check refuses a dynamic route argument with the name of a field or computed var of any state, lex.ui's or plain Reflex's, exactly as Reflex's `_check_overwritten_dynamic_args` refuses it when it adds the decorated pages at export; each refusal is pinned against Reflex's own check, and what Reflex lets through (a backend field, an event handler) starts. These tests fail on green tests and a red frontend build, or a start-up that refuses an app Reflex would build.
   ds:
     title: 'lex.ui forms: a choice searched on the server -- one record among thousands, as the user types'
-    scenarios: 1.900-1.903, 1.912, 1.917, 1.918
+    scenarios: '1.900-1.903, 1.912, 1.917, 1.918, 1.1109'
     status: complete
     tests:
-      pass: 7
+      pass: 8
       skip: 0
       xfail: 0
     note: >-
@@ -2610,20 +2610,20 @@ letters:
       `@ui.job(limit=2)`: at most two runs at once in the server process, for all users; a further press refused at once with a fixed sentence (toast and ui.failed, also for a form's job), before a form's values are judged; the place given back however a run ends, also one reporting through self.progress. These tests fail on a third run starting beside two, a refused press that changes the page, or a place never given back.
   dx:
     title: 'lex.ui forms: a result kept across visits -- ui.form(keep=True)'
-    scenarios: 1.930-1.935, 1.936, 1.937, 1.939
+    scenarios: '1.930-1.935, 1.936, 1.937, 1.939, 1.1101'
     status: complete
     tests:
-      pass: 9
+      pass: 10
       skip: 0
       xfail: 0
     note: >-
       `ui.form(..., keep=True)`: the result flag survives a new visit; back while the job runs its progress, back after it the result; a kept private result that is gone is said under the form; a kept form shows its last failure in place and keeps its refusal above its submit button, not twice; with tabs=True a tab's table reads the kept private value; a searched choice's earlier offer is still accepted; what was typed returns through value=. These tests fail on a kept form that comes back empty, a result shown over data that is gone, or a failure while away that is never shown.
   eb:
     title: 'lex.ui frame: the navigation in areas, in the project''s order, and the way to sign out'
-    scenarios: 1.960-1.964
+    scenarios: '1.960-1.964, 1.1102, 1.1112'
     status: complete
     tests:
-      pass: 5
+      pass: 7
       skip: 0
       xfail: 0
     note: >-
@@ -2640,10 +2640,10 @@ letters:
       The frame shows RFDS's breadcrumbs: the area, the listed page whose table opens the page (else whose button or link leads to it), the page with a state title. These tests fail on a page that loses its trail, a parent that is the wrong list, or a record title that breaks the page.
   ed:
     title: 'lex.ui frame: a project''s no-access sentence and way out, and its own access rules'
-    scenarios: '1.968-1.973, 1.1090'
+    scenarios: '1.968-1.973, 1.1090, 1.1104'
     status: complete
     tests:
-      pass: 7
+      pass: 8
       skip: 0
       xfail: 0
     note: >-
@@ -2660,20 +2660,20 @@ letters:
       `opened(user, page)` after the page's required loads (at once without them), on a worker thread, not awaited; the page's route, address, title as the load left it, area and values; not for a refused or failed page; failures logged. These tests fail on a page that waits for the bookkeeping, an entry for a refused or failed page, or a recently-used entry without the record's name.
   ef:
     title: 'lex.ui calculation pages: the page kind, its form, a run started as the user -- ui.calculation'
-    scenarios: 1.980-1.984, 1.978
+    scenarios: '1.980-1.984, 1.978, 1.1105, 1.1107, 1.1115'
     status: complete
     tests:
-      pass: 6
+      pass: 9
       skip: 0
       xfail: 0
     note: >-
       `ui.calculation(Model, title=, fields=/steps=)`: the form's values become a record created through lex-app's create view as the user and its run is started by lex-app's Calculate request (`self.api.calculate`, the grid's run id), in-process with Celery off and handed to a worker with Celery on; the browser goes to `?run=<key>`; a refusal of the model's permission_create is the form's; `self.api.log` reads the newest run's log. These tests fail on a record created past the model's permissions, a page that waits for the run, or a run whose log the grid cannot find.
   eg:
     title: 'lex.ui calculation pages: one run, followed until it ends -- its result, its error, its log'
-    scenarios: 1.985-1.990, 1.999
+    scenarios: '1.985-1.990, 1.999, 1.1116'
     status: complete
     tests:
-      pass: 7
+      pass: 8
       skip: 0
       xfail: 0
     note: >-
@@ -2700,30 +2700,30 @@ letters:
       A FileField of the run alone in `result=` is a button that downloads the run's file through lex-app's download view as the user (`self.api.file`), shown only when the run has one; a forged field refused. Stop (to users who may edit, asking "Stop this run?") is lex-app's cancel: a run on a worker is revoked and CANCELLED and the page stops following; a run in lex-app's own process cannot be stopped and the page says so; after the end, "The run has already ended." The whole page declared with @ui.page compiles. These tests fail on a file downloaded past lex-app's checks, a Stop that pretends, or a page left running after a stop.
   ej:
     title: 'lex.ui frame: what a user may see in the navigation, decided on the server'
-    scenarios: 1.1000-1.1003, 1.1022
+    scenarios: '1.1000-1.1003, 1.1022, 1.1100, 1.1108'
     status: complete
     tests:
-      pass: 5
+      pass: 7
       skip: 0
       xfail: 0
     note: >-
       Guarded entries carry their route as the key of `ui_frame_shown`, the server's answer; the shell's mount sends `ui_frame_open` (background). A raw page's `requires=` now takes rules too. These tests fail on an entry the user may not open, a rule that cannot hide its entry, an answer taken from the browser's permissions, or a failing rule that fails open.
   ek:
     title: 'lex.ui frame: navigation beyond the declared pages -- sections of links, counts, per-user entries, a foot'
-    scenarios: 1.1004-1.1008
+    scenarios: '1.1004-1.1008, 1.1110, 1.1118'
     status: complete
     tests:
-      pass: 5
+      pass: 7
       skip: 0
       xfail: 0
     note: >-
       A function of the user stands for every value the frame shows; it runs on a worker thread when a page opens, once per event; its failure is logged and leaves its part empty. These tests fail on a section lost from the navigation, a count or a per-user entry decided in the browser, a link drawn for a user who may not open it, or `badge=`/`requires=`/`icon=` accepted in a page.
   el:
     title: 'lex.ui frame: the header band -- a search box, a status hint, a bell with a count'
-    scenarios: 1.1009-1.1011
+    scenarios: '1.1009-1.1011, 1.1117'
     status: complete
     tests:
-      pass: 3
+      pass: 4
       skip: 0
       xfail: 0
     note: >-
@@ -2750,10 +2750,10 @@ letters:
       The banner's words from a function of the user are `ui_frame_values["banner"]`. These tests fail on a banner lost, an empty banner shown, a banner for the wrong user, a failing function shown as an error, or a banner given as anything but one message.
   eo:
     title: 'lex.ui frame: a page the user may not open looks like a missing one -- refused_as_missing'
-    scenarios: 1.1016-1.1019
+    scenarios: '1.1016-1.1019, 1.1111'
     status: complete
     tests:
-      pass: 5
+      pass: 6
       skip: 0
       xfail: 0
     note: >-
@@ -2780,10 +2780,10 @@ letters:
       Fails on a search sent to created_by__icontains (the bug: it was the first text field of every LexModel).
   er:
     title: 'lex.ui tables: the rows a table shows reach the browser and are never stored with the state'
-    scenarios: 1.1024-1.1025
+    scenarios: '1.1024-1.1025, 1.1103, 1.1106'
     status: complete
     tests:
-      pass: 2
+      pass: 4
       skip: 0
       xfail: 0
     note: >-
@@ -2800,10 +2800,10 @@ letters:
       The name is lex-app's own `<fk>__short_description` (str of the related record). These tests fail on an id shown in a foreign key's column or fact, a sort sent by the name key, or the id lost from the row.
   et:
     title: 'lex.ui: every record through self.api.all, and a model table filtered by a range of days'
-    scenarios: 1.1028-1.1029
+    scenarios: '1.1028-1.1029, 1.1114'
     status: complete
     tests:
-      pass: 2
+      pass: 3
       skip: 0
       xfail: 0
     note: >-
@@ -2820,10 +2820,10 @@ letters:
       1.960 still holds (its typo is a lex.ui page's). These tests fail on an unlisted raw area refused, areas out of order, or a lex.ui typo accepted.
   ev:
     title: 'lex reflex check follows the project''s own imports from its dashboards'
-    scenarios: 1.1031
+    scenarios: '1.1031, 1.1122'
     status: complete
     tests:
-      pass: 1
+      pass: 2
       skip: 0
       xfail: 0
     note: >-
@@ -2840,30 +2840,30 @@ letters:
       The opened state is RFDS's client_state (rfdsLexopened<n>). These tests fail on a closed section's chart mounted at once, its table deferred, or a state title or actions accepted where they cannot show.
   ex:
     title: 'lex.ui: a handler brings a section or a table into view -- ui.scroll_to'
-    scenarios: 1.1034
+    scenarios: '1.1034, 1.1120'
     status: complete
     tests:
-      pass: 1
+      pass: 2
       skip: 0
       xfail: 0
     note: >-
       1cm's 1.783 lists scroll_to among the public names (a new name). These tests fail on an id mismatch between the result and the built part, or a wrong argument accepted.
   ey:
     title: 'lex.ui pages: a tab shown only while the state says so -- visible= a state value on a tab'
-    scenarios: 1.1035
+    scenarios: '1.1035, 1.1121'
     status: complete
     tests:
-      pass: 1
+      pass: 2
       skip: 0
       xfail: 0
     note: >-
       1ea's 1.952 changed its given: a state value on a later tab is now accepted, so the case is a state value on the first tab, plus visible= that is neither; 1cs's 1.800 expects the record refusal's added pointer to tabs=True.
   fa:
     title: 'lex.ui pages: more than four tables on a record page refused in lex.ui''s words, with the way out'
-    scenarios: 1.1037
+    scenarios: '1.1037, 1.1119'
     status: complete
     tests:
-      pass: 1
+      pass: 2
       skip: 0
       xfail: 0
     note: >-
@@ -2880,10 +2880,10 @@ letters:
       The Clear carries data-lex-clear=<key>. These tests fail on a several-choice field without its Clear, a Clear always shown, or a Clear that does not empty the browser's value.
   fb:
     title: 'ui.testing: drive a searched field, seed a private value as gone, test against lex-app''s API in-process'
-    scenarios: 1.1038-1.1040
+    scenarios: '1.1038-1.1040, 1.1113'
     status: complete
     tests:
-      pass: 3
+      pass: 4
       skip: 0
       xfail: 0
     note: >-

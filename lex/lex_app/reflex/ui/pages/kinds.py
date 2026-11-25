@@ -106,8 +106,9 @@ class Section(Part):
         if opened is not None:
             # A click on the closed section can only be on its summary: the content mounts from then on.
             extra["on_click"] = opened.set_value(True)
-        if isinstance(self.title, str):
-            extra["id"] = section_anchor(self.title)         # ui.scroll_to("<title>") brings it into view
+        if isinstance(self.title, str):                   # ui.scroll_to("<title>") brings it into view
+            extra["id"] = _section_ids([*ctx.anchors, self.title])[-1]
+            ctx.anchors.append(extra["id"])
         return rfds.section(content, title=title, collapsible=self.collapsed, default_open=not self.collapsed,
                             **extra)
 
@@ -219,25 +220,38 @@ def _rfds(ctx: Build, build: Callable[[], Any]) -> Any:
 
 def hide_tabs(component: Any, shown: dict) -> Any:
     """``component`` (RFDS's tabs, or a page holding them) with each tab of ``shown`` drawn only while its
-    state value is true: the tab's trigger and its panel, found by the tab's value.
+    state value is true: the tab's trigger and its panel, found by the tab's value. While the open tab's
+    value turns false, the first tab shows instead (its panel would be gone, and nothing shown).
 
     RFDS's ``TabSpec`` hides a tab by a permission only; a tab shown by state (a chart tab only when the
-    result has figures) is the same tab under ``rx.cond``.
+    result has figures) is the same tab under ``rx.cond``. This reads how RFDS builds its tabs (a trigger
+    marked ``data-rfds-tab-value``, a ``TabsContent`` panel, a ``TabsRoot`` holding the open tab's value);
+    when RFDS builds them otherwise it stops with a sentence, never silently showing a tab.
     """
     if not shown:
         return component
+    found: dict = {ident: [] for ident in shown}
+    order: list = []                    # every tab's value, in the order of its trigger
+    roots: list = []
 
     def tab_of(node: Any) -> str | None:
         attrs = getattr(node, "custom_attrs", None) or {}
         value = attrs.get("data-rfds-tab-value")
-        if isinstance(value, str) and value in shown:
-            return value
+        if isinstance(value, str):
+            order.append(value)
+            if value in shown:
+                found[value].append("trigger")
+                return value
         if type(node).__name__ == "TabsContent":
             text = str(getattr(node, "value", "")).strip('"')
-            return text if text in shown else None
+            if text in shown:
+                found[text].append("panel")
+                return text
         return None
 
     def walk(node: Any) -> None:
+        if type(node).__name__ == "TabsRoot":
+            roots.append(node)
         children = getattr(node, "children", None)
         if not isinstance(children, list):
             return
@@ -249,6 +263,18 @@ def hide_tabs(component: Any, shown: dict) -> Any:
                 walk(child)
 
     walk(component)
+    wrong = {ident: parts for ident, parts in found.items() if sorted(parts) != ["panel", "trigger"]}
+    if wrong or len(roots) != 1 or not order:
+        raise RuntimeError(f"lex.ui: RFDS's tabs are not built as lex.ui reads them (tab parts found: {found}, "
+                           f"tab roots: {len(roots)}), so a tab shown by state cannot be hidden. lex.ui must be "
+                           "updated for this version of RFDS.")
+    root, first = roots[0], order[0]
+    value = getattr(root, "value", None)
+    if isinstance(value, rx.Var):
+        effective = value
+        for ident, condition in shown.items():
+            effective = rx.cond((value == ident) & ~condition, first, effective)
+        root.value = effective
     return component
 
 
@@ -269,6 +295,37 @@ def tab_visible(at: Build, part: "Section", first: bool) -> tuple[Any, Any]:
     raise at.fail("`visible=` on a tab takes a permission or a state value.",
                   "Write `visible=ui.read(Model)` to hide the tab from some users, or `visible=State.has_chart` to "
                   "show it only while the state says so.")
+
+
+#: What a table repeated by ``ui.each`` counts as: any number of tables, more than any limit.
+MANY = 10**6
+
+
+def tables_in(content: Any) -> int:
+    """How many tables ``content`` holds as RFDS counts them: those inside other parts too, every case of a
+    ``ui.switch`` (each is on the page, shown or not), and :data:`MANY` for a table ``ui.each`` repeats."""
+    seen: set[int] = set()
+
+    def count(part: Any) -> int:
+        if isinstance(part, (list, tuple)):
+            return sum(count(one) for one in part)
+        if isinstance(part, tables.Table):
+            return 1
+        if isinstance(part, vocab.Switch):
+            return sum(count(one) for one in part.cases.values())
+        if isinstance(part, vocab.Each):
+            try:
+                made = part.render(rx.Var("lexItem", _var_type=dict))
+            except Exception:  # noqa: BLE001 - not a table it can make here: counted when built
+                return 0
+            return MANY if count(made) else 0
+        if (not dataclasses.is_dataclass(part) or isinstance(part, (type, rx.Var, rx.Component))
+                or id(part) in seen):
+            return 0
+        seen.add(id(part))
+        return sum(count(getattr(part, field.name)) for field in dataclasses.fields(part))
+
+    return count(content)
 
 
 def section_anchor(title: str) -> str:
@@ -417,13 +474,15 @@ class Record(Kind):
         """RFDS's limit of tables on one record page, said in lex.ui's words, with what to do instead."""
         from rfds.templates import MAX_GRID_TABLES
 
-        holding = [(part.title, sum(isinstance(one, tables.Table) for one in part.content)) for part in parts]
+        holding = [(part.title, tables_in(part.content)) for part in parts]
         count = sum(n for _, n in holding)
         if count <= MAX_GRID_TABLES:
             return
-        where = ", ".join(f"`{title}`" + (f" ({n})" if n > 1 else "") for title, n in holding if n)
+        where = ", ".join(f"`{title}`" + (" (one for each item of ui.each)" if n >= MANY else f" ({n})" if n > 1
+                                          else "") for title, n in holding if n)
+        many = "any number of" if count >= MANY else str(count)
         raise ctx.at("sections").fail(
-            f"the page has {count} tables (in {where}), and a record page shows at most {MAX_GRID_TABLES} "
+            f"the page has {many} tables (in {where}), and a record page shows at most {MAX_GRID_TABLES} "
             f"-- RFDS's rule for one page, with tabs=True too.",
             "Give the further tables a page of their own -- a `@ui.page(\"/orders/[key]/invoices\")` whose "
             "tables' `where=` name this record -- and lead there from a section of this one: "

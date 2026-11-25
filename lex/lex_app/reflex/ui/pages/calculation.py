@@ -16,7 +16,7 @@ import reflex as rx
 from lex.lex_app.reflex.ui import calculations as runtime
 from lex.lex_app.reflex.ui import guard
 from lex.lex_app.reflex.ui.pages import forms, kinds, vocab
-from lex.lex_app.reflex.ui.pages.parts import Build, Part, called, say, shown
+from lex.lex_app.reflex.ui.pages.parts import Build, PageError, Part, called, say, shown
 
 #: The fields of every lex-app model and of every calculation, which a form does not set.
 _MANAGED = ("is_calculated", "created_at", "created_by", "edited_at", "edited_by")
@@ -99,20 +99,36 @@ class Calculation(kinds.Kind):
     history: Any = None
     actions: tuple = ()
 
-    def __post_init__(self) -> None:
-        from lex.lex_app.reflex.ui.pages import declare
+    #: The page's state and its load: lex-app's, made when the page is built (:meth:`_bind`).
+    state: Any = dataclasses.field(default=None, init=False)
+    load: Any = dataclasses.field(default=None, init=False)
 
+    def _bind(self, ctx: Build) -> None:
+        """The page's state, whose handlers require what the page does: ``ctx.requires``, the ``requires=``
+        of the ``@ui.page`` being built. Outside a ``@ui.page`` no page's requirements are known, and the
+        handlers would guard nothing: refused."""
+        if ctx.requires is None or ctx.route is None:
+            raise ctx.fail("`ui.calculation` is built outside a `@ui.page`, so no page's `requires=` is known, and "
+                           "its handlers -- lex-app's, which create records and start runs -- would guard nothing.",
+                           "Return it from a page function: `@ui.page(\"/reports/regions\", "
+                           "requires=ui.read(RegionReport))`.")
         every = [*self.fields, *(one for step in self.steps for one in getattr(step, "fields", ()))]
         keys = tuple(getattr(one, "key", "") for one in every)
-        # The handlers are lex-app's: the page's requires= (its permissions and the project's rules) is theirs.
-        requires = declare.page_requires()
+        requires = tuple(ctx.requires)
         identity = (str(self.title), tuple((getattr(one, "key", ""), getattr(one, "is_a", ""),
                                             bool(getattr(one, "required", False))) for one in every), requires)
-        self.state = runtime.state_for(runtime.Plan(self.model, keys, requires), identity)
+        self.state = runtime.state_for(runtime.Plan(self.model, keys, requires, ctx.route), identity)
         self.load = self.state.open
 
     def loads(self) -> tuple[list, list]:
+        if self.load is None:
+            raise PageError(f"ui.calculation({self.model.__name__}): its load is known once the page is built, "
+                            "and it is built by a @ui.page: return it from a page function.")
         return [self.load], []
+
+    def build(self, ctx: Build) -> rx.Component:
+        self._bind(ctx)
+        return super().build(ctx)
 
     def view_crumb(self) -> tuple:
         """The run's view as one more breadcrumb under the page: shown while a run is open, its name."""
@@ -312,7 +328,8 @@ def calculation(model: Any, *, title: Any, fields: Any = (), steps: Any = (), re
     in its own process or on a Celery worker. A refusal of the API is the form's, above the button.
     The form is shown to users who may create the model. The page's handlers are lex-app's, so the
     page's ``requires=`` -- its permissions and a project's ``@ui.rule`` -- is theirs too: a user the
-    page refuses cannot send its events either.
+    page refuses cannot send its events either. It is a page of its own: built anywhere but a
+    ``@ui.page`` (a ``@ui.dashboard``) it is refused, for its handlers would guard nothing there.
     """
     from django.db import models
 

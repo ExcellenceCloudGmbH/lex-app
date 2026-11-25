@@ -412,11 +412,23 @@ def sign_out_url(state: Any) -> str:
     return f"{_backend_origin_of(state)}{LOGOUT_PATH}"
 
 
-def navigate(url: str) -> Any:
-    """An event that loads ``url`` as a whole page, in the frame the dashboard is in."""
+#: Where Reflex keeps a browser tab's client token (``TOKEN_KEY`` in its ``state.js``): the key of the
+#: tab's states on the server.
+TAB_TOKEN_KEY = "token"
+
+
+def navigate(url: str, *, new_tab_token: bool = False) -> Any:
+    """An event that loads ``url`` as a whole page, in the frame the dashboard is in.
+
+    ``new_tab_token``: the tab forgets its client token first, so the page loaded next starts with a new
+    one -- and with new states: nothing a state held for the user signing out is there for the next.
+    """
     import reflex as rx
 
-    return rx.call_script(f"window.location.assign({json.dumps(url)})")
+    script = f"window.location.assign({json.dumps(url)})"
+    if new_tab_token:
+        script = f"window.sessionStorage.removeItem({json.dumps(TAB_TOKEN_KEY)}); {script}"
+    return rx.call_script(script)
 
 
 def marker_cleanup(state: Any) -> Any:

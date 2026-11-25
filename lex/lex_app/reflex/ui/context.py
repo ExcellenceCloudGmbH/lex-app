@@ -320,10 +320,13 @@ class Api:
             ordering: str | None = None, fields: Sequence[str] | None = None) -> Rows:
         """Every record of a model the user may read, as plain rows: for a ``@ui.rows`` handler.
 
-        Reads page after page in a stable order (``ordering``, then the key), so no row is read
-        twice or missed. More than :data:`ALL_LIMIT` rows is refused in words, asking the user to
-        narrow them: ``filters=`` is how a handler reads fewer. A table over the handler then
-        searches, filters by date, exports and totals every row::
+        Reads page after page in a stable order (``ordering``, then the key). The pages are read one
+        after another, not at one moment: a record created or deleted meanwhile can shift a page, so a
+        row may then be read twice or missed (a table over it shows it on the next read). More than
+        :data:`ALL_LIMIT` rows is refused in words, asking the user to narrow them: ``filters=`` is how a
+        handler reads fewer. A table over the handler then searches, filters by date, exports and
+        totals every row; it reads them once, and turns pages, sorts and filters among them in the
+        server's memory until it is refreshed (``ui.refresh``) or the page opens again::
 
             @ui.rows
             def orders(self):

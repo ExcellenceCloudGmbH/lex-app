@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
-import contextvars
 import dataclasses
 import os
 from typing import Any, Callable
@@ -30,25 +28,6 @@ class Declared:
 
 #: Route -> the page declared for it, until :func:`finalize` hands it to lex-app.
 _DECLARED: dict[str, Declared] = {}
-
-#: The requires= of the page whose function lex-app is calling. A page kind whose handlers are
-#: lex-app's own (``ui.calculation``) gives them the page's requires=: the project cannot write it there.
-_PAGE_REQUIRES: contextvars.ContextVar[tuple] = contextvars.ContextVar("lex_ui_page_requires", default=())
-
-
-def page_requires() -> tuple:
-    """The requires= of the page being declared or built (``()`` outside one, or for a page without)."""
-    return _PAGE_REQUIRES.get()
-
-
-@contextlib.contextmanager
-def _declaring(requires: tuple):
-    token = _PAGE_REQUIRES.set(tuple(requires))
-    try:
-        yield
-    finally:
-        _PAGE_REQUIRES.reset(token)
-
 
 _PAGES_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -134,7 +113,7 @@ def page(route: str, *, nav: str | None = None, icon: str | None = None, require
     """Declare a page: its address, its place in the navigation, who may see it.
 
     ``nav`` names the page's area in the navigation (``nav="Orders"``); the page is listed there, by
-    its title, after the pages declared before it. ``ui.frame(nav=[...])`` gives the areas' order.
+    its title, after the pages declared before it. ``ui.frame(nav={...})`` gives the areas' order.
     A page with route arguments (``/orders/[key]``) is in its area -- its breadcrumbs say so -- but
     not listed: it opens from the page that leads to it. Without ``nav`` a page is reached by links
     only.
@@ -150,13 +129,14 @@ def page(route: str, *, nav: str | None = None, icon: str | None = None, require
     the navigation is drawn only for users who may open it, decided on the server (permissions and rules).
 
     ``badge=`` is a count beside the page's entry in the navigation ("Approvals  3"): a function of the
-    user, ``def waiting(user): ...``, which lex-app calls on the server when a page opens, or a
-    whole-number state value.
+    user, ``def waiting(user): ...``, which lex-app calls on the server when a page opens.
 
-    ``requires=`` and ``visible=`` decide what is shown, never what is allowed: a value a page
-    shows reaches the browser. What a user may read or change is enforced by each handler's own
-    ``requires=`` and by lex-app's API, which acts as the user. A page kind whose handlers are
-    lex-app's (``ui.calculation``) gives them the page's ``requires=``.
+    ``visible=`` decides what is shown, never what is allowed: a value a page shows reaches the
+    browser. What a user may read or change is enforced by each handler's own ``requires=`` and by
+    lex-app's API, which acts as the user. What lex-app reads or runs for the page itself follows the
+    page's ``requires=``: its tables read only for users it grants (their events can be sent by
+    name), and a page kind whose handlers are lex-app's (``ui.calculation``) gives them the page's
+    ``requires=``.
     """
     if not route.startswith("/"):
         raise ValueError(f"ui.page() routes start with '/', got {route!r}")
@@ -167,6 +147,12 @@ def page(route: str, *, nav: str | None = None, icon: str | None = None, require
     permissions, rules = _permission(route, requires)
     permission = permissions[0] if len(permissions) == 1 else (permissions or None)
     _badge(f"ui.page({route!r})", nav, badge)
+    if "[" in route and (badge is not None or icon is not None):
+        given = "badge=" if badge is not None else "icon="
+        raise ValueError(f"ui.page({route!r}): {given} belongs to the page's entry in the navigation, and a page "
+                         "with route arguments is never listed -- it opens from the page that leads to it (nav= "
+                         f"only places its breadcrumbs). Put {given} on that page: @ui.page(\"/orders\", "
+                         f"nav=..., {given}...).")
 
     def decorator(fn: Callable[[], Any]) -> Callable[[], Any]:
         known = _DECLARED.get(route)
@@ -195,10 +181,10 @@ def _badge(where: str, nav: Any, badge: Any) -> None:
     if not nav:
         raise ValueError(f"{where}: badge= is a count beside the page's entry in the navigation, and it has none. "
                          "Give its area too: nav=\"Requests\".")
-    if not isinstance(badge, rx.Var):
-        from lex.lex_app.reflex.ui.pages.frame import of_user
+    from lex.lex_app.reflex.ui.pages.frame import fixed_or_of_user, of_user
 
-        of_user(badge, f"{where}, badge=,")
+    fixed_or_of_user(badge, f"{where}, badge=,")
+    of_user(badge, f"{where}, badge=,")
 
 
 def finalize() -> None:
@@ -215,20 +201,20 @@ def finalize() -> None:
         if declared.done:
             continue
         name = declared.fn.__name__
-        with _declaring(declared.requires):
-            kind = declared.kind = _kind_of(declared.fn)
+        kind = declared.kind = _kind_of(declared.fn)
         title = kind.title
         listed = declared.nav if not declared.info.arguments else None
         if listed and not isinstance(title, str):
             raise PageError(f"Page `{name}`: a page listed in the navigation needs a fixed title.\n"
                             "Give the kind `title=\"...\"`, or leave `nav=` out.")
+        # Built first: every slot checked now (a wrong page stops the start), and what is bound to the page
+        # when it is built -- its requires= on lex-app's own handlers -- is there before its loads are read.
+        kind.build(Build(page=name, route=route, requires=declared.requires))
         required, optional = _loads(name, kind)
-        kind.build(Build(page=name, route=route))      # every slot checked now: a wrong page stops the start
 
         def body(fn: Callable[[], Any] = declared.fn, route: str = route,
                  requires: tuple = declared.requires) -> rx.Component:
-            with _declaring(requires):
-                return _kind_of(fn).build(Build(page=fn.__name__, route=route))
+            return _kind_of(fn).build(Build(page=fn.__name__, route=route, requires=requires))
 
         body.__name__ = name
         body.__qualname__ = declared.fn.__qualname__
@@ -353,6 +339,7 @@ def dashboard(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     def built(*args: Any) -> Any:
         kind = _kind_of(fn, *args)
+        component = kind.build(Build(page=fn.__name__, mounts=True))
         page_loads, part_loads = _loads(fn.__name__, kind)
         owners: dict[str, str] = {}
         for load in (*page_loads, *part_loads):
@@ -364,7 +351,7 @@ def dashboard(fn: Callable[..., Any]) -> Callable[..., Any]:
                                 "page appears, so one would clear what the other read. Give each load a state of "
                                 "its own, or read everything in one load.")
             owners[state] = handler
-        return kind.build(Build(page=fn.__name__, mounts=True))
+        return component
 
     built.__name__ = fn.__name__
     built.__qualname__ = fn.__qualname__

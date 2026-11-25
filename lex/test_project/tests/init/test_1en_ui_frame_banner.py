@@ -70,14 +70,15 @@ class TestCluster01en_FrameBanner(FrameCase):
     # -- 1.1014 --------------------------------------------------------
     def test_1_1014_the_banner_says_what_the_project_says_to_whom_it_concerns(self) -> None:
         """
-        Scenario 1.1014: a banner from a function of the user, a state value, a sentence.
+        Scenario 1.1014: a banner from a function of the user, a sentence; not a state value.
         Given: ui.frame(banner=ui.message(config_problem, tone="warning")); then a state value; then a
                fixed sentence.
         When:  a page is compiled, and the frame is decided for anna, carl and ben.
         Then:  RFDS's banner is in the shell's banner region (above the header) with the message's tone, shown while its sentence is
                not empty; anna's sentence is the function's; carl's is nothing (no banner); ben's failing
-               function is logged and shows no banner; a state value and a fixed sentence are shown as
-               the message shows them; the banner is not hidden inside lex-app's frame.
+               function is logged and shows no banner; a fixed sentence is shown as the message shows it;
+               a state value is refused (review 2: no page loads a state for the frame, so it would show
+               what the last page left there); the banner is not hidden inside lex-app's frame.
         """
         ui.frame(banner=ui.message(config_problem, tone="warning"))
         declare.finalize()
@@ -90,9 +91,9 @@ class TestCluster01en_FrameBanner(FrameCase):
             self.assertEqual(asyncio.run(banner_for("ben")), {})
         self.assertIn("config_problem", "\n".join(logged.output))
 
-        ui.frame(banner=ui.message(NoticeState.notice, tone="info"))
-        module = compile_page("/orders", self.page_named("/orders")())[1]
-        self.assertIn("notice", module, "a state value, shown while it is not empty")
+        with self.assertRaises(TypeError) as caught:
+            ui.frame(banner=ui.message(NoticeState.notice, tone="info"))
+        self.assertIn("function of the user", str(caught.exception), "a state value is refused, saying what to write")
         ui.frame(banner=ui.message("Maintenance tonight from 22:00.", tone="info"))
         self.assertIn("Maintenance tonight from 22:00.", compile_page("/orders", self.page_named("/orders")())[1])
         css = (JS_DIR / "lex_rfds.css").read_text()

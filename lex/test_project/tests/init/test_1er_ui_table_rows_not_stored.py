@@ -10,10 +10,10 @@ choices out of what Reflex stores; the browser gets them in the event's update, 
 stored state lost them reads them again when the page opens or reconnects (`restore`). A regression
 is a person's name in a state pickle, or a table that shows nothing after its state was stored.
 
-Cluster 1er -- scenarios 1.1024-1.1025. Type: U.
+Cluster 1er -- scenarios 1.1024-1.1025, 1.1103, 1.1106. Type: U.
 Covers: lex/lex_app/reflex/data.py (RowsNotStored, LexTableState), lex/lex_app/reflex/ui/pages/rows_table.py
 (LexRowsTableState, go, restore_events), lex/lex_app/reflex/ui/pages/tables.py (shown_on),
-lex/lex_app/reflex/ui/state.py (ui_open sends restore).
+lex/lex_app/reflex/ui/state.py (ui_open sends restore; ui_matches never stored).
 Run: python -m lex pytest lex/test_project/tests/init/test_1er_ui_table_rows_not_stored.py -v
 """
 
@@ -182,3 +182,122 @@ class TestCluster01er_TableRowsNotStored(SimpleTestCase):
         dropped, updates = asyncio.run(scenario())
         self.assertEqual(dropped, {}, "the row's address is not stored")
         self.assertIn("/salaries/7", updates, "the click still opens the row's address")
+
+
+class StaffState(ui.State):
+    """A form whose person is chosen by a search over a private list of persons."""
+
+    _staff: list = ui.private()
+
+    @ui.action
+    def find(self):
+        self._staff = [{"id": 11, "label": PERSON}, {"id": 12, "label": "Alan Turing"}]
+
+    @ui.rows
+    def people(self, search):
+        return [one for one in (self._staff or []) if search.lower() in one["label"].lower()]
+
+    @ui.action
+    def assign(self, values):
+        return None
+
+
+class TestCluster01er_MatchesNotStored(SimpleTestCase):
+    """1.1103: what a searched field offers reaches the browser, never the store."""
+
+    def setUp(self) -> None:
+        private.clear()
+        self.addCleanup(private.clear)
+
+    # -- 1.1103 --------------------------------------------------------
+    def test_1_1103_a_searched_fields_matches_reach_no_stored_state(self) -> None:
+        """
+        Scenario 1.1103: a searched choice over a ui.private value has offered its matches.
+        Given: a form whose person field is searched by a @ui.rows handler reading a private list of
+               persons; the user typed part of a name.
+        When:  every state of the tab is serialised as Reflex stores it (Redis, disk) and pickled.
+        Then:  the browser's update carries the person's name; no stored state holds it; what the form
+               accepts is still known (the offered ids are stored), so a value chosen is accepted.
+        """
+        form = ui.form(title="Assign", submit=StaffState.assign, fields=[ui.field("person", options=StaffState.people)])
+        form.build(Build(page="assign", route="/assign"))
+
+        async def scenario():
+            async with testing.Harness(user="ada") as h:
+                await h.open_tab("/assign")
+                await (await h.send(StaffState, "find"))
+                offered = await h.search(StaffState.assign, "person", "grace")
+                root = (await h._state(State))._get_root_state()
+                blobs = _stored(root)
+                kept = pickle.loads(pickle.dumps(await h._state(State)))
+                await (await h.send(StaffState, "assign", values={"person": "11"}))
+                invalid = dict((await h._state(State)).ui_invalid)
+                return offered, blobs, kept, str(h.updates), invalid
+
+        offered, blobs, kept, updates, invalid = asyncio.run(scenario())
+        self.assertEqual(offered, [{"value": "11", "label": PERSON}])
+        self.assertIn(PERSON, updates, "the browser is offered the person")
+        for blob in blobs:
+            self.assertNotIn(PERSON.encode(), blob, "no stored state holds a match")
+        self.assertEqual(kept.ui_matches, {}, "the matches are left out when the state is stored")
+        self.assertEqual(invalid, {}, "the value chosen is still accepted: the offered ids are kept")
+
+
+class TestCluster01er_EveryTableRestores(SimpleTestCase):
+    """1.1106: a table reads its rows again after a reconnect on every page, routed or not."""
+
+    def setUp(self) -> None:
+        private.clear()
+        self.addCleanup(private.clear)
+
+    # -- 1.1106 --------------------------------------------------------
+    def test_1_1106_a_table_on_a_dashboard_or_in_a_raw_page_restores_its_rows(self) -> None:
+        """
+        Scenario 1.1106: a reconnect where no opener runs.
+        Given: the salary table in ui.embed inside a raw Reflex page, and in a @ui.dashboard (neither has
+               lex.ui's opener, which tells a @ui.page's tables to restore); a model table in ui.embed.
+        When:  each page is compiled with Reflex's page compiler; and a stored state of the table (its rows
+               left out) receives what the page sends when it is hydrated again.
+        Then:  each compiled table sends its own `restore` whenever the page is hydrated (Reflex's
+               is_hydrated, which a reconnect turns off and on again), so the rows come back without an
+               opener; restore reads them again.
+        """
+        import re
+
+        import reflex as rx
+        from reflex.compiler.compiler import compile_page
+
+        embedded = salary_table()
+        raw_page = rx.box(rx.heading("Salaries"), ui.embed(embedded, name="Salaries"))
+        _, raw_module = compile_page("/raw-salaries", raw_page)
+
+        @ui.dashboard
+        def main():
+            return ui.list(title="Salaries", table=salary_table())
+
+        _, dashboard_module = compile_page("/", main())
+        groups = ui.table(Group, columns=["name"])
+        _, model_module = compile_page("/raw-groups", ui.embed(groups, name="Groups"))
+        for module, table in ((raw_module, embedded), (dashboard_module, embedded), (model_module, groups)):
+            state = rows_table._CACHE_BY_TABLE[table]
+            restore = f"{state.get_full_name()}.restore"
+            found = re.search(r"const (on_hydrated_\w+) = useCallback\([^\n]*" + re.escape(f'"{restore}"'), module)
+            self.assertIsNotNone(found, f"{state.__name__} sends its own restore")
+            hydrated = "reflex___state____state.is_hydrated_rx_state_"
+            self.assertIn(f"useEffect(() => {{ if (!{hydrated}) return; ({found.group(1)})(); }}, [{hydrated}]);", module,
+                          "each time the page has been hydrated, so a reconnect sends it again")
+
+        state = rows_table._CACHE_BY_TABLE[embedded]
+
+        async def scenario():
+            async with testing.Harness(user="ada") as h:
+                await h.open_tab("/raw-salaries")
+                await (await h.send(SalaryState, "find"))
+                await (await h.send(state, "open"))
+                live = await h._state(state)
+                stored = pickle.loads(pickle.dumps(live))
+                live.page_rows, live._rows_dropped = stored.page_rows, stored._rows_dropped
+                await (await h.send(state, "restore"))
+                return [row["name"] for row in (await h._state(state)).page_rows]
+
+        self.assertEqual(asyncio.run(scenario()), [PERSON, "Alan Turing"], "restore reads the rows again")

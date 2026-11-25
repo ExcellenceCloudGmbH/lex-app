@@ -27,14 +27,14 @@ class Frame:
     denied: str = ""                    # '' = RFDS's sentence
     request_access: str = ""            # '' = no "Request access" link
     opened: Any = None                  # the project's opened(user, page), or None
-    #: The sections of ``nav=`` given as ``ui.section``: their title, their links, or a function of the user.
+    #: The areas of ``nav=`` with links after their pages, or a function of the user that gives its links.
     sections: tuple["NavLinks", ...] = ()
     nav_footer: Any = None              # a ui.link or ui.text at the foot of the navigation
     search: tuple[str, str] | None = None   # the search page's route and the parameter it reads
     actions: tuple = ()                 # parts in the header band, before the user menu
     user_menu: tuple = ()               # ui.links in the user menu, above "Sign out"
     banner: Any = None                  # a ui.message above every page
-    refused_as_missing: bool = False    # a refused page looks like a page that does not exist
+    denied_as_missing: bool = False    # a refused page looks like a page that does not exist
     logo: str = ""                      # the address of the project's mark ('' = none)
     logo_label: str = ""                # what the mark says, read out ('' = decorative beside the name)
     module: str = ""
@@ -45,7 +45,7 @@ class Frame:
 
 @dataclasses.dataclass(frozen=True)
 class NavLinks:
-    """A section of ``nav=``: its title, and its links or the function of the user that gives them."""
+    """An area of ``nav=`` with more than its pages: its links, or the function of the user that gives them."""
 
     title: str
     links: tuple = ()                   # ui.link parts, with fixed values
@@ -72,105 +72,93 @@ class OpenedPage:
     params: Mapping[str, Any]           # the page's route and query values
 
 
-def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign_out: Any = None,
-          opened: Any = None, nav_footer: Any = None, search: Any = None, actions: Any = (),
-          user_menu: Any = (), banner: Any = None, refused_as_missing: bool = False, logo: Any = None,
-          logo_label: Any = None) -> None:
+def frame(*, nav: Any = None, nav_footer: Any = None, logo: Any = None, logo_label: Any = None,
+          search: Any = None, actions: Any = (), user_menu: Any = (), sign_out: Any = None, denied: Any = None,
+          request_access: Any = None, denied_as_missing: bool = False, banner: Any = None, opened: Any = None,
+          refused_as_missing: Any = None) -> None:
     """Configure lex-app's frame for this project: call it once, in the dashboard module.
 
-    ``nav`` is the navigation's areas in the order they are listed: the same words a page names
-    its area with (``@ui.page(..., nav="Orders")``). Areas it does not list -- those of raw pages
-    not moved yet -- follow, in the order their first page is declared; a ``@ui.page`` whose area
-    neither the list nor a raw page has is a typo and stops the start. Without the list, areas come
-    in the order their first page is declared::
+    Every part is optional. **One rule for every value the frame shows** (a count, a word, a sentence, a
+    section's links): it is fixed, or a function of the user, ``def waiting(user): ...``, which lex-app
+    calls on the server when a page opens, on a worker thread (it may query the database); the page does
+    not wait for it, and a failure is logged and leaves its part empty. Who may see an entry (its
+    ``requires=``, the page it leads to) is decided there too; nothing else is drawn.
 
-        ui.frame(nav=["Orders", "Reports", "Tools"])
+    ==================  ===============================================================================
+    **Navigation**
+    ``nav``             the areas, in their order, as a dict: each area's name -> ``[]`` (its pages),
+                        a list of ``ui.link``\\ s (shown after its pages), or a function of the user
+                        that returns the user's links (a section of its own, named like no area that
+                        has pages). Areas it does not name follow, in the order their first page is
+                        declared; a ``@ui.page`` whose area neither names is a typo and stops the start
+    ``nav_footer``      one ``ui.link`` or ``ui.text`` at the foot of the navigation
+    **Header**
+    ``logo``            the project's mark (``"/acme.svg"`` from the app's assets, or ``https://``)
+                        beside the product's name, both leading home; ``logo_label`` names it when it
+                        says something the name does not
+    ``search``          a page taking one query parameter (``params=["q"]``): RFDS's search box in the
+                        header opens it with what was typed, on Enter
+    ``actions``         the parts at the top right: ``ui.link`` (``icon=``, ``badge=``, ``requires=``),
+                        ``ui.button``, ``ui.status`` and ``ui.custom_block(..., reason=)``
+    ``user_menu``       ``ui.link``\\ s in the user menu, above "Sign out"
+    ``sign_out``        where "Sign out" leads: a page or ``https://``; lex-app's ``/logout`` by default
+    **Denied pages**
+    ``denied``          the sentence a refused user reads, instead of RFDS's
+    ``request_access``  their way out: a page, ``https://`` or ``mailto:``
+    ``denied_as_missing``  ``True``: a refused page looks like lex-app's not-found page
+    **Other**
+    ``banner``          one ``ui.message`` above every page, shown while its sentence is not empty
+    ``opened``          a function lex-app calls when a page has opened: ``opened(user, page)``
+    ==================  ===============================================================================
 
-    ``denied`` is the sentence a user reads where a page refuses them (instead of RFDS's), and
-    ``request_access`` their way out: a page, or an ``https://`` or ``mailto:`` address, shown as
-    RFDS's "Request access" link. The notice's "Switch account" link -- sign in with another
-    account -- goes to the sign-out address::
+    ::
 
-        ui.frame(denied="Ask your administrator for access.", request_access="mailto:it@example.com")
+        def waiting(user):
+            return Request.objects.filter(approver=user.id, state="open").count()
 
-    ``opened`` is a function of the project's that lex-app calls when a page opens, for a "recently
-    used" list or an audit entry: ``opened(user, page)``, with the signed-in user and the page
-    (``page.route``, ``page.address``, ``page.title``, ``page.area``, ``page.params``). It runs after
-    the page's loads have succeeded (at once on a page without them), on a worker thread, and the page
-    does not wait for it; its failure is logged, never shown. It is not called for a refused page or
-    one whose load failed::
+        def favourites(user):
+            return [ui.link(f.title, to=report, key=f.report_id)
+                    for f in Favourite.objects.filter(user=user.id)]
 
-        def remember(user, page):
-            RecentPage.objects.update_or_create(user_id=user.id, address=page.address,
-                                                defaults={"title": page.title})
+        ui.frame(nav={"Orders": [ui.link("Search orders", to=search, icon="search")],
+                      "Reports": [],
+                      "Requests": [ui.link("Waiting for you", to=approvals, badge=waiting)],
+                      "Favourites": favourites},
+                 nav_footer=ui.link("Version 2.4.1", href="https://example.com/changes"),
+                 search=search,
+                 actions=[ui.link("Notifications", to=inbox, icon="notification", badge=unread)],
+                 user_menu=[ui.link("Account", to=account),
+                            ui.link("Settings", to=settings, requires=ui.edit(Setting))],
+                 denied="Ask your administrator for access.", request_access="mailto:it@example.com",
+                 banner=ui.message(config_problem, tone="warning"))
 
-    An item of ``nav`` may also be a section, ``ui.section("Title", ...)``: named like an area it holds
-    the area's pages and then its links; any other title makes a section of links. Its content is
-    ``ui.link``\\ s -- to a page, a raw page, a record or an ``https://`` address, with fixed values; with
-    ``icon=``, ``badge=`` (a count beside it) and ``requires=`` (drawn only for users who meet it) -- or
-    one function of the user that returns the user's links (favourites, topics the user may see)::
+    A link in the frame -- to a page, a raw page, a record or an ``https://`` address -- takes fixed values;
+    ``badge=`` (a count beside it) is a function of the user, as on ``@ui.page(nav=, badge=)``, and
+    ``requires=`` draws it only for users who meet it. A section of the user's own links shows them as
+    the function returns them (no ``icon=``, ``badge=`` or ``requires=``; each leads to a page the user may
+    open, or it is left out).
 
-        ui.frame(nav=[ui.section("Orders", ui.link("Search orders", to=search, icon="search")),
-                      "Reports",
-                      ui.section("Requests", ui.link("Waiting for you", to=approvals, badge=waiting)),
-                      ui.section("Favourites", favourites)],
-                 nav_footer=ui.link("Version 2.4.1", href="https://example.com/changes"))
+    ``opened(user, page)`` is for a "recently used" list or an audit entry: ``page.route``, ``page.title``
+    (a state title as the page's load left it), ``page.area``; ``page.address`` and ``page.params`` are
+    the browser's (what it asked for, never a decision). It runs after the page's loads have succeeded (at
+    once on a page without them), on a worker thread, and the page does not wait for it; its failure is
+    logged, never shown. It is not called for a refused page or one whose load failed.
 
-    A function of the user, ``def waiting(user): ...``, stands wherever the frame shows a value (a
-    badge's count, a section's links): lex-app calls it on the server each time a page opens, on a worker
-    thread (it may query the database), and the page does not wait for it; its failure is logged and its
-    part shows nothing. An entry the user may not open -- a link's ``requires=``, the page it leads to, a
-    listed page's ``requires=`` -- is decided on the server too, and not drawn. ``nav_footer`` is one
-    ``ui.link`` or ``ui.text`` at the foot of the navigation: a version label, a link to help.
-
-    ``search`` is the project's search page -- a page that takes one query parameter, ``params=["q"]`` --
-    and puts RFDS's search box in the header: Enter opens that page with what was typed. ``actions`` are
-    a few parts in the header band before the user menu: ``ui.link`` (with ``icon=``, ``badge=``,
-    ``requires=``, as in the navigation), ``ui.button``, ``ui.status``, ``ui.text`` and
-    ``ui.custom_block``; a status's word or a text's sentence may be a function of the user, and the
-    part is hidden while it answers nothing::
-
-        ui.frame(search=search_page,
-                 actions=[ui.status(sync_state, tone="warning"),
-                          ui.link("Notifications", to=inbox, icon="notification", badge=unread)])
-
-    ``user_menu`` are ``ui.link``\\ s in the user menu, above "Sign out", each drawn only for users who
-    meet its ``requires=`` and may open the page it leads to (decided on the server)::
-
-        ui.frame(user_menu=[ui.link("Account", to=account),
-                            ui.link("Settings", to=settings, requires=ui.edit(Setting))])
-
-    ``banner`` is one ``ui.message`` in RFDS's banner above every page, in the message's tone, shown while
-    its sentence is not empty; the sentence is fixed, a state value, or a function of the user::
-
-        def config_problem(user):
-            return "Some configuration could not be loaded." if not settings_loaded() else None
-
-        ui.frame(banner=ui.message(config_problem, tone="warning"))
-
-    ``refused_as_missing=True``: a page the user may not open -- by a permission or a rule -- looks like a
-    page that does not exist: lex-app's not-found page instead of the no-access notice, with the browser
-    tab's title, the breadcrumbs and its navigation entry gone too; decided by the page's opener on the
-    server. For applications that must not reveal which pages exist. (The page's code is in the app's
-    bundle like every page's: this hides it from the screen, not from someone reading the bundle.)
-    ``denied`` and ``request_access`` word a notice it never shows, so they are refused beside it.
-
-    ``sign_out`` is where the user menu's "Sign out" leads: a page (``@ui.page`` or
-    ``ui.reflex_page``) or an ``https://`` address. By default it is lex-app's ``/logout``, which
-    ends the dashboard's sign-in and lex-app's; a project's address should end there too, or the
-    dashboard's sign-in lasts until it expires.
-
-    ``logo`` is the address of the project's mark -- from the app's assets (``"/acme.svg"``) or
-    ``https://`` -- in RFDS's logo slot of the header, beside the product's name; mark and name lead home
-    (the overview). Beside the name it is decorative, as RFDS says; ``logo_label`` names it when it says
-    something the name does not (the tenant's name)::
-
-        ui.frame(logo="/acme.svg", logo_label="Acme")
+    ``denied_as_missing=True`` is for applications that must not reveal which pages exist: a page the user
+    may not open -- by a permission or a rule -- shows lex-app's not-found page, with the browser tab's
+    title, the breadcrumbs and its navigation entry gone too, decided by the page's opener on the server.
+    (The page's code is in the app's bundle like every page's: this hides it from the screen, not from
+    someone reading the bundle.) ``denied`` and ``request_access`` word a notice it never shows, so they are
+    refused beside it. A project's own ``sign_out`` page should end lex-app's sign-in too (``/logout``),
+    or the dashboard's sign-in lasts until it expires.
 
     The product name in the header is ``LEX_DASHBOARD_TITLE`` and its badge ``LEX_ENVIRONMENT``: a
-    deployment's values. The look is lex-app's: a mark in RFDS's logo slot is content, not a look. Called again from the same module (a reload), the
-    new configuration replaces the old; from another module it is refused.
+    deployment's values; the look is lex-app's. Called again from the same module (a reload), the new
+    configuration replaces the old; from another module it is refused.
     """
+    if refused_as_missing is not None:
+        raise TypeError("ui.frame(refused_as_missing=) is now denied_as_missing=, the same word as denied= and "
+                        f"request_access=: write denied_as_missing={refused_as_missing!r}.")
     global _FRAME
     module = str(sys._getframe(1).f_globals.get("__name__", ""))
     if _FRAME is not None and _FRAME.module != module:
@@ -181,18 +169,18 @@ def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign
                         f"denied=\"Ask your administrator for access.\"; got {denied!r}.")
     if opened is not None:
         _check_opened(opened)
-    if not isinstance(refused_as_missing, bool):
-        raise TypeError(f"ui.frame(refused_as_missing=) takes True or False; got {refused_as_missing!r}. "
-                        "refused_as_missing=True shows a page the user may not open as a page that does not exist.")
-    if refused_as_missing and (denied is not None or request_access is not None):
+    if not isinstance(denied_as_missing, bool):
+        raise TypeError(f"ui.frame(denied_as_missing=) takes True or False; got {denied_as_missing!r}. "
+                        "denied_as_missing=True shows a page the user may not open as a page that does not exist.")
+    if denied_as_missing and (denied is not None or request_access is not None):
         given = "denied=" if denied is not None else "request_access="
-        raise ValueError(f"ui.frame(refused_as_missing=True) shows a refused page as a missing one, so it never shows "
-                         f"the no-access notice that {given} words. Leave {given} out, or refused_as_missing out.")
+        raise ValueError(f"ui.frame(denied_as_missing=True) shows a refused page as a missing one, so it never shows "
+                         f"the no-access notice that {given} words. Leave {given} out, or denied_as_missing out.")
     _check_logo(logo, logo_label)
     areas, sections = _areas(nav)
     _FRAME = Frame(nav=areas, sections=sections, nav_footer=_footer(nav_footer), opened=opened,
                    search=None if search is None else _search(search), actions=_actions(actions),
-                   user_menu=_menu(user_menu), banner=_banner(banner), refused_as_missing=refused_as_missing,
+                   user_menu=_menu(user_menu), banner=_banner(banner), denied_as_missing=denied_as_missing,
                    logo=logo or "", logo_label=logo_label or "", sign_out="" if sign_out is None else target(sign_out, argument="sign_out"),
                    denied=denied or "",
                    request_access="" if request_access is None else target(request_access, argument="request_access",
@@ -201,64 +189,61 @@ def frame(*, nav: Any = (), denied: Any = None, request_access: Any = None, sign
 
 
 def _areas(nav: Any) -> tuple[tuple[str, ...], tuple[NavLinks, ...]]:
-    """The areas' titles in their order, and the sections given as ``ui.section``."""
+    """``nav=``: the areas' names in their order, and the areas that have links or a function of the user."""
     from lex.lex_app.reflex.ui.pages.kinds import Section
+    from lex.lex_app.reflex.ui.pages.vocab import Link
 
-    if isinstance(nav, str):
-        raise TypeError(f"ui.frame(nav=) takes the areas as a list, in their order: nav=[{nav!r}].".replace("'", '"'))
-    try:
-        items = tuple(nav)
-    except TypeError:
-        raise TypeError(f"ui.frame(nav=) takes the areas as a list of names, such as nav=[\"Orders\", \"Reports\"]; "
-                        f"got {nav!r}.") from None
+    if nav is None:
+        return (), ()
+    if not isinstance(nav, Mapping):
+        items = list(nav) if isinstance(nav, (list, tuple)) else [nav]
+        names = [one.title if isinstance(one, Section) else one for one in items]
+        example = "{" + ", ".join(f"{str(one)!r}: []" for one in names if isinstance(one, str)) + "}"
+        if example == "{}":
+            example = '{"Orders": [], "Reports": []}'
+        also = (" A ui.section is a titled part of a page; an area's links are its list: "
+                '{"Help": [ui.link(...)]}.' if any(isinstance(one, Section) for one in items) else "")
+        raise TypeError(f"ui.frame(nav=) takes the areas as a dict, in their order -- each area's name -> [] for its "
+                        f"pages, a list of ui.link(...) shown after them, or a function of the user for the user's "
+                        f"own links: nav={example}.{also}".replace("'", '"'))
     areas: list[str] = []
     sections: list[NavLinks] = []
-    for item in items:
-        if isinstance(item, Section):
-            sections.append(_section(item))
-            areas.append(item.title)
+    for title, content in nav.items():
+        if not isinstance(title, str) or not title.strip():
+            raise TypeError(f"ui.frame(nav=) names each area with fixed words, the words pages give as nav=; got "
+                            f"{title!r}. A count goes on a link: ui.link(..., badge=waiting).")
+        areas.append(title)
+        if _plain_function(content):
+            sections.append(NavLinks(title, of_user=of_user(content, f"the area {title!r} of nav=")))
             continue
-        if not isinstance(item, str) or not item.strip():
-            raise TypeError(f"ui.frame(nav=) takes area names, the words pages give as nav=, or sections "
-                            f"ui.section(\"Help\", ui.link(...)); got {item!r}.")
-        areas.append(item)
-    twice = sorted({area for area in areas if areas.count(area) > 1})
-    if twice:
-        raise ValueError(f"ui.frame(nav=) lists {twice[0]!r} twice; list each area once -- a section named like an "
-                         "area holds its pages and its links.")
+        if not isinstance(content, (list, tuple)):
+            what = "ui.section" if isinstance(content, Section) else _named(content)
+            raise TypeError(f"ui.frame(nav=): the area {title!r} takes [] (its pages), a list of ui.link(...) shown "
+                            f"after them, or a function of the user that returns the user's links; got {what}: "
+                            f"write {{{title!r}: [ui.link(...)]}}.")
+        for one in content:
+            if not isinstance(one, Link):
+                raise TypeError(f"ui.frame(nav=): the area {title!r} holds ui.link(...)s; got {_named(one)}.")
+            entry_link(one, f"the area {title!r} of nav=")
+        if content:
+            sections.append(NavLinks(title, links=tuple(content)))
+    from lex.lex_app.reflex import shell
+
+    for entry in shell.nav_entries():
+        check_per_user(entry.section, entry.route, sections)
     return tuple(areas), tuple(sections)
 
 
-def _section(section: Any) -> NavLinks:
-    """A section of ``nav=``, checked: ``ui.link``\\ s with fixed values, or one function of the user."""
-    from lex.lex_app.reflex.ui.pages.vocab import Link
-
-    title = section.title
-    content = tuple(section.content)
-    if not isinstance(title, str):
-        raise TypeError("ui.frame(nav=): a section of the navigation is named like an area, with fixed words: "
-                        "ui.section(\"Help\", ...); a count goes on a link, ui.link(..., badge=...).")
-    extra = [name for name in ("load", "empty", "visible") if getattr(section, name) is not None]
-    extra += ["actions"] if section.actions else []
-    if extra or section.collapsed:
-        raise TypeError(f"ui.frame(nav=): the section {title!r} is a section of the navigation, which takes its "
-                        f"title and its entries only; leave out {', '.join(extra or ['collapsed'])}=.")
-    functions = [one for one in content if _plain_function(one)]
-    if functions:
-        if len(content) != 1:
-            raise TypeError(f"ui.frame(nav=): the section {title!r} holds one function of the user, which gives all "
-                            "its links, or links; not both: ui.section(\"Favourites\", favourites).")
-        return NavLinks(title, of_user=of_user(functions[0], f"the section {title!r}"))
-    if not content:
-        raise ValueError(f"ui.frame(nav=): the section {title!r} is empty. Give it its entries, "
-                         f"ui.section({title!r}, ui.link(\"Search\", to=search)), or a function of the user that "
-                         "returns them.")
-    for one in content:
-        if not isinstance(one, Link):
-            raise TypeError(f"ui.frame(nav=): the section {title!r} holds entries: ui.link(...), or one function of the "
-                            f"user that returns them; got {_named(one)}.")
-        entry_link(one, f"the section {title!r}")
-    return NavLinks(title, links=content)
+def check_per_user(area: str, route: str, sections: Any = None) -> None:
+    """Refuse a page listed in an area that ``nav=`` makes a section of the user's own links: the page would
+    be lost from the navigation, or the user's links mixed into an area's."""
+    found = next((one for one in (current().sections if sections is None else sections)
+                  if one.title == area and one.of_user is not None), None)
+    if found is None:
+        return
+    raise ValueError(f"The page at {route} is in nav={area!r}, and ui.frame(nav=) makes {area!r} a section of the "
+                     f"user's own links ({_name(found.of_user)}). An area of pages and a user's links are two "
+                     f"sections: give one of them another name, e.g. {area + ' (mine)'!r} for the user's links.")
 
 
 def _check_logo(logo: Any, label: Any) -> None:
@@ -293,8 +278,8 @@ def _search(page: Any) -> tuple[str, str]:
     return info.route, info.params[0]
 
 
-#: What the header's actions slot takes.
-_ACTION_PARTS = "ui.link, ui.button, ui.status, ui.text or ui.custom_block(..., reason=...)"
+#: What the header's actions slot takes: the parts at the top right.
+_ACTION_PARTS = "ui.link, ui.button, ui.status or ui.custom_block(..., reason=...)"
 
 
 def _actions(actions: Any) -> tuple:
@@ -304,10 +289,12 @@ def _actions(actions: Any) -> tuple:
     for index, part in enumerate(items):
         if isinstance(part, Link):
             entry_link(part, "actions=")
-        elif isinstance(part, (Status, Text)):
-            words = part.word if isinstance(part, Status) else part.sentence
-            if _plain_function(words):
-                of_user(words, f"actions=, the {'status' if isinstance(part, Status) else 'text'}")
+        elif isinstance(part, Status):
+            fixed_or_of_user(part.word, "actions=, the status's word")
+        elif isinstance(part, Text):
+            raise TypeError("ui.frame(actions=) holds the parts at the top right -- links, buttons, statuses -- and no "
+                            "free text: a status says a state in a word, ui.status(sync_state); anything else is a "
+                            "ui.custom_block(..., reason=...).")
         elif not isinstance(part, (Button, CustomBlock)):
             raise TypeError(f"ui.frame(actions=) takes {_ACTION_PARTS}; got {_named(part)}.")
     return items
@@ -337,8 +324,7 @@ def _banner(message: Any) -> Any:
         many = " one: RFDS shows one banner at a time" if isinstance(message, (list, tuple)) else ""
         raise TypeError(f"ui.frame(banner=) takes{many or ' one'} ui.message, such as "
                         f"banner=ui.message(config_problem, tone=\"warning\"); got {_named(message)}.")
-    if _plain_function(message.sentence):
-        of_user(message.sentence, "banner=, the message")
+    fixed_or_of_user(message.sentence, "banner=, the message's sentence")
     return message
 
 
@@ -368,6 +354,18 @@ def _plain_function(value: Any) -> bool:
         isinstance(value, functools.partial))
 
 
+def fixed_or_of_user(value: Any, where: str) -> None:
+    """Refuse a frame value that is neither fixed nor a function of the user (a state value: no page loads a
+    state for the frame, so it would show whatever the last page left there)."""
+    import reflex as rx
+
+    if isinstance(value, rx.Var):
+        raise TypeError(f"ui.frame(): {where} is a state value; a value the frame shows is fixed, or a function of "
+                        f"the user that lex-app calls on the server when a page opens: def waiting(user): return ...")
+    if _plain_function(value):
+        of_user(value, where)
+
+
 def of_user(fn: Any, where: str) -> Any:
     """``fn``, checked to be a plain function of the user: ``def waiting(user): ...``."""
     names: list = []
@@ -395,8 +393,11 @@ def entry_link(link: Any, where: str) -> None:
                          f"on every page. For links that depend on the user, give the section a function of the user.")
     if link.to is not None:
         href_of(link)                                   # a page it can address, with its values
-    if link.badge is not None and not isinstance(link.badge, rx.Var):
-        of_user(link.badge, f"the badge= of the link {link.label!r}")
+    if link.badge is not None:
+        fixed_or_of_user(link.badge, f"the badge= of the link {link.label!r}")
+        if not _plain_function(link.badge):
+            raise TypeError(f"ui.frame(): the badge= of the link {link.label!r} is a count, a function of the user: "
+                            f"def waiting(user): return ...; got {link.badge!r}.")
 
 
 def href_of(link: Any) -> tuple[str, bool]:
@@ -536,7 +537,7 @@ def _strings(requires: Any) -> tuple[str, ...]:
 
 def page_guard(route: str, permission: Any = None, rules: tuple = ()) -> Guard:
     """The guard of the page at ``route``: what lex-app registered for the page (``@ui.page``,
-    ``lex_page``), else what its entry says (a raw page's ``requires=``)."""
+    ``lex_page``), else what its entry says (a raw page's ``visible=``)."""
     from lex.lex_app.reflex.ui import handlers
 
     page = handlers.page_of(route)
@@ -594,6 +595,8 @@ def entries() -> list[Entry]:
         found.append(Entry("nav_footer", link_guard(configured.nav_footer), configured.nav_footer.badge))
     found += _placed("actions", configured.actions)
     found += _placed("user_menu", configured.user_menu)
+    if configured.search is not None:            # the search box, for users who may open the search page
+        found.append(Entry("search", target_guard(configured.search[0])))
     if configured.banner is not None and _plain_function(configured.banner.sentence):
         found.append(Entry("banner", value=configured.banner.sentence))
     return found
@@ -601,18 +604,31 @@ def entries() -> list[Entry]:
 
 def _placed(place: str, parts: tuple) -> list[Entry]:
     """The entries of a list of frame parts: a link's guard and count, a status's or a text's words."""
-    from lex.lex_app.reflex.ui.pages.vocab import Link, Status, Text
+    from lex.lex_app.reflex.ui.pages.vocab import Button, Link, Status, Text
 
     found: list[Entry] = []
     for index, part in enumerate(parts):
         key = link_key(place, index)
         if isinstance(part, Link):
             found.append(Entry(key, link_guard(part), part.badge))
+        elif isinstance(part, Button):
+            found.append(Entry(key, button_guard(part)))
         elif isinstance(part, (Status, Text)):
             words = part.word if isinstance(part, Status) else part.sentence
             if _plain_function(words):
                 found.append(Entry(key, value=words))
     return found
+
+
+def button_guard(button: Any) -> Guard:
+    """Who a header button is drawn for: its handler's ``requires=``, as a link is drawn by its own."""
+    from lex.lex_app.reflex.access import permission
+    from lex.lex_app.reflex.ui import guard
+
+    fn = getattr(getattr(button, "handler", None), "fn", None)
+    items = tuple((getattr(fn, "__ui_options__", None) or {}).get("requires") or ())
+    strings = tuple(permission(one.target, one.scope) for one in items if isinstance(one, guard.Requirement))
+    return Guard(tuple(dict.fromkeys(strings)), guard.rules_of(items))
 
 
 def link_key(place: str, index: int) -> str:
@@ -640,6 +656,7 @@ def deciding() -> bool:
 class Answers:
     """What the server decided for one user when a page opened; only this reaches the browser."""
 
+    user: str = ""                      # the id of the user it was decided for (never sent)
     shown: list[str] = dataclasses.field(default_factory=list)
     counts: dict[str, int] = dataclasses.field(default_factory=dict)
     links: dict[str, list[dict[str, str]]] = dataclasses.field(default_factory=dict)
@@ -661,13 +678,18 @@ async def decide(state: Any) -> Answers:
     session = await context.resolve(state)
     held: frozenset[str] | None = None
     asked: dict = {}
-    user = asyncio.ensure_future(context.with_permissions(session))   # read once, for every rule and function
+    reading: list = []                  # the user with permissions, read once when a rule or function needs it
+
+    def user() -> Any:
+        if not reading:
+            reading.append(asyncio.ensure_future(context.with_permissions(session)))
+        return reading[0]
 
     async def _rule(rule: Any, params: tuple) -> Any:
-        return await pools.run("interactive", handlers._ask, rule, await user, context.Params(dict(params)))
+        return await pools.run("interactive", handlers._ask, rule, await user(), context.Params(dict(params)))
 
     async def _function(fn: Any) -> Any:
-        return await pools.run("interactive", fn, await user)
+        return await pools.run("interactive", fn, await user())
 
     def ask(rule: Any, params: tuple) -> Any:
         """A rule's answer for these values, asked once in this event."""
@@ -717,7 +739,7 @@ async def decide(state: Any) -> Answers:
     counts = results[len(guarded):len(guarded) + len(counted)]
     words = results[len(guarded) + len(counted):len(guarded) + len(counted) + len(worded)]
     given = results[len(guarded) + len(counted) + len(worded):]
-    answers = Answers(shown=[entry.key for entry, yes in zip(guarded, granted) if yes])
+    answers = Answers(user=session.user.id, shown=[entry.key for entry, yes in zip(guarded, granted) if yes])
     for entry, count in zip(counted, counts):
         if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
             answers.counts[entry.key] = count
@@ -731,7 +753,12 @@ async def decide(state: Any) -> Answers:
             logger.error("lex.ui: the frame's function %s answered %r for %s; it returns the words to show, or None",
                          _name(entry.value), said, entry.key)
     for section, links in zip(sections, given):
-        answers.links[per_user_key(section.title)] = _user_links(section, links)
+        shown = _user_links(section, links)
+        # Each leads to a page the user may open: its page's guard, asked with the link's values.
+        allowed = await asyncio.gather(*(may(per_user_key(section.title), guard) for _, guard in shown))
+        answers.links[per_user_key(section.title)] = [link for (link, _), yes in zip(shown, allowed) if yes]
+    if reading and not reading[0].done():
+        reading[0].cancel()
     return answers
 
 
@@ -739,13 +766,14 @@ def _name(fn: Any) -> str:
     return getattr(fn, "__qualname__", repr(fn))
 
 
-def _user_links(section: NavLinks, links: Any) -> list[dict[str, str]]:
-    """A per-user section's links as the browser shows them; a link lex-app cannot show is left out, logged."""
+def _user_links(section: NavLinks, links: Any) -> list[tuple[dict[str, str], Guard]]:
+    """A per-user section's links as the browser shows them, each with the guard of the page it leads to;
+    a link lex-app cannot show is left out, logged."""
     from lex.lex_app.reflex.ui.pages.vocab import Link
 
     if links is None:
         return []
-    shown: list[dict[str, str]] = []
+    shown: list = []
     for link in links if isinstance(links, (list, tuple)) else [links]:
         try:
             if not isinstance(link, Link):
@@ -759,8 +787,8 @@ def _user_links(section: NavLinks, links: Any) -> list[dict[str, str]]:
         except Exception:  # noqa: BLE001 - left out, and logged
             logger.exception("lex.ui: a link of the frame's section %r is left out", section.title)
             continue
-        shown.append({"label": label, "href": href, "outside": "yes" if outside else "",
-                      "initial": label[:1].upper()})
+        shown.append(({"label": label, "href": href, "outside": "yes" if outside else "",
+                       "initial": label[:1].upper()}, link_guard(link)))
     return shown
 
 

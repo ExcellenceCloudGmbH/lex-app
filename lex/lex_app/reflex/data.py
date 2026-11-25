@@ -209,10 +209,13 @@ class LexApi:
         commits.
         """
         name = model_id(model)
-        found = await self._request("POST", f"model_entries/{name}/list", params=[("id", str(pk))],
+        key = "id" if isinstance(model, str) else model._meta.pk.name
+        found = await self._request("POST", f"model_entries/{name}/list", params=[(key, str(pk))],
                                     json={"startRow": 0, "endRow": 1})
         rows = list((found or {}).get("rowData") or [])
-        run = rows[0].get("lex_reserved_calculation_id") if rows else None
+        # The record asked for, or none: a list that ignored the filter must not lend another run's log.
+        row = rows[0] if rows and str(rows[0].get(key, rows[0].get("id"))) == str(pk) else None
+        run = row.get("lex_reserved_calculation_id") if row else None
         if not run:
             return []
         data = await self._request("GET", "model_entries/calculationlog/list",
@@ -486,8 +489,9 @@ class RowsNotStored(rx.State, mixin=True):
     event's update, the server forgets them when the state is stored, and a project whose rows come
     from a ``ui.private`` value keeps them out of every pickle. The count of rows, the page, the sort,
     the search and the filters are kept: they say where the user is, and the rows are read again from
-    them. When the browser has to be sent the whole state again (a reconnect hydrates the page), the
-    page's opener sends each such table ``restore``, which reads its rows again.
+    them. When the browser has to be sent the whole state again (a reconnect hydrates the page), each
+    ``ui.table`` sends its own ``restore`` once the page is hydrated (``tables.restorer``), which reads
+    its rows again -- on any page, routed or not.
     """
 
     #: Off for ``lex_table`` (a raw page has nothing to send ``restore``); every ``ui.table`` turns it on.
@@ -560,6 +564,9 @@ class LexTableState(DataTableMixin, ChosenColumns, RowsNotStored, mixin=True):
     date_lookups: ClassVar[dict] = {}
     #: A date filter's range, as its picker shows it: ``{field: {"start": ..., "end": ...}}``.
     dates: dict[str, dict[str, str]] = {}
+    #: The ``requires=`` of the ``@ui.page`` the table is on (``ui.table``): asked before every read, so a
+    #: user the page refuses cannot read its rows by sending the table's events by name. ``()``: none.
+    requires: ClassVar[tuple] = ()
 
     @rx.event
     async def set_dates(self, field: str, value: Mapping[str, Any]):
@@ -632,6 +639,11 @@ class LexTableState(DataTableMixin, ChosenColumns, RowsNotStored, mixin=True):
             yield
 
     async def _fetch_page(self, *, offset, limit, sort, filters, query):
+        requires = getattr(type(self), "requires", ())
+        if requires:
+            from lex.lex_app.reflex.ui.handlers import check_page_requires
+
+            await check_page_requires(self, requires)
         params = scope_params(self.scope) + filter_params(filters) + LexTableState._date_params(self)
         if query and type(self).search_field:
             params.append((f"{type(self).search_field}__icontains", query))
@@ -759,12 +771,13 @@ def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_fiel
                 page_size: int = 25, filters: Mapping[str, Any] | None = None,
                 row_fields: Sequence[str] = (), choice_fields: Sequence[str] | None = None,
                 scope_fields: Sequence[str] | None = None, ordering: str = "", not_stored: bool = False,
-                date_lookups: Mapping[str, str] | None = None) -> type:
+                date_lookups: Mapping[str, str] | None = None, requires: tuple = ()) -> type:
     """The :class:`LexTableState` for one table of ``model`` (one class per distinct table).
 
     The table opens at ``page_size`` rows, which is also among the sizes the
     user can pick. ``row_fields`` are kept in each row besides the columns'
-    own fields -- a primary key that is not shown, for the row's link.
+    own fields -- a primary key that is not shown, for the row's link. ``requires`` is the
+    ``requires=`` of the ``@ui.page`` the table is on: every read checks it first.
     """
     sizes = tuple(sorted({25, 50, 100, int(page_size)}))
     classvars: dict[str, Any] = {
@@ -784,6 +797,8 @@ def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_fiel
         classvars["rows_not_stored"] = True
     if date_lookups:
         classvars["date_lookups"] = dict(date_lookups)
+    if requires:
+        classvars["requires"] = tuple(requires)
     return _state_for(LexTableState, model, classvars, defaults={"page_size": int(page_size)},
                       identity=_filters_identity(filters))
 

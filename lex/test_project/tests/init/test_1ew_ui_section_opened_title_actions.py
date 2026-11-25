@@ -130,7 +130,7 @@ class TestCluster01ew_SectionOpenedTitleActions(SimpleTestCase):
                 make().build(CTX)
             self.assertIn(says, str(wrong.exception), name)
         with self.assertRaises(TypeError) as nav:
-            ui.frame(nav=[ui.section(FiguresState.lines_title, ui.link("Help", to="https://example.com"))])
+            ui.frame(nav={FiguresState.lines_title: [ui.link("Help", href="https://example.com")]})
         self.assertIn("fixed words", str(nav.exception))
         with self.assertRaises(TypeError):
             ui.section(3, ui.text("x"))

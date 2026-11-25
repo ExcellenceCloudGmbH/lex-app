@@ -11,7 +11,7 @@ is refused at the field. A regression is a list of every customer in the page, a
 fields (an e-mail address) in the browser, a forged id reaching the handler's body, or an empty
 box until the user types.
 
-Cluster 1ds -- scenarios 1.900-1.903, 1.912, 1.917, 1.918. Type: U.
+Cluster 1ds -- scenarios 1.900-1.903, 1.912, 1.917, 1.918, 1.1109. Type: U.
 Covers: lex/lex_app/reflex/ui/forms.py (Expect.search, check, clean, search, MATCHES),
 lex/lex_app/reflex/ui/pages/forms.py (field, Field.check, Field.expect, Field.control),
 lex/lex_app/reflex/ui/state.py (ui_search, ui_matches).
@@ -94,6 +94,8 @@ class OrdersState(ui.State):
 
 #: Holds the warehouses search while it is set: a slow search in another system.
 SLOW = {"gate": None}
+#: What each run of the warehouses' search was asked for, in order.
+ASKED_WAREHOUSES: list = []
 
 
 class DeliveryState(ui.State):
@@ -108,6 +110,7 @@ class DeliveryState(ui.State):
 
     @ui.rows
     def warehouses(self, search):
+        ASKED_WAREHOUSES.append(search)
         gate = SLOW["gate"]
         if gate is not None and search == "slow" and not gate.wait(5):
             raise RuntimeError("the gate was never opened")
@@ -400,7 +403,8 @@ class TestCluster01ds_SearchedChoice(SimpleTestCase):
         Then:  the customer's matches arrive while the warehouse search still runs, and the
                button's action runs meanwhile (the search does not hold the tab); the customer's
                search does not cancel the warehouse's; the warehouse shows the matches of what
-               was typed last ("fast"), never the slow, older search's that ended after it.
+               was typed last ("fast"), never the slow, older search's. (Review 2: one search runs
+               at a time per field, so "fast" is searched when the slow one ends, not beside it.)
         """
         import threading
 
@@ -430,9 +434,9 @@ class TestCluster01ds_SearchedChoice(SimpleTestCase):
         self.assertEqual(len(during[0]), 9, "the customer's matches came while the warehouse was searched")
         self.assertEqual(during[1], [], "the slow warehouse search was still running")
         self.assertEqual(during[2], 1, "another button worked meanwhile: the search does not hold the tab")
-        self.assertEqual(fast, ["Warehouse fast 1", "Warehouse fast 2"])
+        self.assertEqual(fast, [], "the field's running search is not joined by a second one")
         self.assertEqual(after, ["Warehouse fast 1", "Warehouse fast 2"],
-                         "the older, slow search ending later does not replace what was typed last")
+                         "what was typed last is searched when the slow one ends, and its matches stay")
         self.assertEqual(len(customers), 9, "and nothing cancelled the customer's matches")
 
     # -- 1.917 ---------------------------------------------------------
@@ -497,3 +501,49 @@ class TestCluster01ds_SearchedChoice(SimpleTestCase):
         self.assertEqual((matches, offered), ({}, {}), "anna's matches and offers left with her")
         self.assertEqual(after_visit, {}, "a new visit drops the matches the browser was given")
         self.assertTrue(still_offered, "the offers stay for the same user (a kept form accepts them, 1.935)")
+
+
+class TestCluster01ds_SearchInALoop(SimpleTestCase):
+    """1.1109: a searched field sent in a loop takes one of the shared pool's workers, not all of them."""
+
+    def setUp(self) -> None:
+        _build()
+        ASKED_WAREHOUSES.clear()
+
+    # -- 1.1109 --------------------------------------------------------
+    def test_1_1109_one_search_runs_at_a_time_per_field_and_the_newest_follows(self) -> None:
+        """
+        Scenario 1.1109: the search event sent over and over (a script, a stuck key).
+        Given: the warehouse field, whose search for "slow" is held.
+        When:  "slow" is typed, then, while it runs, twenty more texts are sent at once; then the slow
+               search ends.
+        Then:  while the slow search runs no other search of the field runs; when it ends, only the
+               newest text is searched (not the nineteen in between), after the field's minimum
+               interval; the field shows the newest text's matches.
+        """
+        import threading
+        import time
+
+        warehouse = next(one.search for one in forms.of(DeliveryState.deliver.fn.__ui_fn__).fields
+                         if one.key == "warehouse")
+        SLOW["gate"] = threading.Event()
+        self.addCleanup(SLOW.update, {"gate": None})
+
+        async def steps(harness):
+            slow = await harness.send(State, "ui_search", field=warehouse, text="slow")
+            await asyncio.sleep(0.05)
+            for n in range(20):
+                await (await harness.send(State, "ui_search", field=warehouse, text=f"loop {n}")).wait_all()
+            during = list(ASKED_WAREHOUSES)
+            released = time.monotonic()
+            SLOW["gate"].set()
+            await asyncio.wait_for(slow.wait_all(), 5)
+            took = time.monotonic() - released
+            shown = [one["label"] for one in dict((await harness._state(State)).ui_matches).get(warehouse, [])]
+            return during, list(ASKED_WAREHOUSES), took, shown
+
+        during, asked, took, shown = asyncio.run(_session(steps))
+        self.assertEqual(during, ["slow"], "nothing ran beside the field's running search")
+        self.assertEqual(asked, ["slow", "loop 19"], "then the newest text alone")
+        self.assertGreaterEqual(took, forms.SEARCH_INTERVAL * 0.9, "after the field's minimum interval")
+        self.assertEqual(shown, ["Warehouse loop 19 1", "Warehouse loop 19 2"])

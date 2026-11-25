@@ -10,7 +10,7 @@ empty or old. What was typed comes back through ``value=`` on a field the handle
 regression is a kept form that comes back empty, a result shown over data that is gone, or a
 failure that happened while the user was away and was never shown.
 
-Cluster 1dx -- scenarios 1.930-1.937, 1.939. Type: U.
+Cluster 1dx -- scenarios 1.930-1.937, 1.939, 1.1101. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/forms.py (form keep=, the failure under a kept form),
 lex/lex_app/reflex/ui/forms.py (keep, kept, gone_message), lex/lex_app/reflex/ui/state.py (ui_open).
 Run: python -m lex pytest lex/test_project/tests/init/test_1dx_ui_form_keep.py -v
@@ -578,3 +578,44 @@ class TestCluster01dx_FormKeep(SimpleTestCase):
         for doc in (state_doc, page_forms.form.__doc__, page_forms.field.__doc__):
             long = [line for line in doc.splitlines() if len(line) > 110]
             self.assertEqual(long, [], "every line of the docstring fits")
+
+
+class TestCluster01dx_AnotherUserOfTheTab(SimpleTestCase):
+    """1.1101: a kept form's result and refusal are its user's, not the next user's of the tab."""
+
+    def setUp(self) -> None:
+        GATE["open"] = threading.Event()
+        private.clear()
+        self.addCleanup(private.clear)
+        report().build(Build(page="report", route="/report"))
+
+    # -- 1.1101 --------------------------------------------------------
+    def test_1_1101_a_kept_result_is_not_shown_to_the_next_user_of_the_tab(self) -> None:
+        """
+        Scenario 1.1101: another user signs in on the tab.
+        Given: the kept report form; its job refused one customer, then built a report for another, and
+               the user left the page.
+        When:  another user signs in on the same browser tab (its client token outlives the sign-in) and
+               opens the report page; and, before that, the first user came back to it.
+        Then:  the first user finds the result kept (as 1.930); the next user's form starts over: no
+               result shown, no refusal above its button, no failure under it.
+        """
+        from lex.test_project.tests.init.test_1ej_ui_frame_decided import signed_in_as
+
+        key = runs.key_of(ReportState.build)
+
+        async def steps(harness):
+            GATE["open"].set()
+            await (await harness.send(ReportState, "build", values={"customer": "nobody"}))
+            await (await harness.send(ReportState, "build", values={"customer": "Acme"}))
+            await _open(harness, "/lookup")
+            mine = await _open(harness, "/report")
+            await (await harness.send(ReportState, "build", values={"customer": "nobody"}))
+            await _open(harness, "/lookup")
+            signed_in_as("somebody-else")
+            return mine, await _open(harness, "/report")
+
+        mine, theirs = _session(steps)
+        self.assertEqual(mine["ui_done"], {key: True}, "the same user finds the kept result")
+        self.assertEqual((theirs["ui_done"], theirs["ui_refused"], theirs["ui_failed"]), ({}, {}, {}),
+                         "the next user of the tab starts the kept form over")

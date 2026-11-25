@@ -238,12 +238,14 @@ class LexUser(rx.State):
     def sign_out(self):
         """Sign out: the backend revokes the binding, then lex-app signs the user out.
 
-        The values the user holds in ``ui.private`` fields in this process leave at once.
+        The values the user holds in ``ui.private`` fields in this process leave at once, and the browser
+        tab forgets its client token: Reflex keeps a tab's states under it, so whoever signs in next on
+        the tab starts with states of their own, never one the last user's page filled.
         """
         from lex.lex_app.reflex.ui import context, private
 
         private.forget(context.user_id_of(self))
-        return session.navigate(session.sign_out_url(self))
+        return session.navigate(session.sign_out_url(self), new_tab_token=True)
 
 
 __all__ = [

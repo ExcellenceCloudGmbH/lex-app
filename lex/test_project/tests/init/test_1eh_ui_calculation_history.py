@@ -34,7 +34,7 @@ from lex.test_project.tests.init.models import UI_CALC_MODELS, UiRegionReport
 pytestmark = pytest.mark.init
 
 ROUTE = "/reports/regions"
-CTX = Build(page="region_reports", route=ROUTE)
+CTX = Build(page="region_reports", route=ROUTE, requires=())      # a @ui.page without requires=
 FIELDS = [ui.field("region", required=True), ui.field("year", kind="year", required=True)]
 
 

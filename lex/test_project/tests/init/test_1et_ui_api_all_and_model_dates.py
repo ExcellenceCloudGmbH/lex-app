@@ -9,7 +9,7 @@ nothing on the server: a date field in `filters=` is a range of days, sent as th
 regression is a row read twice or missed across pages, an unbounded read, or a date filter the API
 ignores.
 
-Cluster 1et -- scenarios 1.1028-1.1029. Type: U.
+Cluster 1et -- scenarios 1.1028-1.1029, 1.1114. Type: U.
 Covers: lex/lex_app/reflex/ui/context.py (Api.all, ALL_LIMIT), lex/lex_app/reflex/data.py (LexTableState
 set_dates, date_lookups), lex/lex_app/reflex/ui/pages/tables.py (a model table's date filters, the
 export/totals refusal).
@@ -140,3 +140,94 @@ class TestCluster01et_ApiAllAndModelDates(SimpleTestCase):
         self.assertEqual(sent[2], [], "a malformed day is dropped")
         self.assertEqual(sent[3], [("event_at__date__gte", "2026-02-01")])
         self.assertEqual((sent[4], dates), ([], {}), "clearing the filters removes the range")
+
+
+ASKED: list = []
+
+
+class StockState(ui.State):
+    """Every stock line through one read, and a search the handler does itself."""
+
+    @ui.rows
+    def stock(self):
+        ASKED.append("stock")
+        return [{"id": n, "item": f"Item {n:03d}", "store": "North" if n % 2 else "South"} for n in range(1, 61)]
+
+    @ui.rows
+    def found(self, search):
+        ASKED.append(f"found:{search}")
+        return [{"id": n, "item": f"Item {n:03d}"} for n in range(1, 61) if search in f"Item {n:03d}"]
+
+    @ui.action
+    def restock(self):
+        return None
+
+
+class TestCluster01et_RowsReadOnce(SimpleTestCase):
+    """1.1114: a table over a @ui.rows handler reads its rows once, not on every page turn."""
+
+    def setUp(self) -> None:
+        ASKED.clear()
+        rows_table._KEPT.clear()
+        self.addCleanup(rows_table._KEPT.clear)
+
+    # -- 1.1114 --------------------------------------------------------
+    def test_1_1114_page_turns_sorts_filters_and_searches_read_the_kept_rows(self) -> None:
+        """
+        Scenario 1.1114: a table over every record of a model (self.api.all through a @ui.rows handler).
+        Given: a searchable, filterable table of 60 stock lines, and a table whose handler searches itself.
+        When:  the user turns pages, sorts, filters, searches among the rows; a handler of the state runs;
+               the page opens again (a new visit); the rows stay unused past the idle time; and the
+               searching handler's table is searched twice and paged.
+        Then:  the handler was asked when the table appeared, after the state's handler, on the new visit
+               and after the idle time -- never for a page turn, a sort, a filter or a search among the
+               rows; the searching handler is asked once per search, not per page; what is shown is right
+               each time; the kept rows are in no state Reflex stores.
+        """
+        import pickle
+
+        from lex.lex_app.reflex.ui import testing
+        from lex.lex_app.reflex.ui.state import State
+
+        stock = ui.table(StockState.stock, columns=["item", "store"], filters=["store"], search=True, page_size=25)
+        found = ui.table(StockState.found, columns=["item"], search=True, page_size=25)
+        for one in (stock, found):
+            one.build(Build(page="stock", route="/stock", caption="Stock"))
+        S, F = rows_table._CACHE_BY_TABLE[stock], rows_table._CACHE_BY_TABLE[found]
+
+        async def scenario():
+            async with testing.Harness(user="ada") as h:
+                await h.open_tab("/stock")
+                await (await h.send(S, "open"))
+                await (await h.send(S, "set_page", value=1))
+                await (await h.send(S, "sort_by", key="item"))
+                await (await h.send(S, "set_choice", field="store", value="North"))
+                await (await h.send(S, "set_query", value="Item 05"))
+                shown = [row["item"] for row in (await h._state(S)).page_rows]
+                browsed = list(ASKED)
+                await (await h.send(StockState, "restock"))
+                await asyncio.sleep(0.05)
+                after_handler = list(ASKED)
+                await (await h.send(State, "ui_open", page="/stock"))
+                await (await h.send(S, "set_query", value=""))
+                after_visit = list(ASKED)
+                with patch.object(rows_table, "ROWS_IDLE", -1):
+                    await (await h.send(S, "set_page", value=1))
+                after_idle = list(ASKED)
+                ASKED.clear()
+                await (await h.send(F, "open"))
+                await (await h.send(F, "set_query", value="Item 0"))
+                await (await h.send(F, "set_page", value=1))
+                await (await h.send(F, "set_query", value="Item 01"))
+                searched = list(ASKED)
+                stored = b"".join(pickle.dumps(one) for one in (await h._state(S), await h._state(F)))
+                return shown, browsed, after_handler, after_visit, after_idle, searched, stored
+
+        shown, browsed, after_handler, after_visit, after_idle, searched, stored = asyncio.run(scenario())
+        self.assertEqual(shown, ["Item 005", "Item 051", "Item 053", "Item 055", "Item 057", "Item 059"])
+        self.assertEqual(browsed, ["stock"], "read once for a page turn, a sort, a filter and a search")
+        self.assertEqual(after_handler, ["stock"] * 2, "read again after a handler of its state")
+        self.assertEqual(after_visit, ["stock"] * 3, "read again on a new visit")
+        self.assertEqual(after_idle, ["stock"] * 4, "read again after the idle time")
+        self.assertEqual(searched, ["found:", "found:Item 0", "found:Item 01"], "a search it does: once per search")
+        self.assertNotIn(b"Item 059", stored, "the kept rows are in no stored state")
