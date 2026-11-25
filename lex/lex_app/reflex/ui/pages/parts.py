@@ -26,6 +26,10 @@ class Build:
     caption: str = ""                   # the title a table in this part is named by (its section's)
     under_load: bool = False            # the part appears only after a load has finished
     page_search: bool = False           # a list page's table: its search is the page's, kept in the address
+    #: The page's ``requires=`` (normalised; ``()`` for a page without): what the reads of its tables and
+    #: the handlers lex-app writes for it (a calculation's) require too. ``None`` outside a ``@ui.page`` (a
+    #: dashboard, ``ui.embed``), where no page's requirements are known.
+    requires: tuple | None = None
     #: The dialogs of the page's buttons (``confirm=``, ``ask=``): one list for the whole page,
     #: shared by every copy of this context, and placed beside the page when it is built.
     overlays: list = dataclasses.field(default_factory=list)

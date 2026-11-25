@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1103
+max_scenario: 1104
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2640,10 +2640,10 @@ letters:
       The frame shows RFDS's breadcrumbs: the area, the listed page whose table opens the page (else whose button or link leads to it), the page with a state title. These tests fail on a page that loses its trail, a parent that is the wrong list, or a record title that breaks the page.
   ed:
     title: 'lex.ui frame: a project''s no-access sentence and way out, and its own access rules'
-    scenarios: '1.968-1.973, 1.1090'
+    scenarios: '1.968-1.973, 1.1090, 1.1104'
     status: complete
     tests:
-      pass: 7
+      pass: 8
       skip: 0
       xfail: 0
     note: >-

@@ -1357,6 +1357,14 @@ scenario (batch in brackets):
   `ui.State.__getstate__` now leaves them out, as `RowsNotStored` leaves a table's rows out; what a form
   accepts is checked against `_ui_offered`, the ids only, which stays. After a reconnect a searched field
   shows no matches until it is opened or typed into again, which searches anew.
+- *A page's tables follow its `requires=` (I-5, 1.1104 [1ed]).* A rule-guarded page shows a refused user
+  no table, but a table's events (`open`, `set_page`...) can be sent by name, and a model table read
+  rows through lex-app's API (within the model's permissions) or a rows handler without `requires=` of
+  its own ran. A table built on a `@ui.page` now carries the page's `requires=` (through `Build.requires`,
+  which `declare.finalize` sets) and asks it -- permissions from Keycloak's grants, rules on a worker
+  thread with the page's values -- before every read, as a handler asks its own; refused, nothing is read
+  and the table shows the refusal's sentence. It costs a rule's answer per read (once per event, as for a
+  handler). A table in `ui.embed` or on a dashboard has no page `requires=` and reads as before.
 
 ## 7. Order of building
 

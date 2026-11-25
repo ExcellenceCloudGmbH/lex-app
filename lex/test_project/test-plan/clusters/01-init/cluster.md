@@ -1804,6 +1804,7 @@ does not remove user launch configurations.
 | 1.972 | A page guarded by a rule is decided by the opener | compiled cond on ui_access with the notice; granted starts the load, refused none and keeps its sentence; a list with a permission hides the entry |
 | 1.973 | A rule written wrongly is refused with what to write | wrong arguments; a plain function in requires=; a rule in visible=; a raw page's requires=; still callable |
 | 1.1090 | A rule reads the user's permissions | `user.permissions` on the rule's worker thread: granted by a held permission, refused with the rule's sentence, never a failure |
+| 1.1104 | A refused user reads no rows by sending a table's events | on a rule-guarded page a model table, a rows table without requires= and a calculation's past runs read nothing for a refused user (API and handler never called) and show the rule's sentence; the team's user reads |
 
 **Scenario range:** 1.968 – 1.973. **Test file:** `lex/test_project/tests/init/test_1ed_ui_access.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ed](batches.md).
 

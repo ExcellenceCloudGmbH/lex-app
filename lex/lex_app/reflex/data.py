@@ -560,6 +560,9 @@ class LexTableState(DataTableMixin, ChosenColumns, RowsNotStored, mixin=True):
     date_lookups: ClassVar[dict] = {}
     #: A date filter's range, as its picker shows it: ``{field: {"start": ..., "end": ...}}``.
     dates: dict[str, dict[str, str]] = {}
+    #: The ``requires=`` of the ``@ui.page`` the table is on (``ui.table``): asked before every read, so a
+    #: user the page refuses cannot read its rows by sending the table's events by name. ``()``: none.
+    requires: ClassVar[tuple] = ()
 
     @rx.event
     async def set_dates(self, field: str, value: Mapping[str, Any]):
@@ -632,6 +635,11 @@ class LexTableState(DataTableMixin, ChosenColumns, RowsNotStored, mixin=True):
             yield
 
     async def _fetch_page(self, *, offset, limit, sort, filters, query):
+        requires = getattr(type(self), "requires", ())
+        if requires:
+            from lex.lex_app.reflex.ui.handlers import check_page_requires
+
+            await check_page_requires(self, requires)
         params = scope_params(self.scope) + filter_params(filters) + LexTableState._date_params(self)
         if query and type(self).search_field:
             params.append((f"{type(self).search_field}__icontains", query))
@@ -759,12 +767,13 @@ def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_fiel
                 page_size: int = 25, filters: Mapping[str, Any] | None = None,
                 row_fields: Sequence[str] = (), choice_fields: Sequence[str] | None = None,
                 scope_fields: Sequence[str] | None = None, ordering: str = "", not_stored: bool = False,
-                date_lookups: Mapping[str, str] | None = None) -> type:
+                date_lookups: Mapping[str, str] | None = None, requires: tuple = ()) -> type:
     """The :class:`LexTableState` for one table of ``model`` (one class per distinct table).
 
     The table opens at ``page_size`` rows, which is also among the sizes the
     user can pick. ``row_fields`` are kept in each row besides the columns'
-    own fields -- a primary key that is not shown, for the row's link.
+    own fields -- a primary key that is not shown, for the row's link. ``requires`` is the
+    ``requires=`` of the ``@ui.page`` the table is on: every read checks it first.
     """
     sizes = tuple(sorted({25, 50, 100, int(page_size)}))
     classvars: dict[str, Any] = {
@@ -784,6 +793,8 @@ def table_state(model: Any, *, columns: Sequence[Mapping[str, Any]], search_fiel
         classvars["rows_not_stored"] = True
     if date_lookups:
         classvars["date_lookups"] = dict(date_lookups)
+    if requires:
+        classvars["requires"] = tuple(requires)
     return _state_for(LexTableState, model, classvars, defaults={"page_size": int(page_size)},
                       identity=_filters_identity(filters))
 

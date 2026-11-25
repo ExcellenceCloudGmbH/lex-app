@@ -3675,6 +3675,7 @@ What building settled is section 6.19 of `docs/superpowers/specs/2026-11-23-refl
 | 1.971 | A rule is asked once per event and fails closed | named twice, asked once per press; raising or answering wrongly refuses with the standard error |
 | 1.972 | A page guarded by a rule is decided by the opener | compiled cond on ui_access with the notice; granted starts the load, refused none and keeps its sentence; a list with a permission hides the entry |
 | 1.973 | A rule written wrongly is refused with what to write | wrong arguments; a plain function in requires=; a rule in visible=; a raw page's requires=; still callable |
+| 1.1104 | A refused user reads no rows by sending a table's events | on a rule-guarded page a model table, a rows table without requires= and a calculation's past runs read nothing for a refused user (API and handler never called) and show the rule's sentence; the team's user reads |
 
 Added 2026-11-25: A rule, a frame function and `opened=` read `user.permissions` outside a handler body: lex-app gives the user its permissions first (1.1090).
 

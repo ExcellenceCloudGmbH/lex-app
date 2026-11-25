@@ -153,10 +153,12 @@ def page(route: str, *, nav: str | None = None, icon: str | None = None, require
     user, ``def waiting(user): ...``, which lex-app calls on the server when a page opens, or a
     whole-number state value.
 
-    ``requires=`` and ``visible=`` decide what is shown, never what is allowed: a value a page
-    shows reaches the browser. What a user may read or change is enforced by each handler's own
-    ``requires=`` and by lex-app's API, which acts as the user. A page kind whose handlers are
-    lex-app's (``ui.calculation``) gives them the page's ``requires=``.
+    ``visible=`` decides what is shown, never what is allowed: a value a page shows reaches the
+    browser. What a user may read or change is enforced by each handler's own ``requires=`` and by
+    lex-app's API, which acts as the user. What lex-app reads or runs for the page itself follows the
+    page's ``requires=``: its tables read only for users it grants (their events can be sent by
+    name), and a page kind whose handlers are lex-app's (``ui.calculation``) gives them the page's
+    ``requires=``.
     """
     if not route.startswith("/"):
         raise ValueError(f"ui.page() routes start with '/', got {route!r}")
@@ -223,12 +225,12 @@ def finalize() -> None:
             raise PageError(f"Page `{name}`: a page listed in the navigation needs a fixed title.\n"
                             "Give the kind `title=\"...\"`, or leave `nav=` out.")
         required, optional = _loads(name, kind)
-        kind.build(Build(page=name, route=route))      # every slot checked now: a wrong page stops the start
+        kind.build(Build(page=name, route=route, requires=declared.requires))   # a wrong page stops the start
 
         def body(fn: Callable[[], Any] = declared.fn, route: str = route,
                  requires: tuple = declared.requires) -> rx.Component:
             with _declaring(requires):
-                return _kind_of(fn).build(Build(page=fn.__name__, route=route))
+                return _kind_of(fn).build(Build(page=fn.__name__, route=route, requires=requires))
 
         body.__name__ = name
         body.__qualname__ = declared.fn.__qualname__

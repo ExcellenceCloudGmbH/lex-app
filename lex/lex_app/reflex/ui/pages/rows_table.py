@@ -68,6 +68,9 @@ class LexRowsTableState(DataTableMixin, ExportMixin, ChosenColumns, RowsNotStore
     query_param: ClassVar[str] = ""
     searchable: ClassVar[bool] = False                # the table has a search box
     exportable: ClassVar[bool] = False                # the table has an export menu
+    #: The ``requires=`` of the ``@ui.page`` the table is on: asked before every read, as the rows
+    #: handler's own ``requires=`` is.
+    requires: ClassVar[tuple] = ()
 
     shown: bool = False
     totals_rows: list[dict] = []
@@ -209,6 +212,10 @@ class LexRowsTableState(DataTableMixin, ExportMixin, ChosenColumns, RowsNotStore
 
         cls = type(self)
         handler = getattr(cls.owner, cls.handler_name)
+        if cls.requires:                    # the page's: a user it refuses reads none of its rows
+            from lex.lex_app.reflex.ui.handlers import check_page_requires
+
+            await check_page_requires(self, cls.requires)
         try:
             owner = await self.get_state(cls.owner)
             raw = await rows_mod.read(handler, owner, search=query if cls.takes_search else "")

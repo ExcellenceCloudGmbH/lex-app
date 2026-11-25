@@ -63,7 +63,8 @@
                             a record's file, downloaded as the user
 ``requires=``               ``ui.read/create/edit/delete(Model)``, ``ui.permission()``,
                             ``ui.signed_in``, a project's ``@ui.rule`` -- needed to query the
-                            database directly; on a page and on every handler
+                            database directly; on every handler, and on a page, whose tables
+                            read only for users it grants
 ``@ui.rule``                a project's own access rule: ``def rule(user, params)`` returns True,
                             False or the refusal's sentence; asked on the server once per event
 ``ui.running/failed/        a handler's status, for views; ``ui.cancel`` is the

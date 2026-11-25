@@ -415,7 +415,7 @@ class Table(Part):
                                  row_fields=tuple(sorted(used)),
                                  choice_fields=tuple(name for name in self.filters if name not in dated),
                                  scope_fields=tuple(dict(self.where or {})), ordering=self.ordering,
-                                 not_stored=True, date_lookups=dated)
+                                 not_stored=True, date_lookups=dated, requires=tuple(ctx.requires or ()))
         rows_table._CACHE_BY_TABLE[self] = state
         rows_table.shown_on(ctx.route, state)
         options = {}
@@ -496,7 +496,7 @@ class Table(Part):
                           if kinds_by_key.get(field) in _EXPORT_KIND},
             query_param="q" if (self.search and ctx.page_search and ctx.route) else "",
             searchable=bool(self.search), exportable=bool(self.export),
-            entity=self.source.fn.__name__.replace("_", " "))
+            entity=self.source.fn.__name__.replace("_", " "), requires=tuple(ctx.requires or ()))
         rows_table._CACHE_BY_TABLE[self] = state
         if not ctx.under_load:          # under a load the table appears again after it, and reads then
             rows_table.on_route(ctx.route, state)

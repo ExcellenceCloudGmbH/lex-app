@@ -298,6 +298,20 @@ async def _session(state: Any, requirements: tuple | None) -> tuple[context.Sess
         return session, exc
 
 
+async def check_page_requires(state: Any, requires: tuple) -> None:
+    """Refuse a table's read when the user does not meet the ``requires=`` of the page it is on.
+
+    The page shows a refused user no table, but its events can be sent by name: each read asks the
+    page's permissions and rules first, as a handler asks its own. Raises RFDS's ``RFDSUserError`` with
+    the refusal's sentence (a rule's own, else lex-app's), which the table shows in its error slot.
+    """
+    session, failure = await _session(state, tuple(requires))
+    if failure is not None:
+        from rfds.errors import RFDSUserError
+
+        raise RFDSUserError(_classify(type(state).__name__, failure, _user_id(session)).message)
+
+
 def _user_id(session: context.Session | None) -> str:
     return session.user.id if session is not None else ""
 

@@ -8,7 +8,7 @@ like lex-app's permissions, refused with the rule's own sentence. A regression i
 strands the user, a sentence that is lex-app's where the project said its own, a rule that the browser
 decides, a rule asked more than once per event, or a rule that fails open.
 
-Cluster 1ed -- scenarios 1.968-1.973. Type: U.
+Cluster 1ed -- scenarios 1.968-1.973, 1.1090, 1.1104. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/frame.py (denied=, request_access=), lex/lex_app/reflex/shell.py
 (denied_notice, lex_page), lex/lex_app/reflex/ui/state.py (error_page, ui_open),
 lex/lex_app/reflex/ui/guard.py (rule), lex/lex_app/reflex/ui/handlers.py (_session),
@@ -353,3 +353,98 @@ class TestCluster01ed_Rules(FrameCase):
 
 async def _send(harness, name):
     await (await harness.send(RegionState, name))
+
+
+class RegionRowsState(ui.State):
+    """A region's customers, read by a rows handler that itself requires nothing."""
+
+    @ui.rows
+    def customers(self):
+        READ.append("customers")
+        return [{"id": 1, "name": "Acme"}]
+
+
+READ: list = []
+
+
+class FakeApi:
+    """lex-app's API as a model table reads it: one page of groups."""
+
+    async def list(self, resource, **kwargs):
+        READ.append(resource)
+        return {"results": [{"id": 1, "name": "North team"}], "count": 1}
+
+
+class TestCluster01ed_TablesFollowThePage(FrameCase):
+    """1.1104: a table on a rule-guarded page reads only for users the page grants."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        ASKED.clear()
+        READ.clear()
+
+    # -- 1.1104 --------------------------------------------------------
+    def test_1_1104_a_refused_user_reads_no_rows_by_sending_a_tables_events(self) -> None:
+        """
+        Scenario 1.1104: the events of a page's tables sent by name.
+        Given: a region page guarded by the project's rule, holding a model table and a table over a
+               rows handler that requires nothing of its own; a calculation page guarded by the rule,
+               with its past runs.
+        When:  a user the rule refuses sends each table's `open` and `set_page` by name; then the
+               region's team does.
+        Then:  the refused user reads nothing -- lex-app's API and the rows handler are never called --
+               and each table shows the rule's sentence; the team's user reads the rows.
+        """
+        import asyncio
+        from unittest.mock import patch
+
+        from django.contrib.auth.models import Group
+
+        from lex.lex_app.reflex import data
+        from lex.lex_app.reflex.ui import testing
+        from lex.lex_app.reflex.ui.pages import rows_table
+        from lex.test_project.tests.init.models import UiRegionReport
+
+        groups = ui.table(Group, columns=["name"])
+        customers = ui.table(RegionRowsState.customers, columns=["name"])
+
+        @ui.page("/regions/[region]", requires=region_team)
+        def region():
+            return ui.record(title="Region", sections=[ui.section("Teams", groups), ui.section("Customers", customers)])
+
+        @ui.page("/reports/regions", nav="Reports", requires=region_team)
+        def reports():
+            return ui.calculation(UiRegionReport, title="Region report",
+                                  fields=[ui.field("region"), ui.field("year", kind="year")],
+                                  history=ui.table(UiRegionReport, columns=["region", "year"]))
+
+        declare.finalize()
+        tables = [rows_table._CACHE_BY_TABLE[groups], rows_table._CACHE_BY_TABLE[customers],
+                  rows_table._CACHE_BY_TABLE[declare._DECLARED["/reports/regions"].kind.built_history]]
+
+        async def fake_api(state):
+            return FakeApi()
+
+        def read_as(user, region_name):
+            async def scenario():
+                async with testing.Harness(user=user, params={"region": region_name}) as harness:
+                    await harness.open_tab(f"/regions/{region_name}")
+                    shown = []
+                    for state in tables:
+                        opening = {"scope": {}} if issubclass(state, data.LexTableState) else {}
+                        await (await harness.send(state, "open", **opening))
+                        await (await harness.send(state, "set_page", value=1))
+                        live = await harness._state(state)
+                        shown.append((live.error, len(live.page_rows)))
+                    return shown
+
+            with patch.object(data, "lex_api", fake_api):
+                return asyncio.run(scenario())
+
+        refused = read_as("ben", "east")
+        self.assertEqual(READ, [], "nothing was read for a user the page refuses")
+        self.assertEqual(refused, [("Only the region's team sees its report.", 0)] * 3,
+                         "each table shows the rule's sentence")
+        granted = read_as("anna", "north")
+        self.assertEqual([error for error, _ in granted], ["", "", ""], "the region's team reads")
+        self.assertEqual(sorted(set(READ)), ["customers", "group", "uiregionreport"])
