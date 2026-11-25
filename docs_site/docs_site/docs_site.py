@@ -16,7 +16,9 @@ from lex.lex_app.reflex.design import lex_head_components, lex_security_headers
 
 
 sandbox.install()
-app = rx.App(**rfds.app_kwargs(html_lang="en", extra_head=lex_head_components(),
+app = rx.App(**rfds.app_kwargs(html_lang="en",
+                                extra_head=[*lex_head_components(),
+                                            rx.el.link(rel="stylesheet", href=layout.MONO_STYLESHEET)],
                                 extra_routes=llms.routes()))
 install_platform(app, headers=lex_security_headers())
 rfds.install(app, tenant=None, auth=None)

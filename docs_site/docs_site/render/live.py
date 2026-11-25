@@ -67,16 +67,34 @@ def to_component(value: Any, name: str) -> rx.Component:
                     f"(ui.table, ui.section); got {type(value).__name__}")
 
 
-def demo_card(code: str | None, component: rx.Component) -> rx.Component:
+def demo_card(code: str | None, component: rx.Component, *, title: str | None = None) -> rx.Component:
+    """A live example: a toolbar (Preview / Code on the left; "Viewing as" Editor/Viewer and Reset on
+    the right) over the running example. ``code`` is None for a ``demo-only`` fence: no Code tab.
+
+    The tabs are client-side, and both panes stay mounted (an inactive pane is only hidden), so
+    switching to the code and back neither reloads the example nor loses what the reader did in it.
+    """
+    from docs_site.render.blocks import highlighted
     from docs_site.sandbox import reset
     from docs_site.sandbox.role import switch
 
-    shown = [rx.hstack(reset.button(), rx.spacer(),
-                       rx.text("Viewing as", size="1", color_scheme="gray"), switch(),
-                       align="center", width="100%", flex_wrap="wrap", row_gap="8px"),
-             rx.box(component, class_name="docs-demo-frame", width="100%",
-                    border="1px solid var(--gray-a6)", border_radius="var(--radius-3)",
-                    padding="16px", background="var(--gray-a2)")]
-    if code is not None:
-        shown.insert(0, rx.code_block(code.rstrip("\n"), language="python", can_copy=True))
-    return rx.vstack(*shown, spacing="3", align="stretch", class_name="docs-demo")
+    controls = rx.el.div(rx.el.span("Viewing as", class_name="docs-demo-as", custom_attrs={"aria-hidden": "true"}),
+                         switch(), reset.button(), class_name="docs-demo-controls")
+    preview = rx.box(component, class_name="docs-demo-frame")
+    if code is None:
+        bar = rx.el.div(rx.el.span("Preview", class_name="docs-demo-tab docs-demo-tab-static"), controls,
+                        class_name="docs-demo-bar")
+        return rx.el.section(bar, preview, class_name="docs-demo", aria_label="Live example")
+    source = rx.box(highlighted(code.rstrip("\n"), "python"), class_name="docs-demo-code")
+    tabs = rx.tabs.list(rx.tabs.trigger("Preview", value="preview", class_name="docs-demo-tab"),
+                        rx.tabs.trigger(title or "Code", value="code", class_name="docs-demo-tab"),
+                        class_name="docs-demo-tabs", aria_label="Example view")
+    return rx.el.section(
+        rx.tabs.root(
+            rx.el.div(tabs, controls, class_name="docs-demo-bar"),
+            rx.tabs.content(preview, value="preview", force_mount=True, class_name="docs-demo-pane"),
+            rx.tabs.content(source, value="code", force_mount=True, class_name="docs-demo-pane"),
+            default_value="preview",
+        ),
+        class_name="docs-demo", aria_label="Live example",
+    )

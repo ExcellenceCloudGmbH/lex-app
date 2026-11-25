@@ -26,6 +26,30 @@ def test_alert_and_tabs():
     assert "One" in built and "Second." in built
 
 
+def test_a_callout_is_a_tinted_note_with_its_tones_icon():
+    """```md alert <tone>```: a panel in the tone's colours with an icon that names the tone."""
+    built = str(render_page(_page("```md alert danger\nStop.\n```\n\n```md alert\nPlain.\n```\n")))
+    assert 'className:"docs-callout docs-callout-danger",role:"note"' in built
+    assert 'className:"docs-callout docs-callout-info",role:"note"' in built
+    assert '"aria-label":"Danger"' in built and '"aria-label":"Note"' in built
+    assert "inline_message" not in built and "rfds-inline-message" not in built
+
+
+def test_a_code_block_has_a_header_strip_with_the_language_or_file_name_and_a_copy_button():
+    built = str(render_page(_page("```bash\nlex reflex add\n```\n\n"
+                                  "```python title=funds/state.py\nx = 1\n```\n")))
+    assert built.count('className:"docs-code"') == 2 and built.count('"aria-label":"Copy code"') == 2
+    assert '"bash"' in built and '"funds/state.py"' in built
+    assert 'language:"bash"' in built and 'language:"python"' in built
+    # the site's own highlighting colours, through the tokens
+    assert "var(--docs-kw)" in built and "var(--docs-str)" in built
+
+
+def test_inline_code_is_a_pill():
+    built = str(render_page(_page("Call `ui.list` here.\n")))
+    assert 'jsx("code",{className:"docs-code-span"},"ui.list")' in built
+
+
 def test_a_table():
     built = str(render_page(_page("| a | b |\n|---|---|\n| 1 | 2 |\n")))
     assert "RadixThemesTable.Root" in built and "RadixThemesTable.ColumnHeaderCell" in built

@@ -27,6 +27,7 @@ def toc(page: Page) -> rx.Component:
     entries = [(anchor_id, rx.el.span(text, class_name=f"docs-toc-h{level}"))
                for level, text, anchor_id in page.headings]
     return rx.fragment(
-        rx.el.p("On this page", class_name="docs-toc-title", custom_attrs={"aria-hidden": "true"}),
+        rx.el.p(rfds.icon("text", size="sm"), "On this page", class_name="docs-toc-title",
+                custom_attrs={"aria-hidden": "true"}),
         rfds.anchor_nav(*entries, label="On this page", sticky=False, id="docs-toc-nav"),
     )
