@@ -102,7 +102,9 @@ ui.record(
 Click **Add 5 million** on a commitment. The commitments table reads again because the action
 belongs to its state; the per-fund totals read again because the action returned
 `ui.refresh(FundTotals.rows)`. Without it, the totals would stay as they were until the page is
-opened again.
+opened again: a table keeps the rows its handler gave in the server's memory and turns pages,
+sorts and searches among them, so not even a page turn would read the new totals. When a table
+reads again is listed in [When the handler runs again](/show-your-data/tables#when-the-handler-runs-again).
 
 ## What `ui.refresh` takes
 

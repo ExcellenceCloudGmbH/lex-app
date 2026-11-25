@@ -18,7 +18,8 @@ A `@ui.rows` handler returns every row, as a list of dicts, each with an `id` (o
 `key=` to name another field that tells rows apart). lex-app calls it
 as the user when the table appears, and again on refresh and after an action of the same state;
 it then searches, filters, sorts and pages the rows itself. The handler only reads: setting a
-field of the state there fails.
+field of the state there fails. How long lex-app keeps the rows it gave is in
+[When the handler runs again](#when-the-handler-runs-again).
 
 Return every row, not one page: `self.api.list` returns one page of records at a time (25 by
 default), so a handler that returns it directly shows, searches and totals only that page.
@@ -83,6 +84,37 @@ def rows(self, search):
     return my_search(self.user, search)
 ```
 
+## When the handler runs again
+
+A table over a `@ui.rows` handler keeps the rows the handler gave in the server's memory, for that
+browser tab, user and table, and turns pages, sorts, filters and searches among them there. A page
+turn or a sort does not call the handler again. It is called again when:
+
+- the table appears, or its page opens again (a new record on the same page);
+- `ui.refresh(State.rows)` is returned, or a handler of the same state finishes;
+- the user opens a page anew (a new visit);
+- a search is typed, if the handler takes a `search` argument and searches itself;
+- the rows have not been used for 10 minutes, or the table has left the screen.
+
+So when a handler changes what **another** state's rows handler reads, it returns
+`ui.refresh(Other.rows)`: the table over `Other.rows` reads its rows again only then. See
+[Keep other tables up to date](/let-people-act/keep-tables-current).
+
+The rows are kept in the memory of the server process that read them, never in a stored state,
+like a [private value](/long-running-work/private-results); with several server processes, each
+keeps its own.
+
+## Who a table reads for
+
+On a `@ui.page` with `requires=`, its tables read rows only for users the page's `requires=`
+grants: permissions from the user's Keycloak grants, and [rules](/who-can-do-what/permissions#a-rule-of-your-own)
+asked on a worker thread with the page's values. A refused user sees no table on the page, but a
+table's events can be sent by name, so every read asks first, model tables and rows tables alike.
+Refused, nothing is read, and the table shows the refusal's sentence.
+
+A table on a `@ui.dashboard` or in `ui.embed` has no page `requires=` to follow: the rows handler's
+own `requires=` and lex-app's API, which acts as the user, guard what it reads.
+
 ## What reaches the browser, and what is kept
 
 The rows a table shows reach the browser, as everything a page shows does. They are never stored
@@ -92,11 +124,13 @@ totals, its filters' choices and its rows' addresses. So a table over a
 [`ui.private`](/long-running-work/private-results) value keeps the persons in it out of the store too.
 
 What is kept is how the user left the table: the page, the sort, the search, the filters and the
-row count. When the browser loses its connection and gets it back, a `@ui.page` tells its tables
-to read their rows again, from where the user left them.
+row count. When the browser loses its connection and gets it back, every table reads its rows
+again, from where the user left them: on a `@ui.page`, a `@ui.dashboard` and in
+[`ui.embed`](/make-it-your-app/your-own-reflex#parts-inside-a-raw-page) alike.
 
 - **The cost**: after a reconnect, or when another of the server's workers answers the user, the
-  table reads its rows again: the handler runs, or lex-app's API is asked, once more.
+  table reads its rows again: from the server's memory while that process still keeps a rows
+  handler's rows, otherwise the handler runs, or lex-app's API is asked, once more.
 - What the user typed in the search box and chose in a filter is stored, as the table's state.
 - A table drawn with `lex_table` on a [raw page](/make-it-your-app/your-own-reflex) still stores its
   rows, since no lex.ui page tells it to read them again.

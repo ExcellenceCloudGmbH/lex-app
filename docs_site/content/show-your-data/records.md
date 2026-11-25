@@ -152,15 +152,17 @@ def orders(self):
     return self.api.all(Order, filters={"region": self.params.key}, ordering="-placed_on")
 ```
 
-- **It reads page after page**, 1,000 records at a time, sorted by `ordering=` and then by the
-  record's key, so no record is read twice or missed when two of them tie. Its `.count` is the
-  number of records read.
+- **It reads page after page**, 1,000 records at a time, in a stable order: by `ordering=` and
+  then by the record's key. The pages are read one after another, not at one moment, so a record
+  created or deleted meanwhile can shift a page, and a record may then be read twice or missed;
+  the table shows it right on its next read. Its `.count` is the number of records read.
 - **At most 10,000.** When more match, it reads no further than the first page and refuses: the
   table shows "There are 12,345 orders here, more than can be shown at once (10,000). Narrow them
   down first." The words for the records are your model's plural name. A `@ui.rows` handler holds
   every row in the server's memory, so read fewer with `filters=`: the user's region, this year.
 - **A table over it does the rest**: it searches, filters (by date too), sorts, totals and exports
-  every row, which a model table cannot.
+  every row, which a model table cannot. It reads them once and does all of that in the server's
+  memory, until it reads again: see [When the handler runs again](/show-your-data/tables#when-the-handler-runs-again).
 
 ## Writing
 

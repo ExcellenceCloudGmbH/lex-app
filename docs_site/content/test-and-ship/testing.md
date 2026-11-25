@@ -249,9 +249,9 @@ class Investors(ui.State):
 class InvestorsTest(TransactionTestCase):
     def test_lists_the_pension_funds(self):
         Investor.objects.create(name="Rhine Pension Fund", kind="pension")
-        # self.client is signed in as the user, the way your project's API tests sign in
+        # self.client is signed in as "analyst", the way your project's API tests sign in
         api = ui.testing.lex_api(self.client)
-        result = ui.testing.run(Investors, "find_pension_funds", api=api)
+        result = ui.testing.run(Investors, "find_pension_funds", user="analyst", api=api)
         assert result.fields["names"] == ["Rhine Pension Fund"]
         assert api.calls == [("GET", "/api/model_entries/investor/list")]
 ```
@@ -262,8 +262,12 @@ database](#handlers-that-query-the-database).
 
 - Every call of `self.api` is answered in the test's own process by lex-app's views, through
   Django's test client: no server, no HTTP.
-- `client` is Django's or Django REST framework's test client, signed in as the user the API acts
-  for, the way your project's API tests sign in. `user=` on `run` only names `self.user`.
+- `client` is Django's or Django REST framework's test client, signed in the way your project's
+  API tests sign in. lex-app's API acts as the client's user, as it acts as the signed-in user in
+  the browser.
+- **`user=` must be the client's user**, by its username, id or e-mail, since it is what the
+  handler reads as `self.user`. The first call refuses a test where the two differ, saying the
+  `user=` to write; a client signed in as nobody is refused too.
 - `.calls` lists the requests made, as `(method, path)`.
 
 ## Handlers that query the database

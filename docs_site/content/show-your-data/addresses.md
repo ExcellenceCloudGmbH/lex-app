@@ -52,20 +52,24 @@ What each argument does:
   listed in the navigation needs a fixed title, a string rather than a state value. How areas are
   ordered and how breadcrumbs are made is on [Navigation, header and menu](/make-it-your-app/navigation).
 - **`icon=`** is the icon of its navigation entry, one of RFDS's icon names such as `"dashboard"`.
+  Like `badge=`, it belongs to a listed page: on a page with route arguments it is refused.
 - **`requires=`** takes what a handler's `requires=` takes: a permission such as
   `ui.read(Model)`, `ui.signed_in`, a rule of your own marked [`@ui.rule`](/who-can-do-what/permissions#a-rule-of-your-own),
   or a list of them. A user who does not meet it sees an access-denied notice instead of the page,
   and the page's loads do not start. The page is also left out of that user's navigation, decided
-  on the server for permissions and rules alike. Leave it out for a page any signed-in user may see.
-- **`badge=`** is a count beside the page's entry in the navigation: a function of the user or a
-  whole-number state value ([Counts](/make-it-your-app/navigation#counts)). It needs `nav=`.
+  on the server for permissions and rules alike. The page's tables read rows only for users it
+  grants, even when their events are sent by name. Leave it out for a page any signed-in user may see.
+- **`badge=`** is a count beside the page's entry in the navigation: a function of the user
+  ([Counts](/make-it-your-app/navigation#counts)). It needs `nav=`, on a page without route arguments.
 - **`params=`** lists the query parameters the page accepts besides its route's arguments, so
   that a link to it may pass them: `params=["tab"]`. How to link to a page is on
   [Buttons and links](/let-people-act/buttons-and-links).
 
 ```md alert warning
-`requires=` decides what is shown, never what is allowed. What a user may read or change is
-enforced by each handler's own `requires=` and by lex-app's API, which acts as the user.
+A page's `requires=` guards the page, its tables' reads and the handlers lex-app writes for it (a
+[calculation page](/long-running-work/calculations)'s). Your own handlers answer to their own
+`requires=`, not the page's, since their events can be sent by name: what a user may read or
+change is enforced by each handler's `requires=` and by lex-app's API, which acts as the user.
 ```
 
 ## One route, one page

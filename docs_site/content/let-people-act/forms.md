@@ -323,6 +323,12 @@ receives the investor's `id`, a number, and lists their commitments.
   without `search` returns every row, and lex-app matches the typed words against the labels.
 - The browser gets at most 50 matches at a time, each its `id` and `label`: nothing else of the
   row. The first page is asked for when the field appears.
+- **One search at a time per field.** What the user types while a search runs is not searched
+  beside it: when the running search ends, the newest text is searched, and the texts typed in
+  between never are. A field searches at most four times a second.
+- **The matches are never stored** with the state, since a label is your data. After the browser
+  loses its connection and gets it back, the field shows no matches until it is opened or typed
+  into again, which searches anew.
 - The server accepts only a value it offered to this browser tab, so a value made up in the
   browser is refused at the field ("Choose one of the options."). A value offered by an earlier
   search stays valid while the user types on.

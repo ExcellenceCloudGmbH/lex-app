@@ -11,6 +11,10 @@ its status, its log and its history. `ui.calculation(Model, ...)` is the page fo
 form for a new run's inputs, the run while it goes, its result, and the past runs. You write no
 handler for it.
 
+`ui.calculation` is a page of its own: return it from a `@ui.page`, whose `requires=` its handlers
+take. Returned from a `@ui.dashboard`, where no page's `requires=` is known, it is refused when
+the page is built, saying to return it from a page function.
+
 ```python
 from lex import ui
 from myproject.models import RegionReport, RegionReportLine
@@ -87,9 +91,10 @@ does, as the signed-in user:
 
 1. the record is created through lex-app's API, so the model's `permission_create`, its
    validation, `created_by` and the audit entry are the user's;
-2. its run is started as lex-app's **Calculate** button starts it, unless the model's
-   `calculate_on_create` already started it on its create;
-3. the browser goes to the run's address, `?run=<key>`.
+2. its run is started as lex-app's **Calculate** button starts it, only when nothing has started
+   it yet: when the model's `calculate_on_create` started it on its create, the created record
+   comes back running or, for a fast run, already done or failed, and it is not started again;
+3. the browser goes to the run's address on the page's own route, `?run=<key>`.
 
 When lex-app's API refuses - the user may not create the record, a value it rejects - the form
 shows the refusal above the button, in the API's words, and no run starts. The form is shown only
@@ -129,7 +134,7 @@ Celery worker.
 - **Leaving the page stops the watching, never the run.** Coming back to the run's address watches
   again. A lost connection that comes back, or a reload, goes on watching.
 - **Progress is the run's own log.** lex-app reports no fraction, so the bar moves without one,
-  and its message is the newest line the run has logged. To say which phase it is in, log a line
+  and its message is the newest line the run has logged, read every third reading of the record. To say which phase it is in, log a line
   from `calculate()`: `LexLogger().add_text("Reading orders").log()`.
 
 ## What the result shows

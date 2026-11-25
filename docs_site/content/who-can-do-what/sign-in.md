@@ -122,8 +122,10 @@ sign-out, which signs the user out of lex-app and Keycloak too. The browser then
 dashboard's home page, which sends it through sign-in again.
 
 `/logout` also drops every [private value](/long-running-work/private-results) the user holds in the
-dashboard's server process. A project can send **Sign out** somewhere else with
-[`ui.frame(sign_out=...)`](/make-it-your-app/blocked-pages#where-sign-out-leads).
+dashboard's server process, and gives the browser tab a fresh client token, so whoever signs in
+next on the tab starts with states of their own. A project can send **Sign out** somewhere else
+with [`ui.frame(sign_out=...)`](/make-it-your-app/blocked-pages#where-sign-out-leads); its page
+should end the same way ([The next user of a browser tab](/make-it-your-app/blocked-pages#the-next-user-of-a-browser-tab)).
 
 Signing out works the other way round as well. When the user signs out of lex-app, or the sign-in
 ends for any other reason, the dashboard notices at its next check, within a minute, and the next
@@ -202,9 +204,11 @@ def profile_card() -> rx.Component:
 | `await current_access_token(state)` | the user's access token for lex-app's API, valid at least 60 seconds; `""` without a sign-in, or while Keycloak cannot be reached and no valid token is left |
 | `await session.access_token(state)` | the same token, from the `session` module |
 | `session.sign_out_url(state)` | the backend's `/auth/logout` address for this session |
+| `session.navigate(url, new_tab_token=False)` | an event that loads `url` as a whole page; with `new_tab_token=True` the tab forgets its client token first |
 
 `session.sign_out_url` is a backend route, so it must be loaded as a whole page:
-`LexUser.sign_out` returns `session.navigate(session.sign_out_url(self))`, which does that.
+`LexUser.sign_out` returns `session.navigate(session.sign_out_url(self), new_tab_token=True)`,
+which does that after the tab forgets its client token.
 
 ### Building the app yourself
 

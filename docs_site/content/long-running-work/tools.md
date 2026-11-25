@@ -203,7 +203,8 @@ return ui.scroll_to("Errors found")          # the section with that title
 return ui.scroll_to(Vintages.funds)          # the table over that @ui.rows handler
 ```
 
-- A section is named by its title, as the page names it; two sections of one title: the first.
+- A section is named by its title, as the page names it. Two sections of one title on a page
+  get two ids, and `ui.scroll_to` reaches the first.
 - A table is named by its `@ui.rows` handler. A model table cannot be named: name the section
   that holds it.
 - A section whose title is a state value is reached through a table it holds.

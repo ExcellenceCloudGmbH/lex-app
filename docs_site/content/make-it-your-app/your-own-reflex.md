@@ -119,6 +119,10 @@ component you can place anywhere. Its loads and its table's rows start when it a
 is the table's caption, and names the part in an error. A whole page kind is refused: it belongs
 on a [`@ui.page`](/show-your-data/addresses) or a `@ui.dashboard`.
 
+An embedded table reads its rows again by itself after a reconnect, as on a lex.ui page. It has
+no page `requires=` to follow, as a table on a `@ui.page` has: what guards its rows is the rows
+handler's own `requires=` and lex-app's API, which acts as the user.
+
 ## Linking to a raw page
 
 lex.ui links name pages, never addresses typed as text. To let a lex.ui link, button or table
@@ -138,6 +142,9 @@ ui.address(ORDER, key=row["id"])                                     # in a @ui.
 starts, lex-app checks that every declared route is a page of the app; one that is not stops the
 start with an error naming the route. `nav=` with `title=` also lists the page in an area of the
 navigation: see [Navigation, header and menu](/make-it-your-app/navigation#a-raw-reflex-page-in-an-area).
+There, `visible=` shows the entry only to users who meet it. It is not `requires=`, because
+`ui.reflex_page` cannot guard the page it names: the page checks access itself, for example with
+`lex_page(requires=...)` above.
 
 ## Raw handlers
 

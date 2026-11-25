@@ -213,6 +213,12 @@ A record page shows at most four tables, counted over all its sections, with `ta
 This is a rule of RFDS, the design system lex-app draws with, for one page. A fifth stops the
 page with a sentence that names how many tables there are and in which sections.
 
+Every table a section holds counts, wherever it sits:
+
+- a table inside another part of the section counts as one;
+- each case of a `ui.switch` counts, shown or not, since every case is on the page;
+- a table that `ui.each` repeats counts as any number, so it stops the page on its own.
+
 The way out is a page of their own for the further tables, led to from a section of the record:
 
 ```python
