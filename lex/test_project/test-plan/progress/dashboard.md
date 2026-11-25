@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 152 | 1122 | 1004 | 3 | 0 |
+| 1. Init — Project Bootstrap | 152 | 1123 | 1005 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -127,7 +127,7 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1cz | lex.ui tables: a table that leaves the screen keeps none of its rows | 1.823 | complete | 1 | 0 | 0 | A table's rows stay in the tab's state only while it is on screen; `close` drops its page, count, totals and filter choices. These tests fail on a person's data left in a state nobody looks at any more. |
 | 1d |  | 1.23-1.30 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1da | lex.ui links: a raw Reflex page as somewhere a link may lead | 1.824 | complete | 1 | 0 | 0 | `ui.reflex_page("/route")` declares a raw Reflex page as a link target for `ui.address`, `open=`, `ui.link` and `ui.button`. These tests fail on a converted table whose rows cannot be opened, or a row link built from a string. |
-| 1db | lex.ui's part of lex-app's app, and every page in lex-app's chrome | 1.825-1.826 | complete | 2 | 0 | 0 | create_app runs lex.ui's part of the app in one internal step, and every page is in lex-app's chrome after the grants; the project-frame hook built first was withdrawn after review. These tests fail on a page registered twice, without its error page, or outside lex-app's chrome. |
+| 1db | lex.ui's part of lex-app's app, and every page in lex-app's chrome | 1.825-1.826, 1.1123 | complete | 3 | 0 | 0 | create_app runs lex.ui's part of the app in one internal step, and every page is in lex-app's chrome after the grants; the project-frame hook built first was withdrawn after review. These tests fail on a page registered twice, without its error page, or outside lex-app's chrome. 1.1123 (2026-11-25): a page function runs once per start - the build checked at the start is the one the app compiles. |
 | 1dc | lex.ui handlers declared on a state mixin are each state's own | 1.827 | complete | 1 | 0 | 0 | A lex.ui handler that a state takes from a mixin is decorated again under the state's own name. These tests fail on a button that stays busy, or a press ignored as a repeat, because another state runs the same handler. |
 | 1dd | lex.ui tables: a date column is filtered by a range of days | 1.828 | complete | 1 | 0 | 0 | A date or datetime column named in `filters=` is filtered by a range of days, on the server, only on the fields the table offers. These tests fail on a list that cannot be narrowed to a month, a range that drops its last day, or a filter on a field the table does not offer. |
 | 1de | lex.ui handlers may hand on to another state's handler | 1.829 | complete | 2 | 0 | 0 | A handler body may return or yield another state's handler among its results; raw Reflex events stay in the custom region. These tests fail on a handler that cannot chain to another state, or a browser script slipping out of an ordinary handler, or a hand-on that could only fail later in the browser (a @ui.rows handler, or a handler of the running handler's own state). |

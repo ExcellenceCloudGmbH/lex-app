@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1122
+max_scenario: 1123
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2391,16 +2391,17 @@ letters:
       `ui.button`. These tests fail on a converted table whose rows cannot be opened, or a row link built from a string.
   db:
     title: "lex.ui's part of lex-app's app, and every page in lex-app's chrome"
-    scenarios: 1.825-1.826
+    scenarios: 1.825-1.826, 1.1123
     status: complete
     tests:
-      pass: 2
+      pass: 3
       skip: 0
       xfail: 0
     note: >-
       create_app runs lex.ui's part of the app in one internal step, and every page is in lex-app's chrome after the
       grants; the project-frame hook built first was withdrawn after review. These tests fail on a page registered
-      twice, without its error page, or outside lex-app's chrome.
+      twice, without its error page, or outside lex-app's chrome. 1.1123 (2026-11-25): a page function runs once per start - the build checked at
+      the start is the one the app compiles.
   dc:
     title: 'lex.ui handlers declared on a state mixin are each state''s own'
     scenarios: '1.827'

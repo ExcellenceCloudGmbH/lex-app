@@ -3090,13 +3090,13 @@ could only link to `@ui.page` functions, so its rows lost their links. 1.783's n
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.825 – 1.826 |
+| Scenario range | 1.825 – 1.826, 1.1123 |
 | Type | U |
 | Files covered | `lex/lex_app/reflex/ui/pages/declare.py` (`install`), `lex/lex_app/reflex/app.py`, `lex/ui.py` |
 | Test file | `lex/test_project/tests/init/test_1db_ui_install.py` |
-| Test classes | `TestCluster01db_Install` (1.825–1.826) |
+| Test classes | `TestCluster01db_Install` (1.825–1.826, 1.1123) |
 | Fixtures | `rx.page` and the app's `add_page` recorded |
-| Tests landed | **2 pass / 0 fail** |
+| Tests landed | **3 pass / 0 fail** |
 | Status | ✅ Complete |
 
 First built as a project-frame hook (`ui.chrome`, a public `ui.install`) for the reviewed customer project, then
@@ -3107,6 +3107,7 @@ withdrawn after an independent review (design note `2026-11-24-reflex-ui-project
 | --- | --- | --- |
 | 1.825 | Create app hands lex ui its pages in one step | the declared page is registered once; the error page is added after the user's grants; the jobs' clock is registered once; the routes are checked after the pages; create_app runs the step, and lex.ui offers no app or chrome hook |
 | 1.826 | Every page is in lex apps chrome after the grants | a page and the error page are in lex-app's chrome; the page's load events are the grants, then the opener - nothing of the project's between them |
+| 1.1123 | A page function runs once per start | after lex-app takes the declared pages, the first compile gets the build checked at the start (one run, in lex-app's chrome); a later compile runs the function again |
 
 ### Batch 1dc — lex.ui handlers declared on a state mixin are each state's own ✅
 

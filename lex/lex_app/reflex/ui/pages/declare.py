@@ -209,11 +209,16 @@ def finalize() -> None:
                             "Give the kind `title=\"...\"`, or leave `nav=` out.")
         # Built first: every slot checked now (a wrong page stops the start), and what is bound to the page
         # when it is built -- its requires= on lex-app's own handlers -- is there before its loads are read.
-        kind.build(Build(page=name, route=route, requires=declared.requires))
+        # That build is the page the app compiles first: a page function runs once per start, as a raw
+        # Reflex page's does (half the work, and page code that registers something for the process -
+        # RFDS's hotkeys - is not run twice). A later compile in the same process builds it again.
+        first = [kind.build(Build(page=name, route=route, requires=declared.requires))]
         required, optional = _loads(name, kind)
 
         def body(fn: Callable[[], Any] = declared.fn, route: str = route,
-                 requires: tuple = declared.requires) -> rx.Component:
+                 requires: tuple = declared.requires, first: list = first) -> rx.Component:
+            if first:
+                return first.pop()
             return _kind_of(fn).build(Build(page=fn.__name__, route=route, requires=requires))
 
         body.__name__ = name

@@ -1484,8 +1484,9 @@ does not remove user launch configurations.
 | --- | --- | --- |
 | 1.825 | Create app hands lex ui its pages in one step | the declared page is registered once; the error page is added after the user's grants; the jobs' clock is registered once; the routes are checked after the pages; create_app runs the step, and lex.ui offers no app or chrome hook |
 | 1.826 | Every page is in lex apps chrome after the grants | a page and the error page are in lex-app's chrome; the page's load events are the grants, then the opener - nothing of the project's between them |
+| 1.1123 | A page function runs once per start | after lex-app takes the declared pages, the first compile gets the build checked at the start (one run, in lex-app's chrome); a later compile runs the function again |
 
-**Scenario range:** 1.825 – 1.826. **Test file:** `lex/test_project/tests/init/test_1db_ui_install.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1db](batches.md).
+**Scenario range:** 1.825 – 1.826, 1.1123. **Test file:** `lex/test_project/tests/init/test_1db_ui_install.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24; 1.1123 2026-11-25). Batch: [1db](batches.md).
 
 ### 1dc. lex.ui handlers declared on a state mixin are each state's own ✅
 

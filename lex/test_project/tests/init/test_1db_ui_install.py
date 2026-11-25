@@ -4,10 +4,12 @@ Intent: create_app hands lex.ui's pages to the app in one place (the declared @u
 page a failed load goes to, the clock that ends abandoned jobs, the route check), so nothing of it
 is forgotten or done twice. Every @ui.page is in lex-app's chrome, after the user's grants: lex.ui
 has no hook for a project's own frame or gate - access rules live in the models and `requires=`.
-A regression is a page that is registered twice, without its error page, or outside lex-app's
-chrome.
+A page function runs once per start, as a raw Reflex page's does: the build checked at the start
+is the one the app compiles. A regression is a page that is registered twice, without its error
+page, or outside lex-app's chrome, or a page function run twice (twice the work, and page code that
+registers something for the process - RFDS's hotkeys - fails the second time).
 
-Cluster 1db -- scenarios 1.825-1.826. Type: U.
+Cluster 1db -- scenarios 1.825-1.826, 1.1123. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/declare.py (install), lex/lex_app/reflex/app.py, lex/ui.py.
 Run: python -m lex pytest lex/test_project/tests/init/test_1db_ui_install.py -v
 """
@@ -40,7 +42,7 @@ class InstallState(ui.State):
 
 
 class TestCluster01db_Install(SimpleTestCase):
-    """1.825-1.826: create_app's lex.ui step; lex-app's chrome for every page."""
+    """1.825-1.826, 1.1123: create_app's lex.ui step; lex-app's chrome for every page; one run each."""
 
     def setUp(self) -> None:
         self.pages: list = []
@@ -103,3 +105,27 @@ class TestCluster01db_Install(SimpleTestCase):
         from lex.lex_app.reflex.ui.state import error_page
 
         self.assertIn("LexThemeFollower", str(error_page()), "and so is the page a failed load goes to")
+
+    # -- 1.1123 --------------------------------------------------------
+    def test_1_1123_a_page_function_runs_once_per_start(self) -> None:
+        """
+        Scenario 1.1123: one run of a page function per start.
+        Given: a declared page whose function counts its runs.
+        When:  lex-app takes the declared pages, and the app compiles the page; then compiles it again
+               (a later compile in the same process).
+        Then:  the function has run once when the page is compiled - the build checked at the start is
+               the page the app gets, in lex-app's chrome; a later compile runs it again and gets a page.
+        """
+        runs = []
+
+        @ui.page("/counted")
+        def counted():
+            runs.append(1)
+            return ui.record(title="Counted", sections=[ui.section("About", ui.text("Counted"))])
+
+        declare.finalize()
+        [(_kwargs, page)] = self.pages
+        self.assertIn("LexThemeFollower", str(page()), "the page is in lex-app's chrome")
+        self.assertEqual(len(runs), 1, "the page function ran once: checked at the start, and that build compiled")
+        self.assertIn("Counted", str(page()), "a later compile builds the page again")
+        self.assertEqual(len(runs), 2, "and runs the function for it")
