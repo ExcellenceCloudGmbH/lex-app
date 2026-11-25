@@ -595,6 +595,8 @@ def entries() -> list[Entry]:
         found.append(Entry("nav_footer", link_guard(configured.nav_footer), configured.nav_footer.badge))
     found += _placed("actions", configured.actions)
     found += _placed("user_menu", configured.user_menu)
+    if configured.search is not None:            # the search box, for users who may open the search page
+        found.append(Entry("search", target_guard(configured.search[0])))
     if configured.banner is not None and _plain_function(configured.banner.sentence):
         found.append(Entry("banner", value=configured.banner.sentence))
     return found
@@ -602,18 +604,31 @@ def entries() -> list[Entry]:
 
 def _placed(place: str, parts: tuple) -> list[Entry]:
     """The entries of a list of frame parts: a link's guard and count, a status's or a text's words."""
-    from lex.lex_app.reflex.ui.pages.vocab import Link, Status, Text
+    from lex.lex_app.reflex.ui.pages.vocab import Button, Link, Status, Text
 
     found: list[Entry] = []
     for index, part in enumerate(parts):
         key = link_key(place, index)
         if isinstance(part, Link):
             found.append(Entry(key, link_guard(part), part.badge))
+        elif isinstance(part, Button):
+            found.append(Entry(key, button_guard(part)))
         elif isinstance(part, (Status, Text)):
             words = part.word if isinstance(part, Status) else part.sentence
             if _plain_function(words):
                 found.append(Entry(key, value=words))
     return found
+
+
+def button_guard(button: Any) -> Guard:
+    """Who a header button is drawn for: its handler's ``requires=``, as a link is drawn by its own."""
+    from lex.lex_app.reflex.access import permission
+    from lex.lex_app.reflex.ui import guard
+
+    fn = getattr(getattr(button, "handler", None), "fn", None)
+    items = tuple((getattr(fn, "__ui_options__", None) or {}).get("requires") or ())
+    strings = tuple(permission(one.target, one.scope) for one in items if isinstance(one, guard.Requirement))
+    return Guard(tuple(dict.fromkeys(strings)), guard.rules_of(items))
 
 
 def link_key(place: str, index: int) -> str:
@@ -663,13 +678,18 @@ async def decide(state: Any) -> Answers:
     session = await context.resolve(state)
     held: frozenset[str] | None = None
     asked: dict = {}
-    user = asyncio.ensure_future(context.with_permissions(session))   # read once, for every rule and function
+    reading: list = []                  # the user with permissions, read once when a rule or function needs it
+
+    def user() -> Any:
+        if not reading:
+            reading.append(asyncio.ensure_future(context.with_permissions(session)))
+        return reading[0]
 
     async def _rule(rule: Any, params: tuple) -> Any:
-        return await pools.run("interactive", handlers._ask, rule, await user, context.Params(dict(params)))
+        return await pools.run("interactive", handlers._ask, rule, await user(), context.Params(dict(params)))
 
     async def _function(fn: Any) -> Any:
-        return await pools.run("interactive", fn, await user)
+        return await pools.run("interactive", fn, await user())
 
     def ask(rule: Any, params: tuple) -> Any:
         """A rule's answer for these values, asked once in this event."""
@@ -733,7 +753,12 @@ async def decide(state: Any) -> Answers:
             logger.error("lex.ui: the frame's function %s answered %r for %s; it returns the words to show, or None",
                          _name(entry.value), said, entry.key)
     for section, links in zip(sections, given):
-        answers.links[per_user_key(section.title)] = _user_links(section, links)
+        shown = _user_links(section, links)
+        # Each leads to a page the user may open: its page's guard, asked with the link's values.
+        allowed = await asyncio.gather(*(may(per_user_key(section.title), guard) for _, guard in shown))
+        answers.links[per_user_key(section.title)] = [link for (link, _), yes in zip(shown, allowed) if yes]
+    if reading and not reading[0].done():
+        reading[0].cancel()
     return answers
 
 
@@ -741,13 +766,14 @@ def _name(fn: Any) -> str:
     return getattr(fn, "__qualname__", repr(fn))
 
 
-def _user_links(section: NavLinks, links: Any) -> list[dict[str, str]]:
-    """A per-user section's links as the browser shows them; a link lex-app cannot show is left out, logged."""
+def _user_links(section: NavLinks, links: Any) -> list[tuple[dict[str, str], Guard]]:
+    """A per-user section's links as the browser shows them, each with the guard of the page it leads to;
+    a link lex-app cannot show is left out, logged."""
     from lex.lex_app.reflex.ui.pages.vocab import Link
 
     if links is None:
         return []
-    shown: list[dict[str, str]] = []
+    shown: list = []
     for link in links if isinstance(links, (list, tuple)) else [links]:
         try:
             if not isinstance(link, Link):
@@ -761,8 +787,8 @@ def _user_links(section: NavLinks, links: Any) -> list[dict[str, str]]:
         except Exception:  # noqa: BLE001 - left out, and logged
             logger.exception("lex.ui: a link of the frame's section %r is left out", section.title)
             continue
-        shown.append({"label": label, "href": href, "outside": "yes" if outside else "",
-                      "initial": label[:1].upper()})
+        shown.append(({"label": label, "href": href, "outside": "yes" if outside else "",
+                       "initial": label[:1].upper()}, link_guard(link)))
     return shown
 
 

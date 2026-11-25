@@ -8,10 +8,10 @@ user, decided on the server when a page opens. A regression is a header that dro
 that leads where the browser says, a count or a hint computed in the browser, or a header link drawn
 for a user who may not open it.
 
-Cluster 1el -- scenarios 1.1009-1.1011. Type: U.
+Cluster 1el -- scenarios 1.1009-1.1011, 1.1117. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/frame.py (frame search=/actions=, entries, decide),
 lex/lex_app/reflex/shell.py (lex_chrome, header_actions, header_search), lex/lex_app/reflex/ui/state.py
-(ui_frame_values, ui_frame_type, ui_frame_search).
+(ui_frame_values, ui_frame_search).
 Run: python -m lex pytest lex/test_project/tests/init/test_1el_ui_frame_header.py -v
 """
 
@@ -164,8 +164,8 @@ class TestCluster01el_FrameHeader(FrameCase):
                     await emit(update, token, **kwargs)
 
                 harness._sink.emit_update = capture
-                await (await harness.send(State, "ui_frame_type", text=text))
-                await (await harness.send(State, "ui_frame_search", form_data={}))
+                # What was typed comes with the Enter alone (review 2: no event per key).
+                await (await harness.send(State, "ui_frame_search", form_data={"lex_frame_query": text}))
                 return [str(event) for event in sent]
 
         typed = "\n".join(asyncio.run(press("north east & co")))
@@ -200,3 +200,46 @@ class TestCluster01el_FrameHeader(FrameCase):
         from lex.lex_app.reflex.ui.pages import frame
 
         self.assertEqual(frame.current().search, ("/legacy-search", "term"))
+
+
+
+class GuardedHeaderState(ui.State):
+    """A header button whose handler only message readers may run."""
+
+    @ui.action(requires=ui.read("lex_app.Message"))
+    def mark_read(self):
+        return None
+
+
+class TestCluster01el_HeaderForWhomItConcerns(FrameCase):
+    """1.1117: the header's search box and buttons are drawn for users who may use them."""
+
+    # -- 1.1117 --------------------------------------------------------
+    def test_1_1117_the_search_box_and_a_button_follow_who_may_use_them(self) -> None:
+        """
+        Scenario 1.1117: review 2, minor -- the header's search box and buttons, like its links.
+        Given: ui.frame(search=) naming a search page that only message readers may open, and a header
+               button whose handler requires message reading.
+        When:  a page is compiled, and the frame is decided for anna (a reader) and ben.
+        Then:  the box and the button are drawn only on the server's answer: anna's lists both, ben's
+               neither; what is typed stays in the browser until Enter (no event per key: the box's value
+               is a client state sent in the form).
+        """
+        @ui.page("/orders", nav="Orders")
+        def orders():
+            return _about("Orders")
+
+        @ui.page("/search", params=["q"], requires=ui.read("lex_app.Message"))
+        def search():
+            return _about("Search")
+
+        ui.frame(search=search, actions=[ui.button("Mark all read", GuardedHeaderState.mark_read)])
+        declare.finalize()
+        _, module = compile_page("/orders", self.page_named("/orders")())
+        for expected in ('ui_frame_shown_rx_state_.includes("search")', 'ui_frame_shown_rx_state_.includes("actions#0")',
+                         '"lex_frame_query"'):
+            self.assertIn(expected, module.replace("?.", "."), f"compiled: {expected}")
+        self.assertNotIn("ui_frame_type", module, "no event per key")
+        anna = asyncio.run(decided(user="anna", grants=["lex_app.Message:read"]))
+        self.assertEqual(anna["shown"], ["actions#0", "search"])
+        self.assertEqual(asyncio.run(decided(user="ben"))["shown"], [])

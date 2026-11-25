@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from unittest.mock import patch
 
 import pytest
 import reflex as rx
@@ -116,7 +115,8 @@ class TestCluster01eo_RefusedAsMissing(FrameCase):
         Given: ui.frame(denied_as_missing=True) and the pages of 1.1016.
         When:  carl (no grants) and anna (Secret:read) open /secret, and carl opens /admin.
         Then:  carl is refused on the server -- "no", no load started -- and anna granted with her load
-               run; the rule's page is refused for carl too.
+               run, both by the grants Keycloak gives their tokens (the source the frame reads too); the
+               rule's page is refused for carl too.
         """
         ui.frame(denied_as_missing=True)
         self.declare_pages()
@@ -130,12 +130,10 @@ class TestCluster01eo_RefusedAsMissing(FrameCase):
                 await asyncio.sleep(0.05)
                 return (await harness.fields(SecretState))["figures"], dict((await harness._state(State)).ui_access)
 
-        # The opener asks RFDS's resolver for the grants LexAccessState.load remembered just before it.
-        with patch("lex.lex_app.reflex.ui.state._page_permitted", lambda state, requires: False):
-            figures, access = asyncio.run(visit("carl", "/secret"))
+        # The opener reads the user's grants as the frame and every handler do (review 2: one source).
+        figures, access = asyncio.run(visit("carl", "/secret"))
         self.assertEqual((figures, access["/secret"]["granted"]), ([], "no"), "refused: no load")
-        with patch("lex.lex_app.reflex.ui.state._page_permitted", lambda state, requires: True):
-            figures, access = asyncio.run(visit("anna", "/secret", ["lex_app.Secret:read"]))
+        figures, access = asyncio.run(visit("anna", "/secret", ["lex_app.Secret:read"]))
         self.assertEqual((figures, access["/secret"]["granted"]), (["12"], "yes"), "granted: its load ran")
         _figures, access = asyncio.run(visit("carl", "/admin"))
         self.assertEqual(access["/admin"]["granted"], "no")

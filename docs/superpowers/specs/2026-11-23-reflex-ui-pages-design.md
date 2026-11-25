@@ -1409,6 +1409,17 @@ scenario (batch in brackets):
   the page's state is named from a hash of what the page is (model, fields, title, `requires=`, route), not
   from the order pages are built in, so every process names it alike; following a run reads the record each
   time and the log (for the progress line) every `LOG_EVERY` (3) readings.
+- *Minor, the frame (1.1117 [1el], 1.1118 [1ek], 1.1017 updated).* The header's search box is drawn only
+  for users who may open the search page, and what is typed stays in the browser (a client state) until
+  Enter sends it with the form -- no event per key, `ui_frame_type`/`ui_frame_query` are gone. A header
+  `ui.button` is drawn only for users its handler's `requires=` grants, as a link by its own. A per-user
+  section's links lead only to pages the user may open (each link's page guard, asked with its values).
+  `badge=` or `icon=` on a `@ui.page` with route arguments is refused (it is never listed). `decide()` reads
+  the user's permissions only when a guard, rule or function needs them. **One permission source:** the
+  opener now decides a page's permissions from the user's Keycloak grants for the token (`Session.permissions`,
+  the cache `LexAccessState.load` fills for this page), as the frame and every handler do; before, it read
+  RFDS's resolver (the same grants, remembered per identity) -- two paths to one answer. `opened=`'s docs say
+  that `page.address` and `page.params` are the browser's.
 
 ## 7. Order of building
 

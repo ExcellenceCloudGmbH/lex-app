@@ -147,6 +147,12 @@ def page(route: str, *, nav: str | None = None, icon: str | None = None, require
     permissions, rules = _permission(route, requires)
     permission = permissions[0] if len(permissions) == 1 else (permissions or None)
     _badge(f"ui.page({route!r})", nav, badge)
+    if "[" in route and (badge is not None or icon is not None):
+        given = "badge=" if badge is not None else "icon="
+        raise ValueError(f"ui.page({route!r}): {given} belongs to the page's entry in the navigation, and a page "
+                         "with route arguments is never listed -- it opens from the page that leads to it (nav= "
+                         f"only places its breadcrumbs). Put {given} on that page: @ui.page(\"/orders\", "
+                         f"nav=..., {given}...).")
 
     def decorator(fn: Callable[[], Any]) -> Callable[[], Any]:
         known = _DECLARED.get(route)

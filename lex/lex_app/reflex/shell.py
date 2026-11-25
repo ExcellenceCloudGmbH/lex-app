@@ -399,7 +399,7 @@ def header_actions() -> tuple:
 
     from lex.lex_app.reflex.ui.pages import frame
     from lex.lex_app.reflex.ui.pages.parts import Build, with_overlays
-    from lex.lex_app.reflex.ui.pages.vocab import Link, Status
+    from lex.lex_app.reflex.ui.pages.vocab import Button, Link, Status
 
     ctx = Build(page="ui.frame", slot="actions")
     drawn: list[Any] = []
@@ -412,7 +412,8 @@ def header_actions() -> tuple:
             value = frame_value(key)
             drawn.append(part._wrap(ctx, rx.cond(value != "", rfds.lozenge(value, tone=part.tone))))
             continue
-        drawn.append(part.build(ctx))
+        built = part.build(ctx)
+        drawn.append(_shown_if_decided(key, built) if isinstance(part, Button) else built)   # by its handler's requires=
     return (with_overlays(ctx, rx.fragment(*drawn)),) if drawn else ()
 
 
@@ -471,11 +472,17 @@ def user_menu_items() -> tuple:
     return tuple(entries)
 
 
+#: The name the header's search box sends what was typed under, when the user presses Enter.
+SEARCH_FIELD = "lex_frame_query"
+
+
 def header_search() -> Any:
-    """RFDS's search box in the header, when ``ui.frame(search=)`` names the project's search page:
-    Enter opens it with what was typed (:meth:`State.ui_frame_search`)."""
+    """RFDS's search box in the header, when ``ui.frame(search=)`` names the project's search page, for users
+    who may open that page (decided on the server): Enter opens it with what was typed
+    (:meth:`State.ui_frame_search`). What is typed stays in the browser until then -- no event per key."""
     import reflex as rx
     import rfds
+    from rfds.components.inputs._shared import client_state
 
     from lex.lex_app.reflex.ui.pages import frame
     from lex.lex_app.reflex.ui.pages.parts import say
@@ -483,9 +490,12 @@ def header_search() -> Any:
 
     if frame.current().search is None:
         return None
-    box = rfds.search_input(value=UiState.ui_frame_query, on_change=UiState.ui_frame_type, label=say("Search"),
+    typed = client_state("lexFrameQuery", "")
+    box = rfds.search_input(value=typed.value, on_change=lambda text: typed.set_value(text), label=say("Search"),
                             id="lex-frame-search")
-    return rx.form(box, on_submit=UiState.ui_frame_search, reset_on_submit=False, class_name="lex-header-search")
+    form = rx.form(box, rx.el.input(type="hidden", name=SEARCH_FIELD, value=typed.value),
+                   on_submit=UiState.ui_frame_search, reset_on_submit=False, class_name="lex-header-search")
+    return _shown_if_decided("search", form)
 
 
 def _any_shown(section: Any, drawn: Any) -> Any:

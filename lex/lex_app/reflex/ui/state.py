@@ -131,17 +131,27 @@ def _progress(state: Any) -> Any:
     return handlers.reporter(state)
 
 
-def _page_permitted(state: Any, requires: Any) -> bool:
-    """Whether the signed-in user holds the page's permission strings ('' or () = no requirement)."""
+async def _page_permitted(state: Any, requires: Any) -> bool:
+    """Whether the signed-in user holds the page's permission strings ('' or () = no requirement).
+
+    The same source as the frame's decision and every handler's ``requires=``: Keycloak's grants for the
+    user's token (``Session.permissions``, fetched once per token -- the fetch ``LexAccessState.load``
+    made for this page). A failure to read them refuses the page.
+    """
     needed = (requires,) if isinstance(requires, str) else tuple(requires or ())
     needed = tuple(one for one in needed if one)
     if not needed:
         return True
-    from rfds.auth import current_identity
+    from lex.lex_app.reflex.access import permission_strings
 
-    from lex.lex_app.reflex.access import lex_permission_resolver
+    try:
+        held = permission_strings(await (await context.resolve(state)).permissions())
+    except Exception:  # noqa: BLE001 - refused, and logged
+        from lex.lex_app.reflex.ui import handlers
 
-    held = lex_permission_resolver(current_identity(state))
+        handlers.logger.exception("lex.ui: the permissions for page %s could not be read; it is refused",
+                                  getattr(state, "_ui_page", ""))
+        return False
     return all(one in held for one in needed)
 
 
@@ -245,8 +255,6 @@ class State(rx.State):
     ui_frame_links: dict[str, list[dict[str, str]]] = {}
     #: Part key -> its words (a status's, a text's, the banner's), as the server answered them.
     ui_frame_values: dict[str, str] = {}
-    #: What is typed in the header's search box (``ui.frame(search=)``).
-    ui_frame_query: str = ""
 
     _ui_boots: dict[str, str] = {}
     _ui_pending_loads: list[str] = []
@@ -358,7 +366,7 @@ class State(rx.State):
         tables = [] if again else rows_table.reopen_events(page)    # a table on screen: the new record's rows
         # A table whose rows the stored state left out (a reconnect sent the browser the whole state again).
         tables += [one for one in rows_table.restore_events(page) if one not in tables]
-        refused = entry is None or not _page_permitted(self, entry.requires)
+        refused = entry is None or not await _page_permitted(self, entry.requires)
         from lex.lex_app.reflex.ui.pages import frame
 
         # A page shown as missing when refused (ui.frame(denied_as_missing=True)) is decided here for its
@@ -420,26 +428,22 @@ class State(rx.State):
             self.ui_frame_values = answers.values
 
     @rx.event
-    def ui_frame_type(self, text: str = ""):
-        """The user typed in the header's search box."""
-        self.ui_frame_query = str(text)[:500]
-
-    @rx.event
     def ui_frame_search(self, form_data: dict | None = None):
         """Enter in the header's search box: the project's search page, with what was typed.
 
         The page and its parameter are the server's (``ui.frame(search=)``); only the text comes from
-        the browser, encoded into the one value.
+        the browser, sent with the Enter alone and encoded into the one value.
         """
         from urllib.parse import quote
 
+        from lex.lex_app.reflex.shell import SEARCH_FIELD
         from lex.lex_app.reflex.ui.pages import frame
 
         search = frame.current().search
         if search is None:
             return None
         route, name = search
-        text = self.ui_frame_query.strip()
+        text = " ".join(str(dict(form_data or {}).get(SEARCH_FIELD) or "").split())[:500]
         return rx.redirect(f"{route}?{name}={quote(text, safe='')}" if text else route)
 
     @rx.event

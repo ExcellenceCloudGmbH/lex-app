@@ -1985,6 +1985,7 @@ does not remove user launch configurations.
 | 1.1007 | A link the user may not open is not drawn | a link's requires=, the page it leads to, a rule asked with the link's values: all three for anna, none for carl |
 | 1.1008 | A link at the foot, and the frame's words in a page | RFDS's navigation footer with a link or a text; a button refused; badge=, requires=, icon= on a link in a page refused with what to write |
 | 1.1110 | A per-user section named like an area with pages is refused | nav={"Orders": favourites} beside a page in Orders -- declared before the frame, after it, or a raw page -- refused naming page, area and function; a section of its own name drawn after the area |
+| 1.1118 | User links are guarded and permissions are read when needed | a per-user link to a page the user may not open is left out, a rule-guarded one asked with its value; a fixed frame reads no permissions; badge= on a route-argument page refused |
 
 **Scenario range:** 1.1004 – 1.1008. **Test file:** `lex/test_project/tests/init/test_1ek_ui_frame_nav_links.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ek](batches.md).
 
@@ -1999,6 +2000,7 @@ does not remove user launch configurations.
 | 1.1009 | The header's actions are lex.ui parts | compiled in rfds-header-actions before the user menu; anna's status Sync delayed, count 4, the bell hers; ben's failing status logged, no bell; ui.fact and ui.section refused naming ui.custom_block |
 | 1.1010 | The search box opens the project's search page | RFDS's search box in the header's search slot; Enter redirects to /search?q=north%20east%20%26%20co; an empty box to the page without it |
 | 1.1011 | A search page must take one value | no parameter, two, a route argument, a route as text refused with what to write; a raw page with params= accepted |
+| 1.1117 | The search box and a header button follow who may use them | search box and a requires= button drawn on ui_frame_shown; anna (reader) gets both, ben neither; the typed text is a client state sent with Enter, no per-key event |
 
 **Scenario range:** 1.1009 – 1.1011. **Test file:** `lex/test_project/tests/init/test_1el_ui_frame_header.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1el](batches.md).
 

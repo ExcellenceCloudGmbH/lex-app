@@ -9,7 +9,7 @@ server when a page opens. A regression is a lost section, a count computed in th
 the wrong user, a per-user entry another user sees, a link the user may not open, or a frame word that
 silently does nothing in a page.
 
-Cluster 1ek -- scenarios 1.1004-1.1008, 1.1110. Type: U.
+Cluster 1ek -- scenarios 1.1004-1.1008, 1.1110, 1.1118. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/frame.py (frame nav=/nav_footer=, entries, decide),
 lex/lex_app/reflex/shell.py (nav_layout, nav_sections, lex_chrome), lex/lex_app/reflex/ui/pages/vocab.py
 (link icon=/badge=/requires=), lex/lex_app/reflex/ui/pages/declare.py (page badge=),
@@ -320,3 +320,59 @@ class TestCluster01ek_UserLinksAreNoArea(FrameCase):
         layout = shell.nav_layout()
         self.assertEqual([getattr(one, "label_default", None) or getattr(one, "title", None) for one in layout[1:]],
                          ["Orders", "Orders (mine)"], "the area keeps its pages; the user's links follow")
+
+
+
+class TestCluster01ek_UserLinksFollowTheirPages(FrameCase):
+    """1.1118: a per-user link leads only to a page the user may open; a listed entry is a page's."""
+
+    # -- 1.1118 --------------------------------------------------------
+    def test_1_1118_user_links_are_guarded_and_permissions_are_read_when_needed(self) -> None:
+        """
+        Scenario 1.1118: review 2, minor.
+        Given: a per-user section whose function returns a link to a page anna may open (team 7, by a
+               rule asked with the link's value), one to a page behind a permission she lacks, and an outside
+               address; a frame with only fixed links.
+        When:  the frame is decided for anna; for the fixed frame; a page with route arguments is given badge=.
+        Then:  anna's section holds team 7 and the outside address, not the page she may not open; the
+               fixed frame reads no permissions (nothing needs them); badge= on a page with route arguments
+               is refused, saying it is never listed and where the count goes.
+        """
+        @ui.page("/orders", nav="Orders")
+        def orders():
+            return _about("Orders")
+
+        @ui.page("/reports", requires=ui.read("lex_app.Report"))
+        def reports():
+            return _about("Reports")
+
+        @ui.page("/teams/[key]", requires=team_of)
+        def team():
+            return _about("Team")
+
+        def mine(user):
+            return [ui.link("Team 7", to=team, key=7), ui.link("Reports", to=reports),
+                    ui.link("Wiki", href="https://wiki.example.com")]
+
+        ui.frame(nav={"Orders": [], "Mine": mine})
+        declare.finalize()
+        anna = asyncio.run(decided(user="anna"))
+        self.assertEqual([one["label"] for one in anna["links"]["Mine#"]], ["Team 7", "Wiki"])
+        self.assertIn(("team_of", "anna", {"key": "7"}), CALLED, "the page's rule, asked with the link's value")
+
+        from lex.lex_app.reflex.ui import context
+
+        ui.frame(nav={"Orders": [ui.link("Wiki", href="https://wiki.example.com")]})
+        read: list = []
+        with_permissions = context.with_permissions
+
+        async def counted(session):
+            read.append(session.user.id)
+            return await with_permissions(session)
+
+        with patch.object(context, "with_permissions", counted):
+            asyncio.run(decided(user="anna"))
+        self.assertEqual(read, [], "nothing needed the user's permissions")
+        with self.assertRaises(ValueError) as caught:
+            ui.page("/orders/[key]", nav="Orders", badge=waiting)
+        self.assertIn("never listed", str(caught.exception))
