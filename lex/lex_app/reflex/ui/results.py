@@ -182,7 +182,7 @@ def split(value: Any, *, handler: str, state: str | None = None) -> tuple[list, 
         else:
             raise TypeError(
                 f"{handler} returned {item!r}. A lex.ui handler returns ui.goto(), ui.toast(), ui.download(), "
-                "ui.refresh(), ui.scroll_to() or another state's handler (`Other.reload`, `Other.open(key)`), and a job may "
+                "ui.refresh(), ui.scroll_to() or a state's handler (`Other.reload`, `Other.open(key)`), and a job may "
                 "yield ui.progress(). Use @ui.custom for raw Reflex events such as rx.call_script()."
             )
     return out, report
@@ -202,7 +202,11 @@ def _is_state_handler(item: Any) -> bool:
 
 
 def _check_hand_on(item: Any, *, handler: str, state: str | None) -> None:
-    """Refuse, when the handler returns, a hand-on that could only fail later in the browser."""
+    """Refuse, when the handler returns, a hand-on that could only fail later in the browser.
+
+    A handler of the same state is handed on like any other: it runs as the next event, once this
+    one has finished (an action that starts its own state's job, a table that refreshes itself).
+    """
     from reflex.event import EventSpec
 
     target = item.handler if isinstance(item, EventSpec) else item
@@ -210,9 +214,6 @@ def _check_hand_on(item: Any, *, handler: str, state: str | None) -> None:
     if getattr(target.fn, "__ui_kind__", None) == "rows":
         raise TypeError(f"{handler} returned the @ui.rows handler {name}. A table reads it; to make its tables "
                         f"read again, return ui.refresh({name}).")
-    if state is not None and target.state_full_name == state:
-        raise TypeError(f"{handler} returned {name}, a handler of its own state; one handler does not start "
-                        "another. Put the shared work in a method whose name starts with `_` and call it.")
 
 
 def _external(path: str) -> bool:

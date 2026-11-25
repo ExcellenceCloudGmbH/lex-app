@@ -3168,6 +3168,8 @@ events stay in the custom region. 1.747's docstring follows.
 | --- | --- | --- |
 | 1.829 | A handler hands on to another states handler | the other state's handlers are results like the toast, in the order written, and reach the browser as they are; a browser script, a redirect and a plain object are refused with the handler's name and where raw events go |
 
+Changed 2026-11-25: a handler of the same state is handed on like any other (the refusal silently broke search fields and self-refreshing tables in a real project); only a `@ui.rows` handler is refused.
+
 ### Batch 1df — lex.ui: a button that says why it cannot be pressed; a download the browser can place ✅
 
 | Property | Value |

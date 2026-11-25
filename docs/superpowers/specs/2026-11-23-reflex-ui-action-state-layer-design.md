@@ -562,6 +562,12 @@ Amended 2026-11-24: a body may also return or yield another state's handler (`Ot
 events (`rx.call_script`, `rx.redirect`, `rx.download`...) are still refused: they belong in an
 `@ui.custom` handler, where the check lists them.
 
+Amended 2026-11-25: a handler of the SAME state may be handed on too (an action that starts its own
+state's job, a table that refreshes itself); it runs as the next event, once this one has finished. An
+earlier rule refused it ("one handler does not start another"); in a real project that silently broke
+search fields, suggestions and tables that refresh themselves, and it protected nothing. Only a
+`@ui.rows` handler is refused (a table reads it; return `ui.refresh(...)`).
+
 `lex reflex check` gains:
 
 | Finding | Result |
