@@ -471,9 +471,12 @@ Gaps found while rewriting dashboards onto lex.ui, each a need of any lex-app pr
   filters' choices and the rows' addresses (`RowsNotStored.__getstate__` in `data.py`, both the
   state's dict and Reflex's backend-var dict). The browser gets them in the event's update; the count,
   the page, the sort, the search and the filters are stored, so the rows can be read again. A stored
-  state marks that it left rows out (`_rows_dropped`); the page's opener (`ui_open`, also on a
-  reconnect, which sends the browser the whole state again) sends each table of the page `restore`,
-  which reads the rows again only then. A row click that opens the row's own address reads the rows
+  state marks that it left rows out (`_rows_dropped`); each table sends its own `restore`, which reads
+  the rows again only then, whenever the page has been hydrated -- its first load and every reconnect,
+  which sends the browser the whole state again and mounts nothing anew: a hook on Reflex's
+  `is_hydrated` (`tables.restorer`), on a `@ui.page`, a `@ui.dashboard` and in `ui.embed` alike (review
+  2, I-6, 1.1106; before, only a `@ui.page`'s opener sent `restore`, and a dashboard's or an embedded
+  table showed a count without rows after a reconnect in production). The opener still sends it too. A row click that opens the row's own address reads the rows
   again when the stored state lost the addresses. Not an option: one rule for every table needs no
   word, and deciding it by whether the handler reads a private field would leave a model table's
   persons in the store. `lex_table` on a raw page keeps storing its rows (no opener tells it to

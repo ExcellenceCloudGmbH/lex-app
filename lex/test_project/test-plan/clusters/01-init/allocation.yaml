@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1105
+max_scenario: 1106
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2780,10 +2780,10 @@ letters:
       Fails on a search sent to created_by__icontains (the bug: it was the first text field of every LexModel).
   er:
     title: 'lex.ui tables: the rows a table shows reach the browser and are never stored with the state'
-    scenarios: '1.1024-1.1025, 1.1103'
+    scenarios: '1.1024-1.1025, 1.1103, 1.1106'
     status: complete
     tests:
-      pass: 3
+      pass: 4
       skip: 0
       xfail: 0
     note: >-

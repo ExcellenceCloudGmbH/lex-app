@@ -7,6 +7,11 @@ import re
 from typing import Any, Callable
 
 import reflex as rx
+from reflex_base.components.component import field
+from reflex_base.constants.compiler import Hooks
+from reflex_base.event import EventHandler, no_args_event_spec
+from reflex_base.vars.base import Var, VarData
+from reflex_components_core.base.fragment import Fragment
 
 from lex.lex_app.reflex.ui.pages import links
 from lex.lex_app.reflex.ui.pages.parts import Build, Part, called, say
@@ -443,7 +448,7 @@ class Table(Part):
             for v in values[1:]:
                 joined = joined + "|" + v.to(str)
             extra = {"key": joined}
-        return rx.box(table, on_mount=state.open(dict(self.where or {})), width="100%", **extra)
+        return rx.box(table, restorer(state), on_mount=state.open(dict(self.where or {})), width="100%", **extra)
 
     # -- a @ui.rows handler -------------------------------------------------------------------------
     def _rows(self, ctx: Build) -> rx.Component:
@@ -522,8 +527,48 @@ class Table(Part):
         table = rfds.data_table(state=state, columns=specs, caption=caption, **props)
         from lex.lex_app.reflex.ui.pages.kinds import table_anchor
 
-        return rx.box(table, on_mount=state.open, on_unmount=state.close, width="100%",
+        return rx.box(table, restorer(state), on_mount=state.open, on_unmount=state.close, width="100%",
                       id=table_anchor(self.source))          # ui.scroll_to(State.rows) brings it into view
+
+
+def restorer(state: Any) -> rx.Component:
+    """What makes a table read its rows again when the stored state left them out (``RowsNotStored``).
+
+    Reflex sends the whole state again after a reconnect (``hydrate``) -- with the rows the store left
+    out -- and mounts nothing anew, so a mount cannot tell. Reflex's ``is_hydrated`` turns off when the
+    page is hydrated and on once its loads are done: each time it turns on, this sends the table's
+    ``restore``, on every page that shows the table -- a ``@ui.page``, a ``@ui.dashboard`` or ``ui.embed``
+    in a raw page alike. ``restore`` reads only when the rows were left out.
+    """
+    return _Rehydrated.create(on_hydrated=state.restore)
+
+
+class _Rehydrated(Fragment):
+    """Sends ``on_hydrated`` each time the page has been hydrated: its first load, and every reconnect."""
+
+    on_hydrated: EventHandler[no_args_event_spec] = field(doc="The page has been hydrated (again).")
+
+    @classmethod
+    def create(cls, **props: Any) -> Any:
+        from reflex_base.components.memoize_helpers import get_memoized_event_triggers
+
+        made = super().create(**props)
+        memo = get_memoized_event_triggers(made)
+        if memo:
+            made.event_triggers = {**made.event_triggers, **memo}
+        return made
+
+    def _exclude_props(self) -> list[str]:
+        return [*super()._exclude_props(), *self.event_triggers.keys()]
+
+    def add_hooks(self) -> list:
+        trigger = self.event_triggers.get("on_hydrated")
+        if trigger is None:
+            return []
+        hydrated = rx.State.is_hydrated
+        return [Var(f"useEffect(() => {{ if (!{hydrated}) return; ({Var.create(trigger)})(); }}, [{hydrated}]);",
+                    _var_data=VarData.merge(hydrated._get_all_var_data(),
+                                            VarData(position=Hooks.HookPosition.POST_TRIGGER)))]
 
 
 def _export_columns(cols: list[Column]) -> tuple[tuple[str, str], ...]:

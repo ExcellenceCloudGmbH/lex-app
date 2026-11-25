@@ -486,8 +486,9 @@ class RowsNotStored(rx.State, mixin=True):
     event's update, the server forgets them when the state is stored, and a project whose rows come
     from a ``ui.private`` value keeps them out of every pickle. The count of rows, the page, the sort,
     the search and the filters are kept: they say where the user is, and the rows are read again from
-    them. When the browser has to be sent the whole state again (a reconnect hydrates the page), the
-    page's opener sends each such table ``restore``, which reads its rows again.
+    them. When the browser has to be sent the whole state again (a reconnect hydrates the page), each
+    ``ui.table`` sends its own ``restore`` once the page is hydrated (``tables.restorer``), which reads
+    its rows again -- on any page, routed or not.
     """
 
     #: Off for ``lex_table`` (a raw page has nothing to send ``restore``); every ``ui.table`` turns it on.
