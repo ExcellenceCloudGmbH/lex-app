@@ -1403,6 +1403,12 @@ scenario (batch in brackets):
 - *A frame value is fixed or a function of the user (Bar 2).* The state-value forms of `banner=`, a status's
   word in `actions=` and `badge=` (frame links, `@ui.page`, `ui.reflex_page`) are refused, saying to write a
   function of the user (1.1009, 1.1014 updated).
+- *Minor, calculation pages (1.1115 [1ef], 1.1116 [1eg]).* `self.api.log` asks for the record by the
+  model's key and lends no log when the answer is another record; Calculate sends the browser to the run on
+  the page's own route (its route values from the page's parameters), not the path the browser reported;
+  the page's state is named from a hash of what the page is (model, fields, title, `requires=`, route), not
+  from the order pages are built in, so every process names it alike; following a run reads the record each
+  time and the log (for the progress line) every `LOG_EVERY` (3) readings.
 
 ## 7. Order of building
 

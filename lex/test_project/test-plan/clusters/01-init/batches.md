@@ -3732,6 +3732,7 @@ The calculation page kind of section 6.20 of `docs/superpowers/specs/2026-11-23-
 | 1.978 | A rule on the page guards the calculation's own handlers | @ui.page(requires=a @ui.rule) on ui.calculation: the granted user's run starts as before; the refused user's page says the rule's sentence and calculate, the load, Stop, the download and the following sent by name are each refused with it before lex-app's API is called; the guarded page has its own state |
 | 1.1105 | The handlers require the page that builds the calculation | a kind made at module level and returned by a rule-guarded @ui.page refuses bob's Calculate with the rule's sentence before the API; on a @ui.dashboard refused with what to write |
 | 1.1107 | A model that calculates on create is started once | calculate_on_create with a run that ends before the create answers: only the create's POST, no Calculate PATCH; computed once; the browser goes to the run |
+| 1.1115 | The run is found by the page and the record it names | Calculate goes to the page's route though the browser reported another path; the log asked by the model's key, [] for another record's answer; a state's name from what the page is |
 
 ### Batch 1eg — lex.ui calculation pages: one run, followed until it ends -- its result, its error, its log ✅
 
@@ -3757,6 +3758,7 @@ Second piece of the calculation page (section 6.20 of `docs/superpowers/specs/20
 | 1.989 | A run the reader may not read is no run to them | nothing of the run in the state; the error page says There is no run N., as for a missing key |
 | 1.990 | Leaving stops the watching, never the run | the follow job ends on a new visit; the run still ends in SUCCESS |
 | 1.999 | A reconnect keeps following the run and does not open the page again | the socket reconnects on a followed run's address: same visit, the following goes on and the re-sent follow is a repeat; the load reads the run again; ui.frame(opened=) called once; the one following ends with SUCCESS |
+| 1.1116 | Following a run reads its log every few readings | ten IN_PROGRESS readings: the record each time, the log every LOG_EVERY and at the end; the newest line shown |
 
 ### Batch 1eh — lex.ui calculation pages: the past runs -- a model table, each row opening its run ✅
 

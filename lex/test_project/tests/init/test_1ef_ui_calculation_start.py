@@ -9,7 +9,7 @@ to the run's address on the same page. A regression is a run nobody may trace to
 created past the model's permissions, a page that blocks while the run goes, or a run whose log the
 grid cannot find.
 
-Cluster 1ef -- scenarios 1.980-1.984, 1.978, 1.1105, 1.1107. Type: E (the handlers run against lex-app's real views; 1.1105 U).
+Cluster 1ef -- scenarios 1.980-1.984, 1.978, 1.1105, 1.1107, 1.1115. Type: E (the handlers run against lex-app's real views; 1.1105 U).
 Covers: lex/lex_app/reflex/ui/pages/calculation.py (ui.calculation, its checks, the form view),
 lex/lex_app/reflex/ui/calculations.py (the state, calculate), lex/lex_app/reflex/data.py and
 lex/lex_app/reflex/ui/context.py (self.api.calculate, self.api.log).
@@ -185,6 +185,55 @@ class TestCluster01ef_CalculationStart(E2ETestCase):
         self.assertEqual(settled(record), CalculationModel.SUCCESS)
         self.assertEqual(record.lines.count(), 2, "the run computed once")
         self.assertEqual([g.path for g in went if hasattr(g, "path")], [f"{ROUTE}?run={record.pk}"])
+
+    # -- 1.1115 --------------------------------------------------------
+    def test_1_1115_the_run_is_found_by_the_page_and_the_record_it_names(self) -> None:
+        """
+        Scenario 1.1115: where a run is, and whose log it is (review 2, minor).
+        Given: the page; a browser whose address was changed to another path before Calculate; a list
+               answer that ignores the filter and gives another record first; two pages' states.
+        When:  the form is sent; the log of a record is read; the states are named.
+        Then:  the browser goes to the run on the page's own route, not the path it was on; the log is
+               asked by the model's key and is [] when the answer is another record; a state's name comes
+               from what the page is -- the same page, the same name, whatever was built before it.
+        """
+        page = region_reports()
+        page.build(CTX)
+        state = page.state
+
+        async def scenario():
+            async with Session(self.client, grants=((UiRegionReport, "create"),)) as session:
+                await session.visit(ROUTE)
+                await session.harness.navigate("/somewhere/else")
+                await (await session.harness.send(state, "calculate", values={"region": "north", "year": "2026"}))
+                await asyncio.sleep(0.05)
+                return list(session.harness.results)
+
+        went = asyncio.run(scenario())
+        record = UiRegionReport.objects.get()
+        self.assertEqual([g.path for g in went if hasattr(g, "path")], [f"{ROUTE}?run={record.pk}"])
+
+        from lex.lex_app.reflex.data import LexApi
+
+        asked: list = []
+
+        async def answer(self_, method, path, params=None, json=None):
+            asked.append((method, path, list(params or [])))
+            if path.endswith("/list") and method == "POST":
+                return {"rowData": [{"id": 99, "lex_reserved_calculation_id": "other-run"}]}
+            return [{"calculation_log": "not this record's"}]
+
+        with patch.object(LexApi, "_request", answer):
+            log = asyncio.run(LexApi("token").log(UiRegionReport, 7))
+        self.assertEqual(asked[0][2], [("id", "7")], "asked by the model's key")
+        self.assertEqual(log, [], "another record's answer lends no log")
+
+        plan = calculations.Plan(UiRegionReport, ("region", "year"), (), ROUTE)
+        first = calculations.state_name(plan, ("Region report",))
+        calculations.state_name(calculations.Plan(UiRegionReport, ("year",), (), "/other"), ("Other",))
+        self.assertEqual(calculations.state_name(plan, ("Region report",)), first, "the same page, the same name")
+        self.assertNotEqual(calculations.state_name(plan, ("Another report",)), first)
+        self.assertTrue(state.__name__.startswith("Calculation_uiregionreport_"))
 
     # -- 1.982 ---------------------------------------------------------
     def test_1_982_a_user_the_model_does_not_let_create_is_refused_above_the_button(self) -> None:

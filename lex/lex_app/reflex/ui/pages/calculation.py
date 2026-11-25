@@ -117,7 +117,7 @@ class Calculation(kinds.Kind):
         requires = tuple(ctx.requires)
         identity = (str(self.title), tuple((getattr(one, "key", ""), getattr(one, "is_a", ""),
                                             bool(getattr(one, "required", False))) for one in every), requires)
-        self.state = runtime.state_for(runtime.Plan(self.model, keys, requires), identity)
+        self.state = runtime.state_for(runtime.Plan(self.model, keys, requires, ctx.route), identity)
         self.load = self.state.open
 
     def loads(self) -> tuple[list, list]:

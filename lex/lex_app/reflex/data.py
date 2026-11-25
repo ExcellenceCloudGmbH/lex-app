@@ -209,10 +209,13 @@ class LexApi:
         commits.
         """
         name = model_id(model)
-        found = await self._request("POST", f"model_entries/{name}/list", params=[("id", str(pk))],
+        key = "id" if isinstance(model, str) else model._meta.pk.name
+        found = await self._request("POST", f"model_entries/{name}/list", params=[(key, str(pk))],
                                     json={"startRow": 0, "endRow": 1})
         rows = list((found or {}).get("rowData") or [])
-        run = rows[0].get("lex_reserved_calculation_id") if rows else None
+        # The record asked for, or none: a list that ignored the filter must not lend another run's log.
+        row = rows[0] if rows and str(rows[0].get(key, rows[0].get("id"))) == str(pk) else None
+        run = row.get("lex_reserved_calculation_id") if row else None
         if not run:
             return []
         data = await self._request("GET", "model_entries/calculationlog/list",
