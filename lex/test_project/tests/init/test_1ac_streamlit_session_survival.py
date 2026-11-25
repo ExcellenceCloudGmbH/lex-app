@@ -45,6 +45,11 @@ from django.test import SimpleTestCase
 from starlette.testclient import TestClient
 
 import lex.proxy as proxy
+import importlib
+
+# The token lifecycle lives here and sa re-exports it. Imported by name, not as an attribute:
+# model discovery also loads the file as `lex_app.streamlit.auth`, a second module object.
+sauth = importlib.import_module("lex.lex_app.streamlit.auth")
 import lex.streamlit_app as sa
 
 pytestmark = pytest.mark.init
@@ -393,7 +398,7 @@ class TestCluster01ac_StreamlitTokenLifecycle(SimpleTestCase):
         # what is guarded now.
         with patch.object(sa.st, "session_state", state), \
              patch.dict(os.environ, {"LEX_INTERNAL_AUTH_SECRET": "s3cret"}), \
-             patch.object(sa, "_live_headers", lambda: {"cookie": "session=abc"}), \
+             patch.object(sauth, "_live_headers", lambda: {"cookie": "session=abc"}), \
              patch.object(sa.requests, "get", _fake_get), \
              patch.object(sa.requests, "post", _must_not_refresh):
             self.assertTrue(sa.renew_access_token())
@@ -426,7 +431,7 @@ class TestCluster01ac_StreamlitTokenLifecycle(SimpleTestCase):
 
         with patch.object(sa.st, "session_state", state), \
              patch.dict(os.environ, {"LEX_INTERNAL_AUTH_SECRET": "s3cret"}), \
-             patch.object(sa, "_live_headers", lambda: {"cookie": "session=abc"}), \
+             patch.object(sauth, "_live_headers", lambda: {"cookie": "session=abc"}), \
              patch.object(sa.requests, "get", _unreachable), \
              patch.object(sa.requests, "post", _must_not_reach_keycloak):
             self.assertFalse(sa.renew_access_token(), "Nothing renewed the token, so renewal must say so.")
@@ -459,7 +464,7 @@ class TestCluster01ac_StreamlitTokenLifecycle(SimpleTestCase):
         )
 
         with patch.object(sa.st, "session_state", state), \
-             patch.object(sa, "_live_headers", lambda: {}), \
+             patch.object(sauth, "_live_headers", lambda: {}), \
              patch.object(sa.st, "context", type("C", (), {"headers": {}})()), \
              patch.object(sa, "start_token_refresh_thread_if_needed", lambda: None), \
              patch.object(sa, "sync_keycloak_context_from_access_token", lambda: None), \
@@ -516,9 +521,9 @@ class TestCluster01ac_StreamlitTokenLifecycle(SimpleTestCase):
                            token_refresher_started=False)
 
         with patch.object(sa.st, "session_state", state), \
-             patch.object(sa, "RENEW_POLL_SECONDS", 0.01), \
-             patch.object(sa, "get_script_run_ctx", lambda: None), \
-             patch.object(sa, "add_script_run_ctx", lambda th, ctx: th):
+             patch.object(sauth, "RENEW_POLL_SECONDS", 0.01), \
+             patch.object(sauth, "get_script_run_ctx", lambda: None), \
+             patch.object(sauth, "add_script_run_ctx", lambda th, ctx: th):
             sa.start_token_refresh_thread_if_needed()
             thread = state["token_refresher_thread"]
             try:
@@ -542,7 +547,7 @@ class TestCluster01ac_StreamlitTokenLifecycle(SimpleTestCase):
         state = _FakeState(stop_token_refresher=False, token_exp=_epoch(600))
 
         with patch.object(sa.st, "session_state", state), \
-             patch.object(sa, "_session_is_live", lambda sid: False):
+             patch.object(sauth, "_session_is_live", lambda sid: False):
             started = time.time()
             sa._token_refresher("dead-session")
             elapsed = time.time() - started

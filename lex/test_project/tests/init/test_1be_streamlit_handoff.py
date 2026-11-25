@@ -78,6 +78,9 @@ from starlette.websockets import WebSocketDisconnect
 
 import lex
 import lex.proxy as proxy
+# The token lifecycle lives here and sa re-exports it. Imported by name, not as an attribute:
+# model discovery also loads the file as `lex_app.streamlit.auth`, a second module object.
+sauth = importlib.import_module("lex.lex_app.streamlit.auth")
 import lex.streamlit_app as sa
 from lex.authentication.dashboards import cookies as dash_cookies
 from lex.authentication.dashboards import handoff
@@ -1098,7 +1101,7 @@ class TestCluster01be_StreamlitProcess(SimpleTestCase):
     def _renew(self, state, answer):
         with patch.object(sa.st, "session_state", state), \
              patch.dict(os.environ, {"LEX_INTERNAL_AUTH_SECRET": "s3cret"}), \
-             patch.object(sa, "_live_headers", lambda: {"cookie": f"{HANDLE}=h"}), \
+             patch.object(sauth, "_live_headers", lambda: {"cookie": f"{HANDLE}=h"}), \
              patch.object(sa.requests, "get", answer):
             return sa.renew_access_token()
 

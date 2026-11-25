@@ -913,3 +913,26 @@ does not remove user launch configurations.
 | 1.694 | The SPA document itself carries `frame-ancestors` | `serve_react`'s SPA fallback (`index.html`) and a literal non-fallback `.html`/`.htm` file (`embed.html`, case-insensitively) both carry `frame-ancestors 'self' <origins>`; merging keeps an existing CSP header's other directives; a hashed asset and `config.js` get none; unset leaves the SPA fallback unchanged; configured but nothing valid still gets exactly `frame-ancestors 'self'` |
 
 **Scenario range:** 1.690 – 1.694. **Test file:** `lex/test_project/tests/init/test_1bs_embed_allowed_origins.py`. **Type:** U. **Status:** ✅ Complete (2026-10-17). Batch: [1bs](batches.md).
+
+---
+
+### 1fc. `lex_api()` — a dashboard calls the Lex API with the token current when the request is sent ✅
+
+**What it tests:** that a Streamlit dashboard calling the Lex API as its viewer always sends the viewer's token as it is at the moment of the request. `lex.lex_app.streamlit.lex_api()` returns a `requests.Session` that reads the token per request (`current_access_token()`), renews it when it has less than a minute left, answers a 401 by renewing once and resending a replayable body once, refuses to send the token to any other origin, and resolves the instance's API URL itself. For dashboards written before it, a dict kept in `st.session_state.headers` carrying the session's token is updated in place on every renewal. The token lifecycle moves from `lex/streamlit_app.py` to the importable `lex/lex_app/streamlit/auth.py`.
+
+**Why a regression matters:** a header built once is a snapshot. Full page runs rebuild it, so it looks fine — until a request is sent from `st.dialog` or `st.fragment`, whose reruns do not. In production a form filled in for longer than the token lasted saved its record and then failed to attach the document with "HTTP 401 … id token is missing", while the session already held a renewed token. And because Streamlit re-executes `streamlit_app.py` as a new `__main__` each run, the refresh lock defined there was a different object every run.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.1123 | The token is read when the request leaves | A session created under token A sends token B once the refresher has stored B; relative paths join onto the API base URL |
+| 1.1124 | A token about to expire is renewed first | With 30 s left the proxy is asked once and the request carries the fresh token |
+| 1.1125 | A 401 renews once and resends once | Renewed and accepted → 2 sends, 200; refused again → 2 sends, 401; proxy cannot renew → 1 send, 401 |
+| 1.1126 | A streamed body is not resent | A file object refused with 401 is sent once, the 401 reaches the caller, no renewal is spent |
+| 1.1127 | No usable token raises | No token, or an expired one with nothing to renew it: `LexAuthRequired`, nothing sent |
+| 1.1128 | The token goes to the Lex API only | Another origin raises `ValueError` and nothing is sent; the API's own absolute URL is allowed; the caller's `authorization` is replaced, its other headers kept, exactly one `Authorization` sent |
+| 1.1129 | The default base URL follows the instance | `LEX_API_URL` wins; else `https://<DOMAIN_HOSTED>/api/api/` (a scheme in it is kept); else `http://localhost:8000/api/` |
+| 1.1130 | A stored header dict follows every renewal | A refresher renewal and an adopted handshake token both rewrite `st.session_state.headers["Authorization"]` in place, so a reference held elsewhere follows; other headers untouched; the `lex_api()` warning is logged once |
+| 1.1131 | Any other credential is left alone | Another bearer token, an `Api-Key` header and a non-dict value are unchanged, and the renewal still lands |
+| 1.1132 | One importable home for the lifecycle | Re-executing `streamlit_app` keeps the same refresh lock, which is the auth module's; `lex_api`, `current_access_token`, `LexApiSession`, `LexAuthRequired` are public on `lex.lex_app.streamlit` |
+
+**Scenario range:** 1.1123 – 1.1132. **Test file:** `lex/test_project/tests/init/test_1fc_streamlit_lex_api.py`. **Type:** U. **Status:** ✅ Complete (2026-11-25). Batch: [1fc](batches.md).

@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 69 | 694 | 707 | 3 | 0 |
+| 1. Init — Project Bootstrap | 70 | 1132 | 717 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -95,6 +95,7 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1d |  | 1.23-1.30 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1e |  | 1.30-1.43 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 1fc | lex_api() -- a dashboard calls the Lex API with the token current when the request is sent | 1.1123-1.1132 | complete | 10 | 0 | 0 | Production incident (AGI provision tool, lex-app 2.4.2): a new-provision form in an st.dialog attached its document through a REST PATCH carrying a header dict the app built once per page run (st.session_state.headers). Dialog reruns do not rebuild it, so after a few minutes the PATCH carried an expired token and the API answered 401 while the session itself held a renewed one. Adds lex.lex_app.streamlit.lex_api() / current_access_token(), keeps a stored headers dict on the current token in place, and moves the token lifecycle out of lex/streamlit_app.py (re-executed as __main__ every script run) into lex/lex_app/streamlit/auth.py. 1ac/1ad/1be patch targets re-pointed at the new module. Allocation: 1fc/1.1123 is the first letter free on lex-app-v2 and every remote branch, above the highest max_scenario (1122, feat/reflex-docs-site and feat/reflex-ui-forms). |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |
 | 1h |  | 1.47-1.50 | complete | 15 | 0 | 0 | `requests.get` patched, network-free |
 | 1i | rebase_incident_datetimes — re-anchor datetimes corrupted by the TIME_ZONE incident | 1.195-1.200 | complete | 6 | 0 | 0 | management command that surgically re-anchors user-entered datetimes mis-stored after the rc212 TIME_ZONE flip (f622c9c); dry-run by default, PER-INSTANCE window [--cutoff, --until) (--cutoff required, no global default — too-early corrupts good data; --until defaults to now), excludes app-stamped created_at/edited_at. Correction is DST-aware (AT TIME ZONE per value's own date — winter −1h vs summer −2h); the ~2 transition hours/year are flagged for review. 1.197 late-upgrader safety, 1.198 post-fix bound, 1.199 DST-aware winter shift, 1.200 transition-flag. Ships with the USE_TZ=True cutover. |

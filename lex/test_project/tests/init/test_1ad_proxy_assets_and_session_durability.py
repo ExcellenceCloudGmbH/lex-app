@@ -2032,7 +2032,7 @@ class TestCluster01ad_RefresherSurvivesReruns(SimpleTestCase):
         dead" report -- and why it looked intermittent: it needs a rerun followed
         by idleness.
         """
-        import lex.streamlit_app as streamlit_app
+        streamlit_auth = importlib.import_module("lex.lex_app.streamlit.auth")  # where the refresher lives
         from streamlit.runtime.scriptrunner_utils.exceptions import (
             RerunException,
             StopException,
@@ -2043,10 +2043,10 @@ class TestCluster01ad_RefresherSurvivesReruns(SimpleTestCase):
             ("RerunException", RerunException(rerun_data=None)),
         ):
             with self.subTest(interrupted_by=label):
-                with patch.object(streamlit_app, "st") as st_mock:
+                with patch.object(streamlit_auth, "st") as st_mock:
                     st_mock.session_state.get.side_effect = raiser
                     self.assertFalse(
-                        streamlit_app._read_stop_flag("stop_token_refresher"),
+                        streamlit_auth._read_stop_flag("stop_token_refresher"),
                         msg=f"a read interrupted by {label} must not be read as 'stop'",
                     )
 
@@ -2062,13 +2062,13 @@ class TestCluster01ad_RefresherSurvivesReruns(SimpleTestCase):
         Without this, "always return False" would satisfy 1.301 while leaking a
         refresher thread per session for the lifetime of the process.
         """
-        import lex.streamlit_app as streamlit_app
+        streamlit_auth = importlib.import_module("lex.lex_app.streamlit.auth")  # where the refresher lives
 
         for flag, expected in ((True, True), (False, False)):
             with self.subTest(stop_flag=flag):
-                with patch.object(streamlit_app, "st") as st_mock:
+                with patch.object(streamlit_auth, "st") as st_mock:
                     st_mock.session_state.get.return_value = flag
                     self.assertEqual(
-                        streamlit_app._read_stop_flag("stop_token_refresher"), expected,
+                        streamlit_auth._read_stop_flag("stop_token_refresher"), expected,
                         msg=f"a stop flag of {flag} must be reported as {expected}",
                     )
