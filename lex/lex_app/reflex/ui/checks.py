@@ -84,6 +84,28 @@ def followed(paths: list[str], root: str | Path) -> list[str]:
     return [*paths, *extra]
 
 
+def drawing(paths: list[str]) -> list[str]:
+    """The files among ``paths`` (folders read whole) that import Reflex, RFDS or lex.ui: the ones RFDS's
+    ``lint --strict`` judges. A followed module of plain logic (a helper, a query) draws nothing, and
+    RFDS's rules for drawing code would only be noise there."""
+    out: list[str] = []
+    for path in _files(paths):
+        try:
+            tree = ast.parse(Path(path).read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 - linted: RFDS reports what it cannot read
+            out.append(str(path))
+            continue
+        names = [alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names]
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and not node.level and node.module:
+                names.append(node.module)
+                names.extend(f"{node.module}.{alias.name}" for alias in node.names)
+        if any(name.split(".")[0] in ("reflex", "rfds") or name == "lex.ui" or name.startswith("lex.ui.")
+               for name in names):
+            out.append(str(path))
+    return out
+
+
 def _imported(tree: ast.AST, path: Path, base: Path) -> list[str]:
     """The dotted names ``tree`` imports, relative ones made absolute from ``path``'s package."""
     try:

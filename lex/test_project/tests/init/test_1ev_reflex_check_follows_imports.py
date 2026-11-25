@@ -8,7 +8,7 @@ leaves lex-app's, Reflex's and other installed packages alone; the files are par
 regression is a broken handler in an imported module reported clean, or a check that reads
 installed packages.
 
-Cluster 1ev -- scenario 1.1031. Type: U.
+Cluster 1ev -- scenarios 1.1031, 1.1122. Type: U.
 Covers: lex/lex_app/reflex/ui/checks.py (followed, _imported, _module_files), lex/lex_app/reflex/scaffold.py
 (check_paths).
 Run: python -m lex pytest lex/test_project/tests/init/test_1ev_reflex_check_follows_imports.py -v
@@ -82,3 +82,39 @@ class TestCluster01ev_CheckFollowsImports(SimpleTestCase):
         self.assertEqual(len(errors), 1, errors)
         self.assertEqual(errors[0][0], "tickets.py")
         self.assertIn("TicketsState.approve: a public method with no lex.ui decorator", errors[0][1])
+
+
+    # -- 1.1122 --------------------------------------------------------
+    def test_1_1122_rfds_lint_reads_only_the_modules_that_draw(self) -> None:
+        """
+        Scenario 1.1122: review 2, minor -- a followed module of plain logic is not RFDS-linted.
+        Given: the project of 1.1031, plus a followed helper of plain logic (it imports os alone).
+        When:  `lex reflex check` runs (RFDS's lint and doctor recorded, not run).
+        Then:  lex.ui's checks read every followed module; RFDS's lint --strict is given the structure module
+               and the dashboards (as always) and, of the followed modules, only those that import Reflex,
+               RFDS or lex.ui -- not the plain helper.
+        """
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            files = {
+                "_reflex_structure.py": "from lex import ui\nimport plain\n\ndef main():\n    return None\n",
+                "_dashboards/__init__.py": "",
+                "_dashboards/home.py": "import reflex as rx\nimport helpers\n",
+                "helpers.py": "import rfds\n",
+                "plain.py": "import os\n\ndef total(rows):\n    return sum(rows)\n",
+            }
+            for name, text in files.items():
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            calls: list = []
+            with patch("rfds.cli.main", lambda argv: calls.append(list(argv)) or 0):
+                scaffold.run_check(root)
+            [lint] = [call for call in calls if call[0] == "lint"]
+            linted = sorted(Path(p).name for p in lint[2:])
+            self.assertEqual(linted, ["_dashboards", "_reflex_structure.py", "helpers.py"],
+                             "the structure module and the dashboards, and the followed module that draws")
+            self.assertIn("plain.py", [Path(p).name for p in checks._files(scaffold.check_paths(root))],
+                          "lex.ui's checks still read it")

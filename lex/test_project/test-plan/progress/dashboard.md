@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 152 | 1118 | 1000 | 3 | 0 |
+| 1. Init — Project Bootstrap | 152 | 1122 | 1004 | 3 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 24 | 177 | 103 | 2 | 0 |
@@ -170,13 +170,13 @@ Fix round 3, same session (re-review): one further host-validation gap. Python's
 | 1es | lex.ui: a foreign key shows the related record's name, in a model table, a run's history and its facts | 1.1026-1.1027 | complete | 2 | 0 | 0 | The name is lex-app's own `<fk>__short_description` (str of the related record). These tests fail on an id shown in a foreign key's column or fact, a sort sent by the name key, or the id lost from the row. |
 | 1et | lex.ui: every record through self.api.all, and a model table filtered by a range of days | 1.1028-1.1029, 1.1114 | complete | 3 | 0 | 0 | 1cx's 1.809 and 1eh's 1.998 now expect the export/totals refusal's new words (it names self.api.all). These tests fail on a row read twice or missed, an unbounded read, or a model date filter not sent. |
 | 1eu | lex.ui frame: areas nav= does not list follow the listed ones; a typo is still refused | 1.103 | complete | 1 | 0 | 0 | 1.960 still holds (its typo is a lex.ui page's). These tests fail on an unlisted raw area refused, areas out of order, or a lex.ui typo accepted. |
-| 1ev | lex reflex check follows the project's own imports from its dashboards | 1.1031 | complete | 1 | 0 | 0 | The files are parsed, never imported. These tests fail on an imported project module left unchecked, or a module outside the project read. |
+| 1ev | lex reflex check follows the project's own imports from its dashboards | 1.1031, 1.1122 | complete | 2 | 0 | 0 | The files are parsed, never imported. These tests fail on an imported project module left unchecked, or a module outside the project read. |
 | 1ew | lex.ui pages: a closed section mounts what it holds when opened; a title from the state; actions | 1.1032-1.1033 | complete | 2 | 0 | 0 | The opened state is RFDS's client_state (rfdsLexopened<n>). These tests fail on a closed section's chart mounted at once, its table deferred, or a state title or actions accepted where they cannot show. |
-| 1ex | lex.ui: a handler brings a section or a table into view -- ui.scroll_to | 1.1034 | complete | 1 | 0 | 0 | 1cm's 1.783 lists scroll_to among the public names (a new name). These tests fail on an id mismatch between the result and the built part, or a wrong argument accepted. |
-| 1ey | lex.ui pages: a tab shown only while the state says so -- visible= a state value on a tab | 1.1035 | complete | 1 | 0 | 0 | 1ea's 1.952 changed its given: a state value on a later tab is now accepted, so the case is a state value on the first tab, plus visible= that is neither; 1cs's 1.800 expects the record refusal's added pointer to tabs=True. |
+| 1ex | lex.ui: a handler brings a section or a table into view -- ui.scroll_to | 1.1034, 1.1120 | complete | 2 | 0 | 0 | 1cm's 1.783 lists scroll_to among the public names (a new name). These tests fail on an id mismatch between the result and the built part, or a wrong argument accepted. |
+| 1ey | lex.ui pages: a tab shown only while the state says so -- visible= a state value on a tab | 1.1035, 1.1121 | complete | 2 | 0 | 0 | 1ea's 1.952 changed its given: a state value on a later tab is now accepted, so the case is a state value on the first tab, plus visible= that is neither; 1cs's 1.800 expects the record refusal's added pointer to tabs=True. |
 | 1ez | lex.ui forms: a field of several choices can be emptied at once -- its Clear | 1.1036 | complete | 1 | 0 | 0 | The Clear carries data-lex-clear=<key>. These tests fail on a several-choice field without its Clear, a Clear always shown, or a Clear that does not empty the browser's value. |
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
-| 1fa | lex.ui pages: more than four tables on a record page refused in lex.ui's words, with the way out | 1.1037 | complete | 1 | 0 | 0 | The limit is RFDS's MAX_GRID_TABLES (4), read from RFDS. 1cs's 1.800 expects these words instead of RFDS's quoted sentence. |
+| 1fa | lex.ui pages: more than four tables on a record page refused in lex.ui's words, with the way out | 1.1037, 1.1119 | complete | 2 | 0 | 0 | The limit is RFDS's MAX_GRID_TABLES (4), read from RFDS. 1cs's 1.800 expects these words instead of RFDS's quoted sentence. |
 | 1fb | ui.testing: drive a searched field, seed a private value as gone, test against lex-app's API in-process | 1.1038-1.1040, 1.1113 | complete | 4 | 0 | 0 | The calculation tests' ViewsClient is now ui.testing.LexViews. These tests fail on a searched field a test cannot drive, a logged warning when seeding GONE, or self.api not answered by lex-app's views. |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |
 | 1h |  | 1.47-1.50 | complete | 15 | 0 | 0 | `requests.get` patched, network-free |

@@ -36,6 +36,9 @@ class Build:
     #: What opens each of them, by the button as written: a button built twice (a table draws its
     #: row actions more than once) has one dialog.
     asked: dict = dataclasses.field(default_factory=dict)
+    #: The ids the page's sections took, shared by every copy of this context: two sections of one title
+    #: get two ids (the second ``-2``); ``ui.scroll_to(title)`` reaches the first.
+    anchors: list = dataclasses.field(default_factory=list)
 
     def at(self, slot: str, place: str | None = None) -> "Build":
         return dataclasses.replace(self, slot=slot, place=place or self.place)

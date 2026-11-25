@@ -8,7 +8,7 @@ sections first and refuses in its own words: how many, in which sections, that t
 the way that does -- a page of their own, led to from a section by a link. The limit is RFDS's and
 stays. A regression is a page past RFDS's rule accepted, or a refusal that points nowhere.
 
-Cluster 1fa -- scenario 1.1037. Type: U.
+Cluster 1fa -- scenarios 1.1037, 1.1119. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/kinds.py (Record._at_most_tables).
 Run: python -m lex pytest lex/test_project/tests/init/test_1fa_ui_record_table_limit.py -v
 """
@@ -27,6 +27,9 @@ pytestmark = pytest.mark.init
 
 class CrowdedOrderState(ui.State):
     """An order with many kinds of lines (no field named like a route argument: Reflex refuses that)."""
+
+    kind: str = "a"
+    groups: list[str] = []
 
     @ui.rows
     def lines(self):
@@ -65,3 +68,29 @@ class TestCluster01fa_RecordTableLimit(SimpleTestCase):
                              "ui.link(\"All invoices\", to=order_invoices"):
                 self.assertIn(expected, message, expected)
             self.assertNotIn("use tab navigation", message, "never RFDS's pointer to tabs")
+
+
+    # -- 1.1119 --------------------------------------------------------
+    def test_1_1119_tables_inside_a_switch_or_an_each_are_counted(self) -> None:
+        """
+        Scenario 1.1119: tables a section holds inside other parts (review 2, minor).
+        Given: record pages whose sections hold tables inside ui.switches (two switches of two cases, one table
+               each) beside three more; one such switch beside one more; a table ui.each repeats.
+        When:  each page is built.
+        Then:  every case of a switch counts, as RFDS counts them (each case is on the page): 4 + 3 = 7 is
+               refused in lex.ui's words (before, RFDS's own refusal came first), 2 + 1 is built; a table
+               per item of ui.each is any number of tables, refused saying so.
+        """
+        two = ui.switch(CrowdedOrderState.kind, {"a": ui.table(CrowdedOrderState.lines, columns=["name"]),
+                                                 "b": ui.table(CrowdedOrderState.lines, columns=["name"])})
+        with self.assertRaises(PageError) as caught:
+            ui.record(title="Order", sections=[ui.section("Kinds", two, two), *[ui.section(f"S{n}", _table())
+                                                                               for n in range(3)]]).build(CTX)
+        self.assertIn("7 tables", str(caught.exception))
+        self.assertIn("a page of their own", str(caught.exception), "lex.ui's words, with the way out")
+        ui.record(title="Order", sections=[ui.section("Kinds", two), ui.section("More", _table())]).build(CTX)
+        with self.assertRaises(PageError) as caught:
+            ui.record(title="Order", sections=[ui.section("Each", ui.each(CrowdedOrderState.groups,
+                                                                          lambda group: _table()))]).build(CTX)
+        self.assertIn("any number of tables", str(caught.exception))
+        self.assertIn("one for each item of ui.each", str(caught.exception))

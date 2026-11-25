@@ -2134,6 +2134,7 @@ does not remove user launch configurations.
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.1031 | The check follows the project's imports | paths: _dashboards, _reflex_structure.py, helpers.py, orders/__init__.py, orders/pages/__init__.py, orders/pages/tickets.py (not unused.py, not os/reflex/lex); one error in tickets.py: TicketsState.approve has no lex.ui decorator |
+| 1.1122 | RFDS's lint reads only the modules that draw | lint --strict given the files importing reflex, rfds or lex.ui; a plain helper still read by lex.ui's checks |
 
 **Scenario range:** 1.1031. **Test file:** `lex/test_project/tests/init/test_1ev_reflex_check_follows_imports.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ev](batches.md).
 
@@ -2159,6 +2160,7 @@ does not remove user launch configurations.
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.1034 | A handler brings a section or a table into view | errors-found on a form's section and a record page's; the table's box id; run() results Toast then ScrollTo; to_events are scroll events with those ids; empty string, a number, an action refused |
+| 1.1120 | Two sections of one title have two ids | errors-found and errors-found-2 once each; ui.scroll_to reaches the first |
 
 **Scenario range:** 1.1034. **Test file:** `lex/test_project/tests/init/test_1ex_ui_scroll_to.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ex](batches.md).
 
@@ -2171,6 +2173,7 @@ does not remove user launch configurations.
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.1035 | A tab is drawn only while its state value is true | form tabs: figures trigger and panel under cond on has_figures, summary not; compiles; record tabs the same; record without tabs refused pointing to tabs=True |
+| 1.1121 | The open tab falls back, and a changed RFDS is said | the tabs' value is the first tab while the open one's state is false; a component without RFDS's tabs refused loudly |
 
 **Scenario range:** 1.1035. **Test file:** `lex/test_project/tests/init/test_1ey_ui_tab_shown_by_state.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1ey](batches.md).
 
@@ -2183,6 +2186,7 @@ does not remove user launch configurations.
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.1037 | More than four tables is refused with the way out | four compile; five refused with and without tabs: slot sections, 5 tables in Lines (2), Invoices, Payments, Shipments, at most 4, with tabs=True too, a page of their own, ui.link to order_invoices; no 'use tab navigation' |
+| 1.1119 | Tables inside a switch or an each are counted | every switch case counts as RFDS counts it: 7 refused in lex.ui's words, 3 built; a table per item of ui.each refused as any number |
 
 **Scenario range:** 1.1037. **Test file:** `lex/test_project/tests/init/test_1fa_ui_record_table_limit.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24). Batch: [1fa](batches.md).
 

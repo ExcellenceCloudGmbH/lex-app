@@ -1420,6 +1420,16 @@ scenario (batch in brackets):
   the cache `LexAccessState.load` fills for this page), as the frame and every handler do; before, it read
   RFDS's resolver (the same grants, remembered per identity) -- two paths to one answer. `opened=`'s docs say
   that `page.address` and `page.params` are the browser's.
+- *Minor, pages and the check (1.1119 [1fa], 1.1120 [1ex], 1.1121 [1ey], 1.1122 [1ev]).* The record page's
+  table limit counts tables wherever a section holds them -- inside other parts, every case of a `ui.switch`
+  (RFDS counts each: all are on the page), and a table `ui.each` repeats as any number -- so lex.ui's sentence
+  with the way out comes before RFDS's. Two sections of one title on a page get two ids (`Build.anchors`,
+  shared by the page's build; the second `-2`); `ui.scroll_to(title)` reaches the first. `hide_tabs` stops
+  with a sentence when RFDS's tabs are not built as it reads them (a trigger marked `data-rfds-tab-value`, a
+  `TabsContent` panel, one `TabsRoot`), and the open tab falls back to the first while its state is false.
+  `lex reflex check` runs lex.ui's checks on every followed module and RFDS's `lint --strict` on the structure
+  module and the dashboards and, of the followed modules, only those that import Reflex, RFDS or lex.ui
+  (`checks.drawing`).
 
 ## 7. Order of building
 

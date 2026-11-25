@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1118
+max_scenario: 1122
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2820,10 +2820,10 @@ letters:
       1.960 still holds (its typo is a lex.ui page's). These tests fail on an unlisted raw area refused, areas out of order, or a lex.ui typo accepted.
   ev:
     title: 'lex reflex check follows the project''s own imports from its dashboards'
-    scenarios: 1.1031
+    scenarios: '1.1031, 1.1122'
     status: complete
     tests:
-      pass: 1
+      pass: 2
       skip: 0
       xfail: 0
     note: >-
@@ -2840,30 +2840,30 @@ letters:
       The opened state is RFDS's client_state (rfdsLexopened<n>). These tests fail on a closed section's chart mounted at once, its table deferred, or a state title or actions accepted where they cannot show.
   ex:
     title: 'lex.ui: a handler brings a section or a table into view -- ui.scroll_to'
-    scenarios: 1.1034
+    scenarios: '1.1034, 1.1120'
     status: complete
     tests:
-      pass: 1
+      pass: 2
       skip: 0
       xfail: 0
     note: >-
       1cm's 1.783 lists scroll_to among the public names (a new name). These tests fail on an id mismatch between the result and the built part, or a wrong argument accepted.
   ey:
     title: 'lex.ui pages: a tab shown only while the state says so -- visible= a state value on a tab'
-    scenarios: 1.1035
+    scenarios: '1.1035, 1.1121'
     status: complete
     tests:
-      pass: 1
+      pass: 2
       skip: 0
       xfail: 0
     note: >-
       1ea's 1.952 changed its given: a state value on a later tab is now accepted, so the case is a state value on the first tab, plus visible= that is neither; 1cs's 1.800 expects the record refusal's added pointer to tabs=True.
   fa:
     title: 'lex.ui pages: more than four tables on a record page refused in lex.ui''s words, with the way out'
-    scenarios: 1.1037
+    scenarios: '1.1037, 1.1119'
     status: complete
     tests:
-      pass: 1
+      pass: 2
       skip: 0
       xfail: 0
     note: >-
