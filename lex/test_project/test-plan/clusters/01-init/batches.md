@@ -4035,6 +4035,7 @@ Section 5.15 of `docs/superpowers/specs/2026-11-23-reflex-ui-tables-design.md`.
 | --- | --- | --- |
 | 1.1028 | self.api.all reads every record in a stable order up to a ceiling | 2,345 rows once and in order; pages 1-3 of 1,000 with ordering amount,id; count; ALL_LIMIT refusal after the first page with the count; a rows table over it builds with export and totals; a model table's totals refusal names self.api.all |
 | 1.1029 | A model table filters a date field by a range of days | date_lookups event_at -> event_at__date; the picker in the toolbar; event_at__date__gte/lte sent; a field that is no date filter ignored; a malformed day dropped; clear_filters removes the range |
+| 1.1114 | Page turns, sorts, filters and searches read the kept rows | 60 rows: the handler asked on open, after a handler of its state, on a new visit and after the idle time, never per page/sort/filter/search among rows; a searching handler once per search; rows in no stored state |
 
 ### Batch 1eu — lex.ui frame: areas nav= does not list follow the listed ones; a typo is still refused ✅
 

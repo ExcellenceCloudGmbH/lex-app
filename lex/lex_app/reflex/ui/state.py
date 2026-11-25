@@ -329,6 +329,9 @@ class State(rx.State):
             self._ui_busy = []
         forms.forget_offers(self, visit=True)       # the matches shown leave; another user's offers too
         private.leave(str(self.router.session.client_token or ""))   # private values not kept across visits
+        from lex.lex_app.reflex.ui.pages import rows_table
+
+        rows_table.forget_rows(tab=str(self.router.session.client_token or ""))   # tables read anew
         kept = forms.kept()
         # A form starts over on a new visit: its field messages, its step, its result and its refusal leave.
         # One declared keep=True keeps its result while what it shows is kept, and its refusal: shown above its

@@ -39,6 +39,40 @@ _CACHE_BY_TABLE: "weakref.WeakKeyDictionary[Any, type]" = weakref.WeakKeyDiction
 _COUNTER = itertools.count(1)
 _ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 
+#: How long a table keeps its rows handler's rows in this process's memory while it is not used, in seconds.
+ROWS_IDLE = 600
+#: (tab, user, table state, search) -> [when last used, the rows as the table shows them]. In this process's
+#: memory only, like a ``ui.private`` value: never in a state Reflex stores (Redis, disk). A page turn, a
+#: sort, a filter or a search the handler does not do itself reads them here, not from the handler.
+_KEPT: dict[tuple, list] = {}
+
+
+def _kept_key(state: Any, query: str) -> tuple:
+    from lex.lex_app.reflex.ui import context
+
+    cls = type(state)
+    try:
+        tab = str(state.router.session.client_token or "")
+    except Exception:  # noqa: BLE001 - no tab: nothing is kept for it
+        tab = ""
+    return tab, context.user_id_of(state), cls.get_full_name(), query if cls.takes_search else ""
+
+
+def forget_rows(state: Any = None, *, tab: str | None = None) -> None:
+    """Drop the rows kept for one table of a tab (``state``), or for every table of ``tab`` (a new visit)."""
+    if state is not None:
+        key = _kept_key(state, "")
+        gone = [one for one in _KEPT if one[:3] == key[:3]]
+    else:
+        gone = [one for one in _KEPT if one[0] == tab]
+    for one in gone:
+        _KEPT.pop(one, None)
+
+
+def _prune(now: float) -> None:
+    for one in [key for key, (used, _) in _KEPT.items() if now - used > ROWS_IDLE]:
+        _KEPT.pop(one, None)
+
 
 def handler_key(handler: Any) -> str:
     return f"{handler.state.get_full_name()}.{handler.fn.__name__}"
@@ -87,6 +121,7 @@ class LexRowsTableState(DataTableMixin, ExportMixin, ChosenColumns, RowsNotStore
     @rx.event
     async def open(self):
         """The table appeared: read the first page (on a list page, with the address's search)."""
+        forget_rows(self)                       # what the handler gives now, not what it gave last time
         self.shown = True
         self.page = 0
         self._totals_all_read = False
@@ -105,12 +140,14 @@ class LexRowsTableState(DataTableMixin, ExportMixin, ChosenColumns, RowsNotStore
         self.totals_rows = []
         self.choices = {}
         self._row_to = {}
+        forget_rows(self)
 
     @rx.event
     async def reread(self):
         """Read again if the table is on screen: after a handler of its state, or ``ui.refresh``."""
         if not self.shown:
             return
+        forget_rows(self)
         self._totals_all_read = False
         async for _ in self.load():
             yield
@@ -120,6 +157,7 @@ class LexRowsTableState(DataTableMixin, ExportMixin, ChosenColumns, RowsNotStore
         """The page opened again (a new record, the same page): the first page, read again."""
         if not self.shown:
             return
+        forget_rows(self)
         self.page = 0
         self._totals_all_read = False
         async for _ in self.load():
@@ -207,15 +245,38 @@ class LexRowsTableState(DataTableMixin, ExportMixin, ChosenColumns, RowsNotStore
 
     # -- reading ---------------------------------------------------------------------------------
     async def _all(self, query: str) -> list[dict]:
-        """Every row, as the table shows it: read as the user, checked, in wire form."""
+        """Every row, as the table shows it: read as the user, checked, in wire form.
+
+        The handler is asked when the table appears, after ``reread`` (a handler of its state, ``ui.refresh``),
+        ``reopen`` and a new visit, and for each search it does itself; in between -- a page turn, a sort, a
+        filter, a search among the rows -- the rows it gave are read from this process's memory
+        (:data:`_KEPT`), until :data:`ROWS_IDLE` seconds unused.
+        """
+        import time
+
+        from rfds.errors import RFDSUserError
+
+        cls = type(self)
+        if cls.requires:                    # the page's: asked before the kept rows are shown too
+            from lex.lex_app.reflex.ui.handlers import check_page_requires
+
+            await check_page_requires(self, cls.requires)
+        key, now = _kept_key(self, query), time.monotonic()
+        _prune(now)
+        kept = _KEPT.get(key)
+        if kept is not None:
+            kept[0] = now
+            return kept[1]
+        rows = await self._read_all(query)
+        _KEPT[key] = [now, rows]
+        return rows
+
+    async def _read_all(self, query: str) -> list[dict]:
+        """Every row from the rows handler, read as the user now."""
         from rfds.errors import RFDSUserError
 
         cls = type(self)
         handler = getattr(cls.owner, cls.handler_name)
-        if cls.requires:                    # the page's: a user it refuses reads none of its rows
-            from lex.lex_app.reflex.ui.handlers import check_page_requires
-
-            await check_page_requires(self, cls.requires)
         try:
             owner = await self.get_state(cls.owner)
             raw = await rows_mod.read(handler, owner, search=query if cls.takes_search else "")

@@ -502,7 +502,9 @@ Gaps found while rewriting dashboards onto lex.ui, each a need of any lex-app pr
   parameters a model table sends, and writes its own columns; totals would need the AG Grid POST in
   pivot mode -- two more paths for what a rows table already does. Chosen, one way:
   **`self.api.all(Model, filters=, search=, ordering=, fields=)`** reads every record the user may
-  read, 1,000 a page, ordered by `ordering` and then the key (no row twice, none missed), and refuses
+  read, 1,000 a page, ordered by `ordering` and then the key (a stable order; the pages are read one after
+  another, so a record created or deleted meanwhile can shift a page and a row be read twice or missed --
+  offset paging, review 2), and refuses
   more than 10,000 (`context.ALL_LIMIT`, what a rows table holds in memory) with a sentence: "There are
   12,345 orders here, more than can be shown at once (10,000). Narrow them down first." -- before a
   second page is read. A `@ui.rows` handler returns it, and its table has export, totals, search and
@@ -511,6 +513,17 @@ Gaps found while rewriting dashboards onto lex.ui, each a need of any lex-app pr
   picker, sent as the API's `field__gte`/`__lte` (`field__date__gte`/`__lte` for a date and time), as on
   a rows table. *Name:* `all`, as Django's `objects.all()`; `every`, `list(all=True)` and
   `list(per_page=-1)` (lex-app's "everything" page size, unbounded) were considered.
+
+- **A rows table reads its rows once (review 2, I-8, 1.1114).** A table over `self.api.all(...)` in a
+  `@ui.rows` handler called the handler -- every record, page after page through lex-app's API -- on every
+  page turn, sort, filter and keystroke. The table now keeps the rows the handler gave, per tab, user and
+  table, in the server process's memory (`rows_table._KEPT`, like a `ui.private` value: never in a state
+  Reflex stores) and pages, sorts, filters and searches among them there. The handler is asked again when
+  the table appears, on `reread` (a handler of its state finished, `ui.refresh`), on `reopen`, on a new
+  visit, after `ROWS_IDLE` (10 minutes) unused, and -- a handler that takes `search` -- once per search,
+  not per page. *Cost:* what the handler reads from another state is read again only on
+  `ui.refresh(State.rows)`; with several server processes each keeps its own copy. *Considered:* Django's
+  cache (shared, but it would store the rows outside the process, which `ui.private` exists to avoid).
 
 ## 6. Limits and risks
 

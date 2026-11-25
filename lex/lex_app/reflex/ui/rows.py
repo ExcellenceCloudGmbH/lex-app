@@ -31,17 +31,20 @@ class ReadOnly(workcopy.Draft):
 def rows(fn: Callable[..., Any] | None = None, *, requires: Any = None) -> Any:
     """A table's rows: a plain function that returns them as a list of dicts.
 
-    lex-app calls it when a table on the page asks -- when the table appears, on each page, sort,
-    search and filter change, on refresh, and after a handler of the same state finishes -- as the
-    user, off the event loop, on a read-only copy of the state. It searches, filters, sorts and
-    pages the rows itself, and sends the browser only the visible page.
+    lex-app calls it when a table on the page asks -- when the table appears, on refresh
+    (``ui.refresh``), after a handler of the same state finishes, when the page opens again, and for
+    each search when it takes ``search`` -- as the user, off the event loop, on a read-only copy of
+    the state. lex-app keeps the rows in the server's memory for that table and tab (never in a
+    stored state) and searches, filters, sorts and pages them itself, sending the browser only the
+    visible page; a page turn or a sort does not call the handler again.
 
     It takes no arguments, or one: ``search``. A rows handler with ``search`` receives the table's
     search text and does the search itself (a ranked search, a search in another system).
 
     It reads only: setting a field fails the read. The database is reached through ``self.api``,
-    or directly when ``requires=`` says what the handler needs, as for every handler. A slow
-    source caches where it reads (Django's ``cache.get_or_set``); lex-app keeps nothing.
+    or directly when ``requires=`` says what the handler needs, as for every handler. What it reads
+    from another state (``self.state(Other)``) is read again when that state's handler returns
+    ``ui.refresh(State.rows)``.
 
     ``self.params`` comes from the address and can be anything: pass ``self.user`` to your logic
     so that it returns only what this user may see.
