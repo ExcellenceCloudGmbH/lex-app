@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1107
+max_scenario: 1109
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2530,10 +2530,10 @@ letters:
       the start-up route check refuses a dynamic route argument with the name of a field or computed var of any state, lex.ui's or plain Reflex's, exactly as Reflex's `_check_overwritten_dynamic_args` refuses it when it adds the decorated pages at export; each refusal is pinned against Reflex's own check, and what Reflex lets through (a backend field, an event handler) starts. These tests fail on green tests and a red frontend build, or a start-up that refuses an app Reflex would build.
   ds:
     title: 'lex.ui forms: a choice searched on the server -- one record among thousands, as the user types'
-    scenarios: 1.900-1.903, 1.912, 1.917, 1.918
+    scenarios: '1.900-1.903, 1.912, 1.917, 1.918, 1.1109'
     status: complete
     tests:
-      pass: 7
+      pass: 8
       skip: 0
       xfail: 0
     note: >-
@@ -2700,10 +2700,10 @@ letters:
       A FileField of the run alone in `result=` is a button that downloads the run's file through lex-app's download view as the user (`self.api.file`), shown only when the run has one; a forged field refused. Stop (to users who may edit, asking "Stop this run?") is lex-app's cancel: a run on a worker is revoked and CANCELLED and the page stops following; a run in lex-app's own process cannot be stopped and the page says so; after the end, "The run has already ended." The whole page declared with @ui.page compiles. These tests fail on a file downloaded past lex-app's checks, a Stop that pretends, or a page left running after a stop.
   ej:
     title: 'lex.ui frame: what a user may see in the navigation, decided on the server'
-    scenarios: '1.1000-1.1003, 1.1022, 1.1100'
+    scenarios: '1.1000-1.1003, 1.1022, 1.1100, 1.1108'
     status: complete
     tests:
-      pass: 6
+      pass: 7
       skip: 0
       xfail: 0
     note: >-

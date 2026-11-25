@@ -12,6 +12,34 @@ from lex.lex_app.reflex.ui.context import RESERVED
 #: The page a failed required load sends the browser to.
 ERROR_ROUTE = "/ui-error"
 
+#: The shortest time between two decisions of the frame for one tab and user, in seconds: the frame's
+#: decision runs the project's rules and functions on the shared ``interactive`` pool, and its event can
+#: be sent in a loop. A page opened sooner keeps the answers just decided (they are the same user's).
+FRAME_INTERVAL = 1.0
+#: (tab, user) -> when its last decision ended; the (tab, user)s whose decision is running now.
+_FRAME_DECIDED: dict[tuple[str, str], float] = {}
+_FRAME_DECIDING: set[tuple[str, str]] = set()
+
+
+def _frame_turn(key: tuple[str, str]) -> bool:
+    """Whether the frame may be decided now for ``key`` (tab, user): none running, none just ended."""
+    import time
+
+    now = time.monotonic()
+    for old in [one for one, ended in _FRAME_DECIDED.items() if now - ended > FRAME_INTERVAL]:
+        _FRAME_DECIDED.pop(old, None)                 # kept only while it still counts
+    if key in _FRAME_DECIDING or key in _FRAME_DECIDED:
+        return False
+    _FRAME_DECIDING.add(key)
+    return True
+
+
+def _frame_done(key: tuple[str, str]) -> None:
+    import time
+
+    _FRAME_DECIDING.discard(key)
+    _FRAME_DECIDED[key] = time.monotonic()
+
 
 def check_route(route: str) -> None:
     """Refuse a route whose dynamic argument is named like a ``ui.State`` helper (``ValueError``)."""
@@ -364,15 +392,22 @@ class State(rx.State):
 
         Sent by the shell's mount, in the background: the page does not wait, and only the answers
         reach the browser. A failure is logged; the frame keeps what it showed. The answers are written
-        only while the user they were decided for is still the one signed in on the tab.
+        only while the user they were decided for is still the one signed in on the tab. One decision
+        runs at a time for a tab and user, and not again within :data:`FRAME_INTERVAL` of the last: the
+        event can be sent in a loop, and each decision takes the shared pool's workers.
         """
         from lex.lex_app.reflex.ui.pages import frame
 
+        key = (str(self.router.session.client_token or ""), context.user_id_of(self))
+        if not _frame_turn(key):
+            return
         try:
             answers = await frame.decide(self)
         except Exception:  # noqa: BLE001 - the page is shown; the project reads the log
             frame.logger.exception("lex.ui: the frame could not be decided for this page")
             return
+        finally:
+            _frame_done(key)
         async with self:
             if _answers_for(self) != answers.user:
                 return                              # decided for a user who has left the tab

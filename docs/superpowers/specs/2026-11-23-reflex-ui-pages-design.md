@@ -1377,6 +1377,16 @@ scenario (batch in brackets):
   create's answer says nothing started it (`is_calculated` empty or `NOT_CALCULATED`) -- what lex-app's
   create view guarantees: it answers a record it started with that record's status. `calculate_on_create`
   itself is not read: lex-app reads it from the instance (a property may decide per record).
+- *The frame's decision and a field's search, sent in a loop (I-9, 1.1108 [1ej], 1.1109 [1ds]).* Both are
+  background events whose work runs on the shared `interactive` pool, and the browser (or a script) can
+  send them over and over. The frame is decided once at a time per tab and user, and not again within
+  `state.FRAME_INTERVAL` (1 s) of the last decision: a page opened sooner keeps the answers just decided
+  (they are the same user's); another user on the tab is decided at once. A searched field runs one
+  search at a time per tab and field, at most one per `forms.SEARCH_INTERVAL` (0.25 s); *departed from the
+  ruling's "drop repeats"*: a search asked while one runs is not dropped but coalesced -- when the running
+  one ends, the newest text asked meanwhile is searched (those in between never are), since dropping it
+  would leave the field showing matches for text the user has since changed. 1.912 now expects the newer
+  text to be searched after the slow one ends, not beside it. Both limits are per server process.
 
 ## 7. Order of building
 

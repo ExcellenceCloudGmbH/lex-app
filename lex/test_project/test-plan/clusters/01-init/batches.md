@@ -3408,6 +3408,7 @@ such a collision.
 | 1.912 | Two searched fields on one form never cancel each other | through Reflex's event processor: a field's matches arrive while another field's slow search runs, another button works meanwhile, and the slow, older search ending after a newer one does not replace the newer matches |
 | 1.917 | A choice reaches the handler as the option's own value | fixed ints, a dict with int keys, a state field of ints, several ints and a searched row whose id is a UUID each reach the handler as their own value, of their own type; a value that is no option is refused; 1.8xx int-option refusals now refuse floats |
 | 1.918 | What was offered to one user is not kept for the next | another user on the tab is refused a value offered to the previous one, and finds neither its matches nor its offers in the state; a new visit drops the matches; the same user's offers stay (1.935) |
+| 1.1109 | One search at a time per field, and the newest follows | while a slow search runs nothing else of the field runs; then only the newest of twenty texts, after the interval; its matches shown |
 
 ### Batch 1dt — lex.ui: a refusal shown above a form's submit button, with a title ✅
 
@@ -3823,6 +3824,7 @@ Section 6.21 of `docs/superpowers/specs/2026-11-23-reflex-ui-pages-design.md`.
 | 1.1003 | lex-app's start-up draws the decided navigation | declare.install then compile: the answer's var and the mount's event; a raw page's requires= takes a list; a plain function refused naming @ui.rule |
 | 1.1022 | The whole frame through lex-app's start-up | every part configured at once in a dashboard module; declare.install; the compiled page holds each part and asks on mount; the server fills anna's counts, banner words and per-user links; a rule's page refused as missing |
 | 1.1100 | The next user of a tab starts without the last one's answers | another user signing in on the tab finds no listed entry, no granted page of the last; a decision for the last user arriving late is not written |
+| 1.1108 | One decision of the frame at a time, and not again at once | twenty events at once decide once; one just after decides nothing; after the interval once; another user on the tab at once |
 
 ### Batch 1ek — lex.ui frame: navigation beyond the declared pages -- sections of links, counts, per-user entries, a foot ✅
 

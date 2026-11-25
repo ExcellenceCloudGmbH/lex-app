@@ -6,7 +6,7 @@ Keycloak's grants (not from what the browser was told), so it is right on the fi
 A regression is an entry the user may not open drawn anyway, an entry a rule refuses still listed, a
 browser that decides by itself what is listed, or a failing rule that shows its entry.
 
-Cluster 1ej -- scenarios 1.1000-1.1003, 1.1022, 1.1100. Type: U.
+Cluster 1ej -- scenarios 1.1000-1.1003, 1.1022, 1.1100, 1.1108. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/frame.py (guards, decide), lex/lex_app/reflex/shell.py (nav_sections,
 lex_chrome), lex/lex_app/reflex/ui/state.py (ui_frame_open, ui_frame_shown),
 lex/lex_app/reflex/ui/pages/links.py (reflex_page requires=), lex/lex_app/reflex/ui/pages/declare.py (install).
@@ -353,7 +353,10 @@ class TestCluster01ej_AnotherUserOfTheTab(FrameCase):
                     late["decided"] = list(answers.shown)
                     return answers
 
-                with patch.object(frame, "decide", decide_then_carl):
+                from lex.lex_app.reflex.ui import state as ui_state
+
+                with patch.object(frame, "decide", decide_then_carl), patch.object(ui_state, "FRAME_INTERVAL", 0):
+                    ui_state._FRAME_DECIDED.clear()
                     await (await harness.send(State, "ui_frame_open"))
                     deadline = time.monotonic() + 5
                     while "decided" not in late and time.monotonic() < deadline:
@@ -366,3 +369,59 @@ class TestCluster01ej_AnotherUserOfTheTab(FrameCase):
         self.assertEqual(carl, ([], {}), "carl's page opens without anna's entries or her granted page")
         self.assertEqual(sorted(late["decided"]), ["/audit", "/desk", "/reports", "/reviews"], "the late answer was anna's")
         self.assertEqual(after, [], "and it was not written for carl")
+
+
+
+class TestCluster01ej_DecidedInALoop(FrameCase):
+    """1.1108: the frame's decision sent in a loop runs once at a time, and not again at once."""
+
+    # -- 1.1108 --------------------------------------------------------
+    def test_1_1108_one_decision_runs_at_a_time_and_not_again_at_once(self) -> None:
+        """
+        Scenario 1.1108: the frame's event sent over and over (a script, a page that remounts).
+        Given: the pages of 1.1000; deciding the frame takes a while (a slow rule).
+        When:  anna's tab sends the frame's event twenty times at once; again just after it was decided;
+               again after the frame's minimum interval; and carl, signed in on the same tab, sends it.
+        Then:  one decision ran for the twenty; none just after; one after the interval; carl's ran for
+               him at once -- another user is never kept waiting by the last one's decision.
+        """
+        from lex.lex_app.reflex.ui import state as ui_state
+        from lex.lex_app.reflex.ui import testing
+        from lex.lex_app.reflex.ui.pages import frame
+        from lex.lex_app.reflex.ui.state import State
+
+        declare_pages()
+        ran: list = []
+        decided = frame.decide
+
+        async def slow_decide(state):
+            ran.append("decide")
+            await asyncio.sleep(0.2)
+            return await decided(state)
+
+        async def settle(harness):
+            await asyncio.sleep(0.4)
+
+        async def scenario():
+            async with testing.Harness(user="anna", grants=["lex_app.Report:read"]) as harness:
+                await harness.open_tab("/orders")
+                for _ in range(20):
+                    await harness.send(State, "ui_frame_open")
+                await settle(harness)
+                looped = len(ran)
+                await (await harness.send(State, "ui_frame_open"))
+                await settle(harness)
+                at_once = len(ran) - looped
+                ui_state._FRAME_DECIDED.clear()           # as when the minimum interval has passed
+                await (await harness.send(State, "ui_frame_open"))
+                await settle(harness)
+                later = len(ran) - looped - at_once
+                signed_in_as("carl")
+                await (await harness.send(State, "ui_frame_open"))
+                await settle(harness)
+                return looped, at_once, later, len(ran) - looped - at_once - later
+
+        with patch.object(frame, "decide", slow_decide):
+            looped, at_once, later, carl = asyncio.run(scenario())
+        self.assertEqual((looped, at_once, later, carl), (1, 0, 1, 1))
+        self.assertGreater(ui_state.FRAME_INTERVAL, 0)

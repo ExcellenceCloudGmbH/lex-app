@@ -195,6 +195,13 @@ class Harness:
         from reflex_base.registry import RegistrationContext
 
         user, grants, params, api = self._session_args
+        from lex.lex_app.reflex.ui import forms, state
+
+        # A new browser and a new server: what the server process remembers per tab starts empty too.
+        state._FRAME_DECIDED.clear()
+        state._FRAME_DECIDING.clear()
+        forms._SEARCHED.clear()
+        forms._SEARCHING.clear()
 
         async def resolve(state: Any) -> context.Session:
             async def token() -> str:
