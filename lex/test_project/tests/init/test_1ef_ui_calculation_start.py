@@ -9,7 +9,7 @@ to the run's address on the same page. A regression is a run nobody may trace to
 created past the model's permissions, a page that blocks while the run goes, or a run whose log the
 grid cannot find.
 
-Cluster 1ef -- scenarios 1.980-1.984, 1.978, 1.1105. Type: E (the handlers run against lex-app's real views; 1.1105 U).
+Cluster 1ef -- scenarios 1.980-1.984, 1.978, 1.1105, 1.1107. Type: E (the handlers run against lex-app's real views; 1.1105 U).
 Covers: lex/lex_app/reflex/ui/pages/calculation.py (ui.calculation, its checks, the form view),
 lex/lex_app/reflex/ui/calculations.py (the state, calculate), lex/lex_app/reflex/data.py and
 lex/lex_app/reflex/ui/context.py (self.api.calculate, self.api.log).
@@ -152,6 +152,39 @@ class TestCluster01ef_CalculationStart(E2ETestCase):
         self.assertEqual(record.orders, 3, "what the run computed is on the record")
         self.assertTrue(CalculationLog.objects.filter(calculationId__startswith=f"uiregionreport_{record.pk}_update_")
                         .exists(), "the run's log is filed under the id the grid's log button looks for")
+
+    # -- 1.1107 --------------------------------------------------------
+    def test_1_1107_a_model_that_calculates_on_create_is_started_once(self) -> None:
+        """
+        Scenario 1.1107: a calculate_on_create model whose run is fast.
+        Given: the model calculates on create, and its run ends before lex-app's create view answers
+               (a run on a synchronous pool: the answer is already SUCCESS, not IN_PROGRESS).
+        When:  the form is sent.
+        Then:  lex-app's create started the run, and the page does not start it again: no Calculate
+               request follows the create, the run computed once, and the browser goes to that run.
+        """
+        from concurrent.futures import Future
+
+        from lex.api.views.model_entries import One
+
+        class AtOnce:
+            """A pool that runs what it is given before it answers: the fastest run there is."""
+
+            def submit(self, fn, *args, **kwargs):
+                done = Future()
+                done.set_result(fn(*args, **kwargs))
+                return done
+
+        UiRegionReport.calculate_on_create = True
+        self.addCleanup(setattr, UiRegionReport, "calculate_on_create", False)
+        with patch.object(One, "_calculation_executor", AtOnce()):
+            went, outcomes, _, calls = _start(self, {"region": "north", "year": "2026"})
+        record = UiRegionReport.objects.get()
+        self.assertEqual([o for o in outcomes if o.kind != "ok"], [], "the form was not refused")
+        self.assertEqual([method for method, _ in calls], ["POST"], "created, and started by the create alone")
+        self.assertEqual(settled(record), CalculationModel.SUCCESS)
+        self.assertEqual(record.lines.count(), 2, "the run computed once")
+        self.assertEqual([g.path for g in went if hasattr(g, "path")], [f"{ROUTE}?run={record.pk}"])
 
     # -- 1.982 ---------------------------------------------------------
     def test_1_982_a_user_the_model_does_not_let_create_is_refused_above_the_button(self) -> None:

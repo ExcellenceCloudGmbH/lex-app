@@ -1371,6 +1371,12 @@ scenario (batch in brackets):
 - *A calculation's handlers take the page's `requires=` when the page is built (I-4, 1.1105 [1ef]).* See 6.20.
   `declare.finalize` and `@ui.dashboard` now build a kind before reading its loads, so what a kind binds
   when built is there; the context variable that carried the page's `requires=` to the constructor is gone.
+- *A calculation is started once (I-3, 1.1107 [1ef]).* Calculate started the run unless the created record
+  came back `IN_PROGRESS`; a `calculate_on_create` model whose run ended before the create answered came
+  back `SUCCESS` (or `ERROR`) and was started a second time. Now Calculate starts the run only when the
+  create's answer says nothing started it (`is_calculated` empty or `NOT_CALCULATED`) -- what lex-app's
+  create view guarantees: it answers a record it started with that record's status. `calculate_on_create`
+  itself is not read: lex-app reads it from the instance (a property may decide per record).
 
 ## 7. Order of building
 

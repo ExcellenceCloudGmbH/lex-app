@@ -1897,6 +1897,7 @@ does not remove user launch configurations.
 | 1.984 | self.api.calculate and self.api.log are the grid's Calculate and log | [] before a run; IN_PROGRESS at once; the run's Markdown log after; its newest line |
 | 1.978 | A rule on the page guards the calculation's own handlers | @ui.page(requires=a @ui.rule) on ui.calculation: the granted user's run starts as before; the refused user's page says the rule's sentence and calculate, the load, Stop, the download and the following sent by name are each refused with it before lex-app's API is called; the guarded page has its own state |
 | 1.1105 | The handlers require the page that builds the calculation | a kind made at module level and returned by a rule-guarded @ui.page refuses bob's Calculate with the rule's sentence before the API; on a @ui.dashboard refused with what to write |
+| 1.1107 | A model that calculates on create is started once | calculate_on_create with a run that ends before the create answers: only the create's POST, no Calculate PATCH; computed once; the browser goes to the run |
 
 **Scenario range:** 1.980 – 1.984, 1.978. **Test file:** `lex/test_project/tests/init/test_1ef_ui_calculation_start.py`. **Type:** E. **Status:** ✅ Complete (2026-11-24). Batch: [1ef](batches.md).
 

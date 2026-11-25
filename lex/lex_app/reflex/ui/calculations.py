@@ -109,7 +109,9 @@ def make_state(plan: Plan, counter: Any) -> type:
     def calculate(self, values):
         record = self.api.create(plan.model, payload(values))
         key = record.get(pk)
-        if record.get("is_calculated") != IN_PROGRESS:          # a calculate_on_create model started on its create
+        # A calculate_on_create model was started by its create: the answer is IN_PROGRESS, or -- a fast
+        # run -- already SUCCESS or ERROR. Only a record nothing started is started here.
+        if record.get("is_calculated") in (None, "", NOT_CALCULATED):
             self.api.calculate(plan.model, key)
         return results.goto(f"{_here(self)}?{RUN}={quote(str(key), safe='')}")
 

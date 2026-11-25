@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1106
+max_scenario: 1107
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2660,10 +2660,10 @@ letters:
       `opened(user, page)` after the page's required loads (at once without them), on a worker thread, not awaited; the page's route, address, title as the load left it, area and values; not for a refused or failed page; failures logged. These tests fail on a page that waits for the bookkeeping, an entry for a refused or failed page, or a recently-used entry without the record's name.
   ef:
     title: 'lex.ui calculation pages: the page kind, its form, a run started as the user -- ui.calculation'
-    scenarios: '1.980-1.984, 1.978, 1.1105'
+    scenarios: '1.980-1.984, 1.978, 1.1105, 1.1107'
     status: complete
     tests:
-      pass: 7
+      pass: 8
       skip: 0
       xfail: 0
     note: >-
