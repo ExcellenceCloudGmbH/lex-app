@@ -33,24 +33,38 @@ def states(ctx: Build, load: Any, content: rx.Component, shape: str) -> rx.Compo
     return rx.box(whole, on_mount=load, width="100%") if ctx.mounts else whole
 
 
+#: The parts that keep their own width in a page: RFDS places buttons and badges in a row (``rfds.cluster``),
+#: never stretched across the page as a stack stretches what it holds.
+_INLINE = (vocab.Button, vocab.Status)
+
+
 def _stacked(ctx: Build, parts: list) -> list:
-    """The parts built in order; facts that follow one another become one key-value list."""
+    """The parts built in order, for an RFDS stack: facts that follow one another side by side
+    (:func:`vocab.facts`), and buttons and badges that follow one another in one row, each as wide as its words."""
     import rfds
 
     built: list = []
     run: list = []
 
     def close() -> None:
-        if run:
-            built.append(rfds.key_value(*vocab.build_all(ctx, run), columns=min(3, len(run))))
-            run.clear()
+        if not run:
+            return
+        if isinstance(run[0], vocab.Fact):
+            built.append(vocab.facts(ctx, run))
+        else:
+            built.append(rfds.cluster(*vocab.build_all(ctx, run), gap="2"))
+        run.clear()
 
     for part in parts:
-        if isinstance(part, vocab.Fact):
-            run.append(part)
-            continue
-        close()
-        built.append(part.build(ctx))
+        for kind in (vocab.Fact, _INLINE):
+            if isinstance(part, kind):
+                if run and not isinstance(run[0], kind):
+                    close()
+                run.append(part)
+                break
+        else:
+            close()
+            built.append(part.build(ctx))
     close()
     return built
 
@@ -68,7 +82,8 @@ class Section(Part):
     actions: tuple = ()
 
     def body(self, ctx: Build) -> rx.Component:
-        return self._content(ctx)[0]
+        """The section's content, under a heading its page draws (a record page's section, a tab)."""
+        return self._content(ctx, headed=True)[0]
 
     def fixed(self, ctx: Build, where: str) -> None:
         """Refuse what a section ``where`` (a record page's, a tab) cannot have: a title from the state, actions."""
@@ -93,7 +108,7 @@ class Section(Part):
         from rfds.components.inputs._shared import client_state
 
         opened = client_state("lexOpened", False) if self.collapsed else None
-        content, parts = self._content(ctx, opened)
+        content, parts = self._content(ctx, opened, headed=True)
         title: Any = say(self.title)
         if self.collapsed:
             title = self._counted(title, parts)
@@ -123,11 +138,13 @@ class Section(Part):
         return rx.cond(state.loaded_at != "", say("{title} ({count, number})", title=title, count=state.total_rows),
                        title)
 
-    def _content(self, ctx: Build, opened: Any = None) -> tuple[rx.Component, list]:
+    def _content(self, ctx: Build, opened: Any = None, headed: bool = False) -> tuple[rx.Component, list]:
         """The section's content, and its parts as built (a table may be a copy carrying ``empty=``).
 
         ``opened``: a client state, true once the user opened the closed section; every part but a
-        table mounts only then.
+        table mounts only then. ``headed``: the section's title shows as its heading, so a table in it
+        is named by the title for screen readers only; drawn without a heading (``ui.embed``), the
+        title shows as the table's caption.
         """
         import rfds
 
@@ -146,7 +163,7 @@ class Section(Part):
             parts = [dataclasses.replace(part, empty=self.empty)
                      if isinstance(part, tables.Table) and part.empty is None else part for part in parts]
         shape = "table" if has_table and len(parts) == 1 else "rect"
-        ctx = dataclasses.replace(ctx, caption=self.title if isinstance(self.title, str) else "",
+        ctx = dataclasses.replace(ctx, caption=self.title, headed=headed,
                                   under_load=ctx.under_load or self.load is not None)
         if opened is None:
             return states(ctx, self.load, rfds.stack(*_stacked(ctx, parts)), shape), parts
@@ -168,7 +185,7 @@ class Section(Part):
         return states(ctx, self.load, rfds.stack(*built), shape), parts
 
     def _render(self, ctx: Build) -> rx.Component:
-        return self.titled(ctx) if self.collapsed or self.actions else self.body(ctx)
+        return self.titled(ctx) if self.collapsed or self.actions else self._content(ctx)[0]
 
 
 def section(title: Any, *content: Any, load: Any = None, empty: Any = None, visible: Any = None,
@@ -498,10 +515,10 @@ class Record(Kind):
             if len(given) != 1:
                 raise ctx.at("status").fail(f"got {len(given)} badges.", "`status=` holds one `ui.status(word, tone=)`.")
             (badge,) = given
-            head.append(badge.build(ctx.at("status")))
+            head.append(rfds.cluster(badge.build(ctx.at("status"))))      # the badge as wide as its word
         facts = take(ctx.at("facts"), list(self.facts), (vocab.Fact,), "Use `ui.fact(label, value)`.")
         if facts:
-            head.append(rfds.key_value(*vocab.build_all(ctx.at("facts"), facts), columns=min(3, len(facts))))
+            head.append(vocab.facts(ctx.at("facts"), facts))
         if self.load is not None:
             ctx = dataclasses.replace(ctx, under_load=True)
         title, actions, sections = self._title(ctx), self._buttons(ctx), self._sections(ctx)   # lex's checks first
@@ -543,7 +560,8 @@ class List(Kind):
             raise ctx.at("table").fail(f"got {called(self.table)}.",
                                        "`table=` holds one `ui.table(Model, columns=[...])`.")
         title, actions = self._title(ctx), self._buttons(ctx)
-        named = dataclasses.replace(ctx.at("table"), caption=title if isinstance(title, str) else "",
+        # The page's title names its table; the page's heading shows it, so the table's caption does not again.
+        named = dataclasses.replace(ctx.at("table"), caption=self.title, headed=True,
                                     under_load=ctx.under_load or self.load is not None, page_search=True)
         table = self.table.build(named)
         page = _rfds(ctx, lambda: templates.list_report(title=title, path=ctx.route or "/", table=table, actions=actions))

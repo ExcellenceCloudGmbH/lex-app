@@ -316,8 +316,10 @@ def embed(part: Any, *, name: str = "embedded") -> Any:
 
     For moving a project one table at a time: ``ui.embed(ui.table(State.rows, columns=[...]))``
     sits in a page built with raw Reflex and RFDS. Its loads and its rows start when it appears;
-    ``name`` names it in an error and is a table's caption. A whole page kind goes on a
-    ``@ui.page`` or a ``@ui.dashboard``.
+    ``name`` names it in an error and is a table's caption, shown above it. Without ``name`` a table
+    shows no caption: it is named for screen readers by its model or its ``@ui.rows`` handler
+    ("Fund holdings" for ``FundState.holdings``), and the raw page's own heading says what it is. A
+    whole page kind goes on a ``@ui.page`` or a ``@ui.dashboard``.
     """
     from lex.lex_app.reflex.ui.pages.parts import Part
 

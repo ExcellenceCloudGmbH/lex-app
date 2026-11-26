@@ -89,6 +89,26 @@ class Fact(Part):
 
         return rfds.kv_item(say(self.label), shape(self.value, self.kind, self.currency))
 
+    def _wrap(self, ctx: Build, component: rx.Component) -> rx.Component:
+        """The fact as its own RFDS key-value list, which :func:`facts` places beside the others."""
+        import rfds
+
+        return shown(ctx, rfds.key_value(component), self.visible)
+
+
+#: The least width of a fact beside others: RFDS's label takes 40% of it and the value the rest, room for
+#: an amount such as "USD 600,000,000.00", which RFDS never wraps.
+FACT_WIDTH = "size.panel.sm"
+
+
+def facts(ctx: Build, parts: list) -> rx.Component:
+    """Facts that follow one another, side by side while the width allows and onto the next line where it
+    does not: each at least :data:`FACT_WIDTH` wide (RFDS's grid of tiles), so a value never runs into the
+    next fact's label -- what RFDS's key-value columns, sized by the screen and not by their place, let happen."""
+    import rfds
+
+    return rfds.grid(*build_all(ctx, parts), min_col_width=FACT_WIDTH, gap="layout.gap.module", row_gap="2")
+
 
 def fact(label: Any, value: Any, *, kind: str = "text", currency: Any = None, visible: Any = None) -> Fact:
     """A label and its value.
@@ -212,6 +232,9 @@ class Link(Part):
         where, outside = self.target(ctx)
         if ctx.place == "actions":
             return rfds.button(say(self.label), intent="secondary", on_click=rx.redirect(where, is_external=outside))
+        if ctx.place == "row":          # an action of a table's row: RFDS's small ghost button, as a button's there
+            return rfds.button(say(self.label), intent="tertiary", size="sm",
+                               on_click=rx.redirect(where, is_external=outside))
         return rfds.link(say(self.label), href=where, external=outside)
 
 
@@ -279,32 +302,49 @@ class Button(Part):
         return self.handler(*self.args) if self.args else self.handler
 
     def menu_entry(self, ctx: Build) -> rx.Component:
-        return menu_entry(ctx, self.label, self.click(ctx), self.visible, tone=self.tone, icon=self.icon)
+        click, why_not = self.click(ctx), self._why_not(ctx)
+        if isinstance(why_not.get("disabled"), rx.Var):
+            # RFDS's entry does nothing while a state value disables it by conditioning one event: the event
+            # that opens a dialog, or the handler. More (a dialog's fields set first) it cannot condition, so
+            # the entry is then disabled without saying why.
+            events = click if isinstance(click, list) else [click]
+            if len(events) == 1:
+                click = events[0]
+            else:
+                why_not.pop("disabled_reason")
+        return menu_entry(ctx, self.label, click, self.visible, tone=self.tone, icon=self.icon, **why_not)
 
     def _wrap(self, ctx: Build, component: rx.Component) -> rx.Component:
         return _marked(component, shown(ctx, component, self.visible))
 
-    def _render(self, ctx: Build) -> rx.Component:
-        import rfds
-
-        intent = "danger" if self.tone == "danger" else "primary" if self.primary else "secondary"
-        extra: dict[str, Any] = {}
-        if getattr(getattr(self.handler, "fn", None), "__ui_kind__", "") in ("action", "job"):
-            from lex.lex_app.reflex.ui import runs
-
-            runs.name_job(self.handler, self.label)     # its refusals name the job as this button does
-            # The button knows its handler: it shows it running -- for a row's button this row's run, not another's.
-            extra["loading"] = runs.running(self.handler, *self.args[:1])
+    def _why_not(self, ctx: Build) -> dict[str, Any]:
+        """RFDS's ``disabled`` and ``disabled_reason`` for ``disabled=``: nothing while it can be pressed."""
         if isinstance(self.disabled, rx.Var):           # a reason per row, or from the state; "" lets it be pressed
             if self.disabled._var_type in (bool, int, float):
                 raise ctx.fail(f"a button's `disabled=` is a {self.disabled._var_type.__name__} from the state.",
                                "Give the reason as text: a field holding the sentence, and \"\" when the "
                                "button can be pressed.")
             reason = self.disabled.to(str)
-            extra["disabled"] = reason != ""
-            extra["disabled_reason"] = rx.cond(reason != "", reason, None)
-        elif self.disabled:
-            extra["disabled"], extra["disabled_reason"] = True, say(self.disabled)
+            return {"disabled": reason != "", "disabled_reason": rx.cond(reason != "", reason, None)}
+        if self.disabled:
+            return {"disabled": True, "disabled_reason": say(self.disabled)}
+        return {}
+
+    def _render(self, ctx: Build) -> rx.Component:
+        import rfds
+
+        intent = "danger" if self.tone == "danger" else "primary" if self.primary else "secondary"
+        extra: dict[str, Any] = {}
+        if ctx.place == "row":          # RFDS's action in a table's row: a small ghost button (a danger one is a menu entry)
+            intent = "danger" if self.tone == "danger" else "tertiary"
+            extra["size"] = "sm"
+        if getattr(getattr(self.handler, "fn", None), "__ui_kind__", "") in ("action", "job"):
+            from lex.lex_app.reflex.ui import runs
+
+            runs.name_job(self.handler, self.label)     # its refusals name the job as this button does
+            # The button knows its handler: it shows it running -- for a row's button this row's run, not another's.
+            extra["loading"] = runs.running(self.handler, *self.args[:1])
+        extra.update(self._why_not(ctx))
         return rfds.button(say(self.label), intent=intent, icon=self.icon, on_click=self.click(ctx), **extra)
 
 
@@ -353,8 +393,11 @@ def button(label: Any, handler: Any = None, *args: Any, to: Any = None, confirm:
 
 
 def menu_entry(ctx: Build, label: Any, click: Any, visible: Any, *, tone: str = "neutral",
-               icon: str | None = None) -> rx.Component:
-    """An action as an entry of the page header's "More actions" menu."""
+               icon: str | None = None, **why_not: Any) -> rx.Component:
+    """An action as an entry of a "More actions" menu (a page header's, a table row's).
+
+    ``why_not`` is a button's ``disabled`` and ``disabled_reason``: the entry stays, says why, and does nothing.
+    """
     from rfds.components.actions.menu import menu_item
 
     try:
@@ -362,7 +405,7 @@ def menu_entry(ctx: Build, label: Any, click: Any, visible: Any, *, tone: str = 
     except NotASentence:
         raise ctx.fail(f"an action's label is {called(label)}.",
                        "Write the words: `ui.button(\"Close fund\", ...)`.") from None
-    entry = menu_item(words, on_select=click, icon=icon, tone="danger" if tone == "danger" else "neutral")
+    entry = menu_item(words, on_select=click, icon=icon, tone="danger" if tone == "danger" else "neutral", **why_not)
     return _marked(entry, shown(ctx, entry, visible))
 
 

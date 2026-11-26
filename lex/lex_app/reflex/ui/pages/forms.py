@@ -569,8 +569,8 @@ class Form(kinds.Kind):
                                                             secondary_actions=actions))
         whole: list = [rfds.page(header, *entry, width="form")]            # a form is narrow
         if self.result:
-            after = dataclasses.replace(ctx.at("result"), under_load=True,
-                                        caption=self.title if isinstance(self.title, str) else "")
+            # Its tables are named by the form's title, which the page's heading already shows.
+            after = dataclasses.replace(ctx.at("result"), under_load=True, caption=self.title, headed=True)
             # Its result takes the page's width: it is where the tables are.
             shown_after = self._result(after)
             whole.append(rx.cond(State.ui_done.get(key, False), rfds.page(rfds.stack(*shown_after))))

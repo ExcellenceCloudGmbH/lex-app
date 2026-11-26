@@ -11,9 +11,10 @@ whether it sums the rows the search left or every row. A regression is a name th
 a row that cannot be reached, a width that only breaks in the browser, a user's column choice
 that hides the row's name, or a total that silently changes meaning when the user searches.
 
-Cluster 1dy -- scenarios 1.940-1.946, 1.953-1.957. Type: U.
+Cluster 1dy -- scenarios 1.940-1.946, 1.953-1.957, 1.1126. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/tables.py (column kind="name"/"code", pin=; table page_size=,
-choose_columns=, totals=), lex/lex_app/reflex/ui/pages/rows_table.py (page size, totals over all
+choose_columns=, totals=, row_actions=), lex/lex_app/reflex/ui/pages/vocab.py (a row's button and link, a menu
+entry that says why it cannot be chosen), lex/lex_app/reflex/ui/pages/rows_table.py (page size, totals over all
 rows, their label), lex/lex_app/reflex/data.py (ChosenColumns, the model table's page size).
 Run: python -m lex pytest lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py -v
 """
@@ -58,6 +59,22 @@ class SearchingState(ui.State):
         SEARCHED.append(search)
         rows = [{"id": n, "name": f"Customer {n:03}", "amount": "1.00"} for n in range(1, 7)]
         return [row for row in rows if search.casefold() in row["name"].casefold()]
+
+
+class ClosingFundsState(ui.State):
+    """Funds with actions on each row: one dangerous, which says per row why it cannot be done."""
+
+    @ui.rows
+    def funds(self):
+        return [{"id": 1, "name": "Alder", "why_not": ""}, {"id": 2, "name": "Birch", "why_not": "Already closed."}]
+
+    @ui.action
+    def close(self, key):
+        return None
+
+    @ui.action
+    def edit(self, key):
+        return None
 
 
 CTX = Build(page="customers", route="/customers", caption="Customers")
@@ -436,3 +453,46 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
         fresh = [ui.table(CustomersState.customers, columns=["name"]) for _ in range(50)]
         self.assertEqual([table for table in fresh if table in rows_table._CACHE_BY_TABLE], [],
                          "a table never built has no state, whatever its address")
+
+    # -- 1.1126 --------------------------------------------------------
+    def test_1_1126_a_rows_actions_are_rfds_row_actions(self) -> None:
+        """
+        Scenario 1.1126: row_actions as RFDS's row actions.
+        Given: a table whose rows each have an Edit button, a dangerous Close that asks first and
+               says per row why it cannot be done, a Note and a Remind button, and a table whose
+               rows have a link.
+        When:  the tables are built.
+        Then:  the first two plain actions are RFDS's small ghost buttons in the row (tertiary,
+               size sm) -- never a full-size solid button filling the row's height -- in the
+               order written, each still showing that row's run; the dangerous one is a danger
+               entry of the row's "More actions" menu, as RFDS's row actions place destructive
+               actions, still asking first, and saying the row's reason when it cannot be chosen
+               (doing nothing then); a third plain action goes into that menu too; a link in a
+               row is the same small ghost button.
+        """
+        table = ui.table(ClosingFundsState.funds, columns=["name"], row_actions=lambda row: [
+            ui.button("Edit", ClosingFundsState.edit, row["id"]),
+            ui.button("Close", ClosingFundsState.close, row["id"], tone="danger", confirm="Close this fund?",
+                      disabled=row["why_not"]),
+            ui.button("Note", ClosingFundsState.edit, row["id"]), ui.button("Remind", ClosingFundsState.edit, row["id"])])
+        text = str(ui.embed(table, name="funds"))
+        row = text[text.index('"data-slot":"rfds-row-actions"'):]
+        inline, menu = row.split("rfds-row-actions-more", 1)
+        self.assertEqual(inline.count('"data-rfds-intent":"tertiary"'), 2, "two ghost buttons in the row")
+        self.assertEqual(inline.count('className:"rfds-button rfds-size-sm"'), 2, "small ones, RFDS's size for a row")
+        self.assertNotIn('"data-rfds-intent":"danger"', inline, "no solid danger button in the row")
+        self.assertLess(inline.index('rfdsI18n.t("Edit"'), inline.index('rfdsI18n.t("Note"'), "in the order written")
+        self.assertIn('ui_running_rx_state_?.["ClosingFundsState.edit"]', inline, "each shows that row's run")
+        close = menu[menu.index('"data-rfds-tone":"danger"') - 400:menu.index('rfdsI18n.t("Close"')]
+        self.assertIn('"aria-disabled":(!((r_rx_state_?.["why_not"]', close, "the danger entry is blocked per row")
+        self.assertIn('"rfds-menu-item-reason"', menu, "and says why")
+        self.assertIn('(!((r_rx_state_?.["why_not"]?.valueOf?.() === ""?.valueOf?.())) ? (ReflexEvent("_call_function"',
+                      menu, "doing nothing while it cannot be chosen")
+        self.assertIn("ui_ask", menu, "else it asks first")
+        self.assertIn('rfdsI18n.t("Remind"', menu, "a third plain action is in the menu")
+        self.assertNotIn('rfdsI18n.t("Remind"', inline, "not in the row")
+        linked = str(ui.embed(ui.table(ClosingFundsState.funds, columns=["name"], row_actions=lambda row: [
+            ui.link("Website", href="https://example.com")]), name="funds"))
+        linked = linked[linked.index('"data-slot":"rfds-row-actions"'):]
+        self.assertIn('"data-rfds-intent":"tertiary"', linked, "a link in a row is a ghost button")
+        self.assertIn("rfds-size-sm", linked, "a small one")

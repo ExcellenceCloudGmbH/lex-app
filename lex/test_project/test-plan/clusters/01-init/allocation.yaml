@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1123
+max_scenario: 1128
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2215,10 +2215,10 @@ letters:
       its data arrives, or if a failed section replaces the whole page with the error page.
   co:
     title: 'lex.ui pages: parts, translated sentences, text / fact / status / message'
-    scenarios: 1.788-1.790
+    scenarios: '1.788-1.790, 1.1124'
     status: complete
     tests:
-      pass: 3
+      pass: 4
       skip: 0
       xfail: 0
     note: >-
@@ -2226,7 +2226,7 @@ letters:
       passes the author's sentence to RFDS's translation as both id and default, and refuses
       anything outside the vocabulary with a message that says what to write (spec 6.5, 6.8). These
       tests fail if a raw component slips into a slot, a label is left untranslated, or an
-      error does not say what to do.
+      error does not say what to do. 1.1124 (2026-11-26): a run of facts is RFDS's grid of tiles that wraps, never a value running into the next fact's label.
   cp:
     title: 'lex.ui pages: links by page function; ui.link and ui.button'
     scenarios: 1.791-1.793
@@ -2243,10 +2243,10 @@ letters:
       builds a wrong address without complaint, or an in-app link opens a new tab.
   cq:
     title: 'lex.ui pages: sections with their own loading and failure; each, switch, custom_block'
-    scenarios: 1.794-1.796
+    scenarios: '1.794-1.796, 1.1125'
     status: complete
     tests:
-      pass: 3
+      pass: 4
       skip: 0
       xfail: 0
     note: >-
@@ -2255,7 +2255,7 @@ letters:
       and `ui.switch` cover repetition and choice, while anything else goes through
       `ui.custom_block`, which must say why (spec 6.4, 6.6). These tests fail if content is
       shown before its data, a failed section leaves a blank, or raw components enter a page
-      unmarked.
+      unmarked. 1.1125 (2026-11-26): buttons and badges sit in an RFDS cluster, as wide as their words.
   cr:
     title: 'lex.ui pages: ui.table over a model; rows that open a page'
     scenarios: 1.797-1.798
@@ -2272,10 +2272,10 @@ letters:
       table has no words.
   cs:
     title: 'lex.ui pages: the record and list kinds'
-    scenarios: 1.799-1.802
+    scenarios: '1.799-1.802, 1.1127'
     status: complete
     tests:
-      pass: 4
+      pass: 5
       skip: 0
       xfail: 0
     note: >-
@@ -2283,7 +2283,7 @@ letters:
       object page for one record, the list report for finding things), shows a skeleton until
       the page's load has finished, places the actions as RFDS's page header does, and refuses
       what does not belong in a slot (spec 6.3, 6.4). These tests fail if a page renders without its
-      data, a slot accepts anything, or actions land in the wrong place.
+      data, a slot accepts anything, or actions land in the wrong place. 1.1127 (2026-11-26): a table's caption is for screen readers only under a heading that already says it; a list page's table is named by its title.
   ct:
     title: 'lex.ui pages: @ui.page, @ui.dashboard, registration once the module is loaded'
     scenarios: 1.803-1.805
@@ -2359,14 +2359,14 @@ letters:
       be narrowed without leaving the API.
   cy:
     title: 'lex.ui adoption: a lex.ui part inside a raw page; the user''s permissions in a body'
-    scenarios: 1.821-1.822
+    scenarios: '1.821-1.822, 1.1128'
     status: complete
     tests:
-      pass: 2
+      pass: 3
       skip: 0
       xfail: 0
     note: >-
-      A project written in raw Reflex moves to lex.ui one table at a time (`ui.embed`), and a handler body reaches the user's Keycloak permission list for the project's own logic (`self.user.permissions`). These tests fail on a project that must convert a whole page before it can use one `@ui.rows` table, or a handler that cannot call the project's own logic.
+      A project written in raw Reflex moves to lex.ui one table at a time (`ui.embed`), and a handler body reaches the user's Keycloak permission list for the project's own logic (`self.user.permissions`). These tests fail on a project that must convert a whole page before it can use one `@ui.rows` table, or a handler that cannot call the project's own logic. 1.1128 (2026-11-26): an embedded table given no name shows no made-up caption.
   cz:
     title: 'lex.ui tables: a table that leaves the screen keeps none of its rows'
     scenarios: '1.823'
@@ -2561,14 +2561,14 @@ letters:
       `ui.toast(..., link=ui.link(...))`: a link's targets (a page, a raw page, a record, an outside address) and checks, run when the handler makes the toast; RFDS's toast with one action. These tests fail on a toast without its button, a button that leads to the wrong page, or a link whose mistake is found only when a user presses it.
   dy:
     title: 'lex.ui tables: the name pinned and given room, a code kept narrow, the Columns menu, every row at once, totals that say what they sum'
-    scenarios: 1.940-1.946, 1.953, 1.954, 1.955, 1.956, 1.957
+    scenarios: '1.940-1.946, 1.953, 1.954, 1.955, 1.956, 1.957, 1.1126'
     status: complete
     tests:
-      pass: 12
+      pass: 13
       skip: 0
       xfail: 0
     note: >-
-      `ui.column(kind="name"|"code")`, the first column always in place, `ui.table(choose_columns=True, page_size=N, totals={...: "sum"}, totals_of_all=True)` on rows and model tables, through Reflex's own event processor and its page compiler. These tests fail on a name that scrolls away, a user's column choice that hides the row's name, a row beyond 200 out of reach, or a total whose label does not say whether it sums the matching rows or every row.
+      `ui.column(kind="name"|"code")`, the first column always in place, `ui.table(choose_columns=True, page_size=N, totals={...: "sum"}, totals_of_all=True)` on rows and model tables, through Reflex's own event processor and its page compiler. These tests fail on a name that scrolls away, a user's column choice that hides the row's name, a row beyond 200 out of reach, or a total whose label does not say whether it sums the matching rows or every row. 1.1126 (2026-11-26): a row's actions follow RFDS's row actions: small ghost buttons, the dangerous ones in the row's menu.
   dz:
     title: 'lex.ui pages: a section closed until the user opens it, saying how many rows it holds'
     scenarios: 1.947-1.949

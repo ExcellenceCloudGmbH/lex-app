@@ -2839,13 +2839,13 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.788 – 1.790 |
+| Scenario range | 1.788 – 1.790, 1.1124 |
 | Type | U |
-| Files covered | `lex/lex_app/reflex/ui/pages/parts.py`, `ui/pages/vocab.py` (text, fact, status, message) |
+| Files covered | `lex/lex_app/reflex/ui/pages/parts.py`, `ui/pages/vocab.py` (text, fact, status, message); `ui/pages/vocab.py` (`facts`, `FACT_WIDTH`), `ui/pages/kinds.py` (`_stacked`, the record header) (1.1124) |
 | Test file | `lex/test_project/tests/init/test_1co_ui_page_parts.py` |
-| Test classes | `TestCluster01co_PageParts` (1.788–1.790) |
+| Test classes | `TestCluster01co_PageParts` (1.788–1.790, 1.1124) |
 | Fixtures | parts built on a stand-in page and slot, with a state value and RFDS's translation and formatters |
-| Tests landed | **3 pass / 0 fail** |
+| Tests landed | **4 pass / 0 fail** |
 | Status | ✅ Complete |
 
 | Scenario | Title | Asserts |
@@ -2853,6 +2853,7 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 | 1.788 | The sentence is the message | each sentence reaches RFDS's translation as both the id and the English default, with its values; a state value is shown as it is, untranslated; a tone outside the five is refused when the part is declared |
 | 1.789 | A value says what it is and who sees it | each kind goes through RFDS's own formatter for it; a whole number is shown without decimals and any other with two; money takes a currency; an unknown kind, and a currency without kind="money", are refused when the fact is declared. visible= takes a permission (RFDS's check, with the string a page's requires= gives), a list of them (all must hold), ui.signed_in (always shown), or a state value; anything else, and an empty list, is refused with what to write. No component of the vocabulary takes a styling argument |
 | 1.790 | A slot names what it refuses and what to write | the error names the page and the slot, says what it got, and says what to write instead; a single part and a list are both accepted; nothing gives an empty list |
+| 1.1124 | Facts side by side never run into each other | each fact is its own RFDS key-value list; a run of facts (a section's, a record page's) is RFDS's grid of tiles at least `size.panel.sm` wide, wrapping onto the next line, never RFDS's screen-sized columns where "USD 600,000,000.00" ran into the next label; a fact shown by state hides its whole tile |
 
 ### Batch 1cp — lex.ui pages: links by page function; ui.link and ui.button ✅
 
@@ -2877,20 +2878,21 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.794 – 1.796 |
+| Scenario range | 1.794 – 1.796, 1.1125 |
 | Type | U |
-| Files covered | `lex/lex_app/reflex/ui/pages/kinds.py` (section, states), `ui/pages/vocab.py` (each, switch, custom_block) |
+| Files covered | `lex/lex_app/reflex/ui/pages/kinds.py` (section, states), `ui/pages/vocab.py` (each, switch, custom_block); `ui/pages/kinds.py` (`_stacked`, `_INLINE`) (1.1125) |
 | Test file | `lex/test_project/tests/init/test_1cq_ui_page_sections.py` |
-| Test classes | `TestCluster01cq_PageSections` (1.794–1.796) |
+| Test classes | `TestCluster01cq_PageSections` (1.794–1.796, 1.1125) |
 | Fixtures | sections, each, switch and custom_block built on a stand-in page and dashboard with a state value |
-| Tests landed | **3 pass / 0 fail** |
+| Tests landed | **4 pass / 0 fail** |
 | Status | ✅ Complete |
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.794 | A section with a load shows its skeleton, then its content or its failure | without a load the section is its content; with one, the content is shown only once ui.loaded says so, before that the failure message when there is one, else a skeleton (a table's, when the section is one table); on a page nothing is mounted (the opener starts the load); on a dashboard the load starts when the section mounts; a section's title is a sentence and comes first. Facts that follow one another form one key-value list; a section inside a section, and empty= without a table, are refused |
+| 1.794 | A section with a load shows its skeleton, then its content or its failure | without a load the section is its content; with one, the content is shown only once ui.loaded says so, before that the failure message when there is one, else a skeleton (a table's, when the section is one table); on a page nothing is mounted (the opener starts the load); on a dashboard the load starts when the section mounts; a section's title is a sentence and comes first. Facts that follow one another form one run, each in a key-value list (1.1124); a section inside a section, and empty= without a table, are refused |
 | 1.795 | each repeats and switch chooses | each item is rendered through the part the function returns; a function that returns a raw component is refused with what to return; switch shows the case matching the value and nothing otherwise; a case that is not a lex component is refused |
 | 1.796 | Anything else goes through the marked way out | directly a raw component is refused, with the page, the slot and what to write; through ui.custom_block with a reason it is accepted and built as it is, and an error names it by its public name; without a reason, or with something that is not a component, custom_block is refused. A section hands its empty= sentence to a copy of its table, never to the author's part |
+| 1.1125 | Buttons and badges keep their own width | buttons and badges that follow one another sit in one RFDS cluster, each as wide as its words, never stretched by the stack (a job's Start button, a status badge); a part between them starts a new row; a button shown by state keeps its row; a record page's badge is in a cluster |
 
 ### Batch 1cr — lex.ui pages: ui.table over a model; rows that open a page ✅
 
@@ -2914,13 +2916,13 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.799 – 1.802 |
+| Scenario range | 1.799 – 1.802, 1.1127 |
 | Type | U |
-| Files covered | `lex/lex_app/reflex/ui/pages/kinds.py` (record, list_, Kind) |
+| Files covered | `lex/lex_app/reflex/ui/pages/kinds.py` (record, list_, Kind); `ui/pages/tables.py` (`_caption`, `_caption_unseen`), `ui/pages/parts.py` (`Build.headed`) (1.1127) |
 | Test file | `lex/test_project/tests/init/test_1cs_ui_page_kinds.py` |
-| Test classes | `TestCluster01cs_PageKinds` (1.799–1.802) |
+| Test classes | `TestCluster01cs_PageKinds` (1.799–1.802, 1.1127) |
 | Fixtures | record and list pages built on stand-in pages with a state, a load and sections |
-| Tests landed | **4 pass / 0 fail** |
+| Tests landed | **5 pass / 0 fail** |
 | Status | ✅ Complete |
 
 | Scenario | Title | Asserts |
@@ -2929,6 +2931,7 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 | 1.800 | A record page refuses what does not belong | each is a PageError naming the page and the slot and saying what to write -- also two sections with one title, a section hidden by a state value, a blank title, a title that is not words, two badges, and an action called Save (one fact or one section given without brackets is a list of one); a limit of RFDS's own (five tables on one page) names the page and quotes RFDS's sentence |
 | 1.801 | Actions are placed as the page header places them | the first action is the primary button -- unless it is dangerous, which is never primary; exactly one further action is a button; two or more further actions are entries of the "More actions" menu, with their translated sentences and their tone; a primary action with visible= stays primary; the author's part is not changed; something that is not a button or a link is refused |
 | 1.802 | A list page is a title, a table and its actions | it is RFDS's list report with the translated title, the table and the primary action; a table slot holding anything but a ui.table is refused |
+| 1.1127 | A table's title shows once | the list page's own title (not its function's name) and a section's title caption its table; under a heading that already shows them (list page, record page section, a section with its heading) RFDS's caption and the narrow view's caption are `rfds-sr-only`; a section drawn without a heading shows its title as the caption |
 
 ### Batch 1ct — lex.ui pages: @ui.page, @ui.dashboard, registration once the module is loaded ✅
 
@@ -3032,19 +3035,20 @@ test (`test_1_693_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenari
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.821 – 1.822 |
+| Scenario range | 1.821 – 1.822, 1.1128 |
 | Type | I |
-| Files covered | `lex/lex_app/reflex/ui/pages/declare.py` (embed), `lex/lex_app/reflex/ui/context.py` (`User.permissions`) |
+| Files covered | `lex/lex_app/reflex/ui/pages/declare.py` (embed), `lex/lex_app/reflex/ui/context.py` (`User.permissions`); `ui/pages/tables.py` (`_handler_words`) (1.1128) |
 | Test file | `lex/test_project/tests/init/test_1cy_ui_adoption.py` |
-| Test classes | `TestCluster01cy_Adoption` (1.821–1.822) |
+| Test classes | `TestCluster01cy_Adoption` (1.821–1.822, 1.1128) |
 | Fixtures | a throwaway state with a rows handler and an action, run through `ui.testing` with two grants |
-| Tests landed | **2 pass / 0 fail** |
+| Tests landed | **3 pass / 0 fail** |
 | Status | ✅ Complete |
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.821 | A lex ui table sits inside a raw page | the table is RFDS's data table over its generated state, inside the raw page; a whole page kind and something that is not a lex.ui part are refused with what to write; a mistake in the embedded part names it by the name given |
 | 1.822 | A handler body reads the users permission list | both see the user's Keycloak permissions as Keycloak lists them; outside a handler body reading them is refused |
+| 1.1128 | An embedded table given no name shows no made-up caption | `ui.embed` without `name=`: no caption shown (never "Embedded"), named for a screen reader by its rows ("Adoption items", "Portfolio holdings"); a name given is shown; an embedded section's title is its table's caption, shown |
 
 ### Batch 1cz — lex.ui tables: a table that leaves the screen keeps none of its rows ✅
 
@@ -3461,13 +3465,13 @@ What building settled is section 6.15 of `docs/superpowers/specs/2026-11-23-refl
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.940 – 1.946, 1.953, 1.954, 1.955, 1.956, 1.957 |
+| Scenario range | 1.940 – 1.946, 1.953, 1.954, 1.955, 1.956, 1.957, 1.1126 |
 | Type | U |
-| Files covered | `lex/lex_app/reflex/ui/pages/tables.py` (`column(kind="name"/"code", pin=)`, `table(page_size=, choose_columns=, totals=)`), `lex/lex_app/reflex/ui/pages/rows_table.py` (page size, totals of all rows, their label), `lex/lex_app/reflex/data.py` (`ChosenColumns`) |
+| Files covered | `lex/lex_app/reflex/ui/pages/tables.py` (`column(kind="name"/"code", pin=)`, `table(page_size=, choose_columns=, totals=)`), `lex/lex_app/reflex/ui/pages/rows_table.py` (page size, totals of all rows, their label), `lex/lex_app/reflex/data.py` (`ChosenColumns`); `ui/pages/tables.py` (`row_actions=`, `ROW_INLINE`), `ui/pages/vocab.py` (a row's button and link, `menu_entry` with `disabled`) (1.1126) |
 | Test file | `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py` |
-| Test classes | `TestCluster01dy_TableColumnsRows` (1.940–1.946, 1.953, 1.954, 1.955, 1.956, 1.957) |
+| Test classes | `TestCluster01dy_TableColumnsRows` (1.940–1.946, 1.953, 1.954, 1.955, 1.956, 1.957, 1.1126) |
 | Fixtures | a neutral customers state (name, code, region, amount in two currencies); Django's `Group` as a model table |
-| Tests landed | **12 pass / 0 fail** |
+| Tests landed | **13 pass / 0 fail** |
 | Status | ✅ Complete |
 
 Table needs found while rewriting dashboards. What building settled is section 5.14 of
@@ -3487,6 +3491,7 @@ Table needs found while rewriting dashboards. What building settled is section 5
 | 1.955 | The first column always stays in place, and pin= is gone | rows and model tables with nothing written: the first column is RFDS's start-sticky column and no other; ui.column(pin=) is no argument; 1.940 and 1.941 rewritten without pin= |
 | 1.956 | The user's column choice lasts until the tab is closed | a choice from the Columns menu survives a new visit and the table appearing again; ChosenColumns' docstring says so (it claimed a new visit starts from the table as declared) |
 | 1.957 | A built table's state is held only while the table is | 200 tables built and dropped leave the note (a weak map keyed by the part); a never-built table is not taken for a dropped one at the same address |
+| 1.1126 | A row's actions are RFDS's row actions | the first two plain actions are RFDS's small ghost buttons (tertiary, size sm) in the order written, each showing that row's run; a dangerous action is a danger entry of the row's "More actions" menu that still asks first and says the row's reason (doing nothing then); a third plain action goes into the menu; a link in a row is a small ghost button |
 
 ### Batch 1dz — lex.ui pages: a section closed until the user opens it, saying how many rows it holds ✅
 

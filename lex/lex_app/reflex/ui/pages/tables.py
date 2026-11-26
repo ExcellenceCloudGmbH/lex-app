@@ -34,6 +34,8 @@ _KIND_WIDTH = {"name": "var(--rfds-size-field-md)", "code": "var(--rfds-size-fie
 TOTALS = ("sum",)
 #: The most rows RFDS lets a table hold in the browser (DA-09): the largest ``page_size=``.
 MAX_PAGE = 200
+#: The actions RFDS shows in a table's row (``rfds.row_actions``); the others go into the row's menu.
+ROW_INLINE = 2
 
 
 @dataclasses.dataclass(frozen=True)
@@ -315,10 +317,24 @@ class Table(Part):
         if self.row_actions is None:
             return None
 
+        from lex.lex_app.reflex.ui.pages import vocab
+
+        at = ctx.at("row_actions", "row")
+
         def draw(row: Any) -> list:
+            """A row's actions as RFDS's ``row_actions`` takes them: at most two small buttons in the row, the
+            rest -- and every dangerous one -- in the row's "More actions" menu, a danger entry there."""
             items = self.row_actions(row)
             items = items if isinstance(items, (list, tuple)) else [items]
-            return [item.build(ctx.at("row_actions")) for item in items]
+            inline: list = []
+            menu: list = []
+            for item in items:
+                dangerous = isinstance(item, vocab.Button) and item.tone == "danger"
+                if dangerous or len(inline) == ROW_INLINE:
+                    menu.append(item.menu_entry(at))
+                else:
+                    inline.append(item.build(at))
+            return [*inline, *menu]
 
         return draw
 
@@ -436,9 +452,11 @@ class Table(Part):
         if toolbar is not None:
             props["toolbar"] = toolbar
         props.update(self._paging(state))
-        caption = say(ctx.caption) if ctx.caption else str(model._meta.verbose_name_plural).capitalize()
+        caption, shown_caption = _caption(ctx, str(model._meta.verbose_name_plural).capitalize())
         table = rfds.data_table(state=state, columns=specs, caption=caption,
                                 **{k: v for k, v in props.items() if k != "row_fields"})
+        if not shown_caption:
+            _caption_unseen(table)
         # Keyed by its where= values: when one of them changes (another record of the same page), the
         # table is a new one to React, so it appears again and reads with the new values.
         values = [v for v in dict(self.where or {}).values() if isinstance(v, rx.Var)]
@@ -523,8 +541,10 @@ class Table(Part):
         if toolbar is not None:
             props["toolbar"] = toolbar
         props.update(self._paging(state))
-        caption = say(ctx.caption) if ctx.caption else say(ctx.page.replace("_", " ").capitalize())
+        caption, shown_caption = _caption(ctx, say(_handler_words(self.source)))
         table = rfds.data_table(state=state, columns=specs, caption=caption, **props)
+        if not shown_caption:
+            _caption_unseen(table)
         from lex.lex_app.reflex.ui.pages.kinds import table_anchor
 
         return rx.box(table, restorer(state), on_mount=state.open, on_unmount=state.close, width="100%",
@@ -569,6 +589,54 @@ class _Rehydrated(Fragment):
         return [Var(f"useEffect(() => {{ if (!{hydrated}) return; ({Var.create(trigger)})(); }}, [{hydrated}]);",
                     _var_data=VarData.merge(hydrated._get_all_var_data(),
                                             VarData(position=Hooks.HookPosition.POST_TRIGGER)))]
+
+
+def _caption(ctx: Build, made_up: Any) -> tuple[Any, bool]:
+    """The words RFDS's caption names the table by, and whether the caption is shown.
+
+    RFDS's table must have a caption: it names the table and its scroll region for a screen reader. It
+    is the title of the table's section or page, or the name ``ui.embed`` was given. Shown, it is the
+    only heading the table has; where a heading on the page already says it (``ctx.headed``) it is kept
+    for screen readers only, never shown twice. Where the author wrote no words for the table,
+    ``made_up`` names it -- the model's plural name, or the ``@ui.rows`` handler's -- and is never shown.
+    """
+    if isinstance(ctx.caption, rx.Var) or ctx.caption:
+        return say(ctx.caption), not ctx.headed
+    return made_up, False
+
+
+def _caption_unseen(table: rx.Component) -> None:
+    """``table``'s caption (and its narrow card view's) for screen readers only: RFDS's ``rfds-sr-only``.
+
+    RFDS's own patterns caption a table under a heading that way. ``rfds.data_table`` takes no word for
+    it, so its caption is found by its class; when RFDS builds it otherwise this stops with a sentence,
+    never silently showing the caption twice.
+    """
+    found: list = []
+
+    def walk(node: Any) -> None:
+        names = getattr(node, "class_name", None)
+        if isinstance(names, str) and {"rfds-data-table-caption", "rfds-dt-cards-caption"} & set(names.split()):
+            node.class_name = f"{names} rfds-sr-only"
+            found.append(node)
+        for child in getattr(node, "children", None) or ():
+            walk(child)
+
+    walk(table)
+    if len(found) != 2:
+        raise RuntimeError(f"lex.ui: RFDS's data table is not built as lex.ui reads it ({len(found)} captions found, "
+                           "2 expected), so its caption cannot be kept for screen readers only. lex.ui must be "
+                           "updated for this version of RFDS.")
+
+
+def _handler_words(handler: Any) -> str:
+    """What a ``@ui.rows`` handler's rows are, in words: its state's name and its own (``FundState.holdings``:
+    "Fund holdings"; a handler called ``rows`` is its state's: ``Commitments.rows``, "Commitments")."""
+    state = re.sub(r"State$", "", handler.state.__name__) or handler.state.__name__
+    words = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", state).split()
+    if handler.fn.__name__ != "rows":
+        words += handler.fn.__name__.split("_")
+    return " ".join(words).lower().capitalize()
 
 
 def _export_columns(cols: list[Column]) -> tuple[tuple[str, str], ...]:

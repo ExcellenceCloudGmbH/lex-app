@@ -8,8 +8,9 @@ button, more in a "More actions" menu), and refuses what does not belong in a sl
 is a page that renders without its data, a slot that accepts anything, or actions in the wrong
 place.
 
-Cluster 1cs -- scenarios 1.799-1.802. Type: U.
-Covers: lex/lex_app/reflex/ui/pages/kinds.py (record, list_, Kind).
+Cluster 1cs -- scenarios 1.799-1.802, 1.1127. Type: U.
+Covers: lex/lex_app/reflex/ui/pages/kinds.py (record, list_, Kind, section), lex/lex_app/reflex/ui/pages/tables.py
+(the table's caption).
 Run: python -m lex pytest lex/test_project/tests/init/test_1cs_ui_page_kinds.py -v
 """
 
@@ -42,6 +43,10 @@ class KindDesk(ui.State):
     @ui.action
     def close(self):
         return ui.toast("Closed")
+
+    @ui.rows
+    def funds(self):
+        return [{"id": 1, "name": "Alder"}]
 
 
 def group_page():
@@ -237,3 +242,40 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         with self.assertRaises(PageError) as no_table:
             kinds.list_(title="Groups").build(Build(page="groups", route="/groups"))
         self.assertIn("got nothing (`None`).", str(no_table.exception), "a list without a table says so")
+
+    # -- 1.1127 --------------------------------------------------------
+    def test_1_1127_a_tables_title_shows_once(self) -> None:
+        """
+        Scenario 1.1127: a table under a heading that says what it is.
+        Given: a list page titled "Open funds" -- built as a page whose function is named
+               otherwise -- a record page whose "Commitments" section holds a table, a section with
+               actions (drawn with its heading) holding one, and a section drawn without a heading.
+        When:  they are built.
+        Then:  RFDS's table keeps its caption, which names it for a screen reader: the list page's
+               own title (not its function's name) and the section's title. Where a heading on the
+               page already shows those words -- the list page's title, the record page's section,
+               the section with its heading -- the caption and the narrow view's caption are for
+               screen readers only (RFDS's rfds-sr-only), never shown twice; a section drawn
+               without a heading shows its title as the table's caption.
+        """
+        hidden = ('className:"rfds-data-table-caption rfds-sr-only"', 'className:"rfds-dt-cards-caption rfds-sr-only"')
+        table = tables.table(KindDesk.funds, columns=["name"])
+        listed = str(kinds.list_(title="Open funds", table=table).build(Build(page="funds_page", route="/funds")))
+        self.assertIn('rfdsI18n.t("Open funds", "Open funds"', listed.split('"rfds-data-table-caption-text"')[1][:120],
+                      "the list page's title names its table")
+        self.assertNotIn("Funds page", listed, "never its function's name")
+        record = str(_record(sections=[kinds.section("Commitments", tables.table(KindDesk.funds, columns=["name"]))])
+                     .build(CTX))
+        headed = str(kinds.section("Commitments", tables.table(KindDesk.funds, columns=["name"]),
+                                   actions=[vocab.button("Refresh", KindDesk.close)]).build(CTX))
+        for where, text in (("a list page", listed), ("a record page's section", record),
+                            ("a section with its heading", headed)):
+            for needle in hidden:
+                with self.subTest(where=where, needle=needle):
+                    self.assertIn(needle, text, "the caption is for screen readers only under a heading that says it")
+        self.assertIn('rfdsI18n.t("Commitments", "Commitments"', record.split('"rfds-data-table-caption-text"')[1][:120],
+                      "the section's title names its table")
+        plain = str(kinds.section("Commitments", tables.table(KindDesk.funds, columns=["name"])).build(CTX))
+        self.assertIn('className:"rfds-data-table-caption"', plain, "a section without a heading shows the caption")
+        self.assertNotIn(hidden[0], plain, "not for screen readers only")
+        self.assertIn('rfdsI18n.t("Commitments", "Commitments"', plain, "its title")

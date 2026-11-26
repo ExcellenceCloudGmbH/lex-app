@@ -21,9 +21,12 @@ class Build:
     page: str                           # the page function's name
     route: str | None = None            # None on a dashboard
     slot: str = ""                      # the slot being filled, for messages
-    place: str = "body"                 # "body" or "actions": a link in actions is a button
+    place: str = "body"                 # "body", "actions" (a link there is a button) or "row" (a table row's actions)
     mounts: bool = False                # a dashboard: a load starts when its part mounts
-    caption: str = ""                   # the title a table in this part is named by (its section's)
+    caption: Any = ""                   # the title a table in this part is named by (its section's): words or a state value
+    #: A heading on the page already shows ``caption`` (a list page's title, a record page's section, a
+    #: titled section): a table there keeps its caption for screen readers only, never shown twice.
+    headed: bool = False
     under_load: bool = False            # the part appears only after a load has finished
     page_search: bool = False           # a list page's table: its search is the page's, kept in the address
     #: The page's ``requires=`` (normalised; ``()`` for a page without): what the reads of its tables and

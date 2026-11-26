@@ -187,7 +187,7 @@ class Calculation(kinds.Kind):
         if self.history is not None:
             history = self._history(ctx)
             self.built_history = history
-            at = dataclasses.replace(ctx.at("history"), caption="Past runs", under_load=True)
+            at = dataclasses.replace(ctx.at("history"), caption="Past runs", headed=True, under_load=True)
             whole.append(rfds.page(rfds.section(history.build(at), title=say("Past runs"))))
         return rx.fragment(*whole)
 
@@ -237,15 +237,12 @@ class Calculation(kinds.Kind):
 
     def _result(self, ctx: Build) -> list:
         """What a run that succeeded shows: ``result=``, with the run's values in place of the model's fields."""
-        at = dataclasses.replace(ctx.at("result"), under_load=True,
-                                 caption=self.title if isinstance(self.title, str) else "")
+        at = dataclasses.replace(ctx.at("result"), under_load=True, caption=self.title, headed=True)
         given = self._swap(at, list(self.result), top=True)
         return forms.Form(self.title, None, (), (), None, tuple(given))._result(at)
 
     def _inputs_shown(self, ctx: Build) -> rx.Component:
         """The run's inputs, as facts labelled as the form's fields."""
-        import rfds
-
         by_name = {field.name: field for field in self.model._meta.concrete_fields}
         every = [*self.fields, *(one for step in self.steps for one in step.fields)]
         facts = [vocab.Fact(one.label if one.label is not None else one.key.replace("_", " ").capitalize(),
@@ -254,7 +251,7 @@ class Calculation(kinds.Kind):
                             else self.state.run[one.key].to(str),
                             _shown_kind(one, by_name[one.key]))
                  for one in every]
-        return rfds.key_value(*vocab.build_all(ctx.at("fields"), facts), columns=min(3, len(facts)))
+        return vocab.facts(ctx.at("fields"), facts)
 
     def _run(self, ctx: Build) -> rx.Component:
         """One run, as it stands: its status, its inputs; its progress, its result or its error; its log."""
