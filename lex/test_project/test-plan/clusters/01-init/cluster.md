@@ -1734,8 +1734,9 @@ does not remove user launch configurations.
 | 1.957 | A built table's state is held only while the table is | 200 tables built and dropped leave the note (a weak map keyed by the part); a never-built table is not taken for a dropped one at the same address |
 | 1.1126 | A row's actions are RFDS's row actions | the first two plain actions are RFDS's small ghost buttons (tertiary, size sm) in the order written, each showing that row's run; a dangerous action is a danger entry of the row's "More actions" menu that still asks first and says the row's reason (doing nothing then); a third plain action goes into the menu; a link in a row is a small ghost button |
 | 1.1129 | The export split button is one control | the table's Export is RFDS's attached export group (Export = CSV, the menu of every format behind "More export formats") with both halves the same secondary button, never a bare ghost half |
+| 1.1130 | A number column's header stands level with the others | a rows table and a model's table each carry the rule that sets RFDS's sort buttons on the header cell's bottom, so a number column's label no longer sits 6 px above the text columns' |
 
-**Scenario range:** 1.940 – 1.946, 1.953, 1.954, 1.955, 1.956, 1.957, 1.1126, 1.1129. **Test file:** `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24; 1.1126 2026-11-26; 1.1129 2026-11-27). Batch: [1dy](batches.md).
+**Scenario range:** 1.940 – 1.946, 1.953, 1.954, 1.955, 1.956, 1.957, 1.1126, 1.1129, 1.1130. **Test file:** `lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py`. **Type:** U. **Status:** ✅ Complete (2026-11-24; 1.1126 2026-11-26; 1.1129 2026-11-27). Batch: [1dy](batches.md).
 
 ### 1dz. lex.ui pages: a section closed until the user opens it, saying how many rows it holds ✅
 

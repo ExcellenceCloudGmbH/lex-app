@@ -465,7 +465,8 @@ class Table(Part):
             for v in values[1:]:
                 joined = joined + "|" + v.to(str)
             extra = {"key": joined}
-        return rx.box(table, restorer(state), on_mount=state.open(dict(self.where or {})), width="100%", **extra)
+        return rx.box(table, restorer(state), headers_level(), on_mount=state.open(dict(self.where or {})), width="100%",
+                      **extra)
 
     # -- a @ui.rows handler -------------------------------------------------------------------------
     def _rows(self, ctx: Build) -> rx.Component:
@@ -546,8 +547,20 @@ class Table(Part):
             _caption_unseen(table)
         from lex.lex_app.reflex.ui.pages.kinds import table_anchor
 
-        return rx.box(table, restorer(state), on_mount=state.open, on_unmount=state.close, width="100%",
-                      id=table_anchor(self.source))          # ui.scroll_to(State.rows) brings it into view
+        return rx.box(table, restorer(state), headers_level(), on_mount=state.open, on_unmount=state.close,
+                      width="100%", id=table_anchor(self.source))          # ui.scroll_to(State.rows) brings it into view
+
+
+#: RFDS sets a header cell's sort button inline, on the cell's text line; a number column reverses its button and
+#: isolates its digits, which lifts that line - its label stood 6 px above the text columns' labels.
+HEADERS_LEVEL = "th .rfds-sort-button { vertical-align: bottom; }"
+
+
+def headers_level() -> rx.Component:
+    """The rule that sets every header label on one line, carried by the table itself so it holds in any app."""
+    import reflex as rx
+
+    return rx.el.style(HEADERS_LEVEL)
 
 
 def restorer(state: Any) -> rx.Component:

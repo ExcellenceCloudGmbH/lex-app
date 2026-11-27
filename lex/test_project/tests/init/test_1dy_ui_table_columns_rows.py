@@ -11,7 +11,7 @@ whether it sums the rows the search left or every row. A regression is a name th
 a row that cannot be reached, a width that only breaks in the browser, a user's column choice
 that hides the row's name, or a total that silently changes meaning when the user searches.
 
-Cluster 1dy -- scenarios 1.940-1.946, 1.953-1.957, 1.1126, 1.1129. Type: U.
+Cluster 1dy -- scenarios 1.940-1.946, 1.953-1.957, 1.1126, 1.1129, 1.1130. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/tables.py (column kind="name"/"code", pin=; table page_size=,
 choose_columns=, totals=, row_actions=, export=), lex/lex_app/reflex/ui/pages/vocab.py (a row's button and link, a menu
 entry that says why it cannot be chosen), lex/lex_app/reflex/ui/pages/rows_table.py (page size, totals over all
@@ -515,3 +515,21 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
         self.assertIn("rfds-button-group-attached", group, "RFDS's attached group")
         self.assertEqual(group.count('"data-rfds-intent":"secondary"'), 2, "both halves the same secondary button")
         self.assertNotIn('"data-rfds-intent":"tertiary"', group, "no bare ghost half")
+
+    # -- 1.1130 --------------------------------------------------------
+    def test_1_1130_a_number_columns_header_stands_level_with_the_others(self) -> None:
+        """
+        Scenario 1.1130: header labels on one line.
+        Given: a table of rows and a model's table, each with a number column.
+        When:  they are built.
+        Then:  each carries the rule that sets RFDS's sort buttons on the header cell's bottom - a
+               number column's header (RFDS reverses its sort button and isolates its digits) sat
+               6 px above the text columns' headers, measured in the browser; with the rule every
+               header label stands on one line. The rule is the table's own, so it holds in any
+               app, whatever stylesheets that app loads.
+        """
+        rule = "th .rfds-sort-button { vertical-align: bottom; }"
+        rows = str(ui.embed(ui.table(ClosingFundsState.funds, columns=["name"]), name="funds"))
+        self.assertIn(rule, rows, "a rows table carries the rule")
+        model = str(ui.embed(ui.table(Group, columns=["name"]), name="groups"))
+        self.assertIn(rule, model, "and so does a model's table")
