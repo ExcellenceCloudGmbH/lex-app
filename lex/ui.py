@@ -3,11 +3,9 @@
     from lex import ui
 
     class Tickets(ui.State):
-        rows: list[dict] = []
-
-        @ui.load
-        def open(self):
-            self.rows = self.api.list(Ticket)
+        @ui.rows
+        def open_tickets(self):
+            return self.api.all(Ticket, filters={"status": "open"})
 
         @ui.action
         def approve(self, ticket_id: int):
@@ -18,6 +16,11 @@
             for done, part in enumerate(parts(self.user), start=1):
                 build(part)
                 yield ui.progress(done / 10, "Building")
+
+    @ui.page("/tickets", nav="Support", requires=ui.read(Ticket))
+    def tickets():
+        return ui.list(title="Open tickets",
+                       table=ui.table(Tickets.open_tickets, columns=["title", "customer"], search=True))
 
     @ui.page("/funds/[key]", requires=ui.read(Fund))
     def fund():
@@ -33,38 +36,96 @@
 ==========================  =====================================================
 ``ui.State``                base class of a page state: ``self.user`` (``.permissions``), ``self.api``,
                             ``self.tab_id`` (the browser tab, for a project's per-tab store),
-                            ``self.params``, ``self.can()``, ``self.state()``
+                            ``self.params``, ``self.can()``, ``self.state()``; in a job
+                            ``self.progress(fraction, message)``, also from a library's thread
+                            (the one part of ``self`` safe there)
 ``@ui.load``                fills the page when it opens
 ``@ui.action``              a short handler, under about a second
-``@ui.job``                 long work with progress; the user keeps working
+``@ui.job``                 long work with progress; the user keeps working. ``limit=2``: at
+                            most two runs at once in each server process, for all users (one
+                            user may hold both); a further press is refused
 ``@ui.rows``                a table's rows, as a list of dicts; read-only, read as the user
 ``@ui.custom``              a raw Reflex handler, marked for review
-``ui.goto/toast/download``  what a handler returns; ``ui.refresh(State.rows)`` makes the
-                            tables of another state read again
+``ui.goto/toast/download``  what a handler returns; ``ui.toast(link=ui.link(...))`` offers to
+                            open something; ``ui.refresh(State.rows)`` makes the tables of
+                            another state read again; ``ui.scroll_to("Errors")`` brings a
+                            section (by its title) or ``ui.scroll_to(State.rows)`` a table into view
 ``ui.progress``             what a job yields
-``ui.Refuse``               an expected refusal, shown in its own words
+``ui.private``              a state field kept in the server's memory only, for its user, for a
+                            while: ``_report: dict = ui.private()``; a ``@ui.rows`` handler reads
+                            it, a computed var may not
+``ui.Refuse``               an expected refusal, shown in its own words (``title=`` heads it): in
+                            a form above its submit button, elsewhere as a toast
 ``ui.ApiError``             lex-app's API refused a call (``.status``, ``.denied``,
                             ``.detail``); uncaught, it is shown to the user
+``self.api``                lex-app's API as the user: ``list/get/create/update/delete``;
+                            ``all(Model, filters=)`` every record, page after page (at most
+                            10,000; more is refused in words), for a ``@ui.rows`` table; and for
+                            a calculation ``calculate(Model, pk)`` (as the Calculate button),
+                            ``log(Model, pk)`` (its newest run's log); ``file(Model, pk, field)``
+                            a record's file, downloaded as the user
 ``requires=``               ``ui.read/create/edit/delete(Model)``, ``ui.permission()``,
-                            ``ui.signed_in`` -- needed to query the database directly
+                            ``ui.signed_in``, a project's ``@ui.rule`` -- needed to query the
+                            database directly; on every handler, and on a page, whose tables
+                            read only for users it grants
+``@ui.rule``                a project's own access rule: ``def rule(user, params)`` returns True,
+                            False or the refusal's sentence; asked on the server once per event
 ``ui.running/failed/        a handler's status, for views; ``ui.cancel`` is the
 progress_of/cancel``        event of a Cancel button
 ``ui.loaded``               whether a load has finished since the page opened
-``ui.testing``              run a handler in a unit test
-``@ui.page``                where a page lives: its route, navigation, who may see it
+``ui.testing``              run a handler in a unit test: ``run``, ``rows`` (a table's rows),
+                            ``search`` (what a searched field offers), ``GONE`` (a private value
+                            gone), ``lex_api(client)`` (``self.api`` answered by lex-app's views)
+``@ui.page``                where a page lives: its route, its area of the navigation (``nav=``),
+                            who may see it. lex-app's frame heads it with its breadcrumbs: the
+                            area, the listed page that opens it, the page. The navigation lists
+                            only what the user may open, decided on the server when a page opens
+``ui.frame``                lex-app's frame for this project, set once in the dashboard module.
+                            Navigation: ``nav={"Orders": [], "Help": [ui.link(...)],
+                            "Favourites": favourites}`` the areas in order -- ``[]`` its pages,
+                            links after them, or a function of the user for the user's own links
+                            -- and ``nav_footer=``. Header: ``logo=``, ``logo_label=``,
+                            ``search=`` (a page taking one query parameter), ``actions=`` (the
+                            parts at the top right: links, buttons, statuses, custom blocks),
+                            ``user_menu=``, ``sign_out=``. Denied pages: ``denied=``,
+                            ``request_access=``, ``denied_as_missing=True``. Other: ``banner=``,
+                            ``opened=``. A value it shows is fixed or a function of the user,
+                            ``def waiting(user)``, called on the server when a page opens
 ``@ui.dashboard``           a page that is not a route (the project's ``main()``)
-``ui.record/list``          the page kinds: named slots, placed by lex-app (``ui.list`` is
+``ui.record/list/form``     the page kinds: named slots, placed by lex-app (``ui.list`` is
                             left out of ``import *``, which would hide Python's ``list``)
-``ui.section``              a titled part of a page; ``load=`` makes it load on its own
-``ui.text/fact/status/      what fills the slots; none takes a styling argument
-message/column/
-button/link``
+``ui.form(keep=True)``      the result is still there when the user comes back: what its
+                            state and its tables' states hold stays across visits
+``ui.calculation``          the page of a lex-app calculation model: a form for a run's inputs
+                            (created and started as the user), the run while it goes, its
+                            result, the past runs; ``?run=<key>`` is one run. A field of the run
+                            is written as the model's: ``RegionReport.orders``. The page's
+                            ``requires=`` guards its handlers too
+``ui.field/step``           a form's inputs, and a wizard's steps; the handler gets ``values``.
+                            ``options=`` a ``@ui.rows`` handler searches on the server as the user
+                            types. ``ui.button(confirm=, ask=)`` asks before its handler runs
+``ui.section``              a titled part of a page (a sentence, or a state value where it has a
+                            heading of its own); ``load=`` makes it load on its own; ``actions=``
+                            buttons in its heading; ``collapsed=True`` closes it until the user
+                            opens it, and mounts what it holds then (a table reads at once); ``tabs=True``
+                            on ``ui.record`` or a ``ui.form``'s result shows one section at a time
+``ui.text/fact/status/      what fills the slots; none takes a styling argument. In lex-app's
+message/column/             frame a ``ui.link`` is an entry: ``icon=``, ``badge=`` (a count),
+button/link``               ``requires=`` (drawn only for users who meet it, decided on the
+                            server); ``@ui.page(nav=, badge=)`` too
 ``ui.each/switch``          repetition and choice; ``visible=`` on every component
                             decides what is shown, never what is allowed
 ``ui.table``                rows from a model (``where=``) or a ``@ui.rows`` handler; ``search=``,
-                            ``filters=``, ``export=``, ``totals=``, ``row_actions=``
+                            ``filters=``, ``export=``, ``totals=`` (``totals_of_all=True``: of
+                            every row, whatever the search leaves), ``row_actions=``,
+                            ``choose_columns=``, ``page_size=`` (up to 200; the pager shows
+                            only when the rows do not fit one page). The rows shown reach the
+                            browser and are never stored with the state (Redis, disk)
 ``ui.address``              a page's address, for a row that leads to a page of its own
-``ui.reflex_page``          a page written in raw Reflex, as somewhere a link may lead
+``ui.reflex_page``          a page written in raw Reflex, as somewhere a link may lead;
+                            ``nav=``, ``title=`` list it in an area of the navigation, ``visible=``
+                            (a permission or a rule) shows that entry only to users who meet it --
+                            lex-app does not guard a raw page
 ``ui.custom_block``         a raw component, marked for review with its reason
 ``ui.embed``                the other way round: one lex.ui part inside a raw Reflex page,
                             for moving a project a table at a time
@@ -76,24 +137,28 @@ Import this module only in the Reflex process: it defines Reflex states.
 
 from lex.lex_app.reflex.data import LexApiError as ApiError
 from lex.lex_app.reflex.ui import testing
-from lex.lex_app.reflex.ui.guard import create, delete, edit, permission, read, signed_in
+from lex.lex_app.reflex.ui.guard import create, delete, edit, permission, read, rule, signed_in
 from lex.lex_app.reflex.ui.handlers import action, custom, job, load
+from lex.lex_app.reflex.ui.pages.calculation import calculation
 from lex.lex_app.reflex.ui.pages.declare import dashboard, embed, page
+from lex.lex_app.reflex.ui.pages.forms import field, form, step
+from lex.lex_app.reflex.ui.pages.frame import frame
 from lex.lex_app.reflex.ui.pages.links import address, reflex_page
 from lex.lex_app.reflex.ui.pages.kinds import list_ as list  # noqa: A001 - ui.list is the page kind
 from lex.lex_app.reflex.ui.pages.kinds import record, section
 from lex.lex_app.reflex.ui.pages.parts import PageError
 from lex.lex_app.reflex.ui.pages.tables import column, table
 from lex.lex_app.reflex.ui.pages.vocab import button, custom_block, each, fact, link, message, status, switch, text
-from lex.lex_app.reflex.ui.results import Refuse, download, goto, progress, refresh, toast
+from lex.lex_app.reflex.ui.private import private
+from lex.lex_app.reflex.ui.results import Refuse, download, goto, progress, refresh, scroll_to, toast
 from lex.lex_app.reflex.ui.rows import rows
 from lex.lex_app.reflex.ui.runs import cancel, failed, loaded, progress_of, running
 from lex.lex_app.reflex.ui.state import State
 
 __all__ = [
-    "ApiError", "PageError", "Refuse", "State", "action", "address", "button", "cancel", "column",
+    "ApiError", "PageError", "Refuse", "State", "action", "address", "button", "calculation", "cancel", "column",
     "create", "custom", "custom_block", "dashboard", "delete", "download", "each", "edit", "embed", "fact",
-    "failed", "goto", "job", "link", "load", "loaded", "message", "page", "permission", "progress",
-    "progress_of", "read", "record", "reflex_page", "refresh", "rows", "running", "section", "signed_in", "status",
-    "switch", "table", "testing", "text", "toast",
+    "failed", "field", "form", "frame", "goto", "job", "link", "load", "loaded", "message", "page", "permission", "private", "progress",
+    "progress_of", "read", "record", "reflex_page", "refresh", "rows", "rule", "running", "scroll_to", "section", "signed_in", "status",
+    "step", "switch", "table", "testing", "text", "toast",
 ]

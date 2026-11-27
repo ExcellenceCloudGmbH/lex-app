@@ -7,8 +7,8 @@ anything outside the vocabulary goes through ui.custom_block, which must say why
 is content shown before its data, a failed section that leaves a blank, or raw components
 entering a page unmarked.
 
-Cluster 1cq -- scenarios 1.794-1.796. Type: U.
-Covers: lex/lex_app/reflex/ui/pages/kinds.py (section, states), ui/pages/vocab.py (each, switch,
+Cluster 1cq -- scenarios 1.794-1.796, 1.1125. Type: U.
+Covers: lex/lex_app/reflex/ui/pages/kinds.py (section, states, _stacked), ui/pages/vocab.py (each, switch,
 custom_block).
 Run: python -m lex pytest lex/test_project/tests/init/test_1cq_ui_page_sections.py -v
 """
@@ -35,6 +35,10 @@ class SectionDesk(ui.State):
     def load_documents(self):
         self.documents = ["x"]
 
+    @ui.action
+    def start(self):
+        return None
+
 
 CTX = Build(page="fund", route="/funds/[key]")
 
@@ -53,7 +57,7 @@ class TestCluster01cq_PageSections(SimpleTestCase):
                a skeleton (a table's, when the section is one table); on a page nothing is
                mounted (the opener starts the load); on a dashboard the load starts when the
                section mounts; a section's title is a sentence and comes first. Facts that
-               follow one another form one key-value list; a section inside a section, and
+               follow one another form one run, each in a key-value list; a section inside a section, and
                empty= without a table, are refused.
         """
         plain = str(kinds.section("Notes", vocab.text("Hello")).build(CTX))
@@ -73,8 +77,9 @@ class TestCluster01cq_PageSections(SimpleTestCase):
         with self.assertRaises(TypeError, msg="a section's title comes first and is a sentence"):
             kinds.section(vocab.text("Hello"))
         facts = str(kinds.section("Key facts", vocab.fact("A", 1), vocab.fact("B", 2), vocab.text("Hello")).build(CTX))
-        self.assertEqual(facts.count('"data-slot":"rfds-key-value"'), 1,
-                         "facts that follow one another are one key-value list, which is what RFDS's items need")
+        self.assertEqual(facts.count('"data-slot":"rfds-grid"'), 1, "facts that follow one another are one run (1.1124)")
+        self.assertEqual(facts.count('"data-slot":"rfds-key-value"'), 2,
+                         "each fact inside a key-value list, which is what RFDS's items need")
         only_table = kinds.section("Groups", tables.table(Group, columns=["name"]), load=SectionDesk.load_documents)
         self.assertIn("rfds-skeleton-row", str(only_table.build(CTX)), "a section that is one table waits as a table")
         self.assertNotIn("rfds-skeleton-row", text, "any other section waits as a block")
@@ -154,3 +159,34 @@ class TestCluster01cq_PageSections(SimpleTestCase):
             vocab.custom_block(rx.text("raw"), reason=" ")
         with self.assertRaises(TypeError, msg="a custom block holds a component"):
             vocab.custom_block("not a component", reason="x")
+
+    # -- 1.1125 --------------------------------------------------------
+    def test_1_1125_buttons_and_badges_keep_their_own_width(self) -> None:
+        """
+        Scenario 1.1125: a button or a badge in a page is as wide as its words.
+        Given: a section holding a status, facts, a text, and a Start and a Cancel button (Cancel
+               shown only while a state value holds), then a text and one more button; and a
+               record page with a status.
+        When:  they are built.
+        Then:  buttons and badges that follow one another sit in one RFDS cluster -- a row that
+               wraps, each as wide as its words -- never stretched across the page by the stack
+               that holds them; a part between them starts a new row; a button shown by state
+               keeps its place in its row; the record page's badge is in a cluster too.
+        """
+        section = str(kinds.section(
+            "Commitments", vocab.status("Investing", tone="info"), vocab.fact("Checked", 0, kind="number"),
+            vocab.text("Working"), vocab.button("Start", SectionDesk.start),
+            vocab.button("Cancel", SectionDesk.start, visible=SectionDesk.mode == "a"),
+            vocab.text("Then"), vocab.button("Again", SectionDesk.start)).build(CTX))
+        self.assertEqual(section.count('"data-slot":"rfds-cluster"'), 3,
+                         "the badge, the two buttons together, and the last button: three rows")
+        rows = section.split('"data-slot":"rfds-cluster"')
+        self.assertIn('rfdsI18n.t("Investing"', rows[1].split('rfdsI18n.t("Checked"')[0], "the badge in its row")
+        both = rows[2].split('rfdsI18n.t("Then"')[0]
+        self.assertIn('rfdsI18n.t("Start"', both, "Start in the second row")
+        self.assertIn('rfdsI18n.t("Cancel"', both, "with Cancel beside it, shown by state")
+        self.assertIn('rfdsI18n.t("Again"', rows[3], "a part between buttons starts a new row")
+        record = str(ui.record(title="Fund", status=vocab.status("Investing", tone="info"),
+                               sections=[ui.section("Details", ui.text("Hi"))]).build(CTX))
+        self.assertLess(record.index('"data-slot":"rfds-cluster"'), record.index('"data-slot":"rfds-lozenge"'),
+                        "a record page's badge sits in a cluster, as wide as its word")

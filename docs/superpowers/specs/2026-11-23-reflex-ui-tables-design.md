@@ -375,6 +375,156 @@ Built and tested the same day; these differ from, or add to, the sections above:
 - **A table that leaves the screen keeps none of its rows** (added 2026-11-24): `close` drops the
   page, the count, the totals and the filter choices from the tab's state.
 
+### 5.14 Columns and rows a reader relies on (2026-11-24, batch 1dy)
+
+Needs found while rewriting dashboards: a name that stays in place in a wide table, columns of
+different widths, columns the user sizes, a file's rows in one scroll, a totals row that says what
+it sums. Each is RFDS's own feature, exposed with the fewest new words:
+
+```python
+ui.table(CustomersState.customers, page_size=200, choose_columns=True,
+         totals={"amount": "sum"}, totals_of_all=True,
+         columns=[ui.column("name", kind="name"), ui.column("code", kind="code"),
+                  "region", ui.column("amount", kind="money", currency="currency")])
+```
+
+- **One pinned column: the first, always.** RFDS's data table puts every start-sticky cell at the
+  left edge and reserves scroll padding for one such column, the identity cell, so only the first
+  column -- the one that names the row -- can stay in place. The first build asked for it with
+  `ui.column(..., pin=True)`, legal on the first column only. Review, 2026-11-24: an argument with
+  one legal place is a rule to learn and nothing to choose, so `pin=` is gone and the first column
+  of every lex.ui table, rows or model, is RFDS's `sticky="start"`: it stays in place whenever the
+  table scrolls sideways. Pinning several would need hand-made offsets; not added.
+- **No width argument; two kinds instead.** Rule 6.1(4) of the pages design forbids optional
+  styling, and test 1.806 refuses a `width` argument on every component. The need is about the
+  values, so two kinds say what they are: `kind="name"` (a person's or a company's name) is RFDS's
+  `entity` kind at RFDS's wide field width (`size.field.md`); `kind="code"` (an order number, an
+  ISO code) is RFDS's identifier (`id`) at its narrow field width (`size.field.xs`). A plain column
+  takes the room its values need, as before. Considered: `width="wide"|"narrow"` (refused by the
+  rule), `min_width=`.
+- **Resizing is RFDS's "Columns" menu.** RFDS's data table has no drag handle (WCAG 2.5.7: dragging
+  is never required); its `column_chooser` shows and hides columns, moves them up and down, takes a
+  width typed in pixels and "Fit to content". Drag resizing exists only in RFDS's AG Grid
+  (`data_grid`), which lex.ui tables do not use. `choose_columns=True` adds the menu to the
+  toolbar, on rows and model tables. The choice is kept in the table's state (`ChosenColumns`,
+  `data.py`) and cleaned on the server: only the table's own columns, widths from 40 to 1,200 px
+  (RFDS's range), and the first column always shown and first, because it names the row and is
+  its link. It lasts until the tab is closed; saving it needs RFDS's saved views and a store (not
+  added). Name: like `search=`, `filters=` and `export=`, it names what the user gets.
+- **Every row: `page_size=200`.** RFDS's rule DA-09: at most 200 rows reach the browser in a data
+  table (`DataTableMixin.page_size_options` must be 1-200). `page_size=50` sets the rows a page
+  (1-200), offered with 25, 50, 100 and 200; `page_size=200` shows every row of a file in one scroll.
+  More than 200 rows in one scroll is RFDS's AG Grid (virtualised), a different engine; not added.
+  Name: `page_size`, as `lex_table()` and RFDS's state call it; `rows_per_page=` and `paged=False`
+  were considered.
+- **Which state a built table got** (review, 2026-11-24) is noted for `ui.testing.rows(table=)` and a
+  section's row count in a weak map keyed by the table part itself, not by its `id()`: a part that
+  is dropped (pages are built again on every compile) leaves the map, and a new part that reuses a
+  dropped one's address is never taken for it.
+- **The pager comes only when it is needed** (review, 2026-11-24). The first build had
+  `page_size=None` meaning "200, no rows-per-page picker, a pager only past 200" -- a second way to
+  write 200, with its own pager rule. Now every lex.ui table, rows or model, draws RFDS's
+  `pagination` (with its rows-per-page choice) under the table only while there are more rows than
+  a page holds, instead of RFDS's always-on pager: a table whose rows all fit shows neither, since
+  neither would change anything. `page_size=None` is refused: "For every row on one page write
+  page_size=200".
+- **A totals row says what it sums.** `totals={"amount": "sum"}` totals the rows the search and
+  filters leave, as before; `totals_of_all=True` beside it totals every row the handler returns,
+  whatever the user narrows (a migrated page had a total over all rows, with a note saying so).
+  While a search or a filter is on, the label says which: "Total of matching rows" or "Total of all
+  rows"; otherwise "Total". A model table still cannot total (5.13).
+- **Review, 2026-11-24: the all-rows total is one table option, read once.** It was first a second
+  word per column, `totals={"amount": "sum of all rows"}`: a table-wide choice written once per
+  column as a sentence, which had to agree across columns, and a handler that searches for itself
+  was asked for every row again on each keystroke. Now `totals_of_all=True` is one option (the
+  label already says what the total covers), and the total of every row is worked out when the
+  table reads its rows -- it appears, a handler of its state finished, `ui.refresh`, a new record --
+  and kept while the user searches and filters. The old sentence is refused with what to write
+  (`totals={"amount": "sum"}, totals_of_all=True`), as is `totals_of_all=` without `totals=`.
+  *Name:* `totals_of_all` reads as the label does ("Total of all rows"); `totals_over="all"` was
+  considered (a string whose only other value would be the default).
+
+### 5.15 What rewrites of real dashboards still needed (2026-11-24, batches 1eq onward)
+
+Gaps found while rewriting dashboards onto lex.ui, each a need of any lex-app project.
+
+- **A search matches the model's own text (bug, batch 1eq).** `self.api.list(Model, search=...)`,
+  `lex_table`'s default and a model table's search box took "the first plain text field" -- on every
+  LexModel that is `created_by`, which lex-app adds to every model and which comes first, so a search
+  for a name found nothing. lex-app's API has no search field to copy: its grid filters one column at
+  a time and its global search reads every field at once (an OR the list API's parameters cannot
+  express). The search is now the first plain text field (no choices, not credential-shaped) **the
+  model itself declares**: fields declared by lex-app's own abstract bases (`LexModel`,
+  `CalculationModel`) are skipped. A model table searches the first such column it shows, and
+  `created_by` only when it shows no other. A model with no text field of its own is refused with
+  what to write instead (`filters={"<field>__icontains": text}`). *Not added:* a per-model
+  `search_field` setting -- one rule, nothing to configure.
+
+- **A table's rows are never stored with the state (privacy, batch 1er).** A table over a `@ui.rows`
+  handler that reads a `ui.private` value put the page it shows into its own state (`page_rows`),
+  and Reflex writes every state to Redis (to disk in development) after each event: the persons'
+  names reached the store after all, defeating `ui.private`. Reflex 0.9.13 has no var that is sent
+  but not stored (a backend var is stored and never sent; a computed var cannot replace RFDS's
+  `page_rows`, and its cache is stored too), and RFDS's data table takes its rows only from its
+  state, so a data route of its own would mean a second table component. Chosen: **every lex.ui
+  table** -- rows or model -- leaves out of what Reflex stores its page of rows, its totals, its
+  filters' choices and the rows' addresses (`RowsNotStored.__getstate__` in `data.py`, both the
+  state's dict and Reflex's backend-var dict). The browser gets them in the event's update; the count,
+  the page, the sort, the search and the filters are stored, so the rows can be read again. A stored
+  state marks that it left rows out (`_rows_dropped`); each table sends its own `restore`, which reads
+  the rows again only then, whenever the page has been hydrated -- its first load and every reconnect,
+  which sends the browser the whole state again and mounts nothing anew: a hook on Reflex's
+  `is_hydrated` (`tables.restorer`), on a `@ui.page`, a `@ui.dashboard` and in `ui.embed` alike (review
+  2, I-6, 1.1106; before, only a `@ui.page`'s opener sent `restore`, and a dashboard's or an embedded
+  table showed a count without rows after a reconnect in production). The opener still sends it too. A row click that opens the row's own address reads the rows
+  again when the stored state lost the addresses. Not an option: one rule for every table needs no
+  word, and deciding it by whether the handler reads a private field would leave a model table's
+  persons in the store. `lex_table` on a raw page keeps storing its rows (no opener tells it to
+  restore). *Cost:* a reconnect, or an event in another worker, reads the page of rows again;
+  what the user typed in the search box and chose in a filter is still stored.
+
+- **A foreign key shows the related record's name (batch 1es).** lex-app's API sends a foreign key
+  as the related record's id and, beside it, `<fk>__short_description` (`str(related)`, the model
+  author's name for a record; `base_serializers._batch_add_fk_display_names`), which lex-app's grid
+  shows. A model table's foreign-key column (`ui.table(Model, columns=["customer"])`), `lex_columns`,
+  `lex_grid_columns`, a calculation's past runs and a run's facts (its inputs and `result=`) now show
+  that name. The author still writes the field's name; the column's row field is the name's key
+  (`data.shown_field`). Sorting the column sends the key (`ordering=customer`), as lex-app's grid
+  sorts a foreign key: the API cannot sort by `str(record)`. The row keeps the id, so a row's action
+  gets the id; `where=` and filters keep working on the key; a row's link is the table's own key, as
+  before. `self.api.list(fields=["customer"])` keeps the name beside the id. A `@ui.rows` table
+  over `self.api.list` rows names the column `customer__short_description` itself.
+
+- **Every record for a rows table; dates on a model table (batch 1et).** A model table reads one
+  page at a time through lex-app's API, so it can neither export nor total every row, and projects
+  copied a paging helper into a `@ui.rows` handler instead. Considered: giving model tables export and
+  totals. lex-app's export endpoint (`ModelExportView`) takes AG Grid's filter model, not the list
+  parameters a model table sends, and writes its own columns; totals would need the AG Grid POST in
+  pivot mode -- two more paths for what a rows table already does. Chosen, one way:
+  **`self.api.all(Model, filters=, search=, ordering=, fields=)`** reads every record the user may
+  read, 1,000 a page, ordered by `ordering` and then the key (a stable order; the pages are read one after
+  another, so a record created or deleted meanwhile can shift a page and a row be read twice or missed --
+  offset paging, review 2), and refuses
+  more than 10,000 (`context.ALL_LIMIT`, what a rows table holds in memory) with a sentence: "There are
+  12,345 orders here, more than can be shown at once (10,000). Narrow them down first." -- before a
+  second page is read. A `@ui.rows` handler returns it, and its table has export, totals, search and
+  date filters already. A model table's `export=` / `totals=` refusal now says exactly that. A model
+  table does gain **date filters**: a date or date-and-time field in `filters=` is RFDS's date range
+  picker, sent as the API's `field__gte`/`__lte` (`field__date__gte`/`__lte` for a date and time), as on
+  a rows table. *Name:* `all`, as Django's `objects.all()`; `every`, `list(all=True)` and
+  `list(per_page=-1)` (lex-app's "everything" page size, unbounded) were considered.
+
+- **A rows table reads its rows once (review 2, I-8, 1.1114).** A table over `self.api.all(...)` in a
+  `@ui.rows` handler called the handler -- every record, page after page through lex-app's API -- on every
+  page turn, sort, filter and keystroke. The table now keeps the rows the handler gave, per tab, user and
+  table, in the server process's memory (`rows_table._KEPT`, like a `ui.private` value: never in a state
+  Reflex stores) and pages, sorts, filters and searches among them there. The handler is asked again when
+  the table appears, on `reread` (a handler of its state finished, `ui.refresh`), on `reopen`, on a new
+  visit, after `ROWS_IDLE` (10 minutes) unused, and -- a handler that takes `search` -- once per search,
+  not per page. *Cost:* what the handler reads from another state is read again only on
+  `ui.refresh(State.rows)`; with several server processes each keeps its own copy. *Considered:* Django's
+  cache (shared, but it would store the rows outside the process, which `ui.private` exists to avoid).
+
 ## 6. Limits and risks
 
 - **The address on mount.** Step 1 found that Reflex sends a component's mount event with the

@@ -17,7 +17,7 @@ LOOP_TIMEOUT_SECONDS = 60.0
 #: The body's helpers on ``self`` (``ui.State``). A field, method or computed var of a ``ui.State``
 #: may not take these names, nor may a page route's dynamic argument (Reflex makes it a field of
 #: every state, which it reads before the helper).
-RESERVED = ("user", "api", "params", "can", "state", "tab_id")
+RESERVED = ("user", "api", "params", "can", "state", "tab_id", "progress")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -28,23 +28,38 @@ class User:
     name: str = ""
     username: str = ""
     email: str = ""
+    #: The permissions read for a project's rule or frame function, which run outside a handler body.
+    _permissions: tuple | None = dataclasses.field(default=None, compare=False, repr=False)
 
     @property
     def permissions(self) -> list:
         """The user's Keycloak permissions, as Keycloak lists them (``{"rsname": ..., "scopes": [...]}``).
 
         For a project's own logic that takes the permission list; to ask about one model, use
-        ``self.can(Model, "read")``. Only inside a handler body.
+        ``self.can(Model, "read")``. Inside a handler body, a ``@ui.rule``, a function of the user
+        given to ``ui.frame`` and ``ui.frame(opened=)``.
         """
+        if self._permissions is not None:
+            return list(self._permissions)
         inv = active()
         if inv is None:
-            raise RuntimeError("self.user.permissions only works inside a lex.ui handler body")
+            raise RuntimeError("self.user.permissions only works inside a lex.ui handler body, a @ui.rule "
+                               "or a function lex-app's frame calls")
         return list(inv.on_loop(inv.session.permissions()))
 
     @classmethod
     def from_profile(cls, profile: Mapping[str, Any]) -> "User":
         return cls(id=str(profile.get("sub") or ""), name=str(profile.get("name") or ""),
                    username=str(profile.get("preferred_username") or ""), email=str(profile.get("email") or ""))
+
+
+async def with_permissions(session: "Session") -> User:
+    """The session's user, carrying its permissions, for code that runs outside a handler body.
+
+    Rules and the frame's functions of the user run on worker threads, where no handler body is
+    active; their ``user.permissions`` are read here first, on the event loop (cached per token).
+    """
+    return dataclasses.replace(session.user, _permissions=tuple(await session.permissions()))
 
 
 class Params:
@@ -88,6 +103,8 @@ class Session:
     api_client: Any = None
     #: The browser tab the event came from (Reflex's client token): ``self.tab_id``.
     tab: str = ""
+    #: The answers of the project's rules (``@ui.rule``) in this event: each is asked once.
+    rules: dict = dataclasses.field(default_factory=dict)
 
 
 def _params_of(state: Any) -> Params:
@@ -137,6 +154,31 @@ def set_resolver(fn: Callable[[Any], Awaitable[Session]] | None) -> Callable[[An
 
 async def resolve(state: Any) -> Session:
     return await _resolver(state)
+
+
+def _profile_user_id(state: Any) -> str:
+    from lex.lex_app.reflex import session
+
+    return User.from_profile(session.profile(workcopy.raw(state))).id
+
+
+_user_id_of: Callable[[Any], str] = _profile_user_id
+
+
+def set_user_id_of(fn: Callable[[Any], str] | None) -> Callable[[Any], str]:
+    """Replace how the signed-in user's id is found without waiting (tests); returns the previous."""
+    global _user_id_of
+    previous = _user_id_of
+    _user_id_of = fn or _profile_user_id
+    return previous
+
+
+def user_id_of(state: Any) -> str:
+    """The id of the user signed in on ``state``'s tab, found at once (a private value is bound to it)."""
+    try:
+        return str(_user_id_of(state) or "")
+    except Exception:  # noqa: BLE001 - nobody known: bound to nobody, so it matches no signed-in user
+        return ""
 
 
 @dataclasses.dataclass
@@ -226,6 +268,12 @@ class Rows(list):
     count: int = 0
 
 
+#: The most rows ``self.api.all()`` reads: a ``@ui.rows`` handler holds them all in memory.
+ALL_LIMIT = 10_000
+#: How many rows ``self.api.all()`` asks lex-app's API for at once.
+ALL_PAGE = 1000
+
+
 class Api:
     """lex-app's API as the signed-in user, for a handler body (synchronous)."""
 
@@ -244,19 +292,67 @@ class Api:
     def list(self, model: Any, *, filters: Mapping[str, Any] | None = None, search: str | None = None,
              ordering: str | None = None, page: int = 1, per_page: int = 25,
              fields: Sequence[str] | None = None) -> Rows:
-        """One page of a model's records, as plain rows with ``.count``."""
+        """One page of a model's records, as plain rows with ``.count``.
+
+        ``search=`` matches the first plain text field the model itself declares (never the
+        ``created_by`` audit field every LexModel inherits); ``filters={"<field>__icontains": text}``
+        searches another field.
+        """
         from lex.lex_app.reflex.data import _default_search_field, scope_params, wire_value
 
         params = scope_params(filters or {})
         if search:
             field = _default_search_field(model) if not isinstance(model, str) else ""
             if not field:
-                raise ValueError(f"{model!r} has no text field to search; pass filters={{'<field>__icontains': ...}}")
+                name = getattr(model, "__name__", model)
+                raise ValueError(f"{name} declares no text field to search (lex-app's own created_by and edited_by "
+                                 f"are not searched); pass filters={{'<field>__icontains': text}} instead of search=")
             params.append((f"{field}__icontains", str(search)))
         data = self._call("list", model, page=page, per_page=per_page, ordering=ordering, params=params)
-        rows = Rows({name: wire_value(value) for name, value in row.items() if fields is None or name in fields}
+        # A foreign key asked for keeps its related record's name beside it (`<fk>__short_description`).
+        wanted = None if fields is None else {*fields, *(f"{name}__short_description" for name in fields)}
+        rows = Rows({name: wire_value(value) for name, value in row.items() if wanted is None or name in wanted}
                     for row in data["results"])
         rows.count = int(data["count"])
+        return rows
+
+    def all(self, model: Any, *, filters: Mapping[str, Any] | None = None, search: str | None = None,
+            ordering: str | None = None, fields: Sequence[str] | None = None) -> Rows:
+        """Every record of a model the user may read, as plain rows: for a ``@ui.rows`` handler.
+
+        Reads page after page in a stable order (``ordering``, then the key). The pages are read one
+        after another, not at one moment: a record created or deleted meanwhile can shift a page, so a
+        row may then be read twice or missed (a table over it shows it on the next read). More than
+        :data:`ALL_LIMIT` rows is refused in words, asking the user to narrow them: ``filters=`` is how a
+        handler reads fewer. A table over the handler then searches, filters by date, exports and
+        totals every row; it reads them once, and turns pages, sorts and filters among them in the
+        server's memory until it is refreshed (``ui.refresh``) or the page opens again::
+
+            @ui.rows
+            def orders(self):
+                return self.api.all(Order, filters={"region": self.params.key})
+        """
+        from lex.lex_app.reflex.ui import results
+
+        key = "id" if isinstance(model, str) else model._meta.pk.name
+        order = ordering or ""
+        if order.lstrip("-") not in (key, "pk"):
+            order = f"{order},{key}" if order else key
+        rows = Rows()
+        page = 1
+        while True:
+            got = self.list(model, filters=filters, search=search, ordering=order, page=page, per_page=ALL_PAGE,
+                            fields=fields)
+            if page == 1 and got.count > ALL_LIMIT:
+                name = model if isinstance(model, str) else str(model._meta.verbose_name_plural)
+                raise results.Refuse(results.message(
+                    "lex.ui.api.too_many", "There are {count} {what} here, more than can be shown at once "
+                    "({limit}). Narrow them down first.", count=f"{got.count:,}", what=name, limit=f"{ALL_LIMIT:,}"))
+            rows.extend(got)
+            if not got or len(rows) >= got.count or len(got) < ALL_PAGE:
+                break
+            page += 1
+        rows.count = len(rows)
         return rows
 
     def get(self, model: Any, pk: Any) -> dict:
@@ -270,6 +366,22 @@ class Api:
 
     def delete(self, model: Any, pk: Any) -> None:
         return self._call("delete", model, pk)
+
+    def calculate(self, model: Any, pk: Any) -> dict:
+        """Start a calculation record's run, as the Calculate button does; answers the record, ``IN_PROGRESS``.
+
+        Prefer it to ``update(Model, pk, {"calculate": "true"})``, which starts the run under an id
+        the grid's log button does not find.
+        """
+        return self._call("calculate", model, pk)
+
+    def file(self, model: Any, pk: Any, field: str) -> dict:
+        """A record's file, downloaded as the user: ``{"data": bytes}``, or ``{"url": ...}`` from a storage that serves it."""
+        return self._call("file", model, pk, field)
+
+    def log(self, model: Any, pk: Any) -> list[str]:
+        """The log of a calculation record's newest run, one Markdown text per entry (``[]`` before one is stored)."""
+        return self._call("log", model, pk)
 
 
 def api_of(inv: Invocation) -> Any:

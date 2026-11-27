@@ -105,7 +105,8 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
         with self.assertRaises(ValueError, msg="a route starts with /"):
             declare.page("funds")
         with self.assertRaises(TypeError) as wrong_requires:
-            declare.page("/open", requires=[ui.read(Group)])
+            # A list is accepted since batch 1ed (spec 6.19), as on a handler; a raw string is not.
+            declare.page("/open", requires="lex_app.Group:read")
         self.assertIn("Leave it out for a page any signed-in user may see", str(wrong_requires.exception),
                       "a wrong requires= is refused when the page is declared, with the route and what to write")
         self.assertIn("'/open'", str(wrong_requires.exception), "the route is named")
@@ -239,7 +240,7 @@ class TestCluster01ct_PageDeclare(SimpleTestCase):
         with self.assertRaises(PageError) as not_a_kind:
             declare.finalize()
         self.assertEqual(str(not_a_kind.exception),
-                         "Page `raw`: it returned Text.\nReturn a page kind: `ui.record(...)`, `ui.list(...)`.",
+                         "Page `raw`: it returned Text.\nReturn a page kind: `ui.record(...)`, `ui.list(...)`, `ui.form(...)`.",
                          "a function that does not return a kind is told what to return")
 
     # -- 1.805 ---------------------------------------------------------

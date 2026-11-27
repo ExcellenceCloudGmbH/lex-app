@@ -44,7 +44,9 @@ def create_app():
     imports, is added when the app compiles (``@ui.page`` pages are registered
     once that module is loaded, so a page may link to one declared after it). Once they are declared, no page route may have
     a dynamic argument named like a ``ui.State`` helper (``[user]``, ``[state]``...):
-    Reflex would make it a field of every state and hide the helper.
+    Reflex would make it a field of every state and hide the helper. Nor may it have one named
+    like a field of any state (``/regions/[region]`` beside a field ``region``), which Reflex
+    refuses only when it builds the frontend.
     """
     import reflex as rx
     import rfds
@@ -101,6 +103,14 @@ def create_app():
         on_load=[LexAccessState.load, LexDashboardState.resolve, UiState.ui_open("/")],
     )
     app.add_page(_signing_out, route="/logout", title="Signing out", on_load=LexUser.sign_out)
+    from reflex_base.constants.route import Page404
+
+    from lex.lex_app.reflex.shell import not_found_page
+
+    # lex-app's not-found page, in its frame: a page refused as missing (ui.frame(denied_as_missing=True))
+    # shows the same. A project that added its own "404" page keeps it.
+    if Page404.SLUG not in getattr(app, "_unevaluated_pages", {}):
+        app.add_page(not_found_page, route=Page404.SLUG, title=Page404.TITLE, on_load=[LexAccessState.load])
     return app
 
 

@@ -7,8 +7,8 @@ as both id and default), and lets a value say what it is (kind=) and who sees it
 without a styling argument anywhere. A regression is a raw component slipping into a slot, an
 untranslated label, or an error that does not say what to do.
 
-Cluster 1co -- scenarios 1.788-1.790. Type: U.
-Covers: lex/lex_app/reflex/ui/pages/parts.py, ui/pages/vocab.py (text, fact, status, message).
+Cluster 1co -- scenarios 1.788-1.790, 1.1124. Type: U.
+Covers: lex/lex_app/reflex/ui/pages/parts.py, ui/pages/vocab.py (text, fact, facts, status, message), ui/pages/kinds.py (_stacked).
 Run: python -m lex pytest lex/test_project/tests/init/test_1co_ui_page_parts.py -v
 """
 
@@ -164,3 +164,40 @@ class TestCluster01co_PageParts(SimpleTestCase):
         self.assertEqual((parts.take(ctx, one, (vocab.Fact,), instead), parts.take(ctx, [one], (vocab.Fact,), instead),
                           parts.take(ctx, None, (vocab.Fact,), instead)), ([one], [one], []),
                          "one part, a list and nothing are all accepted")
+
+    # -- 1.1124 --------------------------------------------------------
+    def test_1_1124_facts_side_by_side_never_run_into_each_other(self) -> None:
+        """
+        Scenario 1.1124: a run of facts wraps rather than overlapping.
+        Given: three facts in a row -- one an amount that RFDS never wraps, "USD 600,000,000.00" --
+               in a section, and a record page's facts.
+        When:  they are built.
+        Then:  each fact is its own RFDS key-value list (a label and its value), and the run is
+               RFDS's grid of tiles, each at least RFDS's small panel wide, side by side while the
+               width allows and onto the next line where it does not -- never RFDS's columns sized
+               by the screen, where a long value ran into the next fact's label. A fact shown only
+               to some users hides its whole tile, never leaving its place empty.
+        """
+        from lex.lex_app.reflex.ui.pages import kinds
+
+        one = str(vocab.fact("Size", 600_000_000, kind="money", currency="USD").build(CTX))
+        self.assertIn('"rfds-key-value"', one, "a fact is RFDS's key-value list")
+        self.assertEqual(one.count('"data-slot":"rfds-kv-item"'), 1, "of one label and its value")
+        run = [vocab.fact("Size", 600_000_000, kind="money", currency="USD"), vocab.fact("Called", 0.62, kind="percent"),
+               vocab.fact("Investors", 14, kind="number")]
+        for where, built in (("a section", kinds._stacked(CTX, run)),
+                             ("a record page", [ui.record(title="Fund", facts=run,
+                                                          sections=[ui.section("Details", ui.text("Hi"))]).build(CTX)])):
+            with self.subTest(where=where):
+                text = str(built[0])
+                if where == "a section":
+                    self.assertEqual(len(built), 1, "facts that follow one another are one run")
+                self.assertIn('"data-slot":"rfds-grid"', text, "the run is RFDS's grid")
+                self.assertIn("repeat(auto-fill, minmax(min(var(--rfds-size-panel-sm), 100%), 1fr))", text,
+                              "of tiles at least RFDS's small panel wide, wrapping onto the next line")
+                self.assertEqual(text.count('"data-slot":"rfds-kv-item"'), 3, "three facts")
+                self.assertEqual(text.count('"data-slot":"rfds-key-value"'), 3, "each its own key-value list")
+                self.assertNotIn('"data-rfds-columns":"3"', text, "not RFDS's columns, sized by the screen")
+        hidden = str(vocab.fact("Fee", 1, kind="number", visible=PartsDesk.open_now).build(CTX))
+        self.assertLess(hidden.index("open_now_rx_state_"), hidden.index('"rfds-key-value"'),
+                        "a fact shown by state hides its whole tile")

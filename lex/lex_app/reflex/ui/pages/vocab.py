@@ -11,7 +11,8 @@ from lex.lex_app.reflex.ui.pages import links
 from lex.lex_app.reflex.ui.pages.parts import Build, NotASentence, Part, called, say, shown
 
 TONES = ("neutral", "info", "success", "warning", "danger")
-KINDS = ("text", "number", "money", "percent", "datetime")
+#: What a value can be, for display and for input alike (a form's fields take the same words).
+KINDS = ("text", "number", "money", "percent", "date", "datetime", "year", "bool", "choice", "choices")
 
 
 def _tone(tone: str) -> str:
@@ -31,8 +32,20 @@ def shape(value: Any, kind: str, currency: Any = None) -> Any:
     """``value`` shown as its ``kind``, formatted for the user's locale."""
     import rfds
 
-    if kind == "text":
+    if kind in ("text", "choice"):
         return value
+    if kind == "choices":               # several chosen: "north, south"
+        if isinstance(value, rx.Var):
+            return value.to(list[str]).join(", ")
+        return ", ".join(str(one) for one in value or ())
+    if kind == "year":                  # a year is not a quantity: no thousands separator
+        return value.to(str) if isinstance(value, rx.Var) else str(value)
+    if kind == "bool":
+        return rx.cond(value, say("Yes"), say("No"))
+    if kind == "date":
+        from rfds import fmt_js
+
+        return fmt_js.date(value if isinstance(value, (str, rx.Var)) else value.isoformat())
     if kind == "number":
         return rfds.number(value, digits=0 if _whole(value) else 2)
     if kind == "money":
@@ -41,8 +54,7 @@ def shape(value: Any, kind: str, currency: Any = None) -> Any:
         return rfds.percent(value)
     if kind == "datetime":
         return rfds.timestamp(value)
-    raise ValueError(f"kind= must be one of {', '.join(KINDS)}; got {kind!r}. "
-                         "`date`, `year`, `bool` and `choice` come with forms.")
+    raise ValueError(f"kind= must be one of {', '.join(KINDS)}; got {kind!r}")
 
 
 @dataclasses.dataclass(eq=False)
@@ -77,6 +89,26 @@ class Fact(Part):
 
         return rfds.kv_item(say(self.label), shape(self.value, self.kind, self.currency))
 
+    def _wrap(self, ctx: Build, component: rx.Component) -> rx.Component:
+        """The fact as its own RFDS key-value list, which :func:`facts` places beside the others."""
+        import rfds
+
+        return shown(ctx, rfds.key_value(component), self.visible)
+
+
+#: The least width of a fact beside others: RFDS's label takes 40% of it and the value the rest, room for
+#: an amount such as "USD 600,000,000.00", which RFDS never wraps.
+FACT_WIDTH = "size.panel.sm"
+
+
+def facts(ctx: Build, parts: list) -> rx.Component:
+    """Facts that follow one another, side by side while the width allows and onto the next line where it
+    does not: each at least :data:`FACT_WIDTH` wide (RFDS's grid of tiles), so a value never runs into the
+    next fact's label -- what RFDS's key-value columns, sized by the screen and not by their place, let happen."""
+    import rfds
+
+    return rfds.grid(*build_all(ctx, parts), min_col_width=FACT_WIDTH, gap="layout.gap.module", row_gap="2")
+
 
 def fact(label: Any, value: Any, *, kind: str = "text", currency: Any = None, visible: Any = None) -> Fact:
     """A label and its value.
@@ -84,12 +116,13 @@ def fact(label: Any, value: Any, *, kind: str = "text", currency: Any = None, vi
     ``kind`` says what the value is, and lex-app formats it for the user's locale:
     ``"number"`` (a whole number without decimals, any other with two), ``"money"`` (in
     ``currency=``, a code such as ``"EUR"`` or a state value; else the home currency),
-    ``"percent"`` (a ratio: 0.6 shows 60%), ``"datetime"`` (an instant with its time zone, shown
-    in the user's), or ``"text"``.
+    ``"percent"`` (a ratio: 0.6 shows 60%), ``"date"``, ``"datetime"`` (an instant with its time
+    zone, shown in the user's), ``"year"`` (no thousands separator), ``"bool"`` (Yes or No),
+    ``"choice"`` or ``"text"`` (shown as they are), ``"choices"`` (a list, shown joined by commas).
+    A form's fields take the same words.
     """
     if kind not in KINDS:
-        raise ValueError(f"kind= must be one of {', '.join(KINDS)}; got {kind!r}. "
-                         "`date`, `year`, `bool` and `choice` come with forms.")
+        raise ValueError(f"kind= must be one of {', '.join(KINDS)}; got {kind!r}")
     if currency is not None and kind != "money":
         raise ValueError(f"ui.fact(currency=) goes with kind=\"money\"; got kind={kind!r}")
     return Fact(label, value, kind, visible, currency)
@@ -151,6 +184,9 @@ class Link(Part):
     record: Any = None
     href: str | None = None
     visible: Any = None
+    icon: str | None = None             # in lex-app's frame: the entry's icon
+    badge: Any = None                   # in lex-app's frame: a count beside the entry
+    requires: tuple | None = None       # in lex-app's frame: who the entry is drawn for
 
     def target(self, ctx: Build) -> tuple[Any, bool]:
         """Where the link leads, and whether that is an outside site."""
@@ -165,8 +201,23 @@ class Link(Part):
         return self.href, True
 
     def click(self, ctx: Build) -> Any:
+        self.in_page(ctx)
         where, outside = self.target(ctx)
         return rx.redirect(where, is_external=outside)
+
+    def in_page(self, ctx: Build) -> None:
+        """Refuse the frame's words (``badge=``, ``requires=``, ``icon=``) on a link in a page."""
+        if self.badge is not None:
+            raise ctx.fail(f"the link `{self.label}` has `badge=`, a count beside an entry of lex-app's frame.",
+                           "Show a count in a page with a state value: `ui.text(\"{count} waiting\", count=State.waiting)`.")
+        if self.requires is not None:
+            raise ctx.fail(f"the link `{self.label}` has `requires=`, which decides an entry of lex-app's frame on the "
+                           "server.", "In a page, `visible=` decides what is shown -- `visible=ui.read(Model)` or a "
+                           "state value -- and the page's handlers what is allowed.")
+        if self.icon is not None:
+            raise ctx.fail(f"the link `{self.label}` has `icon=`, the icon of an entry of lex-app's frame.",
+                           "In a page a link is its words; a button has an icon: `ui.button(\"Search\", to=page, "
+                           "icon=\"search\")`.")
 
     def menu_entry(self, ctx: Build) -> rx.Component:
         return menu_entry(ctx, self.label, self.click(ctx), self.visible)
@@ -177,15 +228,27 @@ class Link(Part):
     def _render(self, ctx: Build) -> rx.Component:
         import rfds
 
+        self.in_page(ctx)
         where, outside = self.target(ctx)
         if ctx.place == "actions":
             return rfds.button(say(self.label), intent="secondary", on_click=rx.redirect(where, is_external=outside))
+        if ctx.place == "row":          # an action of a table's row: RFDS's small ghost button, as a button's there
+            return rfds.button(say(self.label), intent="tertiary", size="sm",
+                               on_click=rx.redirect(where, is_external=outside))
         return rfds.link(say(self.label), href=where, external=outside)
 
 
 def link(label: Any, *, to: Any = None, record: Any = None, href: str | None = None, visible: Any = None,
-         **values: Any) -> Link:
-    """Goes somewhere: ``to=`` a page (with its parameters by name), ``record=(Model, pk)``, or ``href=`` an outside site."""
+         icon: str | None = None, badge: Any = None, requires: Any = None, **values: Any) -> Link:
+    """Goes somewhere: ``to=`` a page (with its parameters by name), ``record=(Model, pk)``, or ``href=`` an outside site.
+
+    In lex-app's frame (``ui.frame``: the navigation, the user menu, the header) a link is an entry and
+    takes three words more: ``icon=`` (an RFDS icon), ``badge=`` (a count beside it: a function of the
+    user, or a whole-number state value) and ``requires=`` (what ``requires=`` takes everywhere: the
+    entry is drawn only for users who meet it, decided on the server; a link to a page that has a
+    ``requires=`` is guarded by it as well). In a page they are refused: there ``visible=`` decides what
+    is shown, and the handlers what is allowed.
+    """
     given = [name for name, value in (("to", to), ("record", record), ("href", href)) if value is not None]
     if len(given) != 1:
         raise ValueError("ui.link() takes exactly one of to=, record= or href=; got " + (", ".join(given) or "none")
@@ -198,7 +261,16 @@ def link(label: Any, *, to: Any = None, record: Any = None, href: str | None = N
     if record is not None and not (isinstance(record, tuple) and len(record) == 2 and hasattr(record[0], "_meta")
                                    and record[1] is not None):
         raise ValueError("ui.link(record=) takes (Model, pk): `record=(Fund, row.id)`.")
-    return Link(label, to, values, record, href, visible)
+    if icon is not None and (not isinstance(icon, str) or not icon):
+        raise ValueError(f"ui.link(icon=) takes the name of an RFDS icon, such as icon=\"search\"; got {icon!r}.")
+    if requires is not None:
+        from lex.lex_app.reflex.ui import guard
+
+        try:
+            requires = guard.normalise(requires)
+        except (TypeError, ValueError) as wrong:
+            raise TypeError(f"ui.link(requires=): {wrong}") from None
+    return Link(label, to, values, record, href, visible, icon, badge, requires)
 
 
 @dataclasses.dataclass(eq=False)
@@ -213,43 +285,84 @@ class Button(Part):
     primary: bool = False               # set by the kind: the first action of a page
     args: tuple = ()                    # values passed to the handler (a row's key)
     disabled: Any = None                # why it cannot be pressed now ("" or None: it can)
+    confirm: Any = None                 # the question asked before the handler runs
+    ask: tuple = ()                     # the fields of a small dialog whose values go to the handler
 
     def click(self, ctx: Build) -> Any:
         if self.to is not None:
             return rx.redirect(links.href(ctx, self.to, self.values))
+        if self.confirm is not None or self.ask:
+            from lex.lex_app.reflex.ui.pages import forms
+
+            return forms.dialog(ctx, self)
+        if self.tone == "danger":
+            raise ctx.fail(f"the button `{self.label}` has `tone=\"danger\"` and no `confirm=`.",
+                           "Ask before it runs, naming the action and its object: "
+                           "`ui.button(\"Close order\", State.close, tone=\"danger\", confirm=\"Close this order?\")`.")
         return self.handler(*self.args) if self.args else self.handler
 
     def menu_entry(self, ctx: Build) -> rx.Component:
-        return menu_entry(ctx, self.label, self.click(ctx), self.visible, tone=self.tone, icon=self.icon)
+        click, why_not = self.click(ctx), self._why_not(ctx)
+        if isinstance(why_not.get("disabled"), rx.Var):
+            # RFDS's entry does nothing while a state value disables it by conditioning one event: the event
+            # that opens a dialog, or the handler. More (a dialog's fields set first) it cannot condition, so
+            # the entry is then disabled without saying why.
+            events = click if isinstance(click, list) else [click]
+            if len(events) == 1:
+                click = events[0]
+            else:
+                why_not.pop("disabled_reason")
+        return menu_entry(ctx, self.label, click, self.visible, tone=self.tone, icon=self.icon, **why_not)
 
     def _wrap(self, ctx: Build, component: rx.Component) -> rx.Component:
         return _marked(component, shown(ctx, component, self.visible))
 
-    def _render(self, ctx: Build) -> rx.Component:
-        import rfds
-
-        intent = "danger" if self.tone == "danger" else "primary" if self.primary else "secondary"
-        extra: dict[str, Any] = {}
-        if self.args and getattr(getattr(self.handler, "fn", None), "__ui_key__", None):
-            from lex.lex_app.reflex.ui import runs
-
-            extra["loading"] = runs.running(self.handler, self.args[0])     # this row's run, not another's
+    def _why_not(self, ctx: Build) -> dict[str, Any]:
+        """RFDS's ``disabled`` and ``disabled_reason`` for ``disabled=``: nothing while it can be pressed."""
         if isinstance(self.disabled, rx.Var):           # a reason per row, or from the state; "" lets it be pressed
             if self.disabled._var_type in (bool, int, float):
                 raise ctx.fail(f"a button's `disabled=` is a {self.disabled._var_type.__name__} from the state.",
                                "Give the reason as text: a field holding the sentence, and \"\" when the "
                                "button can be pressed.")
             reason = self.disabled.to(str)
-            extra["disabled"] = reason != ""
-            extra["disabled_reason"] = rx.cond(reason != "", reason, None)
-        elif self.disabled:
-            extra["disabled"], extra["disabled_reason"] = True, say(self.disabled)
+            return {"disabled": reason != "", "disabled_reason": rx.cond(reason != "", reason, None)}
+        if self.disabled:
+            return {"disabled": True, "disabled_reason": say(self.disabled)}
+        return {}
+
+    def _render(self, ctx: Build) -> rx.Component:
+        import rfds
+
+        intent = "danger" if self.tone == "danger" else "primary" if self.primary else "secondary"
+        extra: dict[str, Any] = {}
+        if ctx.place == "row":          # RFDS's action in a table's row: a small ghost button (a danger one is a menu entry)
+            intent = "danger" if self.tone == "danger" else "tertiary"
+            extra["size"] = "sm"
+        if getattr(getattr(self.handler, "fn", None), "__ui_kind__", "") in ("action", "job"):
+            from lex.lex_app.reflex.ui import runs
+
+            runs.name_job(self.handler, self.label)     # its refusals name the job as this button does
+            # The button knows its handler: it shows it running -- for a row's button this row's run, not another's.
+            extra["loading"] = runs.running(self.handler, *self.args[:1])
+        extra.update(self._why_not(ctx))
         return rfds.button(say(self.label), intent=intent, icon=self.icon, on_click=self.click(ctx), **extra)
 
 
-def button(label: Any, handler: Any = None, *args: Any, to: Any = None, tone: str = "neutral",
-           icon: str | None = None, visible: Any = None, disabled: Any = None, **values: Any) -> Button:
+def button(label: Any, handler: Any = None, *args: Any, to: Any = None, confirm: Any = None, ask: Any = (),
+           tone: str = "neutral", icon: str | None = None, visible: Any = None, disabled: Any = None,
+           **values: Any) -> Button:
     """Runs a handler, or opens a page (``to=``, with the page's parameters by name).
+
+    A button shows its handler running. ``confirm="Close this order?"`` asks that question before
+    the handler runs; a ``tone="danger"`` button must have one. ``ask=[ui.field("reason",
+    required=True)]`` opens a small dialog with those fields; the handler receives what was
+    entered as its last argument, ``values``, checked as a form's values are::
+
+        @ui.action
+        def decline(self, key, values):
+            orders.decline(key, values["reason"])
+
+        ui.button("Decline", OrdersState.decline, row["id"], ask=[ui.field("reason", required=True)])
 
     Values after the handler are passed to it: in a table's ``row_actions``,
     ``ui.button("Approve", State.approve, row["id"])``; the button then shows that row's run.
@@ -270,13 +383,21 @@ def button(label: Any, handler: Any = None, *args: Any, to: Any = None, tone: st
     if disabled is not None and not isinstance(disabled, (str, rx.Var)):
         raise TypeError(f"ui.button(disabled=) takes why it cannot be pressed (a sentence, or a field holding one); "
                         f"got {disabled!r}")
+    asked = () if ask is None else tuple(ask) if isinstance(ask, (list, tuple)) else (ask,)
+    if (confirm is not None or asked) and handler is None:
+        raise ValueError("ui.button(): confirm= and ask= come before a handler runs; a button with to= opens a page.")
+    if confirm is not None and not (isinstance(confirm, (str, rx.Var)) and (isinstance(confirm, rx.Var) or confirm.strip())):
+        raise TypeError(f"ui.button(confirm=) takes the question to ask: `confirm=\"Close this order?\"`; got {confirm!r}")
     return Button(label, handler, to, values, _tone(tone), icon, visible, False, tuple(args),
-                  disabled if isinstance(disabled, rx.Var) else (disabled or None))
+                  disabled if isinstance(disabled, rx.Var) else (disabled or None), confirm, asked)
 
 
 def menu_entry(ctx: Build, label: Any, click: Any, visible: Any, *, tone: str = "neutral",
-               icon: str | None = None) -> rx.Component:
-    """An action as an entry of the page header's "More actions" menu."""
+               icon: str | None = None, **why_not: Any) -> rx.Component:
+    """An action as an entry of a "More actions" menu (a page header's, a table row's).
+
+    ``why_not`` is a button's ``disabled`` and ``disabled_reason``: the entry stays, says why, and does nothing.
+    """
     from rfds.components.actions.menu import menu_item
 
     try:
@@ -284,7 +405,7 @@ def menu_entry(ctx: Build, label: Any, click: Any, visible: Any, *, tone: str = 
     except NotASentence:
         raise ctx.fail(f"an action's label is {called(label)}.",
                        "Write the words: `ui.button(\"Close fund\", ...)`.") from None
-    entry = menu_item(words, on_select=click, icon=icon, tone="danger" if tone == "danger" else "neutral")
+    entry = menu_item(words, on_select=click, icon=icon, tone="danger" if tone == "danger" else "neutral", **why_not)
     return _marked(entry, shown(ctx, entry, visible))
 
 

@@ -12,6 +12,34 @@ from lex.lex_app.reflex.ui.context import RESERVED
 #: The page a failed required load sends the browser to.
 ERROR_ROUTE = "/ui-error"
 
+#: The shortest time between two decisions of the frame for one tab and user, in seconds: the frame's
+#: decision runs the project's rules and functions on the shared ``interactive`` pool, and its event can
+#: be sent in a loop. A page opened sooner keeps the answers just decided (they are the same user's).
+FRAME_INTERVAL = 1.0
+#: (tab, user) -> when its last decision ended; the (tab, user)s whose decision is running now.
+_FRAME_DECIDED: dict[tuple[str, str], float] = {}
+_FRAME_DECIDING: set[tuple[str, str]] = set()
+
+
+def _frame_turn(key: tuple[str, str]) -> bool:
+    """Whether the frame may be decided now for ``key`` (tab, user): none running, none just ended."""
+    import time
+
+    now = time.monotonic()
+    for old in [one for one, ended in _FRAME_DECIDED.items() if now - ended > FRAME_INTERVAL]:
+        _FRAME_DECIDED.pop(old, None)                 # kept only while it still counts
+    if key in _FRAME_DECIDING or key in _FRAME_DECIDED:
+        return False
+    _FRAME_DECIDING.add(key)
+    return True
+
+
+def _frame_done(key: tuple[str, str]) -> None:
+    import time
+
+    _FRAME_DECIDING.discard(key)
+    _FRAME_DECIDED[key] = time.monotonic()
+
 
 def check_route(route: str) -> None:
     """Refuse a route whose dynamic argument is named like a ``ui.State`` helper (``ValueError``)."""
@@ -25,8 +53,60 @@ def check_route(route: str) -> None:
         )
 
 
+def check_route_fields(routes: list[str]) -> None:
+    """Refuse a route whose dynamic argument has the name of a state's field (``ValueError``).
+
+    Reflex makes every dynamic route argument a computed var of its root state, and refuses to add
+    the page while any state -- a ``ui.State`` or a plain Reflex one -- has a field or a computed
+    var of that name (``BaseState._check_overwritten_dynamic_args``). It finds out only when it
+    adds the pages declared with a decorator, which is when it builds the frontend: this finds the
+    same collisions at start-up, among the states defined by then -- the states of the tables of
+    every ``@ui.page`` included, since ``ui.install`` builds those pages first (a ``ui.embed`` in a
+    raw Reflex page is built only when Reflex compiles the page: Reflex finds those). A backend field
+    (``_name``) or an event handler of that name is not refused by Reflex, nor here. The sentence
+    says to rename the route argument, and the field only when it is the project's own.
+    """
+    from reflex.route import get_route_args
+    from reflex.state import DynamicRouteVar
+    from reflex.state import State as Root
+
+    def every(cls: Any) -> list:
+        found = [cls]
+        for sub in sorted(cls.get_substates(), key=lambda one: one.get_full_name()):
+            found += every(sub)
+        return found
+
+    states = every(Root)
+    for route in routes:
+        for name in get_route_args(route):
+            for cls in states:
+                computed = cls.computed_vars.get(name)
+                if name in cls.base_vars or (computed is not None and not isinstance(computed, DynamicRouteVar)):
+                    what = "field" if name in cls.base_vars else "computed var"
+                    shown = '/' + route.lstrip('/')
+                    instead = f"Rename the route argument, e.g. {shown.replace(f'[{name}]', f'[{name}_key]')}"
+                    whose = _maker(cls.__module__)
+                    instead += (f". {cls.__name__} belongs to {whose} (a table's or a component's own state), and "
+                                f"its fields keep their names." if whose else f", or the field, e.g. {name}_value.")
+                    raise ValueError(
+                        f"route {shown!r}: its dynamic argument [{name}] has the name of the "
+                        f"{what} {cls.__name__}.{name} (in {cls.__module__}). Reflex makes a route argument a value "
+                        f"of every state, and does not build the app's pages while a state has a field of that "
+                        f"name. {instead}"
+                    )
+
+
+def _maker(module: str) -> str:
+    """Who wrote a state of ``module`` when it is not the project: lex-app, RFDS or Reflex ('' for the project)."""
+    for prefix, name in (("lex.lex_app.", "lex-app"), ("rfds", "RFDS"), ("reflex", "Reflex")):
+        if module == prefix.rstrip(".") or module.startswith(prefix):
+            return name
+    return ""
+
+
 def check_app_routes(app: Any) -> None:
-    """Refuse an app that has a page route with a dynamic argument named like a ``ui.State`` helper.
+    """Refuse an app that has a page route with a dynamic argument named like a ``ui.State`` helper,
+    or like a field of any state.
 
     ``create_app`` calls it once the project's pages are registered: it sees the pages added to
     the app and those declared with ``@rx.page`` or ``@lex_page`` that the app adds when it compiles.
@@ -38,30 +118,82 @@ def check_app_routes(app: Any) -> None:
                if kwargs.get("route")]
     for route in routes:
         check_route(route)
+    check_route_fields(routes)          # Reflex would refuse them only when it builds the frontend
     from lex.lex_app.reflex.ui.pages import links
 
     links.check_reflex_pages(routes)   # a link to a raw page leads to a page the app has
 
 
-def _page_permitted(state: Any, requires: str) -> bool:
-    """Whether the signed-in user holds the page's permission string ('' = no requirement)."""
-    if not requires:
+def _progress(state: Any) -> Any:
+    """``self.progress``: report a running job's progress (see :func:`handlers.reporter`)."""
+    from lex.lex_app.reflex.ui import handlers
+
+    return handlers.reporter(state)
+
+
+async def _page_permitted(state: Any, requires: Any) -> bool:
+    """Whether the signed-in user holds the page's permission strings ('' or () = no requirement).
+
+    The same source as the frame's decision and every handler's ``requires=``: Keycloak's grants for the
+    user's token (``Session.permissions``, fetched once per token -- the fetch ``LexAccessState.load``
+    made for this page). A failure to read them refuses the page.
+    """
+    needed = (requires,) if isinstance(requires, str) else tuple(requires or ())
+    needed = tuple(one for one in needed if one)
+    if not needed:
         return True
-    from rfds.auth import current_identity
+    from lex.lex_app.reflex.access import permission_strings
 
-    from lex.lex_app.reflex.access import lex_permission_resolver
+    try:
+        held = permission_strings(await (await context.resolve(state)).permissions())
+    except Exception:  # noqa: BLE001 - refused, and logged
+        from lex.lex_app.reflex.ui import handlers
 
-    return requires in lex_permission_resolver(current_identity(state))
+        handlers.logger.exception("lex.ui: the permissions for page %s could not be read; it is refused",
+                                  getattr(state, "_ui_page", ""))
+        return False
+    return all(one in held for one in needed)
 
+
+async def _page_refusal(state: Any, rules: tuple) -> str | None:
+    """The page's rules asked for this user and page: ``None`` granted, else the refusal's sentence.
+
+    A rule that raises refuses with lex-app's sentence, and is logged: the page never opens by accident.
+    """
+    from lex.lex_app.reflex.ui import handlers
+
+    try:
+        return await handlers.rule_refusal(await context.resolve(state), rules)
+    except Exception:  # noqa: BLE001 - refused, and logged
+        handlers.logger.exception("lex.ui: a rule of page %s failed; the page is refused", state._ui_page)
+        return ""
+
+
+
+def _answers_for(state: Any) -> str:
+    """The id of the user signed in on ``state``'s tab; what the tab holds for another user is dropped first.
+
+    Reflex keys a tab's states by its client token, which outlives a sign-in: what was decided for the
+    last user of the tab -- the frame's entries, counts, links and words, the pages' rules' answers, a
+    kept form's result and refusal, the last failures -- is not this user's. Call holding the tab's lock.
+    """
+    user = context.user_id_of(state)
+    if state._ui_for and str(state._ui_for) != user:     # '' until a page first opened: nobody's answers yet
+        state.ui_frame_shown, state.ui_frame_counts, state.ui_frame_links, state.ui_frame_values = [], {}, {}, {}
+        state.ui_access, state.ui_done, state.ui_refused, state.ui_failed = {}, {}, {}, {}
+    state._ui_for = user
+    return user
 
 
 class State(rx.State):
     """The base class of a page state: handler status for views, and the body's helpers.
 
-    Inside a handler body: ``self.user``, ``self.api``, ``self.params``, ``self.can(Model, scope)``
-    and ``self.state(Other)``. They are properties, so the browser cannot call them. Their names are
-    reserved: a subclass declaring a field, computed var or method with one of them is refused
-    when the class is defined.
+    Inside a handler body: ``self.user``, ``self.api``, ``self.params``, ``self.can(Model, scope)``,
+    ``self.state(Other)`` and ``self.tab_id`` (the browser tab, for a project's per-tab store); in a
+    job, ``self.progress(fraction, message)`` -- the only one that is safe from another thread (a
+    library's callback): such a thread reads and writes no other part of ``self``. They are
+    properties, so the browser cannot call them. Their names are reserved: a subclass declaring a
+    field, computed var or method with one of them is refused when the class is defined.
     """
 
     def __init_subclass__(cls, **kwargs: Any):
@@ -73,14 +205,18 @@ class State(rx.State):
                 f"Rename it, e.g. {name}_value or _{name}."
             )
         super().__init_subclass__(**kwargs)
-        from lex.lex_app.reflex.ui import handlers
+        from lex.lex_app.reflex.ui import handlers, private
 
+        private.check_computed(cls)         # a computed var never reads a private field
         handlers.own_handlers(cls)          # a handler from a mixin keeps its status under this state's name
 
     #: Handler key -> the first argument of each run in flight ('' without arguments).
     ui_running: dict[str, list[str]] = {}
     #: Handler key -> the failure message of its last run.
     ui_failed: dict[str, str] = {}
+    #: The handlers whose last failure was a press refused for ``limit=``: about that moment only,
+    #: it leaves ``ui_failed`` with the visit.
+    _ui_busy: list[str] = []
     ui_progress: dict[str, float] = {}
     #: Load key -> whether its last run finished; a page shows its skeleton until then.
     ui_loaded: dict[str, bool] = {}
@@ -89,18 +225,76 @@ class State(rx.State):
     ui_visit: int = 0
     #: What ``/ui-error`` shows: kind, title, message, path.
     ui_error: dict[str, str] = {}
+    #: "Handler key|field key" -> what is wrong with the value last sent for that field.
+    ui_invalid: dict[str, str] = {}
+    #: Handler key -> the step a wizard shows (0 is the first).
+    ui_step: dict[str, int] = {}
+    #: Handler key -> whether its form's last submit succeeded: the form's result shows while it is true.
+    ui_done: dict[str, bool] = {}
+    #: Handler key -> its form's last refusal, ``{"title", "message"}``: shown above the submit button
+    #: until the form is sent again.
+    ui_refused: dict[str, dict[str, str]] = {}
+    #: The dialog of a button with ``confirm=`` or ``ask=`` that is open ('' when none is), and the
+    #: values that button passes to its handler.
+    ui_asking: str = ""
+    ui_asking_args: list = []
+    #: Searched field id -> the matches the user may choose from now: ``{"value", "label"}``, a page of them.
+    #: Data (a label may come from a ``ui.private`` value): it reaches the browser and is never stored with
+    #: the state (:meth:`__getstate__`); ``_ui_offered``, the ids only, is what a form is checked against.
+    ui_matches: dict[str, list[dict[str, str]]] = {}
+    #: Page route -> what its rules (``@ui.rule``) answered at its last opening: ``{"granted": "yes"|"no",
+    #: "message": the refusal's sentence}``. A page with rules shows its content only on "yes".
+    ui_access: dict[str, dict[str, str]] = {}
+
+    #: The keys of the frame's guarded entries this user may open, decided on the server when a page
+    #: opened (``ui.frame``): a guarded entry is drawn only once its key is here.
+    ui_frame_shown: list[str] = []
+    #: Entry key -> its count (``badge=`` a function of the user), as the server answered it.
+    ui_frame_counts: dict[str, int] = {}
+    #: Per-user section key -> its links for this user: ``{"label", "href", "outside", "initial"}``.
+    ui_frame_links: dict[str, list[dict[str, str]]] = {}
+    #: Part key -> its words (a status's, a text's, the banner's), as the server answered them.
+    ui_frame_values: dict[str, str] = {}
 
     _ui_boots: dict[str, str] = {}
     _ui_pending_loads: list[str] = []
     _ui_optional_loads: list[str] = []
     #: The route of this visit, and the states a load of this visit has already reset.
     _ui_page: str = ""
+    #: The address and the socket connection the visit's page last opened on: the same address on a
+    #: new connection is Reflex reconnecting, not a new visit.
+    _ui_location: str = ""
+    _ui_connection: str = ""
+    #: The visit (``ui_visit``) the project's ``ui.frame(opened=)`` was last called for: a reconnect of
+    #: the same visit runs its loads again but does not open the page again.
+    _ui_opened: int = 0
     _ui_reset: list[str] = []
     #: The ids of the loads the opener started that have not begun yet: a load not listed here
     #: was started on mount.
     _ui_started: list[str] = []
     #: Load id -> the token of its latest run in this tab; an older run on mount is stale.
     _ui_load_runs: dict[str, str] = {}
+    #: The signed-in user the tab's answers are for -- the frame's, the pages' rules', a kept form's
+    #: result and refusal: Reflex keeps a tab's states as long as the tab, so another user signing in
+    #: on it starts without them (:func:`_answers_for`).
+    _ui_for: str = ""
+    #: Searched field id -> every value offered to this tab (as text) -> the row's id: what a form accepts.
+    _ui_offered: dict[str, dict] = {}
+    #: The signed-in user the offers and the matches were for: another user of the tab starts without them.
+    _ui_offered_to: str = ""
+    #: Searched field id -> [the number of its latest search, what was typed]: an older search's
+    #: matches, arriving later, are dropped.
+    _ui_searching: dict[str, list] = {}
+    #: "State.field" -> the stamp of the value a ``ui.private`` field holds in the server's memory.
+    #: Only the stamp is part of the state: the value itself is never stored with it.
+    _ui_private: dict[str, str] = {}
+
+    def __getstate__(self):
+        """The state as Reflex stores it (Redis, disk): without the matches a searched field shows."""
+        stored = super().__getstate__()
+        if stored.get("ui_matches"):
+            stored["ui_matches"] = {}
+        return stored
 
     user = property(lambda self: context.current().session.user)
     api = property(lambda self: context.api_of(context.current()))
@@ -109,6 +303,8 @@ class State(rx.State):
     state = property(lambda self: context.current().state_of)
     #: The browser tab the handler runs for (Reflex's client token): for a project's own per-tab store.
     tab_id = property(lambda self: context.current().session.tab)
+    #: A running job's progress, shown in the page: from its body or a thread it started (``@ui.job``).
+    progress = property(_progress)
 
     @rx.event
     async def ui_open(self, page: str):
@@ -119,20 +315,71 @@ class State(rx.State):
         ``on_load`` themselves. Only the route comes from the browser: the loads and the
         permission they need are looked up in the server's page registry. Optional loads start
         when the required ones have succeeded.
+
+        Reflex sends ``on_load`` again whenever the socket reconnects (a laptop waking, a network
+        blip): the same address on a new connection is the same visit. Its loads run again, as
+        Reflex intends, but nothing of the visit is dropped or started over.
         """
-        from lex.lex_app.reflex.ui import handlers
+        from lex.lex_app.reflex.ui import forms, handlers, private, runs
 
+        _answers_for(self)                          # another user on this tab: nothing decided for the last one
+        await runs.sweep(self)                      # runs of a process that is gone: also after a reconnect
+        location = handlers._location(self)
+        connection = str(self.router.session.session_id or "")
+        again = bool(connection) and connection != self._ui_connection and (page, location) == (
+            self._ui_page, self._ui_location)
+        self._ui_connection, self._ui_location = connection, location
+        if again:
+            return await self._ui_start(page, again=True)
         self.ui_visit += 1
-        from lex.lex_app.reflex.ui import runs
+        if self._ui_busy:                           # a press refused for limit= was about that moment
+            self.ui_failed = {key: one for key, one in dict(self.ui_failed).items() if key not in self._ui_busy}
+            self._ui_busy = []
+        forms.forget_offers(self, visit=True)       # the matches shown leave; another user's offers too
+        private.leave(str(self.router.session.client_token or ""))   # private values not kept across visits
+        from lex.lex_app.reflex.ui.pages import rows_table
 
-        await runs.sweep(self)
+        rows_table.forget_rows(tab=str(self.router.session.client_token or ""))   # tables read anew
+        kept = forms.kept()
+        # A form starts over on a new visit: its field messages, its step, its result and its refusal leave.
+        # One declared keep=True keeps its result while what it shows is kept, and its refusal: shown above its
+        # submit button, as when the user stayed (the user may have been away when it came).
+        done = {key: True for key, value in dict(self.ui_done).items() if value and key in kept}
+        for key in list(done):
+            if private.gone_in(await self.get_state(kept[key])):
+                done.pop(key)
+                self.ui_failed = {**dict(self.ui_failed), key: forms.gone_message()}
+        refused = {key: one for key, one in dict(self.ui_refused).items() if key in kept}
+        self.ui_invalid, self.ui_step, self.ui_done, self.ui_refused = {}, {}, done, refused
+        self.ui_asking, self.ui_asking_args = "", []
         self._ui_page = page
         self._ui_reset = []
+        return await self._ui_start(page)
+
+    async def _ui_start(self, page: str, again: bool = False) -> Any:
+        """The loads of ``page`` to start, and its tables' reads; ``again``: the same visit reconnected."""
+        from lex.lex_app.reflex.ui import handlers
+
         entry = handlers.page_of(page)
         from lex.lex_app.reflex.ui.pages import rows_table
 
-        tables = rows_table.reopen_events(page)     # a table already on screen: the new record's rows
-        if entry is None or not _page_permitted(self, entry.requires):
+        tables = [] if again else rows_table.reopen_events(page)    # a table on screen: the new record's rows
+        # A table whose rows the stored state left out (a reconnect sent the browser the whole state again).
+        tables += [one for one in rows_table.restore_events(page) if one not in tables]
+        refused = entry is None or not await _page_permitted(self, entry.requires)
+        from lex.lex_app.reflex.ui.pages import frame
+
+        # A page shown as missing when refused (ui.frame(denied_as_missing=True)) is decided here for its
+        # permissions too: the browser is told only yes or no.
+        concealed = entry is not None and frame.current().denied_as_missing and bool(
+            entry.rules or frame._strings(entry.requires))
+        if concealed or (not refused and entry.rules):  # the project's rules, asked on the server
+            refusal = "" if refused else (await _page_refusal(self, entry.rules) if entry.rules else None)
+            self.ui_access = {**dict(self.ui_access),
+                              page: {"granted": "yes" if refusal is None else "no",
+                                     "message": "" if concealed else refusal or ""}}
+            refused = refusal is not None
+        if refused:
             self._ui_pending_loads, self._ui_optional_loads, self._ui_started = [], [], []
             return None
         from lex.lex_app.reflex.ui import runs as ui_runs
@@ -144,7 +391,60 @@ class State(rx.State):
         self._ui_optional_loads = [handlers.load_id(h) for h in entry.optional] if entry.required else []
         starting = list(entry.required or entry.optional)
         self._ui_started = [handlers.load_id(h) for h in starting]
+        if not entry.required:                          # shown now: the project's opened(), not awaited
+            from lex.lex_app.reflex.ui.pages import frame
+
+            await frame.page_opened(self, page, handlers._location(self))
         return [*starting, *tables]
+
+    @rx.event(background=True)
+    async def ui_frame_open(self):
+        """A page in lex-app's frame opened: decide on the server what the frame shows this user.
+
+        Sent by the shell's mount, in the background: the page does not wait, and only the answers
+        reach the browser. A failure is logged; the frame keeps what it showed. The answers are written
+        only while the user they were decided for is still the one signed in on the tab. One decision
+        runs at a time for a tab and user, and not again within :data:`FRAME_INTERVAL` of the last: the
+        event can be sent in a loop, and each decision takes the shared pool's workers.
+        """
+        from lex.lex_app.reflex.ui.pages import frame
+
+        key = (str(self.router.session.client_token or ""), context.user_id_of(self))
+        if not _frame_turn(key):
+            return
+        try:
+            answers = await frame.decide(self)
+        except Exception:  # noqa: BLE001 - the page is shown; the project reads the log
+            frame.logger.exception("lex.ui: the frame could not be decided for this page")
+            return
+        finally:
+            _frame_done(key)
+        async with self:
+            if _answers_for(self) != answers.user:
+                return                              # decided for a user who has left the tab
+            self.ui_frame_shown = answers.shown
+            self.ui_frame_counts = answers.counts
+            self.ui_frame_links = answers.links
+            self.ui_frame_values = answers.values
+
+    @rx.event
+    def ui_frame_search(self, form_data: dict | None = None):
+        """Enter in the header's search box: the project's search page, with what was typed.
+
+        The page and its parameter are the server's (``ui.frame(search=)``); only the text comes from
+        the browser, sent with the Enter alone and encoded into the one value.
+        """
+        from urllib.parse import quote
+
+        from lex.lex_app.reflex.shell import SEARCH_FIELD
+        from lex.lex_app.reflex.ui.pages import frame
+
+        search = frame.current().search
+        if search is None:
+            return None
+        route, name = search
+        text = " ".join(str(dict(form_data or {}).get(SEARCH_FIELD) or "").split())[:500]
+        return rx.redirect(f"{route}?{name}={quote(text, safe='')}" if text else route)
 
     @rx.event
     def ui_cancel(self, key: str):
@@ -155,12 +455,49 @@ class State(rx.State):
 
         runs.request_cancel(EventContext.get().token, key)
 
+    @rx.event
+    def ui_ask(self, dialog: str, args: list):
+        """A button with ``confirm=`` or ``ask=`` was pressed: its dialog opens, holding the button's values."""
+        self.ui_asking, self.ui_asking_args = dialog, list(args)
+        self.ui_invalid, self.ui_refused = {}, {}
+
+    @rx.event
+    def ui_ask_close(self, open: bool = False):  # noqa: A002 - the name Radix gives the value
+        """The open dialog was answered or dismissed."""
+        if not open:
+            self.ui_asking, self.ui_asking_args = "", []
+
+    @rx.event
+    def ui_search(self, field: str, text: str = ""):
+        """A searched choice opened (``text`` is ``""``), or the user typed into it: offer the matches.
+
+        Only the field's id comes from the browser: the rows handler that searches is looked up in
+        the server's registry, and runs as the user. This records the search, in order with the
+        tab's other events; :meth:`ui_search_run` runs it without holding the tab.
+        """
+        from lex.lex_app.reflex.ui import forms
+
+        return forms.ask(self, field, text)
+
+    @rx.event(background=True)
+    async def ui_search_run(self, field: str, number: int):
+        """Run the search ``number`` of ``field``; its matches count only while it is the field's latest."""
+        from lex.lex_app.reflex.ui import forms
+
+        await forms.search(self, field, number)
+
+    @rx.event
+    def ui_step_back(self, key: str):
+        """A wizard's Back button: the step before, with what was entered kept."""
+        self.ui_step = {**dict(self.ui_step), key: max(int(dict(self.ui_step).get(key, 0)) - 1, 0)}
+
 
 def error_page() -> rx.Component:
     """What ``/ui-error`` shows: why the page could not be opened, a reference, and a way back."""
     import rfds
 
-    from lex.lex_app.reflex.shell import lex_chrome
+    from lex.lex_app.reflex.shell import denied_notice, lex_chrome, not_found_notice
+    from lex.lex_app.reflex.ui.pages import frame
 
     retry = rfds.link("Try again", href=State.ui_error.get("path", "/"))
     title = State.ui_error.get("title", "This page could not be opened")
@@ -169,7 +506,8 @@ def error_page() -> rx.Component:
         rfds.page_header(title="This page could not be opened", path=ERROR_ROUTE),
         rx.cond(
             State.ui_error.get("kind", "error") == "denied",
-            rfds.empty_state(kind="no_permission", title=title, description=message),
+            # the refusal's sentence and the project's way out; or, refused as missing, what a missing page says
+            not_found_notice() if frame.current().denied_as_missing else denied_notice(message=message.to(str)),
             rfds.empty_state(kind="error", title=title, description=message, primary_action=retry),
         ),
     ))

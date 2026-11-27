@@ -21,11 +21,27 @@ class Build:
     page: str                           # the page function's name
     route: str | None = None            # None on a dashboard
     slot: str = ""                      # the slot being filled, for messages
-    place: str = "body"                 # "body" or "actions": a link in actions is a button
+    place: str = "body"                 # "body", "actions" (a link there is a button) or "row" (a table row's actions)
     mounts: bool = False                # a dashboard: a load starts when its part mounts
-    caption: str = ""                   # the title a table in this part is named by (its section's)
+    caption: Any = ""                   # the title a table in this part is named by (its section's): words or a state value
+    #: A heading on the page already shows ``caption`` (a list page's title, a record page's section, a
+    #: titled section): a table there keeps its caption for screen readers only, never shown twice.
+    headed: bool = False
     under_load: bool = False            # the part appears only after a load has finished
     page_search: bool = False           # a list page's table: its search is the page's, kept in the address
+    #: The page's ``requires=`` (normalised; ``()`` for a page without): what the reads of its tables and
+    #: the handlers lex-app writes for it (a calculation's) require too. ``None`` outside a ``@ui.page`` (a
+    #: dashboard, ``ui.embed``), where no page's requirements are known.
+    requires: tuple | None = None
+    #: The dialogs of the page's buttons (``confirm=``, ``ask=``): one list for the whole page,
+    #: shared by every copy of this context, and placed beside the page when it is built.
+    overlays: list = dataclasses.field(default_factory=list)
+    #: What opens each of them, by the button as written: a button built twice (a table draws its
+    #: row actions more than once) has one dialog.
+    asked: dict = dataclasses.field(default_factory=dict)
+    #: The ids the page's sections took, shared by every copy of this context: two sections of one title
+    #: get two ids (the second ``-2``); ``ui.scroll_to(title)`` reaches the first.
+    anchors: list = dataclasses.field(default_factory=list)
 
     def at(self, slot: str, place: str | None = None) -> "Build":
         return dataclasses.replace(self, slot=slot, place=place or self.place)
@@ -69,6 +85,16 @@ class Part:
         return shown(ctx, component, self.visible)
 
 
+def with_overlays(ctx: Build, component: rx.Component) -> rx.Component:
+    """``component`` with the dialogs its buttons open; they are taken from ``ctx``, so placed once."""
+    if not ctx.overlays:
+        return component
+    dialogs = list(ctx.overlays)
+    ctx.overlays.clear()
+    ctx.asked.clear()
+    return rx.fragment(component, *dialogs)
+
+
 def shown(ctx: Build, component: rx.Component, visible: Any) -> rx.Component:
     """``component``, shown only when ``visible`` holds.
 
@@ -86,6 +112,11 @@ def shown(ctx: Build, component: rx.Component, visible: Any) -> rx.Component:
         from lex.lex_app.reflex.access import permission
 
         return can(permission(visible.target, visible.scope), component)
+    if isinstance(visible, guard.Rule):
+        raise ctx.fail(f"`visible=` got {visible!r}, a project's rule; it is asked on the server, and `visible=` "
+                       "is decided in the browser.",
+                       "Set a state field in the page's load -- `self.may_see = region_team(self.user, "
+                       "self.params)` -- and write `visible=State.may_see`.")
     if isinstance(visible, (list, tuple)):
         if not visible:
             raise ctx.fail("`visible=` got an empty list.", "List at least one permission: `visible=[ui.read(Model)]`.")

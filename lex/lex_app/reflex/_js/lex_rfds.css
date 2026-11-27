@@ -10,3 +10,28 @@
 .lex-embedded .rfds-shell-body {
   grid-template-columns: minmax(0, 1fr) !important;
 }
+/* The area of the current page: the heading of the navigation section holding the current entry. */
+.rfds-side-nav-section:has(.rfds-side-nav-link[aria-current="page"]) .rfds-side-nav-heading {
+  color: var(--rfds-color-text-default);
+  font-weight: 600;
+}
+/* lex-app's frame (ui.frame): the brand -- the project's mark and the product's name -- is one link home,
+ * and the header's links (actions=) sit on the chrome band in its own colours, as RFDS's header controls do. */
+.rfds-header .lex-header-home,
+.rfds-header .lex-header-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--rfds-space-2);
+  min-inline-size: 0;
+  color: var(--rfds-color-chrome-fg);
+  text-decoration: none;
+}
+.rfds-header .lex-header-link {
+  gap: var(--rfds-space-1);
+  padding: var(--rfds-space-1) var(--rfds-space-2);
+  border-radius: var(--rfds-radius-sm);
+}
+.rfds-header .lex-header-link:hover {
+  color: var(--rfds-color-chrome-fg);
+  background-color: var(--rfds-color-chrome-hover);
+}

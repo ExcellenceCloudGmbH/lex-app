@@ -46,7 +46,7 @@ def orders_table() -> tuple[type, str]:
     table = ui.table(OrdersState.orders, columns=["name", ui.column("created", kind="date"), "kind"],
                      filters=["kind", "created"])
     built = str(table.build(Build(page="orders", route="/orders", caption="Orders")))
-    return rows_table._CACHE_BY_TABLE[id(table)], built
+    return rows_table._CACHE_BY_TABLE[table], built
 
 
 class TestCluster01dd_TableFilters(SimpleTestCase):

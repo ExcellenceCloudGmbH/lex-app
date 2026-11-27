@@ -10,6 +10,7 @@ from __future__ import annotations
 import itertools
 import re
 import json
+import weakref
 from collections.abc import Mapping, Sequence
 from typing import Any, ClassVar
 
@@ -17,6 +18,7 @@ import reflex as rx
 from rfds.patterns.exports.state import ExportMixin
 from rfds.state.table import DataTableMixin, query_rows
 
+from lex.lex_app.reflex.data import ChosenColumns, RowsNotStored, rows_read
 from lex.lex_app.reflex.ui import rows as rows_mod
 
 #: Most distinct values a filter offers; a column with more is searched, not filtered.
@@ -27,20 +29,59 @@ ALL = "__all__"
 #: Rows handler key -> the table states that read it; route -> the table states on that page.
 _BY_HANDLER: dict[str, list[type]] = {}
 _BY_ROUTE: dict[str, list[type]] = {}
+#: Route -> every table state on that page, model tables and those under a load too: told to ``restore``.
+_SHOWN_ON: dict[str, list[type]] = {}
 _BY_OWNER: dict[str, list[type]] = {}
 _CACHE: dict[tuple, type] = {}
-#: id of a ui.table part -> the state class built for it (for ``ui.testing.rows(table=...)``).
-_CACHE_BY_TABLE: dict[int, type] = {}
+#: A built ui.table part -> the state class built for it (for ``ui.testing.rows(table=...)``). Weak: a part
+#: that is dropped leaves it, and a new part is never taken for an old one that had its address.
+_CACHE_BY_TABLE: "weakref.WeakKeyDictionary[Any, type]" = weakref.WeakKeyDictionary()
 _COUNTER = itertools.count(1)
 _ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+#: How long a table keeps its rows handler's rows in this process's memory while it is not used, in seconds.
+ROWS_IDLE = 600
+#: (tab, user, table state, search) -> [when last used, the rows as the table shows them]. In this process's
+#: memory only, like a ``ui.private`` value: never in a state Reflex stores (Redis, disk). A page turn, a
+#: sort, a filter or a search the handler does not do itself reads them here, not from the handler.
+_KEPT: dict[tuple, list] = {}
+
+
+def _kept_key(state: Any, query: str) -> tuple:
+    from lex.lex_app.reflex.ui import context
+
+    cls = type(state)
+    try:
+        tab = str(state.router.session.client_token or "")
+    except Exception:  # noqa: BLE001 - no tab: nothing is kept for it
+        tab = ""
+    return tab, context.user_id_of(state), cls.get_full_name(), query if cls.takes_search else ""
+
+
+def forget_rows(state: Any = None, *, tab: str | None = None) -> None:
+    """Drop the rows kept for one table of a tab (``state``), or for every table of ``tab`` (a new visit)."""
+    if state is not None:
+        key = _kept_key(state, "")
+        gone = [one for one in _KEPT if one[:3] == key[:3]]
+    else:
+        gone = [one for one in _KEPT if one[0] == tab]
+    for one in gone:
+        _KEPT.pop(one, None)
+
+
+def _prune(now: float) -> None:
+    for one in [key for key, (used, _) in _KEPT.items() if now - used > ROWS_IDLE]:
+        _KEPT.pop(one, None)
 
 
 def handler_key(handler: Any) -> str:
     return f"{handler.state.get_full_name()}.{handler.fn.__name__}"
 
 
-class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
-    """RFDS's server-paged table over the rows a ``@ui.rows`` handler returns."""
+class LexRowsTableState(DataTableMixin, ExportMixin, ChosenColumns, RowsNotStored, mixin=True):
+    """RFDS's server-paged table over the rows a ``@ui.rows`` handler returns (never stored: ``RowsNotStored``)."""
+
+    rows_not_stored: ClassVar[bool] = True
 
     owner: ClassVar[Any] = None
     handler_name: ClassVar[str] = ""
@@ -55,11 +96,15 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
     search_fields: ClassVar[tuple[str, ...]] = ()     # the text columns a search looks in
     totals_spec: ClassVar[tuple[Mapping[str, Any], ...]] = ()
     totals_currency: ClassVar[str] = ""               # the money field whose currency splits the totals
+    totals_of_all: ClassVar[bool] = False             # the totals sum every row, not only the matching ones
     export_columns: ClassVar[tuple[tuple[str, str], ...]] = ()
     export_kinds: ClassVar[dict[str, str]] = {}       # an exported column's label -> its semantic kind
     query_param: ClassVar[str] = ""
     searchable: ClassVar[bool] = False                # the table has a search box
     exportable: ClassVar[bool] = False                # the table has an export menu
+    #: The ``requires=`` of the ``@ui.page`` the table is on: asked before every read, as the rows
+    #: handler's own ``requires=`` is.
+    requires: ClassVar[tuple] = ()
 
     shown: bool = False
     totals_rows: list[dict] = []
@@ -67,13 +112,19 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
     chosen: dict[str, str] = {}
     dates: dict[str, dict[str, str]] = {}             # a date filter's range, as its picker shows it
     _row_to: dict[str, str] = {}
+    #: The totals of every row (``totals_of_all``), worked out when the table last read its rows: a
+    #: search or a filter keeps them, so a handler that searches is not asked for every row each time.
+    _totals_all: list[list[dict]] = []
+    _totals_all_read: bool = False
 
     # -- events ----------------------------------------------------------------------------------
     @rx.event
     async def open(self):
         """The table appeared: read the first page (on a list page, with the address's search)."""
+        forget_rows(self)                       # what the handler gives now, not what it gave last time
         self.shown = True
         self.page = 0
+        self._totals_all_read = False
         name = type(self).query_param
         if name:
             self.query = " ".join(str(self.router.page.params.get(name, "") or "").split())[:200]
@@ -89,12 +140,15 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
         self.totals_rows = []
         self.choices = {}
         self._row_to = {}
+        forget_rows(self)
 
     @rx.event
     async def reread(self):
         """Read again if the table is on screen: after a handler of its state, or ``ui.refresh``."""
         if not self.shown:
             return
+        forget_rows(self)
+        self._totals_all_read = False
         async for _ in self.load():
             yield
 
@@ -103,7 +157,9 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
         """The page opened again (a new record, the same page): the first page, read again."""
         if not self.shown:
             return
+        forget_rows(self)
         self.page = 0
+        self._totals_all_read = False
         async for _ in self.load():
             yield
 
@@ -172,16 +228,51 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
             await self._after_filter_change()
 
     @rx.event
-    def go(self, key: str):
-        """A row whose link is decided per row: open the address its rows handler gave it."""
+    async def go(self, key: str):
+        """A row whose link is decided per row: open the address its rows handler gave it.
+
+        The addresses of the page shown are not stored with the state; after the state was stored the
+        rows are read again to find the row's.
+        """
         where = self._row_to.get(str(key), "")
+        if not where and type(self).row_open:
+            rows = await self._all(self.query)
+            found = next((row for row in rows if str(row.get("id")) == str(key)), None)
+            where = str((found or {}).get(type(self).row_open, "") or "")
         if where:
             return rx.redirect(where)
         return None
 
     # -- reading ---------------------------------------------------------------------------------
     async def _all(self, query: str) -> list[dict]:
-        """Every row, as the table shows it: read as the user, checked, in wire form."""
+        """Every row, as the table shows it: read as the user, checked, in wire form.
+
+        The handler is asked when the table appears, after ``reread`` (a handler of its state, ``ui.refresh``),
+        ``reopen`` and a new visit, and for each search it does itself; in between -- a page turn, a sort, a
+        filter, a search among the rows -- the rows it gave are read from this process's memory
+        (:data:`_KEPT`), until :data:`ROWS_IDLE` seconds unused.
+        """
+        import time
+
+        from rfds.errors import RFDSUserError
+
+        cls = type(self)
+        if cls.requires:                    # the page's: asked before the kept rows are shown too
+            from lex.lex_app.reflex.ui.handlers import check_page_requires
+
+            await check_page_requires(self, cls.requires)
+        key, now = _kept_key(self, query), time.monotonic()
+        _prune(now)
+        kept = _KEPT.get(key)
+        if kept is not None:
+            kept[0] = now
+            return kept[1]
+        rows = await self._read_all(query)
+        _KEPT[key] = [now, rows]
+        return rows
+
+    async def _read_all(self, query: str) -> list[dict]:
+        """Every row from the rows handler, read as the user now."""
         from rfds.errors import RFDSUserError
 
         cls = type(self)
@@ -271,20 +362,24 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
                               search_fields=list(cls.search_fields), offset=0, limit=max(len(rows), 1))
         return found
 
-    def _totals(self, rows: list[dict]) -> list[dict]:
+    def _totals(self, rows: list[dict], *, narrowed: bool = False) -> list[dict]:
+        """The totals rows. While a search or filter narrows the rows, the label says what they sum."""
         cls = type(self)
         if not cls.totals_spec:
             return []
         from rfds.data import compute_totals
 
+        word = self._t("Total")
+        if narrowed:
+            word = self._t("Total of all rows") if cls.totals_of_all else self._t("Total of matching rows")
         if not cls.totals_currency:
-            return compute_totals(rows, cls.totals_spec, label=self._t("Total"))
+            return compute_totals(rows, cls.totals_spec, label=word)
         groups: dict[str, list[dict]] = {}
         for row in rows:
             groups.setdefault(str(row.get(cls.totals_currency, "") or ""), []).append(row)
         out: list[dict] = []
         for code, members in sorted(groups.items()):
-            label = self._t("Total") + (f" ({code})" if code and len(groups) > 1 else "")
+            label = word + (f" ({code})" if code and len(groups) > 1 else "")
             for total in compute_totals(members, cls.totals_spec, label=label):
                 total = {**total, "id": f"__total__{code}", cls.totals_currency: code}
                 out.append(total)
@@ -310,8 +405,22 @@ class LexRowsTableState(DataTableMixin, ExportMixin, mixin=True):
                 key = getattr(type(self).owner, type(self).handler_name).fn.__ui_key__
                 raise RFDSUserError(rows_mod.describe(exc, key, "")) from None
         found = self._matching(rows, sort=sort, filters=filters, query=query)
-        self.totals_rows = self._totals(found)
+        cls = type(self)
+        searched = bool(query) and cls.searchable
+        if cls.totals_spec and cls.totals_of_all:
+            # Every row the handler gives, whatever the search and filters leave, totalled when the
+            # table reads its rows; a search or a filter keeps that total. A handler that searches for
+            # itself is asked for every row once then, not on each keystroke.
+            if not self._totals_all_read or not (cls.takes_search and searched):
+                every = await self._all("") if cls.takes_search and searched else rows
+                # As shown with nothing narrowing the rows ("Total"), and with something ("Total of all rows").
+                self._totals_all = [self._totals(every), self._totals(every, narrowed=True)]
+                self._totals_all_read = True
+            self.totals_rows = self._totals_all[1 if searched or filters else 0]
+        else:
+            self.totals_rows = self._totals(found, narrowed=searched or bool(filters))
         page = found[offset:offset + limit]
+        rows_read(self)
         if type(self).row_open:
             self._row_to = {str(r["id"]): str(r.get(type(self).row_open, "") or "") for r in page}
         return page, len(found)
@@ -382,14 +491,15 @@ def state_for(handler: Any, *, columns: Sequence[Mapping[str, Any]], row_fields:
         return cls
     owner = handler.state
     name = f"RowsTable_{owner.__name__}_{handler.fn.__name__}_{next(_COUNTER)}"
+    page_size = int(config.pop("page_size", 25))
     classvars = {"owner": owner, "handler_name": handler.fn.__name__, "table_columns": tuple(columns),
-                 "page_size_options": (25, 50, 100, 200),
+                 "page_size_options": tuple(sorted({25, 50, 100, 200, page_size})),
                  "row_fields": tuple(row_fields), "takes_search": rows_mod.takes_search(handler),
                  "export_entity": str(config.pop("entity", handler.fn.__name__)), **config}
     annotations = {k: ClassVar[Any] for k in classvars}
     annotations["page_size"] = int
     cls = type(name, (LexRowsTableState, rx.State), {"__module__": __name__, "__annotations__": annotations,
-                                                     "page_size": 25, **classvars})
+                                                     "page_size": page_size, **classvars})
     globals()[name] = cls          # reachable by name, for Reflex's state managers (see data._state_for)
     _CACHE[key] = cls
     _BY_HANDLER.setdefault(handler_key(handler), []).append(cls)
@@ -407,6 +517,19 @@ def on_route(route: str, cls: type) -> None:
 
 def reopen_events(route: str) -> list:
     return [cls.reopen for cls in _BY_ROUTE.get(route, ())]
+
+
+def shown_on(route: str, cls: type) -> None:
+    """``cls`` is a table on the page at ``route`` whose rows are not stored: the opener tells it to ``restore``."""
+    if route:
+        listed = _SHOWN_ON.setdefault(route, [])
+        if cls not in listed:
+            listed.append(cls)
+
+
+def restore_events(route: str) -> list:
+    """The tables of ``route`` that read their rows again when the stored state left them out."""
+    return [cls.restore for cls in _SHOWN_ON.get(route, ())]
 
 
 def reread_events(*, handlers: Sequence[Any] = (), owner: Any = None) -> list:

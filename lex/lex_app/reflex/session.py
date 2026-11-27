@@ -412,11 +412,23 @@ def sign_out_url(state: Any) -> str:
     return f"{_backend_origin_of(state)}{LOGOUT_PATH}"
 
 
-def navigate(url: str) -> Any:
-    """An event that loads ``url`` as a whole page, in the frame the dashboard is in."""
+#: Where Reflex keeps a browser tab's client token (``TOKEN_KEY`` in its ``state.js``): the key of the
+#: tab's states on the server.
+TAB_TOKEN_KEY = "token"
+
+
+def navigate(url: str, *, new_tab_token: bool = False) -> Any:
+    """An event that loads ``url`` as a whole page, in the frame the dashboard is in.
+
+    ``new_tab_token``: the tab forgets its client token first, so the page loaded next starts with a new
+    one -- and with new states: nothing a state held for the user signing out is there for the next.
+    """
     import reflex as rx
 
-    return rx.call_script(f"window.location.assign({json.dumps(url)})")
+    script = f"window.location.assign({json.dumps(url)})"
+    if new_tab_token:
+        script = f"window.sessionStorage.removeItem({json.dumps(TAB_TOKEN_KEY)}); {script}"
+    return rx.call_script(script)
 
 
 def marker_cleanup(state: Any) -> Any:
@@ -662,6 +674,7 @@ async def _logout(scope: Mapping[str, Any]) -> Any:
             await run_orm(_revoke_handle, handle, "logout")
         except Exception:  # noqa: BLE001 - the cookie still goes
             logger.warning("Reflex dashboard sign-out could not revoke its binding", exc_info=True)
+        _forget_private_values(digest_of(handle))
         forget(digest_of(handle))
     back = frontend_origin(origin) + "/"
     app_origin = sites.pick_app_origin(urlsplit(origin).netloc)
@@ -669,6 +682,20 @@ async def _logout(scope: Mapping[str, Any]) -> Any:
     response = _no_store(RedirectResponse(target, status_code=303))
     _delete_cookie(response, HANDLE_COOKIE, secure)
     return response
+
+
+def _forget_private_values(digest: str) -> None:
+    """Drop the signed-out user's ``ui.private`` values held in this process.
+
+    ``LexUser.sign_out`` does it too, but a project may sign out through its own page, which
+    loads this route without that event.
+    """
+    known = cached(digest)
+    if known is None or known.identity is None:
+        return
+    from lex.lex_app.reflex.ui import context, private
+
+    private.forget(context.User.from_profile(known.profile).id)
 
 
 async def _blocked(scope: Mapping[str, Any]) -> Any:

@@ -8,8 +8,9 @@ button, more in a "More actions" menu), and refuses what does not belong in a sl
 is a page that renders without its data, a slot that accepts anything, or actions in the wrong
 place.
 
-Cluster 1cs -- scenarios 1.799-1.802. Type: U.
-Covers: lex/lex_app/reflex/ui/pages/kinds.py (record, list_, Kind).
+Cluster 1cs -- scenarios 1.799-1.802, 1.1127. Type: U.
+Covers: lex/lex_app/reflex/ui/pages/kinds.py (record, list_, Kind, section), lex/lex_app/reflex/ui/pages/tables.py
+(the table's caption).
 Run: python -m lex pytest lex/test_project/tests/init/test_1cs_ui_page_kinds.py -v
 """
 
@@ -43,6 +44,10 @@ class KindDesk(ui.State):
     def close(self):
         return ui.toast("Closed")
 
+    @ui.rows
+    def funds(self):
+        return [{"id": 1, "name": "Alder"}]
+
 
 def group_page():
     """Stands for a page declared with @ui.page("/groups/[key]")."""
@@ -51,6 +56,11 @@ def group_page():
 group_page.__ui_page__ = links.info_of("/groups/[key]", "group_page")
 
 CTX = Build(page="fund", route="/funds/[key]")
+
+
+def _CLOSE():
+    """A dangerous action; it asks first, as every dangerous action must (1.848)."""
+    return vocab.button("Close fund", KindDesk.close, tone="danger", confirm="Close this fund?")
 
 
 def _record(**slots):
@@ -120,7 +130,7 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
                also two sections with one title, a section hidden by a state value, a blank
                title, a title that is not words, two badges, and an action called Save (one
                fact or one section given without brackets is a list of one); a limit of RFDS's
-               own (five tables on one page) names the page and quotes RFDS's sentence.
+               own (five tables on one page) names the page and the sections, in lex.ui's words (1.1037).
         """
         cases = {
             "facts": (dict(facts=[rx.text("raw")]),
@@ -145,7 +155,8 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
             dict(sections=[kinds.section("Notes", vocab.text("a"), visible=KindDesk.name != "")]),
             "Page `fund`, slot `sections[0]`: `visible=` on a section of a record page takes a permission.\n"
             "A section's heading always shows. To hide the section from some users write `visible=ui.read(Model)`; "
-            "to show different content by state, put `ui.switch(...)` inside the section.")
+            "to show different content by state, put `ui.switch(...)` inside the section, or give the record "
+            "`tabs=True`, where a state value hides a tab.")
         cases["blank title"] = (dict(title="   "), "Page `fund`: the page has no title.\n"
                                                     "Give the kind `title=\"...\"`, or a state value.")
         cases["title not words"] = (dict(title=5), "Page `fund`: the page's title is `5`.\n"
@@ -164,8 +175,8 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         crowded = [kinds.section(f"Table {n}", tables.table(Group, columns=["name"])) for n in "abcde"]
         with self.assertRaises(PageError) as limit:
             _record(sections=crowded).build(CTX)
-        self.assertTrue(str(limit.exception).startswith("Page `fund`: RFDS's page layout refuses this page: rfds."),
-                        f"a limit of RFDS's own names the page and quotes RFDS: {limit.exception}")
+        self.assertTrue(str(limit.exception).startswith("Page `fund`, slot `sections`: the page has 5 tables"),
+                        f"RFDS's limit of tables is said in lex.ui's words (1.1037): {limit.exception}")
 
     # -- 1.801 ---------------------------------------------------------
     def test_1_801_actions_are_placed_as_the_page_header_places_them(self) -> None:
@@ -183,11 +194,11 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         one = str(_record(actions=[vocab.button("Edit", KindDesk.close)]).build(CTX))
         self.assertIn('"data-rfds-intent":"primary"', one, "the first action is primary")
         two = str(_record(actions=[vocab.button("Edit", KindDesk.close),
-                                   vocab.button("Close fund", KindDesk.close, tone="danger")]).build(CTX))
+                                   _CLOSE()]).build(CTX))
         self.assertIn('"data-rfds-intent":"danger"', two, "one further action stays a button")
         self.assertNotIn("rfds-menu-item-label", two, "and is not put in a menu")
         three = str(_record(actions=[vocab.button("Edit", KindDesk.close),
-                                     vocab.button("Close fund", KindDesk.close, tone="danger"),
+                                     _CLOSE(),
                                      vocab.link("All groups", to=group_page, key="1")]).build(CTX))
         self.assertIn('"rfds-menu-item-label"},rfdsI18n.t("Close fund", "Close fund"', three,
                       "two or more further actions are menu entries, translated")
@@ -197,11 +208,11 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
                                     vocab.link("All groups", to=group_page, key="1")]).build(CTX))
         self.assertNotIn('"data-rfds-tone":"danger"', calm, "and only a dangerous one has it")
         edit = vocab.button("Edit", KindDesk.close, visible=ui.edit(Group))
-        gated = str(_record(actions=[edit, vocab.button("Close fund", KindDesk.close, tone="danger")]).build(CTX))
+        gated = str(_record(actions=[edit, _CLOSE()]).build(CTX))
         self.assertIn('"data-rfds-intent":"primary"', gated, "a primary action with visible= stays primary")
         self.assertIn('"data-rfds-intent":"danger"', gated, "and the action beside it is still built")
         self.assertFalse(edit.primary, "the kind marks a copy primary, never the author's part")
-        danger_first = str(_record(actions=[vocab.button("Close fund", KindDesk.close, tone="danger")]).build(CTX))
+        danger_first = str(_record(actions=[_CLOSE()]).build(CTX))
         self.assertNotIn('"data-rfds-intent":"primary"', danger_first, "a dangerous action is never the primary one")
         with self.assertRaises(PageError) as wrong:
             _record(actions=[vocab.text("loose")]).build(CTX)
@@ -231,3 +242,40 @@ class TestCluster01cs_PageKinds(SimpleTestCase):
         with self.assertRaises(PageError) as no_table:
             kinds.list_(title="Groups").build(Build(page="groups", route="/groups"))
         self.assertIn("got nothing (`None`).", str(no_table.exception), "a list without a table says so")
+
+    # -- 1.1127 --------------------------------------------------------
+    def test_1_1127_a_tables_title_shows_once(self) -> None:
+        """
+        Scenario 1.1127: a table under a heading that says what it is.
+        Given: a list page titled "Open funds" -- built as a page whose function is named
+               otherwise -- a record page whose "Commitments" section holds a table, a section with
+               actions (drawn with its heading) holding one, and a section drawn without a heading.
+        When:  they are built.
+        Then:  RFDS's table keeps its caption, which names it for a screen reader: the list page's
+               own title (not its function's name) and the section's title. Where a heading on the
+               page already shows those words -- the list page's title, the record page's section,
+               the section with its heading -- the caption and the narrow view's caption are for
+               screen readers only (RFDS's rfds-sr-only), never shown twice; a section drawn
+               without a heading shows its title as the table's caption.
+        """
+        hidden = ('className:"rfds-data-table-caption rfds-sr-only"', 'className:"rfds-dt-cards-caption rfds-sr-only"')
+        table = tables.table(KindDesk.funds, columns=["name"])
+        listed = str(kinds.list_(title="Open funds", table=table).build(Build(page="funds_page", route="/funds")))
+        self.assertIn('rfdsI18n.t("Open funds", "Open funds"', listed.split('"rfds-data-table-caption-text"')[1][:120],
+                      "the list page's title names its table")
+        self.assertNotIn("Funds page", listed, "never its function's name")
+        record = str(_record(sections=[kinds.section("Commitments", tables.table(KindDesk.funds, columns=["name"]))])
+                     .build(CTX))
+        headed = str(kinds.section("Commitments", tables.table(KindDesk.funds, columns=["name"]),
+                                   actions=[vocab.button("Refresh", KindDesk.close)]).build(CTX))
+        for where, text in (("a list page", listed), ("a record page's section", record),
+                            ("a section with its heading", headed)):
+            for needle in hidden:
+                with self.subTest(where=where, needle=needle):
+                    self.assertIn(needle, text, "the caption is for screen readers only under a heading that says it")
+        self.assertIn('rfdsI18n.t("Commitments", "Commitments"', record.split('"rfds-data-table-caption-text"')[1][:120],
+                      "the section's title names its table")
+        plain = str(kinds.section("Commitments", tables.table(KindDesk.funds, columns=["name"])).build(CTX))
+        self.assertIn('className:"rfds-data-table-caption"', plain, "a section without a heading shows the caption")
+        self.assertNotIn(hidden[0], plain, "not for screen readers only")
+        self.assertIn('rfdsI18n.t("Commitments", "Commitments"', plain, "its title")

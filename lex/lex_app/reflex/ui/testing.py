@@ -8,6 +8,11 @@ import time
 from typing import Any
 
 from lex.lex_app.reflex.ui import context, handlers, pools, results
+from lex.lex_app.reflex.ui.private import GONE
+
+#: What a ``ui.private`` field holds once its value is gone: seed it with ``fields={"_name": GONE}``
+#: to test what a handler does then, and find it in ``result.fields["_name"]``.
+__all__ = ["GONE", "Harness", "Result", "lex_api", "rows", "run", "search"]
 
 
 class _NoApi:
@@ -18,6 +23,107 @@ class _NoApi:
             f"the handler used self.api.{name}(), and ui.testing.run() was given no api=. "
             "Pass a stand-in object with the methods the handler calls."
         )
+
+
+class LexViews:
+    """``self.api`` answered in-process by lex-app's own views: see :func:`lex_api`."""
+
+    def __init__(self, client: Any):
+        self.client = client
+        self.calls: list[tuple[str, str]] = []
+        #: The harness's ``user=`` (``self.user``), which the client's user must be; ``None``: not checked.
+        self.acting_for: str | None = None
+        self._checked = False
+
+    async def request(self, method: str, url: str, *, params: Any = None, json: Any = None,  # noqa: A002
+                      headers: Any = None) -> Any:
+        """What lex-app's views answer, in the shape lex.ui's API client reads (httpx's)."""
+        import asyncio
+        import json as json_mod
+        from urllib.parse import urlencode, urlsplit
+
+        parts = urlsplit(url)
+        query = urlencode(list(params or []))
+        path = parts.path + (f"?{query}" if query else "")
+        self.calls.append((method, parts.path))
+        body = "" if json is None else json_mod.dumps(json)
+
+        def call() -> Any:
+            from django.db import close_old_connections
+
+            try:
+                self._check_user()
+                return self.client.generic(method, path, data=body, content_type="application/json")
+            finally:
+                close_old_connections()
+
+        response = await asyncio.to_thread(call)
+        if getattr(response, "streaming", False):          # a file: read whole, as httpx gives it
+            return _Read(response.status_code, dict(response.headers), b"".join(response.streaming_content))
+        return response
+
+
+    def _check_user(self) -> None:
+        """Refuse a test whose ``self.user`` is not the user the API acts as: what it asserts would be wrong."""
+        if self.acting_for is None or self._checked:
+            return
+        signed_in = _client_user(self.client)
+        if signed_in is None:
+            raise ValueError("ui.testing.lex_api(client): the client is signed in as nobody, so lex-app's API refuses "
+                             "every call. Sign it in first (the test case's own sign-in, or client.force_login(user)).")
+        names = {str(signed_in.pk), str(getattr(signed_in, "username", "")), str(getattr(signed_in, "email", ""))}
+        if self.acting_for not in names:
+            who = getattr(signed_in, "username", "") or signed_in.pk
+            raise ValueError(f"ui.testing.lex_api(client): lex-app's API acts as the client's user {who!r}, and the "
+                             f"handler's self.user is {self.acting_for!r}. Give the handler the same user: "
+                             f"user={who!r} (or sign the client in as {self.acting_for!r}).")
+        self._checked = True
+
+
+def _client_user(client: Any) -> Any:
+    """The user a Django (or Django REST framework) test client is signed in as, or ``None``."""
+    forced = getattr(getattr(client, "handler", None), "_force_user", None)
+    if forced is not None:
+        return forced
+    try:
+        pk = client.session.get("_auth_user_id")
+    except Exception:  # noqa: BLE001 - no session: nobody
+        return None
+    if pk is None:
+        return None
+    from django.contrib.auth import get_user_model
+
+    return get_user_model().objects.filter(pk=pk).first()
+
+
+class _Read:
+    """A streamed answer read whole, as httpx gives it."""
+
+    def __init__(self, status_code: int, headers: dict, content: bytes):
+        self.status_code, self.headers, self.content = status_code, headers, content
+        self.text = content.decode("utf-8", "replace")
+
+    def json(self) -> Any:
+        import json
+
+        return json.loads(self.content)
+
+
+def lex_api(client: Any) -> LexViews:
+    """``self.api`` as lex-app's real API, answered in this process by its views: no server, no HTTP.
+
+    ``client`` is Django's (or Django REST framework's) test client, signed in: lex-app's API acts as
+    *the client's user*, as it acts as the signed-in user in the browser. Every call goes through
+    lex-app's own views -- the model's permissions, validation, lifecycle hooks, audit entries and
+    calculations -- so a test checks what the page will really do. The handler's ``self.user`` is the
+    harness's ``user=``, and it must be the same user (its username, id or e-mail): the first call
+    refuses a test where they differ, saying what to write::
+
+        ui.testing.run(OrdersState, "approve", user="e2e_user", api=ui.testing.lex_api(self.client), key=7)
+
+    ``.calls`` lists the requests made (method, path).
+    """
+    return LexViews(client)
 
 
 def _grants(grants: Any) -> list[dict]:
@@ -130,6 +236,16 @@ class Harness:
         from reflex_base.registry import RegistrationContext
 
         user, grants, params, api = self._session_args
+        from lex.lex_app.reflex.ui import forms, state
+
+        # A new browser and a new server: what the server process remembers per tab starts empty too.
+        state._FRAME_DECIDED.clear()
+        state._FRAME_DECIDING.clear()
+        forms._SEARCHED.clear()
+        forms._SEARCHING.clear()
+
+        if isinstance(api, LexViews):
+            api.acting_for = user               # the API acts as the client's user: the same one, or refused
 
         async def resolve(state: Any) -> context.Session:
             async def token() -> str:
@@ -138,11 +254,14 @@ class Harness:
             async def permissions() -> list:
                 return list(grants)
 
+            views = api if isinstance(api, LexViews) else None
+            stand_in = None if views is not None else api if api is not None else _NoApi()
             return context.Session(user=context.User(id=user, name=user, username=user, email=f"{user}@example.test"),
                                    params=context.Params(params), token=token, permissions=permissions,
-                                   api=api if api is not None else _NoApi(), tab=self.token)
+                                   api=stand_in, api_client=views, tab=self.token)
 
-        self._previous = (context.set_resolver(resolve), results.RECORDER, handlers.OUTCOMES)
+        self._previous = (context.set_resolver(resolve), results.RECORDER, handlers.OUTCOMES,
+                          context.set_user_id_of(lambda state: user))
         results.RECORDER = self.results
         handlers.OUTCOMES = self.outcomes
         self._registry = RegistrationContext.set(_registry_with_app())
@@ -158,8 +277,9 @@ class Harness:
             await self._running.__aexit__(*exc)
         finally:
             RegistrationContext.reset(self._registry)
-            resolver, recorder, outcomes = self._previous
+            resolver, recorder, outcomes, user_id_of = self._previous
             context.set_resolver(resolver)
+            context.set_user_id_of(user_id_of)
             results.RECORDER = recorder
             handlers.OUTCOMES = outcomes
             pools.shutdown()
@@ -186,7 +306,8 @@ class Harness:
 
         state = await self._state(state_cls)
         values = workcopy.snapshot(state)
-        for name in ("ui_running", "ui_failed", "ui_progress", "ui_progress_message", "ui_visit", "ui_error"):
+        for name in ("ui_running", "ui_failed", "ui_progress", "ui_progress_message", "ui_visit", "ui_error",
+                     "ui_invalid", "ui_step", "ui_done", "ui_refused", "ui_asking"):
             values[name] = workcopy._plain(getattr(state, name))
         return values
 
@@ -244,9 +365,36 @@ class Harness:
         return future
 
     async def set_fields(self, state_cls: Any, **values: Any) -> None:
+        """Seed fields of ``state_cls``; a ``ui.private`` field takes a value, or :data:`GONE`."""
+        from lex.lex_app.reflex.ui import private, workcopy
+
         state = await self._state(state_cls)
+        kept = private.fields(type(workcopy.raw(state)))
         for name, value in values.items():
-            setattr(state, name, value)
+            if name in kept:                    # the field's own way in: never Reflex's typed setter
+                private.put(state, kept[name], value)
+            else:
+                setattr(state, name, value)
+
+    async def search(self, handler: Any, key: str, text: str) -> list[dict]:
+        """The user types ``text`` into the searched field ``key`` of the form ``handler`` receives.
+
+        Returns the matches the browser is offered (``{"value", "label"}``), after the field's
+        ``@ui.rows`` handler ran as the user. The form must be declared (its page built), as when
+        lex-app starts.
+        """
+        from lex.lex_app.reflex.ui import forms
+        from lex.lex_app.reflex.ui.state import State
+
+        field = f"{forms.ident(handler)}|{key}"
+        if field not in forms._SEARCHES:
+            raise ValueError(f"{forms.ident(handler)} has no searched field {key!r}: a searched field is "
+                             f"ui.field({key!r}, options=State.rows_handler) in the form whose submit= is that "
+                             "handler, and the form's page is built first")
+        if not self._opened:
+            await self.open_tab()
+        await (await self.send(State, "ui_search", field=field, text=text)).wait_all()
+        return [dict(one) for one in dict((await self._state(State)).ui_matches).get(field, [])]
 
 
 @dataclasses.dataclass
@@ -285,6 +433,11 @@ class Result:
         return next((o.message for o in self.outcomes if o.kind == "error"), "")
 
     @property
+    def invalid(self) -> dict:
+        """Field key -> what was wrong with the value sent for it; empty when the handler's body ran."""
+        return {name.rpartition("|")[2]: text for name, text in self.fields["ui_invalid"].items()}
+
+    @property
     def running(self) -> dict:
         return self.fields["ui_running"]
 
@@ -313,6 +466,24 @@ def run(state_cls: Any, handler: str, *, user: str = "tester", grants: Any = (),
             return Result(fields=await harness.fields(state_cls), updates=list(harness.updates),
                           update_times=list(harness.update_times), results=list(harness.results),
                           outcomes=list(harness.outcomes))
+
+    return asyncio.run(scenario())
+
+
+def search(handler: Any, key: str, text: str, *, user: str = "tester", grants: Any = (),
+           params: dict | None = None, api: Any = None) -> list[dict]:
+    """The matches a searched field offers when the user types ``text``: ``[{"value", "label"}]``.
+
+    ``ui.testing.search(OrdersState.create, "customer", "acm")`` -- the form whose ``submit=`` is
+    ``OrdersState.create`` has ``ui.field("customer", options=OrdersState.customers)``. Its rows
+    handler runs as ``user`` with ``grants`` and the page's ``params``, as when the user types. The
+    form's page must be built first (as when lex-app starts). For several steps in one test, use
+    ``Harness.search``.
+    """
+
+    async def scenario() -> list[dict]:
+        async with Harness(user=user, grants=grants, params=params, api=api) as harness:
+            return await harness.search(handler, key, text)
 
     return asyncio.run(scenario())
 
@@ -355,7 +526,7 @@ def rows(handler: Any, *, user: str = "tester", grants: Any = (), params: dict |
         if table.source is not handler:
             raise ValueError("ui.testing.rows(handler, table=...): the table must read that handler")
         table.build(Build(page="test", caption="Rows"))
-        cls = rows_table._CACHE_BY_TABLE[id(table)]
+        cls = rows_table._CACHE_BY_TABLE[table]
         wired = cls._wire(handler.fn.__ui_key__, found)
         refused = [name for name in (filters or {}) if name not in cls.choice_fields]
         if refused:
