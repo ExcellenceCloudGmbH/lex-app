@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 1128
+max_scenario: 1129
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -2561,10 +2561,10 @@ letters:
       `ui.toast(..., link=ui.link(...))`: a link's targets (a page, a raw page, a record, an outside address) and checks, run when the handler makes the toast; RFDS's toast with one action. These tests fail on a toast without its button, a button that leads to the wrong page, or a link whose mistake is found only when a user presses it.
   dy:
     title: 'lex.ui tables: the name pinned and given room, a code kept narrow, the Columns menu, every row at once, totals that say what they sum'
-    scenarios: '1.940-1.946, 1.953, 1.954, 1.955, 1.956, 1.957, 1.1126'
+    scenarios: '1.940-1.946, 1.953, 1.954, 1.955, 1.956, 1.957, 1.1126, 1.1129'
     status: complete
     tests:
-      pass: 13
+      pass: 14
       skip: 0
       xfail: 0
     note: >-

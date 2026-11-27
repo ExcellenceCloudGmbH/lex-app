@@ -11,9 +11,9 @@ whether it sums the rows the search left or every row. A regression is a name th
 a row that cannot be reached, a width that only breaks in the browser, a user's column choice
 that hides the row's name, or a total that silently changes meaning when the user searches.
 
-Cluster 1dy -- scenarios 1.940-1.946, 1.953-1.957, 1.1126. Type: U.
+Cluster 1dy -- scenarios 1.940-1.946, 1.953-1.957, 1.1126, 1.1129. Type: U.
 Covers: lex/lex_app/reflex/ui/pages/tables.py (column kind="name"/"code", pin=; table page_size=,
-choose_columns=, totals=, row_actions=), lex/lex_app/reflex/ui/pages/vocab.py (a row's button and link, a menu
+choose_columns=, totals=, row_actions=, export=), lex/lex_app/reflex/ui/pages/vocab.py (a row's button and link, a menu
 entry that says why it cannot be chosen), lex/lex_app/reflex/ui/pages/rows_table.py (page size, totals over all
 rows, their label), lex/lex_app/reflex/data.py (ChosenColumns, the model table's page size).
 Run: python -m lex pytest lex/test_project/tests/init/test_1dy_ui_table_columns_rows.py -v
@@ -496,3 +496,22 @@ class TestCluster01dy_TableColumnsRows(SimpleTestCase):
         linked = linked[linked.index('"data-slot":"rfds-row-actions"'):]
         self.assertIn('"data-rfds-intent":"tertiary"', linked, "a link in a row is a ghost button")
         self.assertIn("rfds-size-sm", linked, "a small one")
+
+    # -- 1.1129 --------------------------------------------------------
+    def test_1_1129_the_export_split_button_is_one_control(self) -> None:
+        """
+        Scenario 1.1129: the table's Export, one split button.
+        Given: a table with export=True.
+        When:  it is built.
+        Then:  its toolbar holds RFDS's attached export group - "Export" (CSV, the first format)
+               and the menu of every format behind "More export formats" - and both halves are
+               drawn as the same secondary button, so they read as one control: RFDS's own
+               export_menu leaves the menu's half a bare ghost icon pressed against the filled
+               "Export", which reads as two buttons overlapping.
+        """
+        text = str(ui.embed(ui.table(ClosingFundsState.funds, columns=["name"], export=True), name="funds"))
+        group = text[text.index('"data-slot":"rfds-export-menu"') - 1500:]
+        group = group[:group.index("More export formats") + 400]
+        self.assertIn("rfds-button-group-attached", group, "RFDS's attached group")
+        self.assertEqual(group.count('"data-rfds-intent":"secondary"'), 2, "both halves the same secondary button")
+        self.assertNotIn('"data-rfds-intent":"tertiary"', group, "no bare ghost half")

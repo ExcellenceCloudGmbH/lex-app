@@ -261,7 +261,6 @@ class Table(Part):
         import rfds
 
         from lex.lex_app.reflex.ui.pages import rows_table
-        from rfds.patterns.exports import export_menu
 
         search = rfds.search_input(value=state.query, on_change=state.set_query.debounce(250),
                                    label=say("Search")) if self.search else None
@@ -283,7 +282,7 @@ class Table(Part):
                                          on_change=lambda value, name=name: state.set_choice(name, value),
                                          label=label, name=f"filter_{name}", width="sm"))
             filters = rfds.cluster(*boxes, gap="2")
-        export = export_menu(on_export=state.export, kinds=("csv", "xlsx"), loading=state.exporting) if self.export else None
+        export = _export_split(state) if self.export else None
         chooser = None
         if self.choose_columns:
             chooser = rfds.column_chooser(columns=specs, visible=state.view_columns, on_change=state.set_view_columns,
@@ -589,6 +588,30 @@ class _Rehydrated(Fragment):
         return [Var(f"useEffect(() => {{ if (!{hydrated}) return; ({Var.create(trigger)})(); }}, [{hydrated}]);",
                     _var_data=VarData.merge(hydrated._get_all_var_data(),
                                             VarData(position=Hooks.HookPosition.POST_TRIGGER)))]
+
+
+def _export_split(state: Any) -> rx.Component:
+    """The table's Export: RFDS's split button - "Export" (CSV) and the menu of every format - as one control.
+
+    Built from the same RFDS parts, words and marks as ``rfds.export_menu`` (an attached ``button_group``,
+    ``data-slot="rfds-export-menu"``), with one difference: the menu's half is the same secondary button
+    as "Export". RFDS's own leaves it a bare ghost icon pressed against the filled "Export", which reads
+    as two buttons overlapping rather than one.
+    """
+    from rfds.components.actions import button, button_group, icon_button, menu, menu_item
+    from rfds.i18n import t
+
+    names = {"csv": t("exports.kind.csv", "CSV"), "xlsx": t("exports.kind.xlsx", "Excel (XLSX)")}
+    busy = state.exporting
+    trigger = icon_button("chevron_down", label=t("exports.more_formats", "More export formats"), intent="secondary",
+                          disabled=busy, tooltip=False, class_name="rfds-split-button-trigger")
+    group = button_group(
+        button(t("exports.export", "Export"), icon="export", loading=busy, disabled=busy,
+               on_click=state.export("csv")),
+        menu(trigger, *(menu_item(label, on_select=state.export(kind)) for kind, label in names.items()), align="end"),
+        attached=True, class_name="rfds-split-button rfds-export-menu")
+    group.custom_attrs["data-slot"] = "rfds-export-menu"
+    return group
 
 
 def _caption(ctx: Build, made_up: Any) -> tuple[Any, bool]:
