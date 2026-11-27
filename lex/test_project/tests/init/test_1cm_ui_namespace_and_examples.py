@@ -161,7 +161,13 @@ class TestCluster01cm_Namespace(TestCase):
             self.assertIs(getattr(ui, name), obj, f"ui.{name}")
         pages = {"page", "dashboard", "record", "list", "section", "text", "fact", "status", "message", "table", "column",
                  "button", "link", "each", "switch", "custom_block", "loaded", "PageError",   # batch 1cu covers these
-                 "rows", "address", "refresh", "embed", "reflex_page"}                       # and batches 1cv, 1cy, 1da these
+                 "rows", "address", "refresh", "embed", "reflex_page",                      # and batches 1cv, 1cy, 1da these
+                 "form", "field", "step",                                                    # and batch 1dj these
+                 "private",                                                                  # and batch 1dv this
+                 "frame",                                                                    # and batch 1eb this
+                 "rule",                                                                     # and batch 1ed this
+                 "calculation",                                                              # and batch 1ef this
+                 "scroll_to"}                                                                # and batch 1ex this
         self.assertEqual(sorted(set(ui.__all__) - pages), sorted(expected),
                          "nothing else is public beside the page names")
 

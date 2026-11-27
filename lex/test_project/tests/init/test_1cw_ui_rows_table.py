@@ -96,7 +96,7 @@ def build_people_table(route: str = "/people/[key]", slot: str = "sections", lis
                               ui.column("amount", kind="money", currency="currency"), ui.column("kind", kind="status")],
                      row_actions=lambda row: [ui.button("End role", PeopleState.end, row["id"])])
     table.build(Build(page="person", route=route, slot=slot, caption="Roles", page_search=listing))
-    return rows_table._CACHE_BY_TABLE[id(table)]  # this table's state, whatever other test built one before
+    return rows_table._CACHE_BY_TABLE[table]  # this table's state, whatever other test built one before
 
 
 def simple_table(handler) -> type:

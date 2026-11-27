@@ -18,10 +18,21 @@ def raw(state: Any) -> Any:
 
 
 def fields_of(state_cls: Any) -> tuple[str, ...]:
-    """The class's own fields: its vars, and its backend vars (not the inherited ones)."""
+    """The class's own fields: its vars, its backend vars (not the inherited ones), and its private fields
+    -- also those it inherits, which are the declaring state's one value (a load does not reset those)."""
+    from lex.lex_app.reflex.ui import private
+
     inherited = set(getattr(state_cls, "inherited_backend_vars", {}) or {})
     backend = [name for name in state_cls.backend_vars if name not in inherited]
-    return (*state_cls.base_vars, *backend)
+    return (*state_cls.base_vars, *backend, *private.fields(state_cls))
+
+
+def _value(target: Any, name: str) -> Any:
+    """A field's value; a private field's whose value is gone is ``GONE`` instead of a failure."""
+    from lex.lex_app.reflex.ui import private
+
+    found = private.fields(type(target)).get(name)
+    return getattr(target, name) if found is None else private.peek(target, found)
 
 
 def _plain(value: Any) -> Any:
@@ -52,7 +63,7 @@ def snapshot(state: Any) -> dict[str, Any]:
     snap = {}
     for name in fields_of(state_cls):
         try:
-            snap[name] = _plain(getattr(target, name))
+            snap[name] = _plain(_value(target, name))
         except Exception as exc:
             raise TypeError(
                 f"{state_cls.__name__}.{name} cannot be copied. lex.ui copies a state's fields (to discard a "
@@ -66,15 +77,30 @@ def restore(state: Any, snap: dict[str, Any]) -> None:
     """Set every field that differs from ``snap`` back to its snapshot value."""
     target = raw(state)
     for name, value in snap.items():
-        if _differs(_plain(getattr(target, name)), value):
+        if _differs(_plain(_value(target, name)), value):
             setattr(state, name, copy.deepcopy(value))
 
 
 def reset(state: Any, keep: tuple[str, ...] = ()) -> None:
-    """Set the state's own fields to their class defaults, except ``keep``."""
+    """Set the state's own fields to their class defaults, except ``keep``.
+
+    A private field declared ``keep=True`` (or listed in ``keep``) is kept while its value is; one
+    whose value is gone is reset, so the page starts clean instead of failing on it.
+    """
+    from lex.lex_app.reflex.ui import private
+
     state_cls = type(raw(state))
     declared = state_cls.get_fields()
+    held = private.fields(state_cls)
+    own = private.fields(state_cls, inherited=False)
     for name in fields_of(state_cls):
+        if name in held and name not in own:
+            continue                        # inherited: the parent's value, reset by the parent's load
+        if name in held:
+            kept = held[name].keep or name in keep
+            if not (kept and private.peek(raw(state), held[name]) is not private.GONE):
+                private.put(raw(state), held[name], held[name].empty())
+            continue
         if name in keep:
             continue
         if name in state_cls.backend_vars:
@@ -82,6 +108,12 @@ def reset(state: Any, keep: tuple[str, ...] = ()) -> None:
         else:
             default = declared[name].default_value()
         setattr(state, name, default)
+
+
+def _gone() -> Any:
+    from lex.lex_app.reflex.ui import private
+
+    return private.GONE
 
 
 def _not_own(state_cls: Any, name: str) -> str:
@@ -104,7 +136,12 @@ class Draft:
     def __getattr__(self, name: str) -> Any:
         values = object.__getattribute__(self, "_values")
         if name in values:
-            return values[name]
+            value = values[name]
+            if value is _gone():
+                from lex.lex_app.reflex.ui import private
+
+                raise private.Gone()
+            return value
         state_cls = object.__getattribute__(self, "_cls")
         inherited = set(getattr(state_cls, "inherited_vars", {}) or {}) | set(
             getattr(state_cls, "inherited_backend_vars", {}) or {}

@@ -52,6 +52,9 @@ def mark_started(s: Any, key: str, arg: str) -> None:
     failed = dict(s.ui_failed)
     failed.pop(key, None)
     s.ui_failed = failed
+    busy = getattr(s, "_ui_busy", ())
+    if key in busy:
+        s._ui_busy = [one for one in busy if one != key]
     s._ui_boots = {**dict(s._ui_boots), f"{key}|{arg}": BOOT}
 
 
@@ -108,6 +111,45 @@ def claim(token: str, key: str, arg: str) -> Run | None:
 def release(token: str, key: str, arg: str) -> None:
     with _LOCK:
         _ACTIVE.pop((token, key, arg), None)
+
+
+#: Job id (module and qualified name) -> the words of the first button that runs it, for its refusals.
+_WORDS: dict[str, str] = {}
+
+
+def name_job(handler: Any, words: Any) -> None:
+    """A button saying ``words`` runs ``handler``: its refusals name the job so (the first button wins)."""
+    fn = getattr(handler, "fn", handler)
+    body = getattr(fn, "__ui_fn__", None)
+    if body is not None and isinstance(words, str) and words.strip():
+        _WORDS.setdefault(f"{body.__module__}.{body.__qualname__}", words.strip())
+
+
+def words_of(fn: Any) -> str:
+    """How a job's refusal names it: its button's words, else its name as a form's submit button says it."""
+    return _WORDS.get(f"{fn.__module__}.{fn.__qualname__}") or fn.__name__.replace("_", " ").strip().capitalize()
+
+
+#: Job id (module and qualified name) -> how many of its runs hold a place under its ``limit=`` in this process.
+_PLACES: dict[str, int] = {}
+
+
+def take_place(key: str, limit: int) -> bool:
+    """Take one of ``limit`` places for a run of ``key`` in this process; ``False`` when all are taken."""
+    with _LOCK:
+        if _PLACES.get(key, 0) >= limit:
+            return False
+        _PLACES[key] = _PLACES.get(key, 0) + 1
+        return True
+
+
+def give_place(key: str) -> None:
+    with _LOCK:
+        left = _PLACES.get(key, 0) - 1
+        if left > 0:
+            _PLACES[key] = left
+        else:
+            _PLACES.pop(key, None)
 
 
 def request_cancel(token: str, key: str) -> int:
@@ -266,11 +308,18 @@ async def _close(client: Any) -> None:
 
 @contextlib.asynccontextmanager
 async def heartbeat(app: Any):
-    """A lifespan task: while the backend runs, keep this process's heartbeat in Redis."""
+    """A lifespan task: while the backend runs, keep this process's heartbeat in Redis.
+
+    The same clock drops the ``ui.private`` values that are past their idle time or maximum age.
+    """
     global _CLIENT
 
     async def beat() -> None:
+        from lex.lex_app.reflex.ui import private
+
         while True:
+            with contextlib.suppress(Exception):
+                private.sweep()         # private values past their idle time or age leave memory
             try:
                 redis = _redis()
                 if redis is not None:

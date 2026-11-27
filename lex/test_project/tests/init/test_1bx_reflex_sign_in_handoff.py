@@ -477,24 +477,34 @@ class TestCluster01bx_SignOut(_HandoffCase):
                LexUser.sign_out).
         Then:  sign_out loads <backend>/auth/logout; it revokes the binding (`logout`), forgets
                it, deletes the cookie and sends the browser to lex-app's total logout, which
-               comes back to the dashboard; the next event of that session is anonymous.
+               comes back to the dashboard; the next event of that session is anonymous; and the
+               user's `ui.private` values in this process are dropped there too (a project whose
+               own sign-out page loads /auth/logout without LexUser.sign_out loses nothing).
         """
         from lex.lex_app.reflex.auth import LexUser
+        from lex.lex_app.reflex.ui import context, private
 
         _, _, handle = self.signed_in_dashboard()
         digest = handoff.digest(handle)
         _run(session.standing(digest))
+        owner = context.User.from_profile(session.cached(digest).profile).id
+        self.assertTrue(owner, "the signed-in user has an id")
         root = _state(digest)
         spec = LexUser.sign_out.fn(root.get_substate(LexUser.get_full_name().split(".")))
         self.assertIn("http://localhost:8503/auth/logout", json.dumps(spec.payload if hasattr(spec, "payload")
                                                                     else str(spec)) + str(spec))
 
+        now = private._now()
+        private._STORE[("tab-x", "Reports", "_report")] = private._Entry(
+            owner=owner, stamp="s", value={"secret": 1}, written=now, used=now, field=private.private())
         out = self.dash.get("/auth/logout")
         self.assertEqual(out.status_code, 303)
         self.assertEqual(out.headers["location"], APP + "/oidc/total_logout?next=http%3A%2F%2Flocalhost%3A8502%2F")
         self.assertTrue(any(line.startswith("lex_rdash=;") for line in _cookie_lines(out)))
         self.assertEqual(DashboardBinding.objects.get().revoke_reason, "logout")
         self.assertIsNone(session.cached(digest))
+        self.assertFalse([key for key, entry in private._STORE.items() if entry.owner == owner],
+                         "/auth/logout drops the user's private values in this process")
         self.assertIsNone(_run(session.standing(digest)).identity)
 
 

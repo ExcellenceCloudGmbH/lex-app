@@ -10,7 +10,7 @@ import reflex as rx
 
 from lex.lex_app.reflex.ui import runs
 from lex.lex_app.reflex.ui.pages import tables, vocab
-from lex.lex_app.reflex.ui.pages.parts import Build, NotASentence, Part, called, say, slug, take
+from lex.lex_app.reflex.ui.pages.parts import Build, NotASentence, Part, called, say, slug, take, with_overlays
 
 
 def _many(value: Any) -> tuple:
@@ -59,13 +59,76 @@ def _stacked(ctx: Build, parts: list) -> list:
 class Section(Part):
     nests: ClassVar[bool] = False
 
-    title: str
+    title: Any
     content: tuple = ()
     load: Any = None
     empty: Any = None
     visible: Any = None
+    collapsed: bool = False
+    actions: tuple = ()
 
     def body(self, ctx: Build) -> rx.Component:
+        return self._content(ctx)[0]
+
+    def fixed(self, ctx: Build, where: str) -> None:
+        """Refuse what a section ``where`` (a record page's, a tab) cannot have: a title from the state, actions."""
+        if not isinstance(self.title, str):
+            raise ctx.fail(f"a section's title is a state value, and {where} names its sections with fixed words.",
+                           "Give the section a sentence as its title; put the value inside it, as `ui.text(...)` "
+                           "or `ui.fact(...)`.")
+        if self.actions:
+            raise ctx.fail(f"the section `{self.title}` has `actions=`, and {where} has no heading of its own "
+                           "to hold them.",
+                           "Put the buttons inside the section, or give the page `actions=[...]`.")
+
+    def titled(self, ctx: Build) -> rx.Component:
+        """The section with its heading: RFDS's section, closed at first when ``collapsed``.
+
+        A closed section mounts what it holds when the user first opens it (a chart then fits the
+        space it is shown in), except a table, which reads its rows at once for the count in the
+        title. Its actions sit in RFDS's section header; a closed section shows them when opened
+        (RFDS never puts a control inside the disclosure's summary).
+        """
+        import rfds
+        from rfds.components.inputs._shared import client_state
+
+        opened = client_state("lexOpened", False) if self.collapsed else None
+        content, parts = self._content(ctx, opened)
+        title: Any = say(self.title)
+        if self.collapsed:
+            title = self._counted(title, parts)
+        extra: dict[str, Any] = {}
+        if self.actions:
+            at = ctx.at("actions")
+            buttons = take(at, list(self.actions), (vocab.Button, vocab.Link),
+                           "A section's `actions=` holds `ui.button(...)` and `ui.link(...)`.")
+            extra["actions"] = rfds.cluster(*(part.build(at) for part in buttons), gap="2")
+        if opened is not None:
+            # A click on the closed section can only be on its summary: the content mounts from then on.
+            extra["on_click"] = opened.set_value(True)
+        if isinstance(self.title, str):                   # ui.scroll_to("<title>") brings it into view
+            extra["id"] = _section_ids([*ctx.anchors, self.title])[-1]
+            ctx.anchors.append(extra["id"])
+        return rfds.section(content, title=title, collapsible=self.collapsed, default_open=not self.collapsed,
+                            **extra)
+
+    def _counted(self, title: Any, parts: list) -> Any:
+        """A closed section's title, with its table's row count once the table has read its rows."""
+        from lex.lex_app.reflex.ui.pages import rows_table
+
+        held = [part for part in parts if isinstance(part, tables.Table)]
+        state = rows_table._CACHE_BY_TABLE.get(held[0]) if len(held) == 1 else None
+        if state is None:
+            return title
+        return rx.cond(state.loaded_at != "", say("{title} ({count, number})", title=title, count=state.total_rows),
+                       title)
+
+    def _content(self, ctx: Build, opened: Any = None) -> tuple[rx.Component, list]:
+        """The section's content, and its parts as built (a table may be a copy carrying ``empty=``).
+
+        ``opened``: a client state, true once the user opened the closed section; every part but a
+        table mounts only then.
+        """
         import rfds
 
         if any(isinstance(part, Section) for part in self.content):
@@ -83,18 +146,50 @@ class Section(Part):
             parts = [dataclasses.replace(part, empty=self.empty)
                      if isinstance(part, tables.Table) and part.empty is None else part for part in parts]
         shape = "table" if has_table and len(parts) == 1 else "rect"
-        ctx = dataclasses.replace(ctx, caption=self.title, under_load=ctx.under_load or self.load is not None)
-        return states(ctx, self.load, rfds.stack(*_stacked(ctx, parts)), shape)
+        ctx = dataclasses.replace(ctx, caption=self.title if isinstance(self.title, str) else "",
+                                  under_load=ctx.under_load or self.load is not None)
+        if opened is None:
+            return states(ctx, self.load, rfds.stack(*_stacked(ctx, parts)), shape), parts
+        built: list = []
+        group: list = []
+
+        def close() -> None:
+            if group:
+                built.append(rx.cond(opened.value, rfds.stack(*_stacked(ctx, list(group)))))
+                group.clear()
+
+        for part in parts:
+            if isinstance(part, tables.Table):
+                close()
+                built.append(part.build(ctx))
+            else:
+                group.append(part)
+        close()
+        return states(ctx, self.load, rfds.stack(*built), shape), parts
 
     def _render(self, ctx: Build) -> rx.Component:
-        return self.body(ctx)
+        return self.titled(ctx) if self.collapsed or self.actions else self.body(ctx)
 
 
-def section(title: str, *content: Any, load: Any = None, empty: Any = None, visible: Any = None) -> Section:
-    """A titled part of the page. With ``load=`` it loads on its own and shows its own skeleton and failure."""
-    if not isinstance(title, str) or not title:
-        raise TypeError(f"ui.section() takes its title first, a sentence; got {title!r}")
-    return Section(title, tuple(content), load, empty, visible)
+def section(title: Any, *content: Any, load: Any = None, empty: Any = None, visible: Any = None,
+            collapsed: bool = False, actions: Any = ()) -> Section:
+    """A titled part of the page. With ``load=`` it loads on its own and shows its own skeleton and failure.
+
+    ``title`` is a sentence, or a state value (``ImportState.lines_title``, "Lines (12)") where the
+    section has a heading of its own -- not on a record page or a tab, which name their sections
+    with fixed words. ``actions=[ui.button(...)]`` puts buttons in the section's heading.
+
+    ``collapsed=True`` closes it until the user opens it (in the browser, no round trip); what it
+    holds is mounted when the user first opens it, so a chart fits the space it is shown in. A
+    closed section that holds a table reads the rows at once and says in its title how many there
+    are, "Fields read (12)". A record page's sections are always open.
+    """
+    if isinstance(title, str) and not title or not isinstance(title, (str, rx.Var)):
+        raise TypeError(f"ui.section() takes its title first, a sentence or a state value; got {title!r}")
+    if not isinstance(collapsed, bool):
+        raise TypeError(f"ui.section(collapsed=) takes True or False; got {collapsed!r}. `collapsed=True` closes "
+                        "the section until the user opens it.")
+    return Section(title, tuple(content), load, empty, visible, collapsed, _many(actions))
 
 
 #: An action RFDS treats as a Save: it wants a "last saved" time beside it, which a page header cannot give.
@@ -121,6 +216,128 @@ def _rfds(ctx: Build, build: Callable[[], Any]) -> Any:
     except (ValueError, TypeError) as wrong:
         raise ctx.fail(f"RFDS's page layout refuses this page: {wrong}",
                        "The sentence above is RFDS's own: it names the limit the page goes over.") from wrong
+
+
+def hide_tabs(component: Any, shown: dict) -> Any:
+    """``component`` (RFDS's tabs, or a page holding them) with each tab of ``shown`` drawn only while its
+    state value is true: the tab's trigger and its panel, found by the tab's value. While the open tab's
+    value turns false, the first tab shows instead (its panel would be gone, and nothing shown).
+
+    RFDS's ``TabSpec`` hides a tab by a permission only; a tab shown by state (a chart tab only when the
+    result has figures) is the same tab under ``rx.cond``. This reads how RFDS builds its tabs (a trigger
+    marked ``data-rfds-tab-value``, a ``TabsContent`` panel, a ``TabsRoot`` holding the open tab's value);
+    when RFDS builds them otherwise it stops with a sentence, never silently showing a tab.
+    """
+    if not shown:
+        return component
+    found: dict = {ident: [] for ident in shown}
+    order: list = []                    # every tab's value, in the order of its trigger
+    roots: list = []
+
+    def tab_of(node: Any) -> str | None:
+        attrs = getattr(node, "custom_attrs", None) or {}
+        value = attrs.get("data-rfds-tab-value")
+        if isinstance(value, str):
+            order.append(value)
+            if value in shown:
+                found[value].append("trigger")
+                return value
+        if type(node).__name__ == "TabsContent":
+            text = str(getattr(node, "value", "")).strip('"')
+            if text in shown:
+                found[text].append("panel")
+                return text
+        return None
+
+    def walk(node: Any) -> None:
+        if type(node).__name__ == "TabsRoot":
+            roots.append(node)
+        children = getattr(node, "children", None)
+        if not isinstance(children, list):
+            return
+        for index, child in enumerate(children):
+            ident = tab_of(child)
+            if ident is not None:
+                children[index] = rx.cond(shown[ident], child)
+            else:
+                walk(child)
+
+    walk(component)
+    wrong = {ident: parts for ident, parts in found.items() if sorted(parts) != ["panel", "trigger"]}
+    if wrong or len(roots) != 1 or not order:
+        raise RuntimeError(f"lex.ui: RFDS's tabs are not built as lex.ui reads them (tab parts found: {found}, "
+                           f"tab roots: {len(roots)}), so a tab shown by state cannot be hidden. lex.ui must be "
+                           "updated for this version of RFDS.")
+    root, first = roots[0], order[0]
+    value = getattr(root, "value", None)
+    if isinstance(value, rx.Var):
+        effective = value
+        for ident, condition in shown.items():
+            effective = rx.cond((value == ident) & ~condition, first, effective)
+        root.value = effective
+    return component
+
+
+def tab_visible(at: Build, part: "Section", first: bool) -> tuple[Any, Any]:
+    """A tab's ``visible=``: (RFDS's permission string, or the state value that shows the tab)."""
+    from lex.lex_app.reflex.access import permission
+    from lex.lex_app.reflex.ui import guard
+
+    if isinstance(part.visible, guard.Requirement):
+        return permission(part.visible.target, part.visible.scope), None       # RFDS's tab permission
+    if part.visible is None or part.visible is guard.signed_in:
+        return None, None
+    if isinstance(part.visible, rx.Var):
+        if first:
+            raise at.fail("`visible=` on the first tab is a state value, and the page opens on the first tab.",
+                          "Put a tab that is always there first.")
+        return None, part.visible.bool()
+    raise at.fail("`visible=` on a tab takes a permission or a state value.",
+                  "Write `visible=ui.read(Model)` to hide the tab from some users, or `visible=State.has_chart` to "
+                  "show it only while the state says so.")
+
+
+#: What a table repeated by ``ui.each`` counts as: any number of tables, more than any limit.
+MANY = 10**6
+
+
+def tables_in(content: Any) -> int:
+    """How many tables ``content`` holds as RFDS counts them: those inside other parts too, every case of a
+    ``ui.switch`` (each is on the page, shown or not), and :data:`MANY` for a table ``ui.each`` repeats."""
+    seen: set[int] = set()
+
+    def count(part: Any) -> int:
+        if isinstance(part, (list, tuple)):
+            return sum(count(one) for one in part)
+        if isinstance(part, tables.Table):
+            return 1
+        if isinstance(part, vocab.Switch):
+            return sum(count(one) for one in part.cases.values())
+        if isinstance(part, vocab.Each):
+            try:
+                made = part.render(rx.Var("lexItem", _var_type=dict))
+            except Exception:  # noqa: BLE001 - not a table it can make here: counted when built
+                return 0
+            return MANY if count(made) else 0
+        if (not dataclasses.is_dataclass(part) or isinstance(part, (type, rx.Var, rx.Component))
+                or id(part) in seen):
+            return 0
+        seen.add(id(part))
+        return sum(count(getattr(part, field.name)) for field in dataclasses.fields(part))
+
+    return count(content)
+
+
+def section_anchor(title: str) -> str:
+    """The id of the section titled ``title`` on its page (``ui.scroll_to("Lines")`` scrolls to it)."""
+    return _section_ids([title])[0]
+
+
+def table_anchor(handler: Any) -> str:
+    """The id of the table over the ``@ui.rows`` ``handler`` on its page."""
+    from lex.lex_app.reflex.ui.pages import rows_table
+
+    return "table-" + slug(rows_table.handler_key(handler).replace(".", "-").replace("_", "-"))
 
 
 def _section_ids(titles: list) -> list:
@@ -151,10 +368,17 @@ class Kind:
         return ([self.load] if self.load is not None else []), []
 
     def build(self, ctx: Build) -> rx.Component:
+        """The page, and beside it the dialogs its buttons open."""
+        return with_overlays(ctx, self._page(ctx))
+
+    def _page(self, ctx: Build) -> rx.Component:
         raise NotImplementedError
 
-    def _buttons(self, ctx: Build) -> list:
-        """The page's actions as RFDS places them: one primary button; one more as a button, more in a menu."""
+    def _buttons(self, ctx: Build, lead: bool = True) -> list:
+        """The page's actions as RFDS places them: one primary button; one more as a button, more in a menu.
+
+        ``lead=False`` when the page has its primary action elsewhere (a form's submit button).
+        """
         ctx = ctx.at("actions", "actions")
         parts = take(ctx, list(self.actions), (vocab.Button, vocab.Link),
                      "`actions=` holds `ui.button(...)` (or `ui.link(...)`, shown as a button).")
@@ -163,7 +387,8 @@ class Kind:
                 raise ctx.fail(f"an action is called `{part.label}`.",
                                "RFDS shows a last-saved time beside a Save action, which a page header cannot give "
                                "yet. Name the action for what it does (`\"Apply changes\"`); saving belongs to a form.")
-        first = parts[0] if parts and isinstance(parts[0], vocab.Button) and parts[0].tone != "danger" else None
+        first = (parts[0] if lead and parts and isinstance(parts[0], vocab.Button) and parts[0].tone != "danger"
+                 else None)
         rest = [part for part in parts if part is not first]
         built: list = []
         if first is not None:
@@ -210,6 +435,10 @@ class Record(Kind):
         if not parts:
             raise ctx.at("sections").fail("a record page needs at least one section.",
                                           "Add `sections=[ui.section(\"Details\", ...)]`.")
+        self._shown_tabs = {}                       # a tab's id -> the state value that shows it
+        for index, part in enumerate(parts):
+            part.fixed(ctx.at(f"sections[{index}]"), "a record page")
+        self._at_most_tables(ctx, parts)
         titles = [part.title for part in parts]
         twice = sorted({title for title in titles if titles.count(title) > 1})
         if twice:
@@ -218,20 +447,48 @@ class Record(Kind):
         built: list = []
         for index, (part, ident) in enumerate(zip(parts, _section_ids(titles))):
             at = ctx.at(f"sections[{index}]")
+            if part.collapsed:
+                raise at.fail(f"the section `{part.title}` is collapsed, and a record page's sections are always open.",
+                              "RFDS lists them under \"On this page\". To show one section at a time, give the "
+                              "record `tabs=True`.")
             needs = None
-            if isinstance(part.visible, guard.Requirement):
+            if self.tabs and len(parts) > 1:
+                needs, by_state = tab_visible(at, part, index == 0)
+                if by_state is not None:
+                    self._shown_tabs[ident] = by_state
+            elif isinstance(part.visible, guard.Requirement):
                 needs = permission(part.visible.target, part.visible.scope)     # RFDS keeps the heading and says why
             elif not (part.visible is None or part.visible is guard.signed_in):
                 raise at.fail("`visible=` on a section of a record page takes a permission.",
                               "A section's heading always shows. To hide the section from some users write "
                               "`visible=ui.read(Model)`; to show different content by state, put `ui.switch(...)` "
-                              "inside the section.")
+                              "inside the section, or give the record `tabs=True`, where a state value hides "
+                              "a tab.")
             content = part.body(at)
             built.append(_rfds(at, lambda part=part, ident=ident, content=content, needs=needs: templates.ObjectSection(
                 id=ident, title_id=part.title, title_default=part.title, content=content, permission=needs)))
         return built
 
-    def build(self, ctx: Build) -> rx.Component:
+    @staticmethod
+    def _at_most_tables(ctx: Build, parts: list) -> None:
+        """RFDS's limit of tables on one record page, said in lex.ui's words, with what to do instead."""
+        from rfds.templates import MAX_GRID_TABLES
+
+        holding = [(part.title, tables_in(part.content)) for part in parts]
+        count = sum(n for _, n in holding)
+        if count <= MAX_GRID_TABLES:
+            return
+        where = ", ".join(f"`{title}`" + (" (one for each item of ui.each)" if n >= MANY else f" ({n})" if n > 1
+                                          else "") for title, n in holding if n)
+        many = "any number of" if count >= MANY else str(count)
+        raise ctx.at("sections").fail(
+            f"the page has {many} tables (in {where}), and a record page shows at most {MAX_GRID_TABLES} "
+            f"-- RFDS's rule for one page, with tabs=True too.",
+            "Give the further tables a page of their own -- a `@ui.page(\"/orders/[key]/invoices\")` whose "
+            "tables' `where=` name this record -- and lead there from a section of this one: "
+            "`ui.section(\"Invoices\", ui.link(\"All invoices\", to=order_invoices, key=OrderState.key))`.")
+
+    def _page(self, ctx: Build) -> rx.Component:
         import rfds
         from rfds import templates
 
@@ -252,6 +509,7 @@ class Record(Kind):
         page = _rfds(ctx, lambda: templates.object_page(
             title=title, path=ctx.route or "/", header=header, sections=sections,
             navigation="tabs" if self.tabs and len(sections) > 1 else "anchor", actions=actions))
+        page = hide_tabs(page, self._shown_tabs)
         return states(ctx, self.load, page, "rect")
 
 
@@ -278,7 +536,7 @@ class List(Kind):
     table: Any = None
     actions: tuple = ()
 
-    def build(self, ctx: Build) -> rx.Component:
+    def _page(self, ctx: Build) -> rx.Component:
         from rfds import templates
 
         if not isinstance(self.table, tables.Table):

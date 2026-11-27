@@ -65,7 +65,7 @@ class Other(State):
 class Export(State):
     note: str = ""
     status: str = ""
-    progress: int = 0
+    step: int = 0
     seen: list[str] = []
     parts: list[str] = []
 
@@ -80,7 +80,7 @@ class Export(State):
     @handlers.job
     def build(self):
         self.seen.append(f"start note={self.note!r}")
-        self.progress = 10
+        self.step = 10
         yield results.progress(0.1, "Starting")
         time.sleep(0.5)
         self.seen.append(f"before-yield note={self.note!r}")
@@ -88,7 +88,7 @@ class Export(State):
         self.state(Other).count += 1
         yield results.progress(0.6, "Half way")
         self.seen.append(f"after-yield note={self.note!r}")
-        self.progress = 100
+        self.step = 100
         return results.toast("Export ready", tone="success")
 
     @handlers.job
@@ -121,7 +121,7 @@ class Export(State):
     def stoppable(self):
         try:
             for index in range(10):
-                self.progress = index
+                self.step = index
                 yield
                 time.sleep(0.1)
         finally:
@@ -187,7 +187,7 @@ class TestCluster01ci_Job(TestCase):
         self.assertLess(waited, 0.2, "the user's click did not wait for the job")
         self.assertEqual(fields["seen"], ["start note=''", "before-yield note=''", "after-yield note='typed-by-user'"],
                          "the job sees the user's change after its next yield")
-        self.assertEqual((fields["note"], fields["progress"], fields["parts"]), ("typed-by-user", 100, ["p1"]))
+        self.assertEqual((fields["note"], fields["step"], fields["parts"]), ("typed-by-user", 100, ["p1"]))
         self.assertEqual(other["count"], 1, "another state changed through self.state() is merged")
         key = runs.key_of(Export.build)
         fractions = [u["ui_progress"].get(key) for u in updates if key in u.get("ui_progress", {})]
@@ -308,7 +308,7 @@ class TestCluster01ci_Job(TestCase):
                 return await h.fields(Export)
 
         fields = asyncio.run(scenario())
-        self.assertLess(fields["progress"], 9, "the job did not run to the end")
+        self.assertLess(fields["step"], 9, "the job did not run to the end")
         self.assertEqual(CLEANED, ["closed"], "the body's finally block ran")
         self.assertEqual(fields["status"], "", "what the stopped body changed in its cleanup is never merged")
         self.assertEqual(fields["ui_running"], {})
@@ -374,7 +374,7 @@ class TestCluster01ci_Job(TestCase):
                 return await h.fields(Export)
 
         fields = asyncio.run(scenario())
-        self.assertLess(fields["progress"], 9)
+        self.assertLess(fields["step"], 9)
         self.assertEqual(CLEANED, ["closed"])
 
     # -- 1.773 ---------------------------------------------------------

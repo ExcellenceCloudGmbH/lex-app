@@ -12,11 +12,19 @@ RECORDER: list | None = None
 
 
 class Refuse(Exception):
-    """An expected refusal: ``message`` is shown to the user as written, and nothing is logged."""
+    """An expected refusal: ``message`` is shown to the user as written, and nothing is logged.
 
-    def __init__(self, message: str):
+    ``title`` is an optional short heading above it: ``ui.Refuse("No order in this region has an
+    invoice.", title="Nothing to export")``. A form's handler's refusal is shown in the form, above
+    its submit button, until the form is sent again; elsewhere it is a toast, headed by the title.
+    """
+
+    def __init__(self, message: str, *, title: str = ""):
+        if not isinstance(title, str):
+            raise TypeError(f"ui.Refuse(title=) is a short text, such as title=\"Nothing to export\"; got {title!r}")
         super().__init__(message)
         self.message = str(message)
+        self.title = title
 
 
 @dataclasses.dataclass(frozen=True)
@@ -30,6 +38,7 @@ class Toast:
     message: str
     tone: str = "info"
     description: str = ""
+    link: tuple = ()                    # (its words, the address, whether it leaves the dashboards)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -37,6 +46,7 @@ class Download:
     url: str | None = None
     filename: str | None = None
     data: Any = None
+    media_type: str | None = None
 
 
 class Refresh(list):
@@ -46,6 +56,13 @@ class Refresh(list):
     """
 
     handlers: tuple = ()
+
+
+@dataclasses.dataclass(frozen=True)
+class ScrollTo:
+    """What ``ui.scroll_to`` returns: the page's element to bring into view."""
+
+    target: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -61,18 +78,45 @@ def goto(path: str, *, replace: bool = False) -> Goto:
     return Goto(path, bool(replace))
 
 
-def toast(message: str, *, tone: str = "info", description: str = "") -> Toast:
-    """Show a short message; ``tone`` is one of info, success, warning, error."""
+def toast(message: str, *, tone: str = "info", description: str = "", link: Any = None) -> Toast:
+    """Show a short message; ``tone`` is one of info, success, warning, error.
+
+    ``link=`` puts one button in the toast, written as every link is: ``link=ui.link("Open",
+    to=history_page, key=report_id)`` -- a page, a ``ui.reflex_page``, ``record=(Model, pk)`` or
+    ``href=`` an outside address. RFDS keeps a success or info toast with a button open for 10
+    seconds; what the button opens must also be reachable on the page, as RFDS asks.
+    """
     if tone not in TONES:
         raise ValueError(f"ui.toast() tone must be one of {', '.join(TONES)}; got {tone!r}")
-    return Toast(str(message), tone, str(description))
+    return Toast(str(message), tone, str(description), _toast_link(link) if link is not None else ())
+
+
+def _toast_link(link: Any) -> tuple:
+    """A ``ui.link`` as (its words, the address, whether it leaves the dashboards), checked now."""
+    from lex.lex_app.reflex.ui.pages import vocab
+    from lex.lex_app.reflex.ui.pages.parts import Build, PageError
+
+    if not isinstance(link, vocab.Link):
+        got = f"a ui.{type(link).__name__.lower()}" if isinstance(link, vocab.Part) else repr(link)
+        raise TypeError(f"ui.toast(link=) takes a ui.link: `link=ui.link(\"Open\", to=history_page)`; got {got}.")
+    if link.visible is not None:
+        raise ValueError("ui.toast(link=): a toast's link is always shown; leave `visible=` out.")
+    try:
+        where, outside = link.target(Build(page="toast"))
+    except PageError as wrong:              # "Page `toast`: <problem>\n<what to write>"
+        raise ValueError("ui.toast(link=): " + str(wrong).split(": ", 1)[1].replace("\n", " ")) from None
+    return (str(link.label), str(where), bool(outside))
 
 
 def download(*, url: str | None = None, filename: str | None = None, data: Any = None) -> Download:
-    """Hand the user a file: by ``url``, or ``data`` with a ``filename``."""
+    """Hand the user a file: by ``url``, or ``data`` with a ``filename``. The browser is told what
+    the file is from its name (``report.pdf`` is a PDF)."""
     if url is None and data is None:
         raise ValueError("ui.download() needs url= or data=")
-    return Download(url, filename, data)
+    import mimetypes
+
+    kind = mimetypes.guess_type(filename)[0] if (data is not None and filename) else None
+    return Download(url, filename, data, kind)
 
 
 def refresh(*handlers: Any) -> Refresh:
@@ -91,13 +135,36 @@ def refresh(*handlers: Any) -> Refresh:
     return out
 
 
+def scroll_to(part: Any) -> ScrollTo:
+    """Bring a part of the page into view: a section, named by its title (``ui.scroll_to("Lines")``),
+    or the table over a ``@ui.rows`` handler (``ui.scroll_to(OrdersState.lines)``).
+
+    ``return ui.scroll_to("Errors")`` after a check found problems shows the section that lists them.
+    A part that is not on the page is not scrolled to, and nothing fails.
+    """
+    from lex.lex_app.reflex.ui import rows
+    from lex.lex_app.reflex.ui.pages.kinds import section_anchor, table_anchor
+
+    if isinstance(part, str) and part.strip():
+        return ScrollTo(section_anchor(part))
+    if rows.is_rows(part):
+        return ScrollTo(table_anchor(part))
+    raise TypeError("ui.scroll_to() takes a section's title, `ui.scroll_to(\"Errors\")`, or a table's @ui.rows "
+                    f"handler, `ui.scroll_to(OrdersState.lines)`; got {part!r}. A section with a title from the "
+                    "state is reached through the table it holds.")
+
+
 def progress(fraction: float, message: str = "") -> Progress:
     """What a job yields to report progress: a fraction from 0 to 1 and a message."""
     return Progress(min(1.0, max(0.0, float(fraction))), str(message))
 
 
-def split(value: Any, *, handler: str) -> tuple[list, Progress | None]:
-    """A handler's returned or yielded value as (results, progress report)."""
+def split(value: Any, *, handler: str, state: str | None = None) -> tuple[list, Progress | None]:
+    """A handler's returned or yielded value as (results, progress report).
+
+    ``state`` is the full name of the running handler's state: a handler of that same state is
+    refused, since one handler does not start another.
+    """
     items = ([] if value is None else [value] if isinstance(value, Refresh)
              else list(value) if isinstance(value, (list, tuple)) else [value])
     out: list = []
@@ -107,14 +174,45 @@ def split(value: Any, *, handler: str) -> tuple[list, Progress | None]:
             continue
         if isinstance(item, Progress):
             report = item
-        elif isinstance(item, (Goto, Toast, Download, Refresh)):
+        elif isinstance(item, (Goto, Toast, Download, Refresh, ScrollTo)):
+            out.append(item)
+        elif _is_state_handler(item):
+            _check_hand_on(item, handler=handler, state=state)
             out.append(item)
         else:
             raise TypeError(
-                f"{handler} returned {item!r}. A lex.ui handler returns ui.goto(), ui.toast(), ui.download() "
-                "or ui.refresh(), and a job may yield ui.progress(). Use @ui.custom for raw Reflex events."
+                f"{handler} returned {item!r}. A lex.ui handler returns ui.goto(), ui.toast(), ui.download(), "
+                "ui.refresh(), ui.scroll_to() or another state's handler (`Other.reload`, `Other.open(key)`), and a job may "
+                "yield ui.progress(). Use @ui.custom for raw Reflex events such as rx.call_script()."
             )
     return out, report
+
+
+def _is_state_handler(item: Any) -> bool:
+    """Another state's handler, as a handler may hand it on: ``Other.reload`` or ``Other.open(key)``.
+
+    Only a handler of a state: Reflex's own events (``rx.call_script``, ``rx.redirect``,
+    ``rx.download``...) stay in the custom region (``@ui.custom``) - a toast, a goto and a download
+    have lex.ui results of their own.
+    """
+    from reflex.event import EventHandler, EventSpec
+
+    target = item.handler if isinstance(item, EventSpec) else item
+    return isinstance(target, EventHandler) and bool(target.state_full_name)
+
+
+def _check_hand_on(item: Any, *, handler: str, state: str | None) -> None:
+    """Refuse, when the handler returns, a hand-on that could only fail later in the browser."""
+    from reflex.event import EventSpec
+
+    target = item.handler if isinstance(item, EventSpec) else item
+    name = getattr(target.fn, "__ui_key__", target.fn.__qualname__)
+    if getattr(target.fn, "__ui_kind__", None) == "rows":
+        raise TypeError(f"{handler} returned the @ui.rows handler {name}. A table reads it; to make its tables "
+                        f"read again, return ui.refresh({name}).")
+    if state is not None and target.state_full_name == state:
+        raise TypeError(f"{handler} returned {name}, a handler of its own state; one handler does not start "
+                        "another. Put the shared work in a method whose name starts with `_` and call it.")
 
 
 def _external(path: str) -> bool:
@@ -144,10 +242,19 @@ def to_events(items: list) -> list:
         elif isinstance(item, Toast):
             import rfds
 
-            extra = {"description": item.description} if item.description else {}
+            extra: dict = {"description": item.description} if item.description else {}
+            if item.link:
+                from rfds.components.feedback import ToastAction
+
+                label, where, outside = item.link
+                extra["action"] = ToastAction(label, rx.redirect(where, is_external=outside))
             events.append(getattr(rfds.toast, item.tone)(item.message, **extra))
+        elif isinstance(item, ScrollTo):
+            events.append(rx.scroll_to(item.target))
+        elif _is_state_handler(item):
+            events.append(item)
         else:
-            events.append(rx.download(url=item.url, filename=item.filename, data=item.data))
+            events.append(rx.download(url=item.url, filename=item.filename, data=item.data, mime_type=item.media_type))
     return events
 
 
