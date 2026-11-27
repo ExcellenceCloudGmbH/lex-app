@@ -326,7 +326,9 @@ ui.table(
   makes one cell a link the same way. See [Buttons and links](/let-people-act/buttons-and-links#addresses-in-rows).
 - **`row_actions=`** is a function of the row returning `ui.button`s or `ui.link`s. A value after
   the handler, such as `row["id"]`, is passed to it; it comes back from the browser, so check it in
-  the handler. [Your first dashboard](/start-here/first-dashboard#the-page) has one.
+  the handler. The first two plain actions are small buttons in the row; a `tone="danger"` action,
+  and a third or later one, are entries of the row's More actions menu. [Your first
+  dashboard](/start-here/first-dashboard#the-page) has one.
 - **`export=True`** adds an export menu for CSV and Excel files of every matching row.
 - **`empty=`** is the sentence shown when there are no rows.
 

@@ -67,9 +67,14 @@ ui.table(
 )
 ```
 
-Click **Close** on a fund: it asks "Close this fund?" first. While the action runs, that row's button shows it is busy, then a toast
-confirms it and the fund's button turns grey. Point at a grey button, or reach it with the
-keyboard, and it says why it cannot be pressed.
+**Close** is a dangerous action, so it sits in the row's **More actions** menu (the "…" at the end
+of the row) rather than as a button in the row - RFDS keeps destructive actions out of reach of a
+stray click. Choose it on a fund: it asks "Close this fund?" first, then a toast confirms it. On
+a closed fund the entry is greyed out and says why it cannot be chosen, and choosing it does
+nothing.
+
+A row shows its first two plain actions as small buttons, each showing that row's run while it
+goes; a dangerous action, and a third or later one, goes into the row's More actions menu.
 
 ## `ui.button`
 

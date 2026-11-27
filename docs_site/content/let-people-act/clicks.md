@@ -152,4 +152,4 @@ def export(self, region):
 ## Seeing it run
 
 In a page, `ui.running(Sizes.grow)` is true while the action runs, and `ui.failed(Sizes.grow)` is
-the message of its last failure. A button in `row_actions` shows its own row's run as loading.
+the message of its last failure. A button in a row (`row_actions`) shows its own row's run as loading.
